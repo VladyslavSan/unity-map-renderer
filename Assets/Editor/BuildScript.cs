@@ -99,12 +99,13 @@ namespace MapRenderer.Build
         /// The web player. Two settings are forced here rather than left to the project, because on this
         /// target they are not preferences — a build with either one wrong does not start at all:
         ///
-        /// <para><b>Burst AOT is disabled for Web.</b> `com.unity.entities` + Burst AOT traps during static
-        /// init on this Unity version, before any managed entry point runs (WebGPU hangs instead of
-        /// trapping). Reproduced from a stock project with no ECS code, so it is not ours to fix. The cost is
-        /// real and is the reason the web player is slow: Burst is the ONLY way a job reaches a worker thread
-        /// on the web, so with it off every job runs inline on the main thread. Re-enable both this and
-        /// threads support together once Entities is fixed or removed — see
+        /// <para><b>Burst AOT is disabled for Web by default.</b> `com.unity.entities` + Burst AOT traps
+        /// during static init on this Unity version, before any managed entry point runs (WebGPU hangs
+        /// instead of trapping). Reproduced from a stock project with no ECS code, so it is not ours to fix.
+        /// The cost is real and is the reason the web player is slow: Burst is the ONLY way a job reaches a
+        /// worker thread on the web, so with it off every job runs inline on the main thread. Set
+        /// <c>UMR_WEB_BURST=on</c> to build the other way and retest that trap after a Burst or Entities
+        /// upgrade; flip the default here once a Burst-on player is observed rendering — see
         /// <c>docs/web-target.md</c>.</para>
         ///
         /// <para><b>Threads support is left ON.</b> It buys nothing while Burst is off — nothing can reach a
@@ -118,8 +119,21 @@ namespace MapRenderer.Build
         private static void RunWeb(bool development)
         {
             PlayerSettings.WebGL.threadsSupport = true;
-            SetWebBurstAot(false);
+            SetWebBurstAot(WebBurstRequested());
             RunBuild(BuildTarget.WebGL, BuildTargetGroup.WebGL, "Web", ProductBase, development);
+        }
+
+        /// <summary>Whether this web build should Burst-compile: the <c>UMR_WEB_BURST</c> environment
+        /// variable (<c>on</c>/<c>1</c>/<c>true</c> to enable), defaulting to the disabled state the summary
+        /// on <see cref="RunWeb"/> explains.</summary>
+        /// <returns>True to Burst-compile the web player.</returns>
+        private static bool WebBurstRequested()
+        {
+            string requested = Environment.GetEnvironmentVariable("UMR_WEB_BURST")?.Trim().ToLowerInvariant();
+            bool enabled = requested == "on" || requested == "1" || requested == "true";
+            if (requested != null)
+                Console.WriteLine($"[build] web: UMR_WEB_BURST='{requested}' => Burst AOT {(enabled ? "on" : "off")}");
+            return enabled;
         }
 
         /// <summary>Sets Burst's per-platform AOT toggle for Web through Burst's own settings object, so the
@@ -131,20 +145,67 @@ namespace MapRenderer.Build
         /// <c>Tools/build.sh web</c> performs it.</remarks>
         private static void SetWebBurstAot(bool enabled)
         {
+            // Look the type up by name across every loaded assembly rather than in a named one. Burst 2.0
+            // (Unity 6.6) turned com.unity.burst into a shim package and moved the editor code into the
+            // built-in UnityEditor.BurstModule, so the old `Unity.Burst.Editor` assembly no longer exists
+            // — and the miss was silent, producing Burst-less players from Burst-on requests.
+            const string SettingsType = "Unity.Burst.Editor.BurstPlatformAotSettings";
             Type t = AppDomain.CurrentDomain.GetAssemblies()
-                .FirstOrDefault(a => a.GetName().Name == "Unity.Burst.Editor")
-                ?.GetType("Unity.Burst.Editor.BurstPlatformAotSettings");
-            if (t == null) { Console.WriteLine("[build] Burst editor assembly absent; AOT toggle skipped"); return; }
+                .Select(a => a.GetType(SettingsType, throwOnError: false))
+                .FirstOrDefault(found => found != null);
+            if (t == null)
+                throw new InvalidOperationException(
+                    $"No loaded assembly defines {SettingsType} — the web Burst AOT toggle needs porting to " +
+                    $"this Burst version. Refusing to build a player whose Burst setting is unknown.");
 
             const System.Reflection.BindingFlags Any =
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Public |
                 System.Reflection.BindingFlags.Static    | System.Reflection.BindingFlags.Instance;
-            object settings = t.GetMethod("GetOrCreateSettings", Any).Invoke(null, new object[] { BuildTarget.WebGL });
-            t.GetField("EnableBurstCompilation", Any).SetValue(settings, enabled);
-            object target = t.GetMethod("ResolveTarget", Any).Invoke(null, new object[] { BuildTarget.WebGL });
-            t.GetMethod("Save", Any).Invoke(settings, new[] { target });
+            System.Reflection.MethodInfo getOrCreate =
+                Member(t.GetMethod("GetOrCreateSettings", Any), "GetOrCreateSettings");
+            System.Reflection.MethodInfo resolveTarget =
+                Member(t.GetMethod("ResolveTarget", Any), "ResolveTarget");
+
+            object settings = getOrCreate.Invoke(null, WebArgsFor(getOrCreate));
+            Member(t.GetField("EnableBurstCompilation", Any), "EnableBurstCompilation").SetValue(settings, enabled);
+            // Save against the RESOLVED target, not the requested one: Burst groups some targets onto one
+            // settings file, and the resolved handle is the one that names the file the build reads.
+            object target = resolveTarget.Invoke(null, WebArgsFor(resolveTarget));
+            Member(t.GetMethod("Save", Any), "Save").Invoke(settings, new[] { target });
             Console.WriteLine($"[build] web: Burst AOT EnableBurstCompilation={enabled}");
         }
+
+        /// <summary>Builds the argument list for one of Burst's settings methods: the web build target for
+        /// every target-shaped parameter, and each remaining parameter's own default.</summary>
+        /// <param name="method">The Burst settings method about to be invoked.</param>
+        /// <returns>Arguments positionally matching <paramref name="method"/>.</returns>
+        /// <remarks>Reading the parameters instead of hard-coding them is what survives a Burst upgrade:
+        /// <c>GetOrCreateSettings</c> grew a second parameter in Burst 2.0, and a fixed argument array turns
+        /// that into a build-time <c>TargetParameterCountException</c>.</remarks>
+        private static object[] WebArgsFor(System.Reflection.MethodInfo method) =>
+            method.GetParameters().Select(p =>
+                p.ParameterType == typeof(BuildTarget) || p.ParameterType == typeof(BuildTarget?)
+                    ? (object)BuildTarget.WebGL
+                    : p.HasDefaultValue
+                        ? p.DefaultValue
+                        : throw new InvalidOperationException(
+                            $"Burst's {method.Name} takes a '{p.Name}' ({p.ParameterType.Name}) with no " +
+                            $"default and no meaning this build script knows — the web Burst AOT toggle " +
+                            $"needs porting to this Burst version."))
+            .ToArray();
+
+        /// <summary>Asserts that a reflected member was found, naming it when it was not.</summary>
+        /// <param name="member">The reflection lookup result.</param>
+        /// <param name="name">The member's name, for the failure message.</param>
+        /// <typeparam name="T">The reflected member kind.</typeparam>
+        /// <returns><paramref name="member"/>, never null.</returns>
+        /// <remarks>Reflection into Burst's editor internals is version-fragile, and the failure that matters
+        /// is the quiet one: a build that reports the Burst setting it never applied. Naming the member turns
+        /// "Burst produced nothing" into "Burst moved this."</remarks>
+        private static T Member<T>(T member, string name) where T : class =>
+            member ?? throw new InvalidOperationException(
+                $"Burst's BurstPlatformAotSettings has no '{name}' — the web Burst AOT toggle needs porting " +
+                $"to this Burst version.");
 
         /// <param name="platformDir">Output subfolder under <c>Builds/</c>. A development build appends
         /// <c>-Development</c> to it, so it can never overwrite the release artifact of the same platform —

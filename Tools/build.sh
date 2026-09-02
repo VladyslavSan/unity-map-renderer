@@ -55,6 +55,11 @@ WEB
                          a worker thread on web.
     stripping Minimal    High builds clean and then hangs at 100%. Costs ~4.5 MB of shippable size.
 
+  `UMR_WEB_BURST=on Tools/build.sh web` builds the Burst-on variant instead, to retest that trap after
+  a Burst or Entities upgrade. Every web build prints a `burst:` line reporting what was requested
+  against what Burst actually produced — generated-artifacts=0 on a requested=True build means the
+  toggle never took, so nothing that player does is evidence about Burst.
+
   Full reasoning, the measured table of configurations that do and do not start, and how to verify a
   build is genuinely what it claims: docs/web-target.md.
 
@@ -190,6 +195,24 @@ method_for()  { case "$1" in
     web)     echo MapRenderer.Build.BuildScript.BuildWeb ;;
   esac; }
 
+# Report whether the web player actually got Burst-compiled. BuildScript prints the setting it
+# REQUESTED, which is not the same claim: Unity has been observed skipping Burst's build callback
+# entirely and producing a Burst-less player from a Burst-on request. The evidence that cannot be
+# faked is bcl (Burst's compiler) in the log and lib_burst_generated.wasm under Library/Bee — so a
+# requested=on/compiled=no line here is the signal to delete Library/Bee and build again, and a
+# result read off a player in that state means nothing.
+report_web_burst() {
+  local log="$1" requested bcl generated
+  requested="$(grep -aoE 'EnableBurstCompilation=(True|False)' "$log" 2>/dev/null | tail -1 | cut -d= -f2)"
+  bcl=$(grep -acE 'bcl(\.exe)?[ "]' "$log" 2>/dev/null || true)
+  generated=$(find "$ROOT/Library/Bee" -iname '*burst_generated*' 2>/dev/null | wc -l | tr -d ' ')
+  echo "    burst: requested=${requested:-unknown} bcl-invocations=$bcl generated-artifacts=$generated" >&2
+  if [ "$requested" = True ] && [ "$generated" -eq 0 ]; then
+    echo "    WARNING: Burst was requested but produced nothing — this player is NOT Burst-compiled." >&2
+    echo "             Delete Library/Bee and rebuild before reading anything into how it behaves." >&2
+  fi
+}
+
 build_one() {
   local name="$1"
   shift  # drop the platform name; what remains in "$@" is the caller's `unity build` passthrough
@@ -229,6 +252,7 @@ build_one() {
     echo "$name FAILED (exit $code) — see $log" >&2
     return 1
   fi
+  [ "$name" = web ] && report_web_burst "$log"
   echo "$name ok" >&2
   return 0
 }
