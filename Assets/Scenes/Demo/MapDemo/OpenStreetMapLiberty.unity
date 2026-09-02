@@ -450,7 +450,7 @@ MonoBehaviour:
     FillTileBufferClip: 0
     SymbolTileCoverageCull: 0.001
     SymbolMaxDistanceFraction: 1
-    Backend: 2
+    Backend: 0
     MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
     PreparedCache:
       Enabled: 1
