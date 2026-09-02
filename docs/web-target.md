@@ -2,19 +2,20 @@
 
 **What this is:** everything we have measured about shipping this renderer to the web — how to build and
 serve a player, which settings it must have or it silently never starts, what runs off the main thread and
-what only appears to, and the package-level failures we hit getting there. **Facts, as of Unity 6.5**, not a
+what only appears to, and the package-level failures we hit getting there. **Facts, as of Unity 6.6**, not a
 design or a plan. Where a conclusion has been overturned, the correction and the reasoning error that
 produced it are kept rather than edited away — this doc has been wrong twice, both times by inferring past
 what was measured.
 
-**Read this before touching a web build.** Two settings are load-bearing (Burst AOT and managed stripping),
-Unity will hand you a player that silently is not the configuration you asked for, and the build is not
-servable by a plain static server.
+**Read this before touching a web build.** Unity will hand you a player that silently is not the
+configuration you asked for, and the build is not servable by a plain static server.
 
-**Measured:** 2026-08-29, re-measured 2026-08-31, corrected and extended 2026-09-01. Unity 6000.5.0f1,
-WebGPU backend, `webGLThreadsSupport=1`, served cross-origin-isolated (COOP `same-origin` + COEP
-`require-corp`, verified). The original threading matrix was taken on a **Development** build. May change
-with a future Unity version — re-measure (see *How to reproduce*).
+**Measured:** 2026-08-29, re-measured 2026-08-31, corrected and extended 2026-09-01, **re-measured on Unity
+6000.6.0f1 2026-09-02**. WebGPU backend, `webGLThreadsSupport=1`, served cross-origin-isolated (COOP
+`same-origin` + COEP `require-corp`, verified). The original threading matrix was taken on a **Development**
+build. Findings dated 2026-09-01 and earlier were taken on Unity 6000.5.0f1 / Burst 1.8.29; where 6.6
+changed the answer it is marked inline, and the old finding is kept because the failure modes it documents
+are the ones a future regression will look like.
 
 ## Current state
 
@@ -29,6 +30,14 @@ what `InlineWorkScheduler` does, and it is the accepted cost of the bridge, not 
 mesh build and symbol shaping all land in the requesting frame. The fix is not a better scheduler — it is
 moving those bodies into Burst jobs so they stop needing a scheduler at all (see the rule below). Do not
 respond to the main-thread cost by adding a cleverer managed offload; there is nowhere for it to run.
+
+**Burst AOT and Entities both work on the web as of Unity 6000.6.0f1 / Burst 2.0 (measured 2026-09-02).**
+Through Unity 6000.5 the web player could have Burst or `com.unity.entities`, not both — with Burst on it
+trapped during static init before any managed code ran, so the web build shipped Burst-off and therefore
+with every job inline. The 6.6 upgrade removed that constraint at no cost to us: a player with Burst AOT on,
+the Entities package linked, **and** Entities Graphics actually driving the rendering starts and renders
+correctly, colours included. The startup trap and a separate white-fill symptom both went away with the same
+upgrade. That makes worker threads reachable in this project for the first time — see *Threading*.
 
 **Measured 2026-08-31, corrected 2026-09-01. A job DOES reach a worker pthread — but only when it is
 Burst-compiled.** The wasm IS compiled for threads (`-pthread`,
@@ -56,29 +65,44 @@ compresses with Brotli and the loader has no JS fallback decoder (`webGLDecompre
 plain `http://` it never asks — the header has to be sent regardless. The script also sends COOP/COEP, which
 this build does not need but will the moment threads matter.
 
-### Three settings the web build forces, and what each one costs
+### The three settings that decide whether a web player starts
 
 | setting | value | why | cost |
 |---|---|---|---|
-| Burst AOT | **off** | `com.unity.entities` + Burst traps during static init (see above) | every job runs inline on the main thread — no worker threads at all |
-| managed stripping | **Minimal** (High elsewhere) | High builds clean and then hangs at 100% | 18.6 MB shippable instead of 14.0 MB |
-| threads support | **on** | it is the configuration observed rendering | requires a cross-origin-isolated host |
+| Burst AOT | **on** | the only route to a worker thread on web | none since 6.6; it was off through 6000.5, where Entities + Burst trapped during static init |
+| managed stripping | **High** — same as every other target | it works again as of 6.6; it hung the player at 100% on 6000.5 | none; keeping Minimal cost 3.1 MB |
+| threads support | **on** | grants the job system worker pthreads, which Burst can now actually use | requires a cross-origin-isolated host |
 
-The first two are not preferences — with either one wrong the player does not start. Both are set in
-`BuildScript.RunWeb` / `ApplyReleaseSettings` with the reasoning inline, not left to whoever last opened the
-Editor.
+Burst and threads are set in `BuildScript.RunWeb`, stripping in `ApplyReleaseSettings`, with the reasoning
+inline rather than left to whoever last opened the Editor. **Web no longer carries any settings exception**
+— that is new as of 6.6, and both exceptions it used to carry were fixed by the same upgrade.
+`UMR_WEB_BURST=off Tools/build.sh web` builds the Burst-off variant if the 6000.5 trap ever returns.
 
 ### Known-bad configurations, all measured on this project
+
+On **Unity 6000.6.0f1 / Burst 2.0** (2026-09-02):
+
+| Burst | stripping | threads | backend | result |
+|---|---|---|---|---|
+| on | Minimal | on | GameObjects | **renders** |
+| on | Minimal | on | **Entities** | **renders** — the combination that used to trap |
+| on | **High** | on | Entities | **renders**, 14.2 MB shippable (vs 17.3 MB at Minimal) |
+
+**If fills ever render white, that is an open bug, not a known-fixed one.** White fills were seen once
+under Burst 1.8 on an experimental Entities-removed tree, never root-caused, and never reproduced on 6.6.
+Nothing here explains them, so treat a recurrence as live and unexplained.
+
+On **Unity 6000.5.0f1 / Burst 1.8.29**, kept because a regression will look like this:
 
 | Burst | stripping | threads | result |
 |---|---|---|---|
 | on | any | any | never finishes init (WebGPU) / OOB trap in `entryFunction` (WebGL2) |
 | off | **High** | on | engine initialises, loader sticks at 100%, no error |
 | off | **High** | off | same |
-| off | Minimal | on | **renders** |
+| off | Minimal | on | renders |
 
-Two of these cost a build each to find because more than one variable moved at a time. Change one thing per
-build here; each is ~4–9 minutes.
+Two of the 6000.5 rows cost a build each to find because more than one variable moved at a time. Change one
+thing per build here; each is ~1–9 minutes depending on what the incremental build can reuse.
 
 ### Proving a build is what it claims
 
@@ -86,9 +110,13 @@ Unity will hand you a player that silently is not the thing you asked for — se
 re-testing this*, under the Entities failure below, for the mechanisms. Before
 drawing any conclusion from a web build:
 
-- **Burst off:** `find Library/Bee -iname '*burst_generated*'` must be **empty**.
-- **Burst on:** it must be **non-empty**, and `bcl.exe` must appear in the build log. A build that reports
-  Burst enabled and has neither ran without it.
+- **`Tools/build.sh web` prints a `burst:` line after every web build**, reporting the setting that was
+  requested against the artifacts Burst actually produced. `requested=True generated-artifacts=0` means the
+  toggle never took; move `Library/Bee` aside and build again.
+- The underlying check, by hand: `find Library/Bee -iname '*burst_generated*'` — **empty** for a Burst-off
+  build, **non-empty** for a Burst-on one.
+- **`bcl.exe` in the build log is a Burst 1.x signal only.** Burst 2.0 compiles in-process, so its absence
+  says nothing; only the artifacts do.
 - **Threads:** the wasm imports `env.memory` with `shared=YES` — parse it, do not trust the setting.
 - Never conclude from wasm *size*: a one-line string constant moved it 21 KB and made a void build look
   valid.
@@ -259,14 +287,35 @@ Two things made the mistake easy to miss, both worth avoiding again:
 
 **Consequence for this project:** off-main work on the web is real, and jobification buys parallelism there,
 not merely "runs at all". `IWorkScheduler`'s inline-on-web policy is a stopgap for the managed closures that
-cannot be jobs yet — not the end state, and not evidence that the platform lacks threads. It also means Burst
-is **not** droppable for web to dodge the startup failure below: dropping it costs every worker thread.
+cannot be jobs yet — not the end state, and not evidence that the platform lacks threads. It also meant Burst
+was **not** droppable for web to dodge the startup failure below: dropping it costs every worker thread. That
+fork closed with Unity 6.6, which fixed the startup failure and left Burst on.
 
 *Scope:* measured in a minimal Unity 6000.5.0f1 project (URP, one scene, 44.9 MB wasm), because our own
-Burst-enabled web build does not start. The mechanism is not project-specific, but the re-measurement inside
-this repo is still owed once that is fixed.
+Burst-enabled web build did not start at the time. The mechanism is not project-specific. **That blocker is
+gone as of Unity 6.6** — this project now ships a Burst-on web player — so the re-measurement inside this
+repo is possible, and still owed: what has been confirmed here is that the player *renders*, not yet that
+our jobs land on a worker. Re-run the probe shape in *How to reproduce* against this repo to close it.
 
-## `com.unity.entities` + Burst AOT breaks the web player (2026-09-01, minimal repro)
+## `com.unity.entities` + Burst AOT broke the web player — FIXED in Unity 6.6 (history)
+
+**Resolved 2026-09-02 by upgrading Unity 6000.5.0f1 → 6000.6.0f1, which moves Burst 1.8.29 → 2.0.0.** A web
+player with Burst AOT on, Entities linked and the Entities render backend active now starts and renders
+correctly. Nothing in this repository changed to achieve it; no workaround was kept. The section below is
+the original investigation, retained because it is the shape a regression would take, and because the
+attribution (it is the package, not our code) is what made the upgrade worth trying rather than a
+coincidence to be re-derived.
+
+Two consequences of the fix are worth stating plainly:
+
+- **The "ship web without Entities, or without Burst" fork is dead.** Both halves are now available at once,
+  so neither the non-Entities backend nor an inline-everything player is forced on the web target.
+- **A separate white-fill symptom disappeared with the same upgrade.** Fills rendering white had been seen
+  only on an experimental Entities-removed tree under Burst 1.8; it was never reproduced on 6.6. It was
+  never root-caused, so it is not *known* to be the same defect — if white fills reappear, treat that as a
+  live unexplained bug, not a known-fixed one.
+
+### The original investigation (2026-09-01, minimal repro, Unity 6000.5.0f1)
 
 **With Burst AOT enabled for Web, the player never finishes initialising.** The page loads, the wasm
 instantiates, and `requestAnimationFrame` runs at a steady 60 fps (`scheduled=1479 fired=1478` over 26 s) —
@@ -308,15 +357,14 @@ this project's WebGL2 failure.
 scene, and Entities Graphics. Nothing in this repository is implicated — the same crash reproduces with the
 package alone.
 
-**Consequences.** The web target cannot currently have both Entities and Burst AOT. Neither half is
-comfortably droppable: Burst is the only route to a worker thread on web (above), and Entities is a render
-backend here. The realistic options are to ship web with the non-Entities backend, or to drop Burst for web
-and accept every job running inline on the main thread. Worth a Unity bug report; the repro above is small
-enough to attach as-is.
+**Consequences (as they stood on 6000.5).** The web target could not have both Entities and Burst AOT, and
+neither half was comfortably droppable: Burst is the only route to a worker thread on web (above), and
+Entities is a render backend here. Worth a Unity bug report at the time; the repro above is small enough to
+attach as-is, and is still worth filing against 6000.5 for anyone pinned there.
 
-**Still unverified:** that this fully explains our own failure. The mechanism matches and the stack matches,
-but our build has not been re-tested with Entities removed. That is the confirming experiment, and it is now
-cheap.
+**Never independently confirmed:** that the package repro fully explained *our* failure. The mechanism and
+the stack matched, but the confirming experiment — our build with Entities removed — was never completed
+before the upgrade made it moot. The 6.6 result is consistent with the attribution without proving it.
 
 ### Traps when re-testing this
 
@@ -343,6 +391,15 @@ Several separate mechanisms will hand you a green-looking build that tested noth
   `ForceDisableBurstCompilation = False`, and the settings path resolved correctly. Nothing that Burst
   watches can help, because the step doing the watching never runs.
 
+- **Burst 2.0 moved its editor code, and the miss is silent.** `com.unity.burst` 2.0.0 is a `"type":
+  "shim"` package with a Runtime folder and nothing else; the editor half now lives in the built-in
+  `UnityEditor.BurstModule`. Any code that reaches for an assembly *named* `Unity.Burst.Editor` — as this
+  repo's own build script did — finds nothing and, if it treats that as "no Burst here", produces a
+  Burst-less player from a Burst-on request. `Unity.Burst.Editor.BurstPlatformAotSettings` itself is
+  unchanged, so look the type up by name across loaded assemblies, and fail loudly when it is absent.
+  `GetOrCreateSettings` also gained a parameter, so read arguments off the method rather than hard-coding an
+  array.
+
 **The decisive check is not the wasm size** — that moves with your own script edits too (a one-line `const
 string` shifted it by 21 KB and made a void build look valid). Two checks cannot be fooled:
 
@@ -359,11 +416,19 @@ assembly's Burst code breaks the player, because `BurstAotCompiler` reads it str
 It is worthless until Burst is actually running again; verify that first with the two checks above.
 
 **To recover a Burst-on build:** close the Editor, delete `Library/Bee`, reopen, build once. This does not
-touch `Library/Artifacts`, so there is no asset reimport — it costs a full script/linker/IL2CPP pass
-(~20–30 min) and nothing else. Reach for it early; the cheap-looking cache-busts above cost far more.
+touch `Library/Artifacts`, so there is no asset reimport — it costs a full script/linker/IL2CPP pass and
+nothing else (measured 8.5 min on 6.6, against ~1.5 min for an incremental build). Reach for it early; the
+cheap-looking cache-busts above cost far more. This trap was still live on Unity 6.6: a Burst-on build with
+a correct toggle produced no artifacts until `Library/Bee` was moved aside.
 
 ## Open questions (not yet measured)
 
+- **Do this project's own jobs reach a worker on the web?** Burst-on is now shippable here, and the
+  mechanism is established in a minimal project, but the in-repo measurement has not been taken. Until it
+  is, "the web player is Burst-compiled" and "the web player uses worker threads" are separate claims.
+- **What `IWorkScheduler`'s inline-on-web policy still costs.** It was adopted when nothing could reach a
+  worker. Managed closures remain dead on the web regardless of Burst, so the seam is still needed — but the
+  cost of each site that stays managed is now a real parallelism loss rather than a theoretical one.
 - A **WebGL2 (OpenGLES3) vs WebGPU** A/B for the *threading* result was never run. Note this is a weak
   hypothesis, not a lead: the graphics-threading suspicion that motivated it has been ruled out (see above),
   so a backend difference would have to act through some other route. (Both backends *were* A/B'd for the

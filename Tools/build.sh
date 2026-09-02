@@ -48,17 +48,17 @@ WEB
   with Brotli and its loader has no fallback decoder, so the server must send Content-Encoding. Use
   `Tools/serve-web.sh` (defaults to this build, port 8080).
 
-  Two settings are forced by BuildScript.RunWeb / ApplyReleaseSettings because a player with either one
-  wrong does not start, and fails silently rather than erroring:
-    Burst AOT off        com.unity.entities + Burst AOT traps during static init on this Unity version.
-                         Costs every job running inline on the main thread — Burst is the only route to
-                         a worker thread on web.
-    stripping Minimal    High builds clean and then hangs at 100%. Costs ~4.5 MB of shippable size.
+  Two settings that used to need a web-specific exception, and no longer do — both were fixed by the
+  Unity 6.6 upgrade, so web now builds on the same settings as every other target:
+    Burst AOT on         the only route to a worker thread on web. Off through Unity 6000.5 / Burst
+                         1.8.29, where entities + Burst trapped during static init; fixed in 6000.6 /
+                         Burst 2.0. `UMR_WEB_BURST=off Tools/build.sh web` builds the other way.
+    stripping High       same as every other target. It hung the player at 100% on Unity 6000.5, which
+                         is why web was pinned to Minimal until 6.6; keeping Minimal cost 3.1 MB.
 
-  `UMR_WEB_BURST=on Tools/build.sh web` builds the Burst-on variant instead, to retest that trap after
-  a Burst or Entities upgrade. Every web build prints a `burst:` line reporting what was requested
-  against what Burst actually produced — generated-artifacts=0 on a requested=True build means the
-  toggle never took, so nothing that player does is evidence about Burst.
+  Every web build prints a `burst:` line reporting what Burst was asked for against what it actually
+  produced. generated-artifacts=0 on a requested=True build means the toggle never took — so nothing
+  that player does is evidence about Burst, whatever the build said.
 
   Full reasoning, the measured table of configurations that do and do not start, and how to verify a
   build is genuinely what it claims: docs/web-target.md.
@@ -197,16 +197,16 @@ method_for()  { case "$1" in
 
 # Report whether the web player actually got Burst-compiled. BuildScript prints the setting it
 # REQUESTED, which is not the same claim: Unity has been observed skipping Burst's build callback
-# entirely and producing a Burst-less player from a Burst-on request. The evidence that cannot be
-# faked is bcl (Burst's compiler) in the log and lib_burst_generated.wasm under Library/Bee — so a
-# requested=on/compiled=no line here is the signal to delete Library/Bee and build again, and a
-# result read off a player in that state means nothing.
+# entirely and producing a Burst-less player from a Burst-on request. A requested=True/generated=0
+# line is the signal to move Library/Bee aside and build again; a result read off a player in that
+# state means nothing.
 report_web_burst() {
-  local log="$1" requested bcl generated
+  local log="$1" requested generated
   requested="$(grep -aoE 'EnableBurstCompilation=(True|False)' "$log" 2>/dev/null | tail -1 | cut -d= -f2)"
-  bcl=$(grep -acE 'bcl(\.exe)?[ "]' "$log" 2>/dev/null || true)
+  # lib_burst_generated.wasm under Library/Bee, and NOT a bcl.exe invocation in the log: Burst 2.0
+  # compiles in-process, so the bcl count this used to print is now a permanent 0 that reads as failure.
   generated=$(find "$ROOT/Library/Bee" -iname '*burst_generated*' 2>/dev/null | wc -l | tr -d ' ')
-  echo "    burst: requested=${requested:-unknown} bcl-invocations=$bcl generated-artifacts=$generated" >&2
+  echo "    burst: requested=${requested:-unknown} generated-artifacts=$generated" >&2
   if [ "$requested" = True ] && [ "$generated" -eq 0 ]; then
     echo "    WARNING: Burst was requested but produced nothing — this player is NOT Burst-compiled." >&2
     echo "             Delete Library/Bee and rebuild before reading anything into how it behaves." >&2

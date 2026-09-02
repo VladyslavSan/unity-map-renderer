@@ -99,21 +99,18 @@ namespace MapRenderer.Build
         /// The web player. Two settings are forced here rather than left to the project, because on this
         /// target they are not preferences — a build with either one wrong does not start at all:
         ///
-        /// <para><b>Burst AOT is disabled for Web by default.</b> `com.unity.entities` + Burst AOT traps
-        /// during static init on this Unity version, before any managed entry point runs (WebGPU hangs
-        /// instead of trapping). Reproduced from a stock project with no ECS code, so it is not ours to fix.
-        /// The cost is real and is the reason the web player is slow: Burst is the ONLY way a job reaches a
-        /// worker thread on the web, so with it off every job runs inline on the main thread. Set
-        /// <c>UMR_WEB_BURST=on</c> to build the other way and retest that trap after a Burst or Entities
-        /// upgrade; flip the default here once a Burst-on player is observed rendering — see
-        /// <c>docs/web-target.md</c>.</para>
+        /// <para><b>Burst AOT is enabled for Web.</b> It is what buys worker threads: a Burst body is native
+        /// code the job system can hand to a worker pthread, while an IL2CPP managed body cannot be and runs
+        /// inline on the main thread. It was OFF through Unity 6000.5 / Burst 1.8.29, where
+        /// `com.unity.entities` + Burst AOT trapped during static init before any managed entry point ran
+        /// (WebGPU hung instead of trapping) — reproduced from a stock project with no ECS code. Unity
+        /// 6000.6 / Burst 2.0 fixed it: a Burst-on player with Entities present renders correctly
+        /// (2026-09-02). Set <c>UMR_WEB_BURST=off</c> to build the other way if that trap ever returns.</para>
         ///
-        /// <para><b>Threads support is left ON.</b> It buys nothing while Burst is off — nothing can reach a
-        /// worker — and it costs a serving constraint: the player then requires a cross-origin-isolated host
-        /// (COOP/COEP on every response, which <c>Tools/serve-web.sh</c> sends and most static hosts do not).
-        /// It stays on because this is the configuration that has actually been observed rendering a map;
-        /// turning it off is an untested variation, and an unverified build recipe is worse than a
-        /// constrained one. Revisit together with Burst.</para>
+        /// <para><b>Threads support is ON</b>, and now buys what it costs. The cost is a serving constraint:
+        /// the player requires a cross-origin-isolated host (COOP/COEP on every response, which
+        /// <c>Tools/serve-web.sh</c> sends and most static hosts do not). Do not turn it off to escape that
+        /// without turning Burst off too — a Burst job with nowhere to run is the worst of both.</para>
         /// </summary>
         /// <param name="development">Whether to build the development variant.</param>
         private static void RunWeb(bool development)
@@ -123,16 +120,16 @@ namespace MapRenderer.Build
             RunBuild(BuildTarget.WebGL, BuildTargetGroup.WebGL, "Web", ProductBase, development);
         }
 
-        /// <summary>Whether this web build should Burst-compile: the <c>UMR_WEB_BURST</c> environment
-        /// variable (<c>on</c>/<c>1</c>/<c>true</c> to enable), defaulting to the disabled state the summary
-        /// on <see cref="RunWeb"/> explains.</summary>
+        /// <summary>Whether this web build should Burst-compile: on unless <c>UMR_WEB_BURST</c> says
+        /// <c>off</c>/<c>0</c>/<c>false</c>, for the reasons the summary on <see cref="RunWeb"/> gives.</summary>
         /// <returns>True to Burst-compile the web player.</returns>
         private static bool WebBurstRequested()
         {
             string requested = Environment.GetEnvironmentVariable("UMR_WEB_BURST")?.Trim().ToLowerInvariant();
-            bool enabled = requested == "on" || requested == "1" || requested == "true";
-            if (requested != null)
-                Console.WriteLine($"[build] web: UMR_WEB_BURST='{requested}' => Burst AOT {(enabled ? "on" : "off")}");
+            if (string.IsNullOrEmpty(requested)) return true;
+
+            bool enabled = requested != "off" && requested != "0" && requested != "false";
+            Console.WriteLine($"[build] web: UMR_WEB_BURST='{requested}' => Burst AOT {(enabled ? "on" : "off")}");
             return enabled;
         }
 
@@ -321,15 +318,13 @@ namespace MapRenderer.Build
             //   High-stripped build (map loads, tiles render, input works) before publishing.
             PlayerSettings.SetManagedStrippingLevel(nbt, ManagedStrippingLevel.High);
 
-            // WEB EXCEPTION (measured 2026-09-01): High produces a player that builds clean and then never
-            // finishes initialising — engine, graphics device, physics and input all come up, then the loader
-            // sticks at 100% with no error. Minimal renders, from the same tree with the same Burst setting
-            // and one build between them, so this is exactly the runtime hazard the paragraph above warns
-            // about rather than a code defect. Suspected cause is Entities' reflection-driven type/system
-            // registration; not confirmed, because Minimal was enough to unblock. The cost is binary size
-            // (18.6 MB vs 14.0 MB shippable). Revisit with an Assets/link.xml preserving what it needs.
-            if (nbt == NamedBuildTarget.WebGL)
-                PlayerSettings.SetManagedStrippingLevel(nbt, ManagedStrippingLevel.Minimal);
+            // Web carried an exception to Minimal from 2026-09-01 to 2026-09-02: on Unity 6000.5, High built
+            // clean and then never finished initialising — the loader stuck at 100% with no error, which is
+            // exactly the runtime hazard the caveat above describes. Unity 6.6 / Burst 2.0 fixed it together
+            // with the Entities + Burst startup trap, and a High-stripped web player was confirmed loading
+            // and rendering (17.3 MB -> 14.2 MB shippable). Recorded because a recurrence will look the same:
+            // a silent hang at 100%, not a build error, and the answer then is an Assets/link.xml preserving
+            // what reflects, not dropping the level for the whole target.
 
             // Drop unused engine modules.
             PlayerSettings.stripEngineCode = true;

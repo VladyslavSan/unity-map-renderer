@@ -865,7 +865,7 @@ PlayerSettings:
   managedStrippingLevel:
     Android: 3
     Standalone: 3
-    WebGL: 4
+    WebGL: 3
   incrementalIl2cppBuild: {}
   suppressCommonWarnings: 1
   allowUnsafeCode: 0

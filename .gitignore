@@ -109,6 +109,9 @@ InitTestScene*.unity*
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
 
+# Stray Burst AOT output the WebGL build drops at the repo root (~12 MB), not an input to anything
+/[Dd]ata/
+
 # Written by com.unity.test-framework.performance on every batch run
 /[Aa]ssets/[Rr]esources/PerformanceTestRun*.json*
 /[Aa]ssets/[Rr]esources.meta
