@@ -282,7 +282,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 200000001}
   serializedVersion: 2
-  m_LocalRotation: {x: 0.4082179, y: 0.23456961, z: -0.10938165, w: 0.8768116}
+  m_LocalRotation: {x: 0.40821788, y: 0.23456976, z: -0.10938167, w: 0.8754261}
   m_LocalPosition: {x: 0, y: 3, z: 0}
   m_LocalScale: {x: 1, y: 1, z: 1}
   m_ConstrainProportionsScale: 0
@@ -447,10 +447,10 @@ MonoBehaviour:
     MaxReleasesPerTick: 4
     MaxConcurrentTileLoads: 12
     PriorityStrategy: 0
-    PropertyStorage: 1
     SymbolPlacementThrottleFrames: 1
     FillTileBufferClip: 0
     SymbolTileCoverageCull: 0.005
+    SymbolMaxDistanceFraction: 1
     Backend: 0
     MaterialSet: {fileID: 11400000, guid: bc4a41b25dc8b41fcb0dfb8f58673ef4, type: 2}
     PreparedCache:
@@ -469,8 +469,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: bf01f2a6f0fb743a6bdffe9ea7ea8fb5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.MapController
-  Map: {fileID: 0}
-  Camera: {fileID: 0}
   ZoomSensitivity: 0.5
   KeyboardZoomStep: 2
   BearingSensitivity: 0.3
@@ -511,7 +509,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f764aa4dcc26249138aaf4adf26ba8df, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.Rendering.Map.CameraControlPanel
-  Map: {fileID: 300000003}
   Zoom: 14
   Tilt: 0
   Heading: 0
@@ -530,7 +527,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5da27bab377744121a84c49751149e45, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.Rendering.Map.MapTelemetryPanel
-  Map: {fileID: 300000003}
   VisibleTileCount: 0
   CoverColumns: 0
   CoverRows: 0
@@ -556,16 +552,17 @@ MonoBehaviour:
   PreparedCacheByteBudget: 0
   PreparedCacheFillPercent: 0
   PreparedCacheEvictions: 0
-  SymbolActiveLabelTiles: 0
-  SymbolCachedLabelTiles: 0
-  SymbolCoverageDroppedLabels: 0
-  SymbolInputLabelCount: 0
-  SymbolDistanceCulledLabels: 0
-  SymbolCoverageFadingLabels: 0
+  SymbolActiveTiles: 0
+  SymbolCachedTiles: 0
+  SymbolCoverageDropped: 0
+  SymbolInputCount: 0
+  SymbolDistanceCulled: 0
+  SymbolCoverageFading: 0
+  SymbolZoomCulled: 0
   SymbolCollisionCandidates: 0
   SymbolCollisionSurvivors: 0
   SymbolPlacedQuads: 0
-  SymbolLiveFadeRecords: 0
+  SymbolLiveFade: 0
   SymbolMirrorRebuilds: 0
   SymbolMirrorRebuildsPerSecond: 0
 --- !u!114 &300000008
@@ -580,7 +577,6 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 1745e14e6250443b1970c07bfd5d99e9, type: 3}
   m_Name: 
   m_EditorClassIdentifier: MapRenderer.Unity::MapRenderer.Unity.Rendering.Map.DebugMenu.DebugMenuOverlay
-  Map: {fileID: 300000003}
   ToggleKey: 96
   TopRightCornerToggle: 1
   WindowRect:
