@@ -421,6 +421,13 @@ pends; 10 Ticks ⇒ `Σ CoverRecomputesLastTick(ticks 2..10) == 0` while `pendin
 > `Measure(IReadOnlyList<ITileFeature> features, …)` already assumes the A6 neutral-feature surface — so re-verify
 > signatures at implementation time but don't assume this section is stale wholesale; only §1.4's top-level `Kick`
 > anchor actually drifted.
+>
+> *Second anchor note (2026-09-02):* **a second live plan now covers this same seam** —
+> `docs/job-scheduling-design.md` §3.6 states which parts of this section it takes over (§4.1's state, §4.3's
+> exact-size allocation, D7's `Mesh[]` cache ripple and the overshoot tooth) and which it supersedes (§4.2's
+> managed `ILayerGeometry` seam, replaced by a graph builder plus a chunk-plan job). Read that section before
+> implementing anything here; neither doc alone is the whole plan. Nothing has landed yet, so this section is
+> still live rather than retired.
 
 Prerequisite: capture `PmMeshDataAllocate` numbers from a liberty-style pan session first — this stage's
 alloc-loop half is measure-first. The overshoot half (#4) is structurally certain regardless.

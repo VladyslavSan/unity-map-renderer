@@ -11,6 +11,9 @@ settings a web player must have or it silently never starts, what does and does 
 thread there, and how to prove a build is the configuration you asked for), and
 **`docs/lessons-learned.md` for hard-won engineering gotchas** (Unity/URP/HLSL + the headless test
 workflow) — check it before debugging a shader/material/test-harness surprise.
+`docs/job-scheduling-design.md` is the SSOT for how Burst work is chained (the job graph, the
+`.Run()`/`.Schedule()` discriminator, and the disposal/cancellation invariant for in-flight `JobHandle`s);
+it partly supersedes `docs/tile-pipeline-design.md` §4 — read its §3.6 for which parts.
 Proprietary / all rights reserved.
 
 `docs/*-design.md` describe *why the code is the way it is* (decisions, history — the code leads, the doc
