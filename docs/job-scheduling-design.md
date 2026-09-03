@@ -485,6 +485,33 @@ test runtime as well as the frame.
   count per tile moves.
 - *Tooth:* the probe itself is the deliverable; its numbers are dated and recorded here, not in source.
 
+**Measured 2026-09-02** (Editor, safety checks on, `BurstCompiler.IsEnabled=True`, six read-only container
+fields per node, warmed up so one-time compilation is excluded). Cost per `Schedule` call, sweeping the
+number of edges created before one flush:
+
+| edges | independent (µs/edge) | chained (µs/edge) |
+|---|---|---|
+| 1 | 2.90 | 2.20 |
+| 16 | 0.24 | 0.31 |
+| 64 | 0.23 | 0.37 |
+| 256 | 0.28 | 0.31 |
+| 1024 | 0.26 | 0.29 |
+
+**Verdict: the per-layer shape stands; stages 1–3 as written.** An edge costs ~0.3 µs to create and the cost
+is flat in the number of edges — the `n=1` row is first-call overhead the warm-up does not reach, not a
+fixed per-batch price. Flush (`ScheduleBatchedJobs`) stays under 10 µs at every N, so it is not a hidden
+per-edge cost in disguise.
+
+Sizing it against the frame: at 0.3 µs, spending 1 ms of a 16.7 ms Tick on scheduling buys ~3 300 edges.
+Production `MaxMeshBuildsPerTick` is **2** (`MapViewConfig.cs:46`), so that is ~1 650 edges per kick against
+a per-layer graph's 10–15 nodes per fill layer — the shape does not come close to the budget, and the fused
+`LayerInputTable` variant is not needed. The EditMode suites that raise the cap to 64 have ~50 edges per kick
+per layer at the same price, which is why the gate's runtime does not move either.
+
+The caveat this probe does not cover: the nodes are read-only, so the job system inserts no write-conflict
+dependencies. A real graph's write edges cost more to register. That raises the constant, not the shape —
+the margin here is ~3 orders of magnitude, so it does not change the verdict.
+
 ### Stage 1 — the fill graph, with no production caller
 
 `MapRenderer.Jobs/FillMeshGraph`: the scheduled form of `FillMeshPipeline.Schedule` — same `LayerInput`,
