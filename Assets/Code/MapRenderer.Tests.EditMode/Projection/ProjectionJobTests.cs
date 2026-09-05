@@ -6,7 +6,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Projection;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
@@ -20,8 +20,11 @@ namespace MapRenderer.Tests.Projection
     /// (2) Acceptance — all 239 countries' vertices project within MercatorBounds (± margin).
     /// (3) Precision intent — origin-relative double3 magnitudes are smaller than absolute Mercator.
     ///
-    /// Note: Tests run the job via managed fallback (.Run() / .Complete()), not Burst-compiled.
-    /// They validate numeric correctness but do NOT prove Burst compilation.
+    /// Note: whether these run Burst-compiled depends on the Jobs ▸ Burst ▸ Enable Compilation toggle and
+    /// compile success, not on the runner — <c>CompileSynchronously = true</c> falls back to managed IL
+    /// SILENTLY on a compile failure (<c>FillGraphBurstProbeTests</c>), so a passing numeric test alone never
+    /// proves Burst compiled it. <c>./Tools/run-tests.sh</c> (batch mode) is this project's path verified
+    /// Burst-compiled, via its log, not the test result.
     /// </summary>
     public class ProjectionJobTests
     {

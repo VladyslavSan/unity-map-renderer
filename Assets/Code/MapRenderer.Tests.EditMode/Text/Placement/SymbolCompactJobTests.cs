@@ -11,8 +11,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Symbols;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>

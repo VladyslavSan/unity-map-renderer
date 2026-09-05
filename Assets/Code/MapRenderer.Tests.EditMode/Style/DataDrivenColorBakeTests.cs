@@ -1,5 +1,5 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only. It exercises MapRenderer.Jobs.Mvt (the tile-decode seam, moved out of Core),
+// which Tools/core-tests does not compile — this file is not registered there.
 
 using System;
 using System.Collections.Generic;

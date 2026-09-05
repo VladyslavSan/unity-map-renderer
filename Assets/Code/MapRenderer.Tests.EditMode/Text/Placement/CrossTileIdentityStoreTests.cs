@@ -35,6 +35,14 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class CrossTileIdentityStoreTests
     {
+        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
+        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
+        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        private long _liveBlocks;
+        [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
+        [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
+            "this test baked a block it never disposed — release the snapshot and Clear() the store");
+
         // Appends one point symbol straight into `buffer` (the direct-buffer-builder idiom — see
         // Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/TestSymbolTileBuffer.cs) and returns the resulting
         // record, so a caller can both group it into its tile's buffer AND hold it for a later assertion.
@@ -94,6 +102,7 @@ namespace MapRenderer.Tests.Text.Placement
             // managed-object references). TileKey is the distinguishing field: it is the only one that
             // differs between the parent and child copies (both carry the same text/layer/anchor cell).
             Assert.AreEqual(SymbolTileKey.Pack(child), output[0].TileKey, "the finest (child) tile's label wins");
+            store.Clear();
         }
 
         // ── (4) two GENUINELY distinct nearby symbols (different cells) both survive. ──
@@ -111,6 +120,7 @@ namespace MapRenderer.Tests.Text.Placement
             var key = new SymbolTileStore.Key("src", tile);
             Commit(store, key, store.BeginBuild(key), buffer);
             Assert.AreEqual(2, Collect(store, q).Count, "distinct-cell symbols are not merged");
+            store.Clear();
         }
 
         // ── (5) line symbols are excluded from dedup in v1 (two coincident line symbols both pass through). ──
@@ -130,6 +140,7 @@ namespace MapRenderer.Tests.Text.Placement
             var key = new SymbolTileStore.Key("src", tile);
             Commit(store, key, store.BeginBuild(key), buffer);
             Assert.AreEqual(2, Collect(store, q).Count, "line labels pass through undeduped (per-anchor identity is a follow-up)");
+            store.Clear();
         }
     }
 }

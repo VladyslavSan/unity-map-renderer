@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using System.Runtime.CompilerServices;
+using Unity.Collections;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Json;
@@ -85,11 +86,12 @@ namespace MapRenderer.Jobs.Tiles
                 // feature IS an IFeature (the neutral carrier implements it directly), so it passes straight
                 // to filter.Matches — no adapter alloc.
                 IReadOnlyList<IFeature> features = tileLayer.Features;
+                NativeArray<byte> results = native != null ? native.MatchAll() : default;
                 var result = new List<IFeature>();
                 for (int i = 0; i < features.Count; i++)
                 {
                     IFeature feature = features[i];
-                    bool matched = native != null ? native.Matches(i) : filter.Matches(feature, zoom, binding);
+                    bool matched = native != null ? results[i] != 0 : filter.Matches(feature, zoom, binding);
                     if (matched)
                         result.Add(feature);
                 }
@@ -154,6 +156,21 @@ namespace MapRenderer.Jobs.Tiles
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, List<SelectedTileFeature> into)
             => SelectFeaturesInto(layer, features, zoom, into, keyResolver: null, native: null);
 
+        /// <summary>The <see cref="List{T}"/> selection over an ALREADY-FETCHED feature list, WITH native-filter
+        /// binding — the caller has both read <see cref="ITileLayer.Features"/> once and still has the layer in
+        /// scope to probe for capability. <b><paramref name="features"/> MUST be <paramref name="tileLayer"/>'s
+        /// own <see cref="ITileLayer.Features"/></b>: a bound native matcher addresses features by their ordinal
+        /// in the layer, so a mismatched list silently selects the wrong feature at that ordinal. See the
+        /// <see cref="ITileLayer"/> overload for the selection contract.</summary>
+        public static void SelectFeatures(
+            StyleLayer layer, ITileLayer tileLayer, IReadOnlyList<IFeature> features, double zoom,
+            List<SelectedTileFeature> into)
+        {
+            var keyResolver = (tileLayer as IIndexedFeatureSource)?.KeyResolver;
+            INativeFeatureMatcher native = BindNativeFilter(tileLayer, layer);
+            SelectFeaturesInto(layer, features, zoom, into, keyResolver, native);
+        }
+
         private static void SelectFeaturesInto(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, List<SelectedTileFeature> into,
             IFeatureKeyResolver keyResolver, INativeFeatureMatcher native)
@@ -170,10 +187,11 @@ namespace MapRenderer.Jobs.Tiles
             }
             try
             {
+                NativeArray<byte> results = native != null ? native.MatchAll() : default;
                 for (int i = 0; i < features.Count; i++)
                 {
                     IFeature feature = features[i];
-                    bool matched = native != null ? native.Matches(i) : filter.Matches(feature, zoom, binding);
+                    bool matched = native != null ? results[i] != 0 : filter.Matches(feature, zoom, binding);
                     if (matched)
                         into.Add(new SelectedTileFeature { Feature = feature, Ordinal = i });
                 }
@@ -191,7 +209,7 @@ namespace MapRenderer.Jobs.Tiles
         /// instead of growing a <see cref="List{T}"/> by doubling. Rung-1 "allocate nothing" for the mesh-build
         /// worker pass — the caller passes a grow-only array sized to at least <c>tileLayer.Features.Count</c>
         /// (the selection can never exceed the source layer's own feature count), e.g.
-        /// <c>TileBuildScratch.SelectionBuffer</c> in <c>MapRenderer.Unity</c>.
+        /// <c>TileBuildBuffers.SelectionBuffer</c> in <c>MapRenderer.Unity</c>.
         ///
         /// <para>Unlike the <see cref="List{T}"/> overload, this does <b>not</b> clear <paramref name="into"/>
         /// first — the caller is expected to read only the returned <c>[0, count)</c> prefix, exactly the
@@ -221,6 +239,22 @@ namespace MapRenderer.Jobs.Tiles
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, SelectedTileFeature[] into)
             => SelectFeaturesInto(layer, features, zoom, into, keyResolver: null, native: null);
 
+        /// <summary>The scratch-buffer selection over an ALREADY-FETCHED feature list, WITH native-filter
+        /// binding — the caller has both read <see cref="ITileLayer.Features"/> once (for its own buffer
+        /// sizing) and still has the layer in scope to probe for capability. <b><paramref name="features"/>
+        /// MUST be <paramref name="tileLayer"/>'s own <see cref="ITileLayer.Features"/></b>: a bound native
+        /// matcher addresses features by their ordinal in the layer, so a mismatched list silently selects the
+        /// wrong feature at that ordinal. See the <see cref="ITileLayer"/> overload for the selection contract
+        /// and the grow-only-buffer contract.</summary>
+        public static int SelectFeatures(
+            StyleLayer layer, ITileLayer tileLayer, IReadOnlyList<IFeature> features, double zoom,
+            SelectedTileFeature[] into)
+        {
+            var keyResolver = (tileLayer as IIndexedFeatureSource)?.KeyResolver;
+            INativeFeatureMatcher native = BindNativeFilter(tileLayer, layer);
+            return SelectFeaturesInto(layer, features, zoom, into, keyResolver, native);
+        }
+
         private static int SelectFeaturesInto(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, SelectedTileFeature[] into,
             IFeatureKeyResolver keyResolver, INativeFeatureMatcher native)
@@ -236,11 +270,12 @@ namespace MapRenderer.Jobs.Tiles
             }
             try
             {
+                NativeArray<byte> results = native != null ? native.MatchAll() : default;
                 int count = 0;
                 for (int i = 0; i < features.Count; i++)
                 {
                     IFeature feature = features[i];
-                    bool matched = native != null ? native.Matches(i) : filter.Matches(feature, zoom, binding);
+                    bool matched = native != null ? results[i] != 0 : filter.Matches(feature, zoom, binding);
                     if (matched)
                         into[count++] = new SelectedTileFeature { Feature = feature, Ordinal = i };
                 }

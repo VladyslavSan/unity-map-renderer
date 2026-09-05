@@ -16,7 +16,6 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;

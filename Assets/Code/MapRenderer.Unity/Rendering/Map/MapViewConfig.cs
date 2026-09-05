@@ -40,8 +40,8 @@ namespace MapRenderer.Unity.Rendering.Map
                  "for smoother FPS while loading. NOTE: 0 BLOCKS consume entirely (not 'uncapped').")]
         public int MaxConsumesPerTick = 4;
 
-        [Tooltip("S55: Max mesh build kick-offs per Tick (build throttle). " +
-                 "Caps how many background mesh build tasks are started per frame. Default 2 — " +
+        [Tooltip("S55: Max tiles admitted per Tick (build throttle). " +
+                 "Caps how many tiles are newly started per frame. Default 2 — " +
                  "tuned against the live Profiler to spread decode/earcut cost across frames.")]
         public int MaxMeshBuildsPerTick = 2;
 
@@ -73,13 +73,6 @@ namespace MapRenderer.Unity.Rendering.Map
                  "on screen. CameraDistance prioritizes whatever the camera is nearest to — under tilt this " +
                  "favours the near/bottom edge of the frustum instead of the visual centre.")]
         public TilePriorityStrategy PriorityStrategy = TilePriorityStrategy.GroundDistanceToLookAt;
-
-        [Tooltip("Rapid-zoom stutter: recompute the full symbol-label placement (project/collide/emit — the " +
-            "main-thread SymbolTick that spikes to ~100ms) only every Nth frame; on the held frames between, " +
-            "labels stay GPU-billboarded at their world anchors (only reflow / collision / fade update less " +
-            "often). 1 = every frame (throttle OFF, unchanged behaviour). 2-4 trades a few frames of " +
-            "label-reflow latency for a large main-thread saving during zoom.")]
-        public int SymbolPlacementThrottleFrames = 1;
 
         [Header("Meshing")]
         [Tooltip("How much of each tile's MVT buffer the FILL meshes keep, in tile units at extent 4096 " +

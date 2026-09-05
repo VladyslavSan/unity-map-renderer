@@ -17,7 +17,7 @@ namespace MapRenderer.Tests.Structure
     /// <see cref="MapRenderer.Unity.Rendering.Tile.Processing.TileLayerProcessorRunner"/>.
     ///
     /// Against the pre-A1 source this test FAILS on both forbidden call forms (a direct
-    /// <c>MvtDecoder.Decode(</c> and a direct <c>.WriteInto(</c> inside <c>KickMeshBuild</c>) — recorded as
+    /// <c>MvtDecoder.Decode(</c> and a direct mesh-write call inside <c>KickMeshBuild</c>) — recorded as
     /// the RED observation before the production rewire. Adding an unused interface or merely renaming the
     /// local cannot pass: the assertions are over the CALL forms actually present in the method body.
     /// </summary>
@@ -29,13 +29,42 @@ namespace MapRenderer.Tests.Structure
         // successor to the R1-era lease's `.Tile`) rather than `.GetOrDecode(` since D1 — the wrapper holds
         // an already-decoded tile, so reading it is a property access, not a call.
         private const string DecodeReadForm = "decode.Value";
-        private const string WriteIntoCallForm = ".WriteInto(";
+        // job-scheduling-design.md §8 stage 5 Group B: `.WriteInto(` retired with the seam arm — the token
+        // no longer names anything a compiling program can contain, so the clause it fenced would be
+        // unfalsifiable. Swapped, not deleted (first swap): `WriteMeshData(` became the direct-mesh-write
+        // entry point a regression would now reach for, so fencing it continued to guard the SAME property
+        // — KickMeshBuild delegates the mesh write entirely to the runner→graph pipeline, never calling a
+        // builder's write method itself.
+        // RED-verified (first swap): a dead (if (false)) StyledFillTileBuilder.WriteMeshData( call pasted
+        // into KickMeshBuild's body reds this file's
+        // TileManager_DelegatesDecodeAndLayerWritesToTheProcessorRunner (Expected: 0, But was: 2 — the extra
+        // count is this fence's own un-comment-stripped reading of the injection's own comment). Executed
+        // and reverted.
+        //
+        // Vestige sweep (SECOND swap, same clause, same reason): `WriteMeshData(` retired for real —
+        // the synchronous public method moved to the test assembly with zero production callers, so the
+        // token can no longer appear in any compiling PRODUCTION program and the clause it fenced would go
+        // unfalsifiable again. Swapped to `TileBuilder.ScheduleWrite(` — the entry point a regression would
+        // now reach for.
+        //
+        // The token is `TileBuilder.ScheduleWrite(`, NEVER the bare `ScheduleWrite(`, and this is not
+        // style: a bare `ScheduleWrite(` is a SUBSTRING of `CompleteMeasureAndScheduleWrite(` — the
+        // CORRECT graph write kick, called from TileManager.cs outside KickMeshBuild's braces — and this
+        // fence does not strip comments. `TileBuilder.ScheduleWrite(` matches all three
+        // `Styled*TileBuilder.ScheduleWrite` call forms and cannot match the delegation call, so a future
+        // "simplification" back to the bare token would silently red this fence the day the write kick
+        // moves inside KickMeshBuild.
+        // RED-verified (second swap): a dead (if (false)) StyledFillTileBuilder.ScheduleWrite( call pasted
+        // into KickMeshBuild's body reds this file's
+        // TileManager_DelegatesDecodeAndLayerWritesToTheProcessorRunner on the ScheduleWrite( count.
+        // Executed and reverted (T3).
+        private const string ScheduleWriteCallForm = "TileBuilder.ScheduleWrite(";
         private const string RunnerCallForm = "TileLayerProcessorRunner.RunWorkerPass(";
 
         // Anchors the method DEFINITION (return-type-prefixed), not one of KickMeshBuild's several call
         // sites elsewhere in TileManager.cs (which read just "KickMeshBuild(...)" with no return type
         // before them) — this substring is unique to the signature.
-        private const string KickMeshBuildSignatureAnchor = "WorkHandle<MeshBuildResult> KickMeshBuild(";
+        private const string KickMeshBuildSignatureAnchor = "WorkHandle<Processing.TilePrologueOutput> KickMeshBuild(";
 
         [Test]
         public void TileManager_DelegatesDecodeAndLayerWritesToTheProcessorRunner()
@@ -47,43 +76,22 @@ namespace MapRenderer.Tests.Structure
 
             string body = ExtractMethodBody(source, KickMeshBuildSignatureAnchor, path);
 
-            int decodeCalls    = CountOccurrences(body, DecodeCallForm);
-            int writeIntoCalls = CountOccurrences(body, WriteIntoCallForm);
-            int runnerCalls    = CountOccurrences(body, RunnerCallForm);
+            int decodeCalls        = CountOccurrences(body, DecodeCallForm);
+            int scheduleWriteCalls = CountOccurrences(body, ScheduleWriteCallForm);
+            int runnerCalls        = CountOccurrences(body, RunnerCallForm);
 
             Assert.AreEqual(0, decodeCalls,
                 $"TileManager.KickMeshBuild must contain ZERO direct '{DecodeCallForm}' call sites — the " +
                 "decode is the runner's job now (Epic A / A1: one MVT decode per mesh worker pass, owned by " +
                 "TileLayerProcessorRunner).");
-            Assert.AreEqual(0, writeIntoCalls,
-                $"TileManager.KickMeshBuild must contain ZERO direct '{WriteIntoCallForm}' call sites — " +
-                "per-layer WriteInto now happens inside TileMeshLayerProcessor.ProcessOnWorker, invoked " +
-                "through the runner.");
+            Assert.AreEqual(0, scheduleWriteCalls,
+                $"TileManager.KickMeshBuild must contain ZERO direct '{ScheduleWriteCallForm}' call sites — " +
+                "the mesh write happens inside TileBuildGraph's write step (job-scheduling-design.md §8 " +
+                "stage 5), reached only through TileMeshLayerProcessor.BuildGraphRequest + the runner, never " +
+                "by KickMeshBuild calling a builder's ScheduleWrite directly.");
             Assert.AreEqual(1, runnerCalls,
                 $"TileManager.KickMeshBuild must call '{RunnerCallForm}' exactly once — the single " +
                 "decode-once fan-out point for this worker pass.");
-        }
-
-        /// <summary>Epic A / A2 (design §B Q1, plan §F tooth 2 structural companion): the source-less
-        /// worker pass must NEVER decode — a source-less style layer has no MVT bytes at all. Against a
-        /// deliberately-wrong impl that decodes anyway (e.g. the rejected "empty-bytes through the real
-        /// fetch/decode path" alternative) this assertion fails.</summary>
-        [Test]
-        public void RunSourcelessWorkerPass_DoesNotDecode()
-        {
-            string path = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Tile", "Processing",
-                "TileLayerProcessorRunner.cs");
-            Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
-            string source = File.ReadAllText(path);
-
-            const string signatureAnchor = "IRenderLayerPayload[] RunSourcelessWorkerPass(";
-            string body = ExtractMethodBody(source, signatureAnchor, path);
-
-            int decodeCalls = CountOccurrences(body, DecodeCallForm);
-            Assert.AreEqual(0, decodeCalls,
-                $"RunSourcelessWorkerPass must contain ZERO '{DecodeCallForm}' call sites — the source-less " +
-                "arm never fetches or decodes MVT bytes (Epic A / A2 design §B Q1).");
         }
 
         /// <summary>Epic A / A4 (design §B Q1-Q3, plan §E-3): re-scoped again — A4 moved the decode out of
@@ -91,7 +99,9 @@ namespace MapRenderer.Tests.Structure
         /// <c>GetTile</c>. <c>RunWorkerPass</c> therefore decodes nothing and reads the caller's reference
         /// exactly once, via <c>decode.Value</c> (R2). The invariant this test has guarded since A1/A3 — the mesh
         /// cadence's OWN decode-once boundary — survives as "reads the lease exactly once, decodes nothing
-        /// directly". The source-less pass still never touches either form (unchanged from A2).</summary>
+        /// directly". job-scheduling-design.md §8 stage 3 retired the source-less worker pass entirely (Group
+        /// 5.2/5.5) — a background tile schedules its measure graph directly, no runner entry of its own —
+        /// so this test no longer has a sourceless half to check.</summary>
         [Test]
         public void TileLayerProcessorRunner_MeshWorkerPass_ReadsTheSharedDecode_AndNeverDecodesItself()
         {
@@ -101,11 +111,9 @@ namespace MapRenderer.Tests.Structure
             Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
             string source = File.ReadAllText(path);
 
-            const string workerPassAnchor = "IRenderLayerPayload[] RunWorkerPass(";
-            const string sourcelessAnchor = "IRenderLayerPayload[] RunSourcelessWorkerPass(";
+            const string workerPassAnchor = "TilePrologueOutput RunWorkerPass(";
 
             string workerPassBody = ExtractMethodBody(source, workerPassAnchor, path);
-            string sourcelessBody = ExtractMethodBody(source, sourcelessAnchor, path);
 
             Assert.AreEqual(0, CountOccurrences(workerPassBody, DecodeCallForm),
                 $"RunWorkerPass must contain ZERO direct '{DecodeCallForm}' calls — the decode happens in " +
@@ -114,12 +122,6 @@ namespace MapRenderer.Tests.Structure
                 $"RunWorkerPass must read '{DecodeReadForm}' exactly once — the mesh worker pass's own " +
                 "read of the caller's lease. More than one read is more than one place a released lease " +
                 "can be observed, and the fan-out is supposed to happen through the single tile it returns.");
-            Assert.AreEqual(0, CountOccurrences(sourcelessBody, DecodeCallForm),
-                $"RunSourcelessWorkerPass must contain ZERO '{DecodeCallForm}' calls — the source-less arm " +
-                "never decodes MVT bytes (unchanged from A2).");
-            Assert.AreEqual(0, CountOccurrences(sourcelessBody, DecodeReadForm),
-                $"RunSourcelessWorkerPass must contain ZERO '{DecodeReadForm}' reads — it has no bytes " +
-                "and no lease to read (unchanged from A2).");
         }
 
         /// <summary>Epic A / A3 (plan §F tooth 1 — primary structural delegation tooth, RED-verified
@@ -307,7 +309,7 @@ namespace MapRenderer.Tests.Structure
                 (unityRoot, Path.Combine("Rendering", "Tile", "Processing", "ITileLayerProcessor.cs")),
                 (unityRoot, Path.Combine("Rendering", "Tile", "Processing", "TileMeshLayerProcessor.cs")),
                 (unityRoot, Path.Combine("Rendering", "Tile", "Processing", "TileSymbolLayerProcessor.cs")),
-                (unityRoot, Path.Combine("Rendering", "Tile", "Processing", "TileBackgroundLayerProcessor.cs")),
+                (unityRoot, Path.Combine("Rendering", "Tile", "Processing", "BackgroundQuad.cs")),
                 (unityRoot, Path.Combine("Rendering", "Style", "ITileMeshRenderLayer.cs")),
                 (unityRoot, Path.Combine("Rendering", "Style", "FillRenderLayer.cs")),
                 (unityRoot, Path.Combine("Rendering", "Style", "LineRenderLayer.cs")),
@@ -354,8 +356,15 @@ namespace MapRenderer.Tests.Structure
                 // buffer off. `Geometry` alone would be a poor token (it is a substring of
                 // TileGeometryBuffers and matched with word boundaries would still be weak); `tileLayer` is
                 // the identifier that only exists because the LAYER owns the geometry.
+                //
+                // job-scheduling-design.md §8 stage 5 Group B: RingFeatureIdx/RingOffsets/LineRibbonJob
+                // retired from the LINE row (they survive only in prose comments now, stripped here) — the
+                // per-ring buffer read and the ribbon build moved into the Burst job graph
+                // (MapRenderer.Jobs/LineMeshGraph.cs), which StyledLineTileBuilder.cs no longer names; it
+                // schedules and completes that graph instead. Replaced by identifiers of THAT mechanism —
+                // SymbolFeatureExtractor.cs is untouched by this stage and keeps its original set.
                 (Path.Combine("Rendering", "Meshing", "StyledLineTileBuilder.cs"),
-                    new[] { "TileGeometryBuffers", "RingFeatureIdx", "RingOffsets", "LineRibbonJob" }),
+                    new[] { "TileGeometryBuffers", "LineMeshGraph", "LineGraphOutput", "LineLayerInput" }),
                 (Path.Combine("Text", "SymbolFeatureExtractor.cs"),
                     new[] { "TileGeometryBuffers", "RingFeatureIdx", "tileLayer", "RingOffsets",
                             "LineAnchorPlacement" }),
@@ -912,14 +921,22 @@ namespace MapRenderer.Tests.Structure
         /// in-cover lifetime now (see the <c>LoadedTile.Decode</c> field doc), and
         /// <c>RenderTeardownRecord</c> (funnel 1) is its only release, kicked or not. A surviving
         /// <c>lt.Decode = null;</c> at either kick call site is the retired transfer shape leaking back in —
-        /// it would desync <c>FetchCompleted &amp;&amp; !HasMeshBuild &amp;&amp; Decode == null</c> from the
+        /// it would desync <c>FetchCompleted &amp;&amp; Step != BuildStep.Prologue &amp;&amp; Decode == null</c> from the
         /// kicked state and re-observe the record's PRESERVED fetch task on the next tick.</para>
+        ///
+        /// <para><b>Re-shaped for job-scheduling-design.md §8 stage 3.</b> The body's `finally { decode.Release(); }`
+        /// is gone — on SUCCESS the reference now TRANSFERS to the returned <c>TilePrologueOutput</c> (freed
+        /// once handed to <c>TileBuildGraph.ScheduleMeasure</c>, or by a pen's <c>TilePrologueOutput.Dispose()</c>
+        /// if it never gets that far); on a FAULT it is released by a guard `catch`. Both schedulers always
+        /// run the body, so "transferred or released" is exhaustive — the two releases (the body-fault catch
+        /// and the hand-off-fault catch around <c>IWorkScheduler.Schedule</c>) are now the SAME shape, one
+        /// regex match each.</para>
         ///
         /// <para><b>RED injections:</b> re-add a caller-side <c>lt.Decode = null;</c> after either kick call;
         /// remove the prologue <c>decode.Acquire()</c> (a leak-balance regression the runtime
-        /// <c>EagerDecodeOwnershipTests</c> teeth catch, not this one); or move <c>decode.Release()</c> out
-        /// of the body's <c>finally</c>; or remove the guard <c>catch</c> around the
-        /// <c>IWorkScheduler.Schedule</c> hand-off (a leak on a synchronous dispatch throw).</para>
+        /// <c>EagerDecodeOwnershipTests</c> teeth catch, not this one); or drop the `output.Decode = decode;`
+        /// transfer on the success path (a leak — nothing frees the kick's reference at all); or remove
+        /// either guard <c>catch</c> (a leak on that fault path).</para>
         /// </summary>
         [Test]
         public void KickMeshBuild_AcquiresItsOwnReference_AndNeitherCallerNullsTheRecordsField()
@@ -930,25 +947,29 @@ namespace MapRenderer.Tests.Structure
             string source   = File.ReadAllText(path);
             string stripped = StripComments(source);
             string body     = StripComments(
-                ExtractMethodBody(source, "WorkHandle<MeshBuildResult> KickMeshBuild(", path));
+                ExtractMethodBody(source, KickMeshBuildSignatureAnchor, path));
 
             Assert.AreEqual(1, CountOccurrences(body, "decode.Acquire()"),
                 "KickMeshBuild must call 'decode.Acquire()' exactly once — its OWN reference, taken in the " +
                 "main-thread prologue before the scheduler call exists. R1 retires the transfer: the record no " +
                 "longer hands this reference over, so the kick must take a separate one of its own.");
             Assert.AreEqual(2, CountOccurrences(body, "decode.Release()"),
-                "KickMeshBuild must contain EXACTLY TWO 'decode.Release()' — the body's `finally` " +
-                "(success path) and the guard `catch` around the Acquire()->IWorkScheduler.Schedule hand-off " +
-                "(which can throw synchronously — OOM — before the body runs). They are mutually exclusive by " +
-                "control flow, so each reference is released exactly once; a THIRD would be a real double-free.");
-            Assert.AreEqual(1, CountOccurrences(body, "finally"),
-                "…the success release is a `finally`, not a trailing statement — the mesh pass can throw, and " +
-                "a release it skips leaks the kick's own token on the fault path.");
-            Assert.IsTrue(Regex.IsMatch(body, @"catch\s*\{\s*decode\.Release\(\);\s*throw;\s*\}"),
-                "…and the SECOND release is a guard `catch { decode.Release(); throw; }` around the " +
-                "Acquire()->IWorkScheduler.Schedule hand-off (mirrors TryParkBuild): a synchronous hand-off " +
-                "throw frees the kick's own reference instead of leaking it. Remove the rethrow and it " +
-                "swallows the fault; remove the release and it leaks (the body's finally never runs).");
+                "KickMeshBuild must contain EXACTLY TWO 'decode.Release()' — one guard `catch` around the " +
+                "worker-pass body (a fault there releases instead of transferring) and one guard `catch` " +
+                "around the Acquire()->IWorkScheduler.Schedule hand-off (which can throw synchronously — OOM " +
+                "— before the body runs). They are mutually exclusive by control flow, so each reference is " +
+                "released exactly once; a THIRD would be a real double-free.");
+            Assert.AreEqual(0, CountOccurrences(body, "finally"),
+                "…job-scheduling-design.md §8 stage 3: there is no `finally` any more — on success the " +
+                "reference TRANSFERS to the returned TilePrologueOutput instead of being released here.");
+            Assert.AreEqual(2, Regex.Matches(body, @"catch\s*\{\s*decode\.Release\(\);\s*throw;\s*\}").Count,
+                "…and BOTH releases are guard `catch { decode.Release(); throw; }` blocks (mirrors " +
+                "TryParkBuild): a fault frees the kick's own reference instead of leaking it. Remove either " +
+                "rethrow and it swallows the fault; remove either release and it leaks.");
+            Assert.AreEqual(1, CountOccurrences(body, "output.Decode = decode"),
+                "KickMeshBuild must transfer the reference to the output exactly once, on the success path — " +
+                "'output.Decode = decode;' — or nothing ever frees the kick's own reference on a successful " +
+                "build (a leak the two guard catches above cannot see, since neither fires).");
 
             Assert.AreEqual(3, CountOccurrences(stripped, "KickMeshBuild("),
                 "TileManager.cs must contain exactly three 'KickMeshBuild(' occurrences: the definition and " +
@@ -1003,23 +1024,37 @@ namespace MapRenderer.Tests.Structure
             // Counted on STRIPPED text, not raw source — a comment merely mentioning either token (e.g. a
             // "why not RunOnThreadPool" explanation) must not satisfy or defeat these counts.
             Assert.AreEqual(0, CountOccurrences(stripped, "UniTask.RunOnThreadPool"),
-                "TileManager.cs must contain ZERO 'UniTask.RunOnThreadPool' call sites — both mesh-build " +
-                "kicks now dispatch through IWorkScheduler, the only policy that runs on a WebGL player.");
-            Assert.AreEqual(2, CountOccurrences(stripped, "WorkScheduler.Schedule("),
-                "TileManager.cs must contain exactly two 'WorkScheduler.Schedule(' call sites — one for " +
-                "KickMeshBuild, one for KickSourcelessBackground.");
+                "TileManager.cs must contain ZERO 'UniTask.RunOnThreadPool' call sites — the mesh-build kick " +
+                "still on the seam (KickMeshBuild) dispatches through IWorkScheduler, the only policy that " +
+                "runs on a WebGL player.");
+            // job-scheduling-design.md §8 stage 2 / E1 (resolved by reordering, option C): the source-less
+            // background kick left the seam entirely — it schedules FillMeshGraph directly and reaches no
+            // IWorkScheduler.Schedule<T> call (tooth (e), MeshBuildWorkSchedulerTests). Only KickMeshBuild
+            // (source tiles) still dispatches through the seam.
+            Assert.AreEqual(1, CountOccurrences(stripped, "WorkScheduler.Schedule("),
+                "TileManager.cs must contain exactly one 'WorkScheduler.Schedule(' call site — KickMeshBuild. " +
+                "KickSourcelessBackground no longer uses the seam at all.");
 
             string meshBuildBody = StripComments(
-                ExtractMethodBody(source, "WorkHandle<MeshBuildResult> KickMeshBuild(", path));
-            string sourcelessBody = StripComments(
-                ExtractMethodBody(source, "WorkHandle<MeshBuildResult> KickSourcelessBackground(", path));
+                ExtractMethodBody(source, KickMeshBuildSignatureAnchor, path));
+
+            // A whole-file count of one is satisfied by any single call, including a wrong one — name the
+            // site: the remaining call must be INSIDE KickMeshBuild, not merely somewhere.
+            Assert.AreEqual(1, CountOccurrences(meshBuildBody, "WorkScheduler.Schedule("),
+                "the one remaining 'WorkScheduler.Schedule(' call site must be inside KickMeshBuild's own " +
+                "method body.");
 
             Assert.AreEqual(0, CountOccurrences(meshBuildBody, ".Preserve()"),
                 "KickMeshBuild must not call .Preserve() — WorkHandle<T>.GetResult() is repeatable once " +
                 "terminal with no recycling hazard (the backing completion source never recycles), so the " +
                 "wrapper this stage retires from KickMeshBuild is genuinely unnecessary, not just deleted.");
-            Assert.AreEqual(0, CountOccurrences(sourcelessBody, ".Preserve()"),
-                "KickSourcelessBackground must not call .Preserve() either — same WorkHandle<T> contract.");
+
+            // Tooth (h) — job-scheduling-design.md §8 stage 3: BuildStep.Seam is renamed to BuildStep.Prologue
+            // throughout; a survivor is either a stale rename or a live reference to the retired member name.
+            Assert.AreEqual(0, CountOccurrences(stripped, "BuildStep.Seam"),
+                "TileManager.cs must contain ZERO 'BuildStep.Seam' occurrences — the member was renamed to " +
+                "BuildStep.Prologue (job-scheduling-design.md §8 stage 3); a survivor names a member that no " +
+                "longer exists.");
         }
 
         /// <summary>

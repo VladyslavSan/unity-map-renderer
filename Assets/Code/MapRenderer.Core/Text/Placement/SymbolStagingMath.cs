@@ -194,8 +194,8 @@ namespace MapRenderer.Core.Text.Placement
         /// Stages one CURVED along-line symbol (#5): validates + walks this frame's projected path, then stages one
         /// all-or-nothing candidate per stable build-time anchor (A-2), each N per-glyph rotated boxes/quads placed
         /// along the arc. Returns the number of anchors staged (0 if the path culls, has zero projected length, or
-        /// the symbol is longer than the whole line). <paramref name="pathScratch"/> and
-        /// <paramref name="cumulativeScratch"/> are caller-owned reused buffers sized to at least the path length.
+        /// the symbol is longer than the whole line). <paramref name="pathPoints"/> and
+        /// <paramref name="cumulativeLengths"/> are caller-owned reused buffers sized to at least the path length.
         ///
         /// <para><paramref name="anchorFadeIds"/>/<paramref name="anchorWasPlaced"/> carry the pre-resolved A-4
         /// fade id + A-5 incumbency per anchor — indices <c>[0, anchorCount)</c> for the build-time anchors and the
@@ -291,7 +291,7 @@ namespace MapRenderer.Core.Text.Placement
             ReadOnlySpan<double3> worldPath, ReadOnlySpan<float3> worldUpPath,
             ReadOnlySpan<CurvedGlyph> glyphs, ReadOnlySpan<LineAnchor> anchors,
             ReadOnlySpan<long> anchorFadeIds, ReadOnlySpan<byte> anchorWasPlaced,
-            Span<float2> pathScratch, Span<float> cumulativeScratch,
+            Span<float2> pathPoints, Span<float> cumulativeLengths,
             float bearingRadians, in SymbolViewTransform view, int ordinal,
             Span<SymbolBox> boxes, ref int boxCount, Span<PlacedQuad> quadsOut, ref int quadCount,
             Span<SymbolCandidate> candidates, Span<CandidateEmit> emit, ref int emitCount)
@@ -307,7 +307,7 @@ namespace MapRenderer.Core.Text.Placement
                 if (validPath[v] == 0) return 0;
                 float2 sp = screenPath[v];
                 if (!(math.abs(sp.x) < SymbolScreenProjection.MaxProjectedPx && math.abs(sp.y) < SymbolScreenProjection.MaxProjectedPx)) return 0;
-                pathScratch[v] = sp;
+                pathPoints[v] = sp;
                 if (v == pathLen / 2) pathDepth = depthPath[v];
             }
 
@@ -324,8 +324,8 @@ namespace MapRenderer.Core.Text.Placement
             float cornerMetresPerLogicalPixel = worldArc ? s.MetresPerLogicalPixel : 0f;
 
             float total = worldArc
-                ? PolylineArcMath.BuildCumulativeWorld(worldPath, pathLen, cumulativeScratch)   // metres
-                : PolylineArcMath.BuildCumulative(pathScratch, pathLen, cumulativeScratch);     // screen px
+                ? PolylineArcMath.BuildCumulativeWorld(worldPath, pathLen, cumulativeLengths)   // metres
+                : PolylineArcMath.BuildCumulative(pathPoints, pathLen, cumulativeLengths);     // screen px
             if (!(total > 0f)) return 0;
 
             float arcScale         = s.TextSizePx / TextQuadLayout.OneEm            // baked em -> arc units
@@ -344,9 +344,9 @@ namespace MapRenderer.Core.Text.Placement
                 // build-time tile-space topology, so resolving it on the world path is strictly more faithful
                 // than resolving it on the per-frame projected one — the two agree only at constant view
                 // depth, which is why a map-pitched curved anchor used to drift with the pose.
-                float centerArc = PolylineArcMath.ArcDistanceAt(cumulativeScratch, pathLen, anchors[a].Segment, anchors[a].T);
+                float centerArc = PolylineArcMath.ArcDistanceAt(cumulativeLengths, pathLen, anchors[a].Segment, anchors[a].T);
                 if (centerArc - halfSpan < 0f || centerArc + halfSpan > total) continue; // symbol spills the ends
-                if (StageCurvedAnchor(in s, pathScratch, cumulativeScratch, pathLen, total, worldPath, worldUpPath, glyphs, ref cursor,
+                if (StageCurvedAnchor(in s, pathPoints, cumulativeLengths, pathLen, total, worldPath, worldUpPath, glyphs, ref cursor,
                         ordinal + staged, anchorFadeIds[a], anchorWasPlaced[a] != 0,
                         centerArc, symbolCenterBaked, arcScale, cornerMetresPerLogicalPixel, pathDepth, bearingRadians,
                         in view,
@@ -356,7 +356,7 @@ namespace MapRenderer.Core.Text.Placement
 
             // No build-time anchor's projected position fit this frame → try one centred symbol at the arc midpoint.
             if (staged == 0 &&
-                StageCurvedAnchor(in s, pathScratch, cumulativeScratch, pathLen, total, worldPath, worldUpPath, glyphs, ref cursor,
+                StageCurvedAnchor(in s, pathPoints, cumulativeLengths, pathLen, total, worldPath, worldUpPath, glyphs, ref cursor,
                     ordinal, anchorFadeIds[anchorCount], anchorWasPlaced[anchorCount] != 0,
                     total * 0.5f, symbolCenterBaked, arcScale, cornerMetresPerLogicalPixel, pathDepth, bearingRadians,
                     in view,

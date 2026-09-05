@@ -417,6 +417,30 @@ pends; 10 Ticks ⇒ `Σ CoverRecomputesLastTick(ticks 2..10) == 0` while `pendin
 
 ## 4. Two-phase kick + mesher vertex cap (stalls #4/#5) — PENDING
 
+> **RETRACTED 2026-09-02 — the vertex cap is not built, and stall #4 does not survive reading the code.**
+> The cap existed to stop one 100k+-vertex layer uploading whole because `MaxVerticesPerTick` is checked
+> before each layer. That was argued, never measured — this section said "structurally certain regardless",
+> which is an assertion standing in for a number. Three facts kill it:
+>
+> - **A per-mesh budget already exists.** `MaxConsumesPerTick` (default 4) bounds "tile-layer meshes uploaded
+>   + registered per Tick", and consume is already mesh-by-mesh, so a rich tile already spreads across frames.
+> - **The main-thread cost is mostly per-mesh, not per-vertex.** `MeshDataPayload.Upload()` does `new Mesh`,
+>   `ApplyAndDisposeWritableMeshData` with validation and bounds-recalculation disabled, and a bounds
+>   assignment from a worker-computed AABB. Filling, bounds and index validation are already off-main.
+> - **So chunking makes it worse.** Splitting a layer into four leaves the uploaded bytes unchanged,
+>   quadruples the per-mesh cost, and spends the whole consume budget on one layer.
+>
+> The maintainer's judgement, which the code supports: mesh upload has never been a demonstrated bottleneck
+> here. **If the vertex cap is ever revisited it needs a measurement first** — a marker around the per-mesh
+> main-thread work over a low-zoom pan — and it should probably budget meshes rather than vertices, since
+> that is where the cost is. §4.1's two-phase kick is unaffected and lands for its own reasons (exact-size
+> allocation, stall #5).
+>
+> Recorded because the failure is instructive: a cost was assumed, a proxy was chosen to bound it
+> (`MaxVerticesPerTick`), and a design was built on the proxy without checking that the cost was real or that
+> the proxy tracked it.
+
+
 > *Anchor note (predates Epic A):* still a live pending plan. It partially anticipated the epic — §4.2's
 > `Measure(IReadOnlyList<ITileFeature> features, …)` already assumes the A6 neutral-feature surface — so re-verify
 > signatures at implementation time but don't assume this section is stale wholesale; only §1.4's top-level `Kick`
@@ -451,8 +475,9 @@ HasMeasure && task running    → pending++
 HasMeshBuild && completed     → Consume under dual budget                  [unchanged]
 ```
 
-`KickWrite` is charged against `MaxMeshBuildsPerTick` — it does the main-thread `AllocateWritableMeshData` work
-that cap exists to bound. **Latency cost: every tile gains +1 frame** (measure completes frame N; alloc+write
+`KickWrite` is **not** charged against `MaxMeshBuildsPerTick` (job-scheduling-design.md §11 fork 2) — exact
+sizing closed the blind-allocation stall the charge once answered, so the budget now bounds tiles admitted
+per Tick, not this step. **Latency cost: every tile gains +1 frame** (measure completes frame N; alloc+write
 kicks frame N+1) — invisible next to network fetch. Mid-flight release: `RenderTeardownRecord` stashes a
 live/completed `MeasureTask` via `engine.StashDiscardMeasure` (the pen disposes `MeasuredGeometry`'s native
 buffers). `MeasuredGeometry` gets a `DebugLiveCount` (leak tooth).
@@ -498,7 +523,8 @@ aggregate: `ILayerGeometry[]` (dense order) + the capture set + the chunk→(lay
 
 ### 4.3 Allocation + consume + cache
 
-`KickWrite` (main): for each **non-empty** chunk, `MeshDataPayload.AllocateTracked(1)` under `PmMeshDataAllocate`
+`KickWrite` (main): for each **non-empty** chunk *(read "layer" — chunking is retracted, see this section's
+head)*, `MeshDataPayload.AllocateTracked(1)` under `PmMeshDataAllocate`
 — exact counts are known, so the "dozens of 0-vertex arrays allocated, carried, disposed unused" loop (#5) is
 gone. Per-chunk single-element arrays are kept deliberately (`ApplyAndDisposeWritableMeshData` applies a whole
 array at once, and the resumable per-mesh consume requires applying one mesh at a time).
@@ -514,11 +540,20 @@ per (style, tile, layerId), the release-path transfer would destroy chunks 1..K�
 becomes `Mesh[]` (`null` array stays the empty-layer marker); `TransferOnRelease` groups the record's tracked
 meshes by `MaterialIndices[i]` before `Put`; `TakeAsLoadedTile` registers each chunk of a taken array.
 
+> **Dead with the retraction (2026-09-02).** D7 above exists only because a layer could become K > 1 meshes.
+> One mesh per layer keeps the current `Mesh`-valued entry correct, so **the cache is not changed at all** —
+> there is no ripple. Recorded in `job-scheduling-design.md` §3.6 as consequence (1).
+
 **Teeth:** overshoot bound (≥100k-vert fixture across ≥4 features, `MaxVerticesPerTick = 40 000` ⇒ per-tick
 `VerticesConsumedLastTick ≤ 40 000 + 32 768` and the layer produces ≥3 meshes); allocation exactness (a new
 `MeshDataArraysAllocatedLastKick` counter < D dense layers on the liberty fixture); leak (release in the
 measured-awaiting-alloc state ⇒ `DebugLiveCount` back to 0); cache round-trip (build→release→revisit vertex sum
 equals the original; a `Mesh`-valued cache loses chunks); parity (full GPU-snapshot suite unchanged).
+
+> **Which of those teeth survive (2026-09-02).** The overshoot bound and the cache round-trip are **struck**:
+> both assert K > 1 meshes per layer, which the retraction makes impossible — a tooth nothing can satisfy is
+> worse than no tooth, because it reads as coverage. Allocation exactness, the leak tooth and parity survive
+> and are adopted by `job-scheduling-design.md` stage 2, restated there per *layer*.
 
 ---
 
@@ -569,7 +604,7 @@ L=30, the worst frame goes from 450 structural changes to ≤4. **Teeth:** budge
 `MaxReleasesPerTick = 2` ⇒ Tick 1 releases 2, queue depth 6; queue empties in 4 ticks, `CountMeshObjects` back to
 baseline); batching (`DestroyEntityBatchesLastRemove` == 1 for a 10-layer tile, `EntitiesDestroyedLastRemove` ==
 11; a `RemoveItems`-loops-`RemoveItem` impl yields batches == 0); pan-return (tile returns before dequeue ⇒
-record survives, `MeshBuildsKickedLastTick == 0`).
+record survives, `TileBuildsStartedLastTick == 0`).
 
 ---
 

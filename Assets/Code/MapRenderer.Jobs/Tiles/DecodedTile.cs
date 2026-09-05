@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Jobs.Mvt;
 
+using MapRenderer.Jobs.Geometry;
 namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>One decoded tile layer: name, extent, its features — and <b>its geometry</b>.

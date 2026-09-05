@@ -77,5 +77,23 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsTrue(SymbolFarPlaneCull.IsCulled(anchor, Origin, ry180, cam, 400.0),
                 "180° rebase ⇒ 500 m from camera ⇒ culled (proves the rebase is applied)");
         }
+
+        /// <summary>Pins <c>float3x3</c>'s 9-scalar constructor to the real Unity.Mathematics layout
+        /// (row-major arguments, column-major storage — verified by reflecting the real
+        /// UnityEngine.MathematicsModule.dll) with a NON-symmetric matrix. The tests above only ever
+        /// build <c>ry180</c>, a diagonal matrix that reads identically under transpose, so they could
+        /// never catch a transposed constructor in the Tools/core-tests shim — this is the tooth that
+        /// would.</summary>
+        [Test]
+        public void Float3x3_NineArgConstructor_IsRowMajorArgsColumnMajorStorage()
+        {
+            var m = new float3x3(1f, 2f, 3f,
+                                  4f, 5f, 6f,
+                                  7f, 8f, 9f);
+
+            Assert.That(m.c0.x, Is.EqualTo(1f)); Assert.That(m.c0.y, Is.EqualTo(4f)); Assert.That(m.c0.z, Is.EqualTo(7f));
+            Assert.That(m.c1.x, Is.EqualTo(2f)); Assert.That(m.c1.y, Is.EqualTo(5f)); Assert.That(m.c1.z, Is.EqualTo(8f));
+            Assert.That(m.c2.x, Is.EqualTo(3f)); Assert.That(m.c2.y, Is.EqualTo(6f)); Assert.That(m.c2.z, Is.EqualTo(9f));
+        }
     }
 }

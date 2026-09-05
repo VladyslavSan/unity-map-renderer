@@ -1,6 +1,9 @@
 // Unity EditMode only — needs a real Camera/Mesh/Material + the job runtime (NativeArray/IJobParallelFor).
-// NOT registered in core-tests.csproj. NOTE: EditMode runs jobs via managed fallback (not Burst-compiled) — this
-// validates the numerics + the index mapping; Burst-compile correctness comes only from ./Tools/run-tests.sh.
+// NOT registered in core-tests.csproj. NOTE: whether this runs Burst-compiled depends on the Jobs ▸ Burst ▸
+// Enable Compilation toggle and compile success, not on the runner — a compile failure falls back to managed
+// IL SILENTLY (FillGraphBurstProbeTests), so a passing test alone never proves Burst compiled it. This
+// validates the numerics + the index mapping; ./Tools/run-tests.sh (batch mode, confirmed via its log) is
+// this project's Burst-compiled path.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -12,7 +15,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View.Camera;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Symbols;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;

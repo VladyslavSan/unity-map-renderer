@@ -54,7 +54,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <c>OrderedBlocks</c>, the same list the gather (<c>SymbolGatherPlan</c>) indexes by
         /// <paramref name="blockId"/> — then fans the block decision out to records through
         /// <paramref name="blockId"/>, at O(blocks) tile work + an O(records) int/byte fan-out. Blocks that share
-        /// a physical tile key collapse in <paramref name="tileDecisionScratch"/>, so each cross-frame side effect
+        /// a physical tile key collapse in <paramref name="tileDecisions"/>, so each cross-frame side effect
         /// still fires exactly once per tile — order-independent (set inserts + per-tile deadline stamps), so
         /// block order vs record order does not change the result.</para>
         ///
@@ -85,7 +85,7 @@ namespace MapRenderer.Core.Text.Placement
         /// record's coverage-fading state (the placement gather eases those out instead of popping).</param>
         /// <param name="now">This call's wall-clock (seconds) — stamps/checks fade deadlines.</param>
         /// <param name="graceSeconds">How long a crossing tile keeps fading before it is finally dropped.</param>
-        /// <param name="tileDecisionScratch">Reused per-tile-key decision cache (cleared here) so a tile shared by
+        /// <param name="tileDecisions">Reused per-tile-key decision cache (cleared here) so a tile shared by
         /// many records/blocks is classified — and its side effects (deadline stamp, above/fading-set membership)
         /// applied — ONCE per call, not once per record. The caller owns its lifetime (no per-frame GC once warm).</param>
         /// <param name="blockDecision">Caller's reused per-block scratch — cleared then filled with one decision
@@ -98,7 +98,7 @@ namespace MapRenderer.Core.Text.Placement
             HashSet<long> coverageAbovePrev, HashSet<long> coverageAboveThisFrame,
             Dictionary<long, double> coverageDepartingUntil, HashSet<long> coverageFadingTilesOut,
             double now, double graceSeconds,
-            Dictionary<long, byte> tileDecisionScratch, List<byte> blockDecision,
+            Dictionary<long, byte> tileDecisions, List<byte> blockDecision,
             List<byte> decisions, out int culledCount)
         {
             int n = blockId.Count;
@@ -114,7 +114,7 @@ namespace MapRenderer.Core.Text.Placement
                 return;
             }
 
-            tileDecisionScratch.Clear();
+            tileDecisions.Clear();
             coverageAboveThisFrame.Clear();
             coverageFadingTilesOut.Clear();
 
@@ -122,7 +122,7 @@ namespace MapRenderer.Core.Text.Placement
             // that left cover — the reconciler emits departing records into their OWN blocks) is NEVER classified,
             // so a departing tile touches no cross-frame state (deadline stamp / above-set / fading-set), matching
             // the old per-record scope fence (its records short-circuit to Keep in Phase B anyway). Blocks sharing
-            // a physical tile key collapse in tileDecisionScratch, so each active tile's side effect fires once.
+            // a physical tile key collapse in tileDecisions, so each active tile's side effect fires once.
             const byte needsClassify = 0xFF; // transient marker (never a valid Keep/Fade/Drop) — overwritten below
             int blockCount = blockTileKeys.Count;
             blockDecision.Clear();
@@ -134,7 +134,7 @@ namespace MapRenderer.Core.Text.Placement
                 if (blockDecision[b] == needsClassify)
                     blockDecision[b] = ClassifyTile(blockTileKeys[b], projection, sceneOriginRender, viewProj,
                         viewportLogicalPx, rebase, minCoverage, coverageAbovePrev, coverageAboveThisFrame,
-                        coverageDepartingUntil, coverageFadingTilesOut, now, graceSeconds, tileDecisionScratch);
+                        coverageDepartingUntil, coverageFadingTilesOut, now, graceSeconds, tileDecisions);
 
             // Phase B — fan the per-block decision out to records over int/byte arrays (no managed symbol deref).
             int culled = 0;
@@ -148,7 +148,7 @@ namespace MapRenderer.Core.Text.Placement
             culledCount = culled;
         }
 
-        // Classify (once per tile per call, cached in tileDecisionScratch) whether tileKey's on-screen coverage
+        // Classify (once per tile per call, cached in tileDecisions) whether tileKey's on-screen coverage
         // this frame keeps it, fades it, or drops it — applying the corresponding cross-frame side effect
         // (above-set membership / deadline stamp) exactly once, regardless of how many symbols share the tile:
         //   ≥ threshold             → Keep: recorded as above this frame; any live fade deadline is cleared
@@ -161,9 +161,9 @@ namespace MapRenderer.Core.Text.Placement
             in float4x4 viewProj, in double2 viewportLogicalPx, in float3x3 rebase, double minCoverage,
             HashSet<long> coverageAbovePrev, HashSet<long> coverageAboveThisFrame,
             Dictionary<long, double> coverageDepartingUntil, HashSet<long> coverageFadingTilesOut,
-            double now, double graceSeconds, Dictionary<long, byte> tileDecisionScratch)
+            double now, double graceSeconds, Dictionary<long, byte> tileDecisions)
         {
-            if (tileDecisionScratch.TryGetValue(tileKey, out byte cached)) return cached;
+            if (tileDecisions.TryGetValue(tileKey, out byte cached)) return cached;
 
             bool belowThreshold = TileIsCulled(tileKey, projection, sceneOriginRender, viewProj, viewportLogicalPx, rebase, minCoverage);
             byte decision;
@@ -189,7 +189,7 @@ namespace MapRenderer.Core.Text.Placement
                 }
             }
 
-            tileDecisionScratch[tileKey] = decision;
+            tileDecisions[tileKey] = decision;
             return decision;
         }
 
@@ -197,7 +197,7 @@ namespace MapRenderer.Core.Text.Placement
         // (ring TL,TR,BR,BL) through the SAME path AnchorRender was built with (SymbolTileKey.Unpack
         // → TileId.ToLonLat → projection.Project — no MercatorBounds/flat-earth shortcut), then
         // SymbolTileCoverage.ScreenCoverage/IsCulled. Called at most once per tile per ClassifyActive call —
-        // ClassifyTile's tileDecisionScratch is the cache, so this needs none of its own.
+        // ClassifyTile's tileDecisions is the cache, so this needs none of its own.
         private static bool TileIsCulled(long tileKey, IProjection projection, in double3 sceneOriginRender,
             in float4x4 viewProj, in double2 viewportLogicalPx, in float3x3 rebase, double minCoverage)
         {

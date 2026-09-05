@@ -61,6 +61,15 @@ namespace MapRenderer.App
         [Tooltip("Loaded records whose mesh build is complete but consume is budget-deferred.")]
         public int ConsumeBacklog;
 
+        [Tooltip("Loaded records currently in a source tile's managed PROLOGUE step.")]
+        public int PrologueInFlight;
+
+        [Tooltip("Loaded records currently in the graph arm's MEASURE step.")]
+        public int GraphMeasureInFlight;
+
+        [Tooltip("Loaded records currently in the graph arm's WRITE step.")]
+        public int GraphWriteInFlight;
+
         [Tooltip("In-flight network fetches, summed across every source pipeline.")]
         public int InFlightFetches;
 
@@ -202,6 +211,9 @@ namespace MapRenderer.App
             LoadedTileCount        = snap.LoadedTileCount;
             PendingTileCount       = snap.PendingTileCount;
             ConsumeBacklog         = snap.ConsumeBacklog;
+            PrologueInFlight       = snap.PrologueInFlight;
+            GraphMeasureInFlight   = snap.GraphMeasureInFlight;
+            GraphWriteInFlight     = snap.GraphWriteInFlight;
             InFlightFetches        = snap.InFlightFetches;
             ReleasedMidFlightCount = snap.ReleasedMidFlightCount;
             ReleasedMidFetchCount  = snap.ReleasedMidFetchCount;

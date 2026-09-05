@@ -7,7 +7,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Lines;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 

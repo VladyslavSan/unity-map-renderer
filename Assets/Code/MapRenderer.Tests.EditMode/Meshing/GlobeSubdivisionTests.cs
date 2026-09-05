@@ -9,9 +9,10 @@ using MapRenderer.Core.Geometry;
 namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
-    /// Globe-fill SUBDIVISION testbench (design §6.2). Engine-free — runs in both the Unity EditMode
-    /// runner and the fast dotnet core-tests. See <see cref="SubdivisionCoverageValidator"/> for the
-    /// managed mirror + gap/coverage/quality analysis this exercises.
+    /// Globe-fill SUBDIVISION testbench (design §6.2). Unity EditMode only — it drives
+    /// <see cref="SubdivisionCoverageValidator"/>, which is itself Unity-only (see that class's header).
+    /// See <see cref="SubdivisionCoverageValidator"/> for the managed mirror + gap/coverage/quality
+    /// analysis this exercises.
     /// </summary>
     public class GlobeSubdivisionTests
     {

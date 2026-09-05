@@ -55,6 +55,22 @@ namespace MapRenderer.Core.View
         /// "measure first" signal.</summary>
         public int ConsumeBacklog { get; init; }
 
+        /// <summary>Loaded records currently in the SOURCE tile's managed PROLOGUE step
+        /// (job-scheduling-design.md §8 stage 3) — a subset of <see cref="PendingTileCount"/>, disjoint from
+        /// <see cref="GraphMeasureInFlight"/>/<see cref="GraphWriteInFlight"/>. A background tile never
+        /// appears here — it starts directly at Measure.</summary>
+        public int PrologueInFlight { get; init; }
+
+        /// <summary>Loaded records currently in the graph arm's MEASURE step — a subset of
+        /// <see cref="PendingTileCount"/>. Every tile passes through here now (job-scheduling-design.md §8
+        /// stage 3); a background tile arrives directly, a source tile arrives from
+        /// <see cref="PrologueInFlight"/>.</summary>
+        public int GraphMeasureInFlight { get; init; }
+
+        /// <summary>Loaded records currently in the graph arm's WRITE step — a subset of
+        /// <see cref="PendingTileCount"/>, disjoint from <see cref="GraphMeasureInFlight"/>.</summary>
+        public int GraphWriteInFlight { get; init; }
+
         /// <summary>In-flight network fetches, summed across every source pipeline.</summary>
         public int InFlightFetches { get; init; }
 

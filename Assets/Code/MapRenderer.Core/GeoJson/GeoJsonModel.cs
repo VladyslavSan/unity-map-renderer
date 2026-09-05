@@ -20,7 +20,7 @@ namespace MapRenderer.Core.GeoJson
     ///
     /// <list type="table">
     /// <item><term>Point / MultiPoint</term><description><c>Point</c>; N paths of ONE coordinate each (the
-    /// shape production's MVT decoder, <c>MapRenderer.Jobs.MvtDecodeJob</c>, produces for a MoveTo with
+    /// shape production's MVT decoder, <c>MvtDecodeJob</c>, produces for a MoveTo with
     /// count &gt; 1)</description></item>
     /// <item><term>LineString / MultiLineString</term><description><c>LineString</c>; N paths</description></item>
     /// <item><term>Polygon / MultiPolygon</term><description><c>Polygon</c>; rings concatenated, with

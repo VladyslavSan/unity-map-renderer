@@ -41,6 +41,8 @@ namespace MapRenderer.Tests.Visual
             var selected = TestTileMeshBuilder.Select(styleLayer, mvtLayer, 0.0);
             Assert.IsNotEmpty(selected, "geolines must select features");
 
+            // `proj` is `var`-typed off `new SphericalProjection()` above, so this binds to
+            // BuildLineFromLayer<TProj>, not the IProjection-typed overload — see that overload's own doc note.
             Mesh mesh = TestTileMeshBuilder.BuildLineFromLayer(mvtLayer, selected, paint, layout, 0.0, tid, proj);
             Assert.IsNotNull(mesh, "line mesh build must produce a mesh");
 

@@ -1,5 +1,6 @@
 using System;
 
+using MapRenderer.Jobs.Geometry;
 namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>

@@ -30,6 +30,14 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class SymbolPlacementAllocTests
     {
+        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
+        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
+        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        private long _liveBlocks;
+        [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
+        [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
+            "this test baked a block it never disposed — release the snapshot and Clear() the store");
+
         private static GlyphAtlasTexture BuildTinyAtlasTexture()
         {
             var glyph = new SdfGlyph
@@ -555,6 +563,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Is.Not.AllocatingGCMemory(),
                 "a warm per-frame dedup must allocate ZERO — interning happened once at CompleteBuild and the " +
                 "integer DedupKey does not box in the reused _dedup dictionary.");
+            store.Clear(); // CollectInto already released its own pins — nothing pinned, just the committed block
         }
     }
 }

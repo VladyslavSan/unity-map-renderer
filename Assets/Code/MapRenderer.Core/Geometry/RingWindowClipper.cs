@@ -5,12 +5,12 @@ namespace MapRenderer.Core.Geometry
 {
     /// <summary>
     /// Sutherland–Hodgman clip of ONE ring against an axis-aligned window — the managed, engine-free twin of
-    /// <c>MapRenderer.Jobs.RingClipJob</c>, for the client-side GeoJSON slicer (which must stay engine-free
+    /// <c>RingClipJob</c>, for the client-side GeoJSON slicer (which must stay engine-free
     /// in <c>MapRenderer.Core</c>, and so cannot reach for a Burst job over native containers).
     ///
     /// <para><b>Coordinate space and winding (producer declaration).</b> Input and output are both tile-local
     /// <c>double2</c>, origin top-left, Y down. Rings are <b>implicitly closed</b> (the first vertex is not
-    /// repeated), matching production's MVT decoder <c>MapRenderer.Jobs.MvtDecodeJob</c>. Sutherland–Hodgman
+    /// repeated), matching production's MVT decoder <c>MvtDecodeJob</c>. Sutherland–Hodgman
     /// is orientation-preserving, so
     /// this type <b>chooses no winding at all</b>: <b>output winding equals input winding</b>, and the
     /// relative sign between an exterior ring and its holes survives unchanged.</para>
@@ -18,7 +18,7 @@ namespace MapRenderer.Core.Geometry
     /// <para>Which absolute sign an exterior ring carries is decided upstream, at the place it is produced —
     /// <c>GeoJson.GeoJsonParser</c> normalises it and <c>GeoJson.GeoJsonTileSlicer</c> declares it for the
     /// sliced output; both state the MVT convention there. Stating it here as well would claim a guarantee
-    /// this type does not make, and would contradict <c>MapRenderer.Jobs.RingClipJob</c> — the bit-identical
+    /// this type does not make, and would contradict <c>RingClipJob</c> — the bit-identical
     /// twin, which names the other canonical because it clips a different producer's rings. The two agree on
     /// the only thing either one actually guarantees: winding is preserved.</para>
     ///
@@ -64,13 +64,13 @@ namespace MapRenderer.Core.Geometry
             if (ring.Count < 3) return null;
 
             var current = new List<double2>(ring);
-            var scratch = new List<double2>(ring.Count);
+            var next = new List<double2>(ring.Count);
 
             // axis 0 = x, axis 1 = y; keepAbove = the >= min half-plane, else the <= max one.
-            if (!ClipAgainstPlane(ref current, ref scratch, axis: 0, boundary: min.x, keepAbove: true))  return null;
-            if (!ClipAgainstPlane(ref current, ref scratch, axis: 0, boundary: max.x, keepAbove: false)) return null;
-            if (!ClipAgainstPlane(ref current, ref scratch, axis: 1, boundary: min.y, keepAbove: true))  return null;
-            if (!ClipAgainstPlane(ref current, ref scratch, axis: 1, boundary: max.y, keepAbove: false)) return null;
+            if (!ClipAgainstPlane(ref current, ref next, axis: 0, boundary: min.x, keepAbove: true))  return null;
+            if (!ClipAgainstPlane(ref current, ref next, axis: 0, boundary: max.x, keepAbove: false)) return null;
+            if (!ClipAgainstPlane(ref current, ref next, axis: 1, boundary: min.y, keepAbove: true))  return null;
+            if (!ClipAgainstPlane(ref current, ref next, axis: 1, boundary: max.y, keepAbove: false)) return null;
 
             return current;
         }
@@ -90,13 +90,13 @@ namespace MapRenderer.Core.Geometry
 
         /// <summary>
         /// One Sutherland–Hodgman pass: reads <paramref name="current"/>, writes the survivors into
-        /// <paramref name="scratch"/>, then swaps so the result is back in <paramref name="current"/>.
+        /// <paramref name="next"/>, then swaps so the result is back in <paramref name="current"/>.
         /// Returns false when the ring clipped away entirely.
         /// </summary>
         private static bool ClipAgainstPlane(
-            ref List<double2> current, ref List<double2> scratch, int axis, double boundary, bool keepAbove)
+            ref List<double2> current, ref List<double2> next, int axis, double boundary, bool keepAbove)
         {
-            scratch.Clear();
+            next.Clear();
 
             double2 prev       = current[current.Count - 1];
             bool    prevInside = Inside(prev, axis, boundary, keepAbove);
@@ -109,12 +109,12 @@ namespace MapRenderer.Core.Geometry
                 if (curInside)
                 {
                     if (!prevInside)
-                        Emit(scratch, Intersect(prev, cur, axis, boundary));
-                    Emit(scratch, cur);
+                        Emit(next, Intersect(prev, cur, axis, boundary));
+                    Emit(next, cur);
                 }
                 else if (prevInside)
                 {
-                    Emit(scratch, Intersect(prev, cur, axis, boundary));
+                    Emit(next, Intersect(prev, cur, axis, boundary));
                 }
 
                 prev       = cur;
@@ -124,12 +124,12 @@ namespace MapRenderer.Core.Geometry
             // Close the ring: an exit crossing whose entry vertex sat exactly ON the plane emits that vertex
             // a second time, and the wrap-around can leave the first and last equal. Both are zero-length
             // edges, and both are what turn an on-boundary quad into a 5-vertex ring.
-            if (scratch.Count > 1 && SameVertex(scratch[scratch.Count - 1], scratch[0]))
-                scratch.RemoveAt(scratch.Count - 1);
+            if (next.Count > 1 && SameVertex(next[next.Count - 1], next[0]))
+                next.RemoveAt(next.Count - 1);
 
             List<double2> consumed = current;
-            current = scratch;
-            scratch = consumed;
+            current = next;
+            next = consumed;
             return current.Count != 0;
         }
 

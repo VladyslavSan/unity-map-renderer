@@ -334,6 +334,10 @@
 
     <!-- S105 Slice 3: A4 decisive — real style + real tile → shaped label records, no synthetic source. -->
 
+    <!-- Engine-free shader-path resolution shared by LineDashTests/LineOffsetTests (ShaderPropertyParser's
+         AssetDatabase-based MapShaderPath is Editor-only and cannot be registered here). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Structure/EngineFreeShaderPaths.cs" />
+
     <!-- S43: LineDash (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LineDash.cs" />
 

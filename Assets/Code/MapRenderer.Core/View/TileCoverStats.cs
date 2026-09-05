@@ -21,12 +21,12 @@ namespace MapRenderer.Core.View
     public static class TileCoverStats
     {
         /// <summary>
-        /// Computes cover dims + zoom span with zero per-call allocation. <paramref name="scratchX"/> /
-        /// <paramref name="scratchY"/> are caller-owned reused buffers (cleared and refilled here) — the
+        /// Computes cover dims + zoom span with zero per-call allocation. <paramref name="distinctX"/> /
+        /// <paramref name="distinctY"/> are caller-owned reused buffers (cleared and refilled here) — the
         /// steady-state no-GC contract; the caller reuses the same two sets across ticks/captures.
         /// </summary>
         public static (int Columns, int Rows, int MinZ, int MaxZ) Compute(
-            IReadOnlyList<TileId> cover, HashSet<int> scratchX, HashSet<int> scratchY)
+            IReadOnlyList<TileId> cover, HashSet<int> distinctX, HashSet<int> distinctY)
         {
             if (cover.Count == 0) return (0, 0, 0, 0);
 
@@ -38,17 +38,17 @@ namespace MapRenderer.Core.View
                 if (z > maxZ) maxZ = z;
             }
 
-            scratchX.Clear();
-            scratchY.Clear();
+            distinctX.Clear();
+            distinctY.Clear();
             for (int i = 0; i < cover.Count; i++)
             {
                 TileId t = cover[i];
                 if (t.Z != maxZ) continue; // near-field grid: only the finest level
-                scratchX.Add(t.X);
-                scratchY.Add(t.Y);
+                distinctX.Add(t.X);
+                distinctY.Add(t.Y);
             }
 
-            return (scratchX.Count, scratchY.Count, minZ, maxZ);
+            return (distinctX.Count, distinctY.Count, minZ, maxZ);
         }
     }
 }

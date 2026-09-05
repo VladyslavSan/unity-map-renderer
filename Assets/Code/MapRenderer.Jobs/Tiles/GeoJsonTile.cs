@@ -6,6 +6,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.GeoJson;
 using MapRenderer.Core.Tiles;
 
+using MapRenderer.Jobs.Geometry;
 namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>

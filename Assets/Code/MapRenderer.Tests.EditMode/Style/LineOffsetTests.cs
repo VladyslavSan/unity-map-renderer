@@ -362,7 +362,7 @@ namespace MapRenderer.Tests.Style
 
             // S67: extrusion logic (including the S44 offset term) lives in Line_VertexExtrude.hlsl (shared,
             // resolved by name — move-proof).
-            string hlsl = File.ReadAllText(ShaderPropertyParser.MapShaderPath("Line_VertexExtrude.hlsl"));
+            string hlsl = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_VertexExtrude.hlsl"));
 
             // The S44 offset term must reference sideAndDist.x (the per-vertex side value).
             // This is the structural guarantee that the offset shifts the band CENTER,
@@ -373,7 +373,7 @@ namespace MapRenderer.Tests.Style
                 "Grep: 'sideAndDist.x * (miter * _LineOffset * pxToWorld)'");
 
             // Also confirm _LineOffset is declared in Line_LitInput.hlsl (resolved by name — move-proof).
-            string inputHlsl = File.ReadAllText(ShaderPropertyParser.MapShaderPath("Line_LitInput.hlsl"));
+            string inputHlsl = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_LitInput.hlsl"));
             Assert.That(inputHlsl, Does.Contain("float  _LineOffset;"),
                 "Line_LitInput.hlsl CBUFFER must declare 'float  _LineOffset;' (SRP Batcher requirement).");
 

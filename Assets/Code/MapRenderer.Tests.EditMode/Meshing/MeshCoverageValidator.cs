@@ -22,8 +22,8 @@ namespace MapRenderer.Tests
     ///   • MismatchPct small      — rasterised coverage matches the even-odd source fill, so no phantom holes
     ///                              (source-inside-but-untriangulated) and no spill (triangulated-but-outside).
     ///
-    /// Engine-free (Unity.Mathematics only) so it runs in BOTH the Unity EditMode runner and the fast
-    /// dotnet core-tests.
+    /// Unity EditMode only — it depends on <c>MapRenderer.Jobs.Mvt</c> (the decode seam), which
+    /// <c>Tools/core-tests</c> does not compile.
     /// </summary>
     public static class MeshCoverageValidator
     {

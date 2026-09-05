@@ -13,7 +13,7 @@ namespace MapRenderer.Tests
     /// background quad, had constant paint that was never data-driven).
     ///
     /// <para><b>Zero production callers as of IR B5</b> — its only one was
-    /// <c>TileBackgroundLayerProcessor</c>'s background quad, which now synthesizes tile-local corners
+    /// <c>BackgroundQuad</c>'s background quad, which now synthesizes tile-local corners
     /// directly instead of hand-authoring MVT commands. IR C1 moved it here, next to
     /// <see cref="DictionaryFeature"/>, when the tile-decode seam left <c>MapRenderer.Core</c>.</para>
     ///

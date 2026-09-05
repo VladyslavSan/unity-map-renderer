@@ -149,46 +149,6 @@ namespace MapRenderer.Tests.Text.Placement
                 "MirrorRebuildCount is CUMULATIVE; it must never go backwards.");
         }
 
-        // ── Placement throttle (rapid-zoom stutter): the full place (TickCore, which bumps TickCount) runs only
-        //    every Nth frame when PlacementThrottleFrames > 1; held frames skip TickCore. TickCount is the tooth
-        //    — it counts full places, not Tick calls. The two tests are a matched pair: the control shows an
-        //    un-throttled run is 7 places over 7 ticks, so the throttled run's 3 is a real, measured reduction
-        //    (and would read 7, failing, if the throttle early-return were removed). ──
-        [Test]
-        public void PlacementThrottle_Disabled_RunsTheFullPlaceEveryFrame()
-        {
-            using var h = new Harness();
-            var buffer = new SymbolTileBuffer();
-            AddPoint(buffer, h.Origin, sortKey: 0f, text: "A", feature: 0);
-            using var plan = new TestSymbolPlan(h.Projection);
-
-            Assert.AreEqual(1, h.System.PlacementThrottleFrames, "precondition: the throttle is OFF by default (== 1).");
-            for (int i = 0; i < 7; i++)
-                h.System.Tick(in h.Frame, plan.Build(buffer), h.Atlas, deltaTime: 0.016f);
-
-            Assert.AreEqual(7, h.System.TickCount,
-                "throttle OFF: every one of the 7 ticks runs the full place (TickCore), so TickCount == 7.");
-        }
-
-        [Test]
-        public void PlacementThrottle_RunsTheFullPlaceOnlyEveryNthFrame_HoldingBetween()
-        {
-            using var h = new Harness();
-            var buffer = new SymbolTileBuffer();
-            AddPoint(buffer, h.Origin, sortKey: 0f, text: "A", feature: 0);
-            using var plan = new TestSymbolPlan(h.Projection);
-
-            h.System.PlacementThrottleFrames = 3;
-            // 7 ticks, throttle 3: the full place runs on ticks 1 (first place always builds), 4 and 7 — three
-            // times. Ticks 2,3,5,6 are held (WorldRenderer.Rebase only; TickCore, hence TickCount, is skipped).
-            for (int i = 0; i < 7; i++)
-                h.System.Tick(in h.Frame, plan.Build(buffer), h.Atlas, deltaTime: 0.016f);
-
-            Assert.AreEqual(3, h.System.TickCount,
-                "throttle 3 over 7 ticks must run the full place exactly 3 times (ticks 1,4,7); the 4 held " +
-                "frames skip TickCore. Reads 7 — i.e. == the disabled control — if the throttle stops working.");
-        }
-
         [Test]
         public void Tick_DefaultDeltaTime_SnapsToFullOpacity()
         {

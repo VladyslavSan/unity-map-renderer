@@ -12,7 +12,8 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Core.Expressions;
 
@@ -413,13 +414,16 @@ namespace MapRenderer.Tests.Jobs
                     Geometry       = geometry,
                     RingVisitOrder = visitOrder,
                     OriginRender   = new double3(bMin.x, 0.0, bMin.y),
+                    Projection     = new WebMercatorProjection(), // was implicit (null ⇒ Mercator); now explicit
                 };
 
                 var unclippedInput = baseInput; unclippedInput.Clip = TileBufferClip.Disabled;
                 var clippedInput   = baseInput; clippedInput.Clip   = TileBufferClip.KeepTileUnits(0.0);
 
-                TileMeshBuffers unclipped = FillMeshPipeline.Schedule(unclippedInput);
-                TileMeshBuffers clipped   = FillMeshPipeline.Schedule(clippedInput);
+                FillGraphOutput unclipped = FillMeshGraph.Schedule(unclippedInput);
+                FillGraphOutput clipped   = FillMeshGraph.Schedule(clippedInput);
+                unclipped.Handle.Complete();
+                clipped.Handle.Complete();
                 try
                 {
                     Assert.IsTrue(unclipped.IsCreated, $"{fixture}/{layerName}: unclipped produced no buffers.");
@@ -437,14 +441,16 @@ namespace MapRenderer.Tests.Jobs
 
                     // (b) the S–H degenerate-channel risk: zero-width channels along the clip edge must not
                     // drive EarcutJob into its force-clip escape more often than the unclipped input did.
-                    Assert.LessOrEqual(clipped.TotalForceClipCount, unclipped.TotalForceClipCount,
+                    int unclippedForceClips = unclipped.Counts[0].ForceClipCount;
+                    int clippedForceClips   = clipped.Counts[0].ForceClipCount;
+                    Assert.LessOrEqual(clippedForceClips, unclippedForceClips,
                         $"{fixture}/{layerName}: clipping raised the earcut force-clip count from " +
-                        $"{unclipped.TotalForceClipCount} to {clipped.TotalForceClipCount}. That is a finding " +
+                        $"{unclippedForceClips} to {clippedForceClips}. That is a finding " +
                         "about the clipper (the degenerate-channel case), not a licence to retune earcut.");
 
-                    Debug.Log($"[RingClipJob T4] {fixture}/{layerName}: verts {unclipped.VertexCount[0]} → " +
-                              $"{clipped.VertexCount[0]}, forceClips {unclipped.TotalForceClipCount} → " +
-                              $"{clipped.TotalForceClipCount}");
+                    Debug.Log($"[RingClipJob T4] {fixture}/{layerName}: verts {unclipped.TileVertices.Length} → " +
+                              $"{clipped.TileVertices.Length}, forceClips {unclippedForceClips} → " +
+                              $"{clippedForceClips}");
                 }
                 finally
                 {
@@ -462,11 +468,11 @@ namespace MapRenderer.Tests.Jobs
                 "buffered, so assertion (a) above passed without the clip ever having to cut anything.");
         }
 
-        private static int CountOutsideExtent(TileMeshBuffers buffers, double extent)
+        private static int CountOutsideExtent(FillGraphOutput buffers, double extent)
         {
             const double eps = 1e-9;
             int count = 0;
-            int n = buffers.VertexCount[0];
+            int n = buffers.TileVertices.Length;
             for (int i = 0; i < n; i++)
             {
                 double2 v = buffers.TileVertices[i];
@@ -529,9 +535,9 @@ namespace MapRenderer.Tests.Jobs
             }
             ringOffsets[rings.Length] = pos;
 
-            int scratchCap = math.max(1, maxRingLen * RingClipJob.ScratchLengthMultiplier);
-            var scratchA = new NativeArray<double2>(scratchCap, Allocator.Persistent);
-            var scratchB = new NativeArray<double2>(scratchCap, Allocator.Persistent);
+            int bufferCap = math.max(1, maxRingLen * RingClipJob.BufferLengthMultiplier);
+            var bufferA = new NativeArray<double2>(bufferCap, Allocator.Persistent);
+            var bufferB = new NativeArray<double2>(bufferCap, Allocator.Persistent);
 
             var result = new ClipResult
             {
@@ -553,15 +559,15 @@ namespace MapRenderer.Tests.Jobs
                 RingVisitOrder    = visitOrderArr,
                 ClipMin           = clipMin,
                 ClipMax           = clipMax,
-                ScratchA          = scratchA,
-                ScratchB          = scratchB,
+                BufferA          = bufferA,
+                BufferB          = bufferB,
                 OutVertices       = result.Vertices,
                 OutRingOffsets    = result.RingOffsets,
                 OutRingFeatureIdx = result.RingFeatureIdx,
             }.Run();
 
             verts.Dispose(); ringOffsets.Dispose(); ringFeatIdx.Dispose();
-            scratchA.Dispose(); scratchB.Dispose(); visitOrderArr.Dispose();
+            bufferA.Dispose(); bufferB.Dispose(); visitOrderArr.Dispose();
             return result;
         }
 

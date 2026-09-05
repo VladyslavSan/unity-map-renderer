@@ -37,6 +37,25 @@ namespace MapRenderer.Tests.Text
     [TestFixture]
     public class SymbolTileStoreTests
     {
+        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
+        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
+        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here — real
+        // blocks via DebugLiveAllocCount, and FakeDisposableBlock via the same mirrored counter below.
+        private long _liveBlocks;
+        private int _liveFakes;
+        [SetUp] public void BaselineBlocks()
+        {
+            _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
+            _liveFakes = FakeDisposableBlock.LiveCount;
+        }
+        [TearDown] public void NoLeakedBlocks()
+        {
+            Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
+                "this test baked a block it never disposed — release the snapshot and Clear() the store");
+            Assert.AreEqual(_liveFakes, FakeDisposableBlock.LiveCount,
+                "this test committed a FakeDisposableBlock it never disposed — Clear() the store");
+        }
+
         private static SymbolTileStore.Key Key(string source, int x)
             => new SymbolTileStore.Key(source, new TileId { Z = 5, X = x, Y = 0 });
 
@@ -101,6 +120,7 @@ namespace MapRenderer.Tests.Text
             List<ShapedSymbol> back = Collect(store);
             Assert.AreEqual(1, back.Count, "the cache hit restores the kept-warm labels (the zoom-out-then-in fix)");
             Assert.AreEqual(1, back[0].FeatureIndex, "it is the SAME tile's labels");
+            store.Clear();
         }
 
         // ── A true eviction (cache disabled / not built) drops the symbols — a later restore finds nothing. ──
@@ -132,6 +152,7 @@ namespace MapRenderer.Tests.Text
 
             store.Restore(key);
             Assert.AreEqual(1, Collect(store).Count, "…and the cache hit then shows the labels captured mid-flight");
+            store.Clear();
         }
 
         // ── A superseded build (the tile was re-fetched, a newer BeginBuild took the slot) is discarded. ──
@@ -149,6 +170,7 @@ namespace MapRenderer.Tests.Text
 
             Assert.IsTrue(Commit(store, key, gen2, Symbols(2)), "the current build commits");
             Assert.AreEqual(2, Collect(store)[0].FeatureIndex, "and only its labels render");
+            store.Clear();
         }
 
         // ── FIFO cap: the cached side is bounded — the OLDEST-released tile is evicted first, so it cannot be
@@ -172,6 +194,7 @@ namespace MapRenderer.Tests.Text
             store.Restore(b); store.Restore(c);
             var back = Collect(store);
             Assert.AreEqual(2, back.Count, "the two newest cached tiles restore fine");
+            store.Clear();
         }
 
         // ── Multi-source isolation (why we DON'T evict by bare tileId): same TileId, different source are
@@ -192,6 +215,7 @@ namespace MapRenderer.Tests.Text
             var back = Collect(store);
             Assert.AreEqual(1, back.Count, "only source A's labels are active");
             Assert.AreEqual(10, back[0].FeatureIndex, "and they are A's, not B's — keys are (source, tile)");
+            store.Clear();
         }
 
         // ═══ A-1: the PULL/reconcile model (replaces the release/restore push-callbacks) ═══
@@ -217,6 +241,7 @@ namespace MapRenderer.Tests.Text
             List<ShapedSymbol> back = Collect(store);
             Assert.AreEqual(1, back.Count, "reconcile restores the kept-warm labels on re-entry");
             Assert.AreEqual(1, back[0].FeatureIndex, "the SAME tile's labels");
+            store.Clear();
         }
 
         // ── keepWarmOnRelease:false (mesh cache disabled) → a released tile is dropped, not kept warm, so a
@@ -248,6 +273,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(2, store.ActiveTileCount, "both stay active");
             Assert.AreEqual(0, store.CachedTileCount, "nothing released");
             Assert.AreEqual(2, Collect(store).Count);
+            store.Clear();
         }
 
         // ── A loaded tile with no symbol entry yet (still fetching) is left untouched — its build is kicked by
@@ -277,6 +303,7 @@ namespace MapRenderer.Tests.Text
 
             Commit(store, key, gen2, Symbols(2));
             Assert.AreEqual(2, Collect(store)[0].FeatureIndex, "only when the rebuild commits do they swap");
+            store.Clear();
         }
 
         // ── Clear (restyle) drops everything, active and cached. ──
@@ -326,6 +353,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(0, store.DepartingTileCount, "grace elapsed → purged");
             Assert.AreEqual(0, Collect(store).Count, "…no longer collected");
             Assert.AreEqual(1, store.CachedTileCount, "but still kept warm for a cache-hit re-entry");
+            store.Clear();
         }
 
         // ── A tile that re-enters cover WITHIN the grace window is restored to active (fades back in), not left
@@ -343,6 +371,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(0, store.DepartingTileCount, "re-entry within grace clears the departing stamp");
             Assert.AreEqual(1, store.ActiveTileCount, "…and the tile is active again");
             Assert.AreEqual(1, Collect(store).Count, "…rendered as a normal active label (fades back in)");
+            store.Clear();
         }
 
         // ── With no grace window (the default / cache-disabled path) a release retains nothing — pre-fade behaviour. ──
@@ -355,6 +384,7 @@ namespace MapRenderer.Tests.Text
             store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true); // grace defaults to 0 → feature off
             Assert.AreEqual(0, store.DepartingTileCount, "grace 0 ⇒ nothing retained");
             Assert.AreEqual(0, Collect(store).Count, "a released tile is not collected");
+            store.Clear();
         }
 
         // ── CollectInto's out-activeCount splits active symbols (first) from departing symbols (appended last) — the
@@ -374,6 +404,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, activeCount, "exactly one is active; the departing come after the split");
             Assert.AreEqual(1, output[0].FeatureIndex, "active label first");
             Assert.AreEqual(2, output[activeCount].FeatureIndex, "departing label after the split");
+            store.Clear();
         }
 
         // ── A departing POINT symbol whose cross-tile identity is already shown by an ACTIVE symbol is NOT collected
@@ -395,6 +426,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, output.Count, "the active copy shows; the departing twin is skipped (no double-draw)");
             Assert.AreEqual(1, activeCount, "…and it is the active one (nothing appended after the split)");
             Assert.AreEqual(1, output[0].FeatureIndex, "the surviving label is the active tile's");
+            store.Clear();
         }
 
         // ═══ Stage 3: the SEAMLESS same-cell HOLD across a zoom step (the fixed-grid pivot) ═══
@@ -435,6 +467,7 @@ namespace MapRenderer.Tests.Text
             // managed-object references). FeatureIndex distinguishes the active (1) from the departing (2)
             // copy — the one field this fixture sets differently between them.
             Assert.AreEqual(active.FeatureIndex, output[0].FeatureIndex, "the surviving copy is the active (z=9) one");
+            store.Clear();
         }
 
         // ── Companion sanity: the same-band hold (both z=9, co-located) — a same-z re-tiling never changed grids,
@@ -462,6 +495,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, output.Count, "co-located same-band departing copy is claim-skipped");
             Assert.AreEqual(1, activeCount, "…nothing appended after the split");
             Assert.AreEqual(active.FeatureIndex, output[0].FeatureIndex, "the active copy survives");
+            store.Clear();
         }
 
         // ═══ I6: icon cross-tile identity dedup (the I5b-deferred gap this stage closes) ═══
@@ -497,6 +531,7 @@ namespace MapRenderer.Tests.Text
             Commit(store, key, store.BeginBuild(key), buffer);
 
             Assert.AreEqual(2, CollectQuantized(store, q).Count, "distinct icon-image at the same cell are NOT merged");
+            store.Clear();
         }
 
         // ── Same icon-image in a parent + child tile still dedups to ONE (the seamless-swap property icons
@@ -522,6 +557,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, output.Count, "the same icon in a parent+child tile collapses to one");
             // ShapedSymbol is a struct — FeatureIndex (2 = child, 1 = parent) is the field this fixture varies.
             Assert.AreEqual(2, output[0].FeatureIndex, "the finest (child) tile's label wins");
+            store.Clear();
         }
 
         // ── Byte-identical control: the pre-I6 text-dedup case, unaffected by the icon change — a text symbol at
@@ -546,6 +582,7 @@ namespace MapRenderer.Tests.Text
             List<ShapedSymbol> output = CollectQuantized(store, q);
             Assert.AreEqual(1, output.Count, "text dedup is unchanged by I6");
             Assert.AreEqual(2, output[0].FeatureIndex, "the finest (child) tile's label wins");
+            store.Clear();
         }
 
         // ═══ Symbol-symbol perf Phase 1 / Stage 1 (design §4, §5 B): Block dispose lifecycle ═══
@@ -558,8 +595,13 @@ namespace MapRenderer.Tests.Text
 
         private sealed class FakeDisposableBlock : IDisposable
         {
+            // Mirrors SymbolTileBlock.DebugLiveAllocCount's idiom so the fixture's leak-guard TearDown can
+            // catch an abandoned fake commit too — every DisposeCount assertion in this fixture is 0 or 1,
+            // so decrementing unconditionally on every Dispose() call stays correct.
+            internal static int LiveCount;
             public int DisposeCount;
-            public void Dispose() => DisposeCount++;
+            public FakeDisposableBlock() => LiveCount++;
+            public void Dispose() { DisposeCount++; LiveCount--; }
         }
 
         // ── (a) Commit-overwrite disposes exactly the OLD block, once — the new one stays live. ──
@@ -577,6 +619,7 @@ namespace MapRenderer.Tests.Text
             store.CompleteBuild(key, store.BeginBuild(key), newBlock); // a rebuild commits over it
             Assert.AreEqual(1, oldBlock.DisposeCount, "commit-overwrite disposes the OLD block exactly once");
             Assert.AreEqual(0, newBlock.DisposeCount, "the new block stays live — it is now the entry's block");
+            store.Clear();
         }
 
         // ── A superseded build's block never lands — CompleteBuild disposes the CALLER's block on the
@@ -612,6 +655,7 @@ namespace MapRenderer.Tests.Text
 
             store.Release(c, true); // over cap (2) → evicts a (the oldest)
             Assert.AreEqual(1, blockA.DisposeCount, "FIFO eviction disposes the evicted tile's block");
+            store.Clear(); // b (cached) and c (active) are still live — evicting only dropped a
         }
 
         // ── (c) Release true-eviction (cache disabled / not built) disposes the block outright. Covers BOTH
@@ -669,6 +713,7 @@ namespace MapRenderer.Tests.Text
 
             store.BeginBuild(key); // a rebuild starts (e.g. zoom re-fetch) — pulls the SAME entry active again
             Assert.AreEqual(0, block.DisposeCount, "BeginBuild's stale-survives pull must not dispose the block");
+            store.Clear();
         }
 
         // ── NO dispose on a Restore cache-hit move (the entry — and its block — just moves back to active). ──
@@ -683,6 +728,7 @@ namespace MapRenderer.Tests.Text
 
             store.Restore(key); // cache-hit move back to active
             Assert.AreEqual(0, block.DisposeCount, "a cache-hit Restore must not dispose the moved block");
+            store.Clear();
         }
 
         // ── Resident-graph shed (4.4b): a structural guard, not a behavioural one — Entry must never re-root a
@@ -895,6 +941,7 @@ namespace MapRenderer.Tests.Text
                 Assert.AreEqual(oracle.LocalIndex[i], pLocal[i], $"localIndex mismatch at index {i}");
                 Assert.AreEqual(oracle.IsDeparting[i], pDep[i], $"isDeparting mismatch at index {i}");
             }
+            store.Clear();
         }
 
         // ═══ Stage 4a (symbols-async-reconcile): collect-generation invalidation completeness + purity ═══
@@ -984,6 +1031,7 @@ namespace MapRenderer.Tests.Text
             }
             Assert.AreNotEqual(g0, store.CollectGeneration,
                 $"{mutation} changes the collected set → it MUST bump the collect generation (a missed bump = stale labels)");
+            store.Clear(); // some BumpCase branches leave a real block committed/cached — always safe to Clear
         }
 
         // The N rows of §1 — a no-op / superseded mutation must NOT bump (else a stable cover dirties every frame and
@@ -1042,6 +1090,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(g0, store.CollectGeneration,
                 "a second reconcile with the SAME loaded set moves nothing → the collect generation must be unchanged");
             Assert.AreEqual(2, store.ActiveTileCount, "…and both tiles stay active");
+            store.Clear();
         }
 
         // ── CollectInto is a PURE function of the tile set (Stage 3): two back-to-back collects with no mutation
@@ -1081,6 +1130,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(blocks1.Count, store.OrderedBlocks.Count, "OrderedBlocks count identical");
             for (int i = 0; i < blocks1.Count; i++)
                 Assert.AreSame(blocks1[i], store.OrderedBlocks[i], $"OrderedBlocks[{i}] reference-identical");
+            store.Clear();
         }
     }
 }

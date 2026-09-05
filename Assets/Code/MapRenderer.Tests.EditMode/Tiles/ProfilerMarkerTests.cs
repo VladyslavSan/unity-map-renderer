@@ -36,7 +36,6 @@ using MapRenderer.Unity.Text.Placement;
 // to MapViewComponent (as it once was) — the marker SSOT lives on the MapView class itself, and shadowing the
 // name made `MapView.ProfilerMarkerNames` silently resolve to the wrong type.
 using TileDecodeDispatch   = MapRenderer.Unity.Rendering.Tile.Processing.TileDecodeDispatch;
-using FillMeshPipeline     = MapRenderer.Jobs.FillMeshPipeline;
 using MvtDecoder           = MapRenderer.Jobs.Mvt.MvtDecoder;
 using FillRenderLayer      = MapRenderer.Unity.Rendering.Style.FillRenderLayer;
 using LineRenderLayer      = MapRenderer.Unity.Rendering.Style.LineRenderLayer;
@@ -110,13 +109,19 @@ namespace MapRenderer.Tests.Tiles
                 TileManager.ProfilerMarkerNames.FetchPoll,
                 TileManager.ProfilerMarkerNames.SchedulerRequest,
                 TileDecodeDispatch.ProfilerMarkerNames.TileDecode,
-                StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData,
+                // vestige sweep: StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData removed — three
+                // such literals were removed when the last declaration sites moved to the SSOT pattern (see
+                // this file's own doctrine above); NEVER add a literal back. Its only opener was the
+                // synchronous WriteMeshData method, which had zero production callers and moved to the test
+                // assembly (MapRenderer.Tests.SyncMeshWrite.Fill) with it.
+                StyledFillTileBuilder.ProfilerMarkerNames.BuildLayerInput,
                 TileManager.ProfilerMarkerNames.MeshUpload,
                 MvtDecoder.ProfilerMarkerNames.Decode, // IR C1 P3: the marker follows the decode it brackets
-                FillMeshPipeline.ProfilerMarkerNames.Clip,
-                FillMeshPipeline.ProfilerMarkerNames.RingAssembly,
-                FillMeshPipeline.ProfilerMarkerNames.Earcut,
-                FillMeshPipeline.ProfilerMarkerNames.Project,
+                // job-scheduling-design.md §8 stage 4 Group B: FillMeshPipeline.ProfilerMarkerNames.Clip/
+                // RingAssembly/Earcut/Project retired with FillMeshPipeline.Schedule, the schedule-then-Complete
+                // main-thread path they bracketed — FillMeshGraph's nodes are scheduled, not run synchronously,
+                // and carry no marker of their own (the graph write step's Profiler coverage is
+                // StyledFillTileBuilder.ProfilerMarkerNames.BuildLayerInput, already listed above).
                 // Per-frame MapView.LateUpdate sub-phases + EG-drive split (added to localise live zoom spikes).
                 MapView.ProfilerMarkerNames.LateUpdate,
                 MapView.ProfilerMarkerNames.SceneFrame,
@@ -179,7 +184,14 @@ namespace MapRenderer.Tests.Tiles
         //
         // Uses a [UnityTest] coroutine so we can yield a frame after the tile load completes,
         // giving the profiler a chance to commit the sample data. The recorder is started BEFORE
-        // the tile load so it captures the MapRenderer.Meshing.StyledFillTileBuilder.WriteMeshData samples fired in BuildTile.
+        // the tile load so it captures the samples fired in BuildTile.
+        //
+        // job-scheduling-design.md §8 stage 3: a fill layer's PRODUCTION path no longer fires
+        // WriteMeshData at all — the graph arm's prologue calls BuildLayerInput and the write step is a
+        // Burst job with no ProfilerMarker sample of its own. A marker named WriteMeshData around the
+        // prologue would make the telemetry contract a lie, since no mesh is written there any more.
+        // WriteMeshData is not in production at all any more (vestige sweep: moved to the test assembly,
+        // zero production callers) — so this tooth repoints at the marker production actually fires now.
         //
         // S47 update: BuildMeshData (which fires PmBuildMesh) now runs on a ThreadPool thread inside
         // Task.Run. We must NOT use CollectOnlyOnCurrentThread — that would miss cross-thread samples.
@@ -187,7 +199,7 @@ namespace MapRenderer.Tests.Tiles
         [UnityTest]
         public IEnumerator ProfilerRecorder_BuildMarker_HasSamplesAfterTileLoad()
         {
-            const string markerName    = StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData;
+            const string markerName    = StyledFillTileBuilder.ProfilerMarkerNames.BuildLayerInput;
             const string bogusName     = "MapRenderer.__NoSuchMarker__";
 
             var go   = new GameObject("MapView_ProfilerTest");
@@ -218,6 +230,11 @@ namespace MapRenderer.Tests.Tiles
 
                 Assert.IsTrue(view.AllTilesSettled(),
                     "Tiles must be settled before yielding — otherwise the marker may not have fired yet.");
+                // NIT 1 follow-up: the marker sample count alone cannot tell "fired" from "fired and produced
+                // nothing" — pin the OTHER end too, that the settled tile actually registered a draw item.
+                Assert.Greater(view.EntitiesRenderer().DrawItemCount(), 0,
+                    "the settled tile must have registered at least one draw item — a marker firing with no " +
+                    "geometry reaching the backend would still pass the sample-count check below.");
 
                 // Yield a couple of frames so the profiler can commit accumulated samples.
                 yield return null;

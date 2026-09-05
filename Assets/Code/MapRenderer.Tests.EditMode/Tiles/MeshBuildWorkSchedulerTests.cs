@@ -51,12 +51,16 @@ namespace MapRenderer.Tests.Tiles
 
         private sealed class SpySymbolTileWorkerPass : ISymbolTileWorkerPass
         {
-            public bool Ran;
+            // job-scheduling-design.md §8 stage 3 tooth (e): a bool can't tell one run from two — the exact
+            // defect this tooth exists to catch (the symbol pass moved earlier relative to the Burst chain,
+            // so the risk is now running it TWICE per tile, not zero times). A count can.
+            public int RunCount;
+            public bool Ran => RunCount > 0;
             public int RunThreadId = -1;
 
             public void RunWorkerAndHandoff(SharedDisposable<IDecodedTile> decode)
             {
-                Ran = true;
+                RunCount++;
                 RunThreadId = Environment.CurrentManagedThreadId;
             }
         }
@@ -147,27 +151,35 @@ namespace MapRenderer.Tests.Tiles
 
         // ── T2: the source-less kick (KickSourcelessBackground) ───────────────────────────────────────
 
-        /// <summary>The sourceless-background sibling of T1 — a SEPARATE dispatch site, so a per-site tooth
-        /// is what stops "one converted, one missed" reading green. No fetch at all here, so plain
-        /// <see cref="MapViewComponent.LateUpdate"/> pumping is fully deterministic under Inline.
+        // job-scheduling-design.md §8 stage 2 / E1 (resolved by reordering, option C): the background kick
+        // now schedules the FillMeshGraph directly and reaches no IWorkScheduler.Schedule<T> call on EITHER
+        // projection — the graph serves both arms. A tooth that only drove Mercator would leave the shipped
+        // globe scene's client untested, which is the hole option C was chosen to avoid.
+        private static readonly IProjection[] BackgroundProjectionCases = { null, new SphericalProjection() };
+
+        /// <summary>The sourceless-background sibling of T1 — retires
+        /// <c>InjectedScheduler_RunsTheSourcelessBackgroundKick_OnTheCallingThread</c> (which asserted
+        /// <c>spy.ScheduleCount &gt;= 1</c>), because leaving the seam is exactly what this stage does at
+        /// this site. Asserts BOTH ends — the suite's own rule: <c>ScheduleCount == 0</c> alone cannot tell
+        /// "absent" from "never kicked", so the settle + registered-mesh check must accompany it.
         ///
-        /// <para><b>RED injection:</b> revert <c>KickSourcelessBackground</c>'s dispatch back to
-        /// <c>UniTask.RunOnThreadPool</c> — <c>ScheduleCount</c> stays 0.</para></summary>
+        /// <para><b>RED injection:</b> restore the seam call in <c>KickSourcelessBackground</c> (schedule the
+        /// graph inside <c>WorkScheduler.Schedule</c>) — <c>ScheduleCount</c> becomes 1.</para></summary>
         [Test]
-        public void InjectedScheduler_RunsTheSourcelessBackgroundKick_OnTheCallingThread()
+        public void SourcelessBackgroundKick_ReachesNoWorkScheduler_AndStillRegistersItsMesh(
+            [ValueSource(nameof(BackgroundProjectionCases))] IProjection projection)
         {
             var go   = new GameObject("MeshBuildWorkScheduler_T2");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 3;
             view.Config.TileSelection.MaxZoom = 3;
             view.Config.Backend               = RenderBackend.GameObject;
-            view.WithTestCamera();
+            view.WithTestCamera(projection: projection);
             try
             {
                 view.LoadTestStyle(null, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
 
-                int caller = Environment.CurrentManagedThreadId;
-                var spy    = new RecordingWorkScheduler(new InlineWorkScheduler());
+                var spy = new RecordingWorkScheduler(new InlineWorkScheduler());
                 view.TileManager.WorkScheduler = spy;
 
                 // Checked AFTER the pump, not as a loop guard: before the first LateUpdate the cover hasn't
@@ -181,18 +193,13 @@ namespace MapRenderer.Tests.Tiles
 
                 Assert.Greater(view.LoadedTileCount(), 0, "drive precondition: the cover must have loaded tiles.");
                 Assert.IsTrue(view.AllTilesSettled(), "drive precondition: the cover must fully settle.");
-                Assert.GreaterOrEqual(spy.ScheduleCount, 1,
-                    "the source-less kick must go THROUGH the injected scheduler.");
-                Assert.GreaterOrEqual(spy.BodyThreadIds.Count, 1,
-                    "the body must actually have run at least once — a tooth that iterates zero entries " +
-                    "would vacuously pass the per-thread-id check below.");
-                foreach (int tid in spy.BodyThreadIds)
-                    Assert.AreEqual(caller, tid,
-                        "the kick body must run on the CALLING thread under Inline, with zero dispatch.");
 
+                Assert.AreEqual(0, spy.ScheduleCount,
+                    "the source-less kick must reach NO IWorkScheduler.Schedule<T> call — it schedules the " +
+                    "graph directly.");
                 Assert.Greater(view.GameObjectRenderer().DrawItemCount(), 0,
-                    "positive control: a non-empty background mesh + AddTileLayer, or a tooth that passes on " +
-                    "an empty cover proves nothing.");
+                    "positive control: the tile must have settled WITH its mesh registered — 'absent' and " +
+                    "'never kicked' are indistinguishable without this.");
             }
             finally { view.Teardown(); UnityEngine.Object.DestroyImmediate(go); }
         }
@@ -302,6 +309,13 @@ namespace MapRenderer.Tests.Tiles
                         "a populated symbol pass's RunWorkerAndHandoff must run on the CALLING thread under " +
                         "Inline — it rides inside the SAME dispatched body as the mesh pass " +
                         "(symbolPass?.RunWorkerAndHandoff(decode), called from KickMeshBuild).");
+                    // job-scheduling-design.md §8 stage 3 tooth (e): the symbol pass moved earlier relative
+                    // to the Burst chain — it must still run EXACTLY ONCE per issued pass, not merely "at
+                    // least once" (§5(e)'s RED: a second invocation from the prologue-complete arm).
+                    Assert.AreEqual(1, pass.RunCount,
+                        "a populated symbol pass's RunWorkerAndHandoff must run EXACTLY ONCE — it rides " +
+                        "inside KickMeshBuild's one-shot worker pass, and a second call anywhere on the mesh " +
+                        "build path would double-run it.");
                 }
                 Assert.Greater(ranCount, 0,
                     "at least one issued pass must actually have RUN — a tooth over zero ran passes would " +

@@ -11,7 +11,6 @@ using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;

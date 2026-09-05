@@ -84,7 +84,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         // Reusable scratch holding the compacted emit order (indices into _sortedItems that are still live
         // in _items) for OnPerformCulling. Grown on demand, reused each cull → no per-frame managed alloc.
-        private readonly List<int> _emitScratch = new List<int>(64);
+        private readonly List<int> _emitList = new List<int>(64);
 
         // CPU-side instance data (SoA layout). Grown on demand, never shrunk — no per-frame alloc.
         internal float[] _cpuBuffer = Array.Empty<float>();
@@ -469,7 +469,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             // memory, so emitting one command per _sortedItems slot and skipping stale ones in place would
             // leave uninitialized garbage BatchDrawCommands (invalid batch/mesh/material id) — the source
             // of the "MeshID <null>" BRG error seen while zooming.
-            int emitted = ComputeEmitOrder(_emitScratch);
+            int emitted = ComputeEmitOrder(_emitList);
             if (emitted == 0 || !_batchRegistered) return default;
 
             // cullingOutput.drawCommands is a NativeArray<BatchCullingOutputDrawCommands> (length 1).
@@ -510,11 +510,11 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                 },
             };
 
-            // Fill exactly `emitted` contiguous commands — no holes, by construction. _emitScratch[e] is
+            // Fill exactly `emitted` contiguous commands — no holes, by construction. _emitList[e] is
             // the packed instance-buffer slot (Rebuild packed instance i at sorted index i).
             for (int e = 0; e < emitted; e++)
             {
-                int i = _emitScratch[e];
+                int i = _emitList[e];
                 var item = _items[_sortedItems[i].handle];
 
                 drawCommandsPtr->visibleInstances[e] = i;

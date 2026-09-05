@@ -7,7 +7,8 @@ using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Tests.Jobs
@@ -102,7 +103,7 @@ namespace MapRenderer.Tests.Jobs
         // ── T2 — borrow, not transfer ─────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// <c>FillMeshPipeline.Schedule</c> may be called <b>twice over the same buffer</b> — the production
+        /// <c>FillMeshGraph.Schedule</c> may be called <b>twice over the same buffer</b> — the production
         /// shape, where several fill layers of one source-layer each run against the store's single buffer.
         ///
         /// <para>Three claims, and the third is the one that catches the subtle version: (a) the second run
@@ -136,14 +137,14 @@ namespace MapRenderer.Tests.Jobs
 
             NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(shared);
 
-            TileMeshBuffers unclipped = Run(shared, visitOrder, TileBufferClip.Disabled);
-            TileMeshBuffers clipped   = Run(shared, visitOrder, TileBufferClip.KeepTileUnits(0.0));
+            FillGraphOutput unclipped = Run(shared, visitOrder, TileBufferClip.Disabled);
+            FillGraphOutput clipped   = Run(shared, visitOrder, TileBufferClip.KeepTileUnits(0.0));
 
             // The control arm: the SAME clipped run over a buffer nothing has touched.
             TileGeometryBuffers fresh = TestTileMeshBuilder.Materialize(
                 new List<IFeature> { Square(100) }, SampleTile, SampleExtent);
             NativeArray<int> freshOrder = TestTileMeshBuilder.FullVisitOrder(fresh);
-            TileMeshBuffers control = Run(fresh, freshOrder, TileBufferClip.KeepTileUnits(0.0));
+            FillGraphOutput control = Run(fresh, freshOrder, TileBufferClip.KeepTileUnits(0.0));
 
             try
             {
@@ -151,15 +152,15 @@ namespace MapRenderer.Tests.Jobs
                 Assert.IsTrue(unclipped.IsCreated, "the FIRST run over the borrowed buffer produced no mesh");
                 Assert.IsTrue(clipped.IsCreated,
                     "the SECOND run over the SAME buffer produced no mesh — the first run consumed its input");
-                Assert.Greater(unclipped.VertexCount[0], 0, "precondition: there is geometry to compare");
+                Assert.Greater(unclipped.TileVertices.Length, 0, "precondition: there is geometry to compare");
 
                 // (b)
-                Assert.AreEqual(control.VertexCount[0], clipped.VertexCount[0],
+                Assert.AreEqual(control.TileVertices.Length, clipped.TileVertices.Length,
                     "the second run over a REUSED buffer must match the same run over a fresh one");
-                Assert.AreEqual(control.TotalIndexCount, clipped.TotalIndexCount, "…index counts too");
-                for (int i = 0; i < control.VertexCount[0]; i++)
+                Assert.AreEqual(control.TriangleIndices.Length, clipped.TriangleIndices.Length, "…index counts too");
+                for (int i = 0; i < control.TileVertices.Length; i++)
                     Assert.AreEqual(control.TileVertices[i], clipped.TileVertices[i], $"TileVertices[{i}]");
-                for (int i = 0; i < control.TotalIndexCount; i++)
+                for (int i = 0; i < control.TriangleIndices.Length; i++)
                     Assert.AreEqual(control.TriangleIndices[i], clipped.TriangleIndices[i], $"TriangleIndices[{i}]");
 
                 // (c) — the borrowed buffer is byte-for-byte what it was.
@@ -191,17 +192,20 @@ namespace MapRenderer.Tests.Jobs
 
         // ── Fixture ───────────────────────────────────────────────────────────────────────────────
 
-        private static TileMeshBuffers Run(
+        private static FillGraphOutput Run(
             TileGeometryBuffers geometry, NativeArray<int> visitOrder, TileBufferClip clip)
         {
             var (bMin, _) = SampleTile.MercatorBounds();
-            return FillMeshPipeline.Schedule(new FillMeshPipeline.LayerInput
+            FillGraphOutput output = FillMeshGraph.Schedule(new FillMeshPipeline.LayerInput
             {
                 Geometry       = geometry,
                 RingVisitOrder = visitOrder,
                 OriginRender   = new double3(bMin.x, 0.0, bMin.y),
+                Projection     = new WebMercatorProjection(), // was implicit (null ⇒ Mercator); now explicit
                 Clip           = clip,
             });
+            output.Handle.Complete();
+            return output;
         }
 
         /// <summary>One axis-aligned square polygon feature, well inside the tile.</summary>

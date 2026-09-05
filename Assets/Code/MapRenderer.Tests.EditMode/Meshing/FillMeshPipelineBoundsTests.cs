@@ -1,11 +1,12 @@
-// Unity EditMode only — references MapRenderer.Jobs.FillMeshPipeline.
+// Unity EditMode only — references FillMeshPipeline.
 // NOT included in Tools/core-tests (MapRenderer.Jobs depends on Unity.Collections).
 
 using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Collections;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Expressions;
@@ -118,7 +119,7 @@ namespace MapRenderer.Tests.Meshing
 
         /// <summary>
         /// End-to-end: the count=11 malformed Polygon feature must flow through
-        /// <see cref="FillMeshPipeline.Schedule"/> WITHOUT overflow/corruption. Against the old
+        /// <see cref="FillMeshGraph.Schedule"/> WITHOUT overflow/corruption. Against the old
         /// heuristic sizing this throws inside MvtDecodeJob (the 11th ring write lands out of the length-10
         /// OutRingFeatureIndex array; the EditMode collections-checks turn the silent release-build corruption
         /// into a loud throw). With exact sizing it completes cleanly. The 11 single-vertex rings are all
@@ -145,16 +146,20 @@ namespace MapRenderer.Tests.Meshing
                 Geometry       = geometry,
                 RingVisitOrder = visitOrder,
                 OriginRender   = default, // all rings degenerate ⇒ no geometry ⇒ origin irrelevant here
+                Projection     = new WebMercatorProjection(),
             };
 
-            TileMeshBuffers buffers = default;
-            Assert.DoesNotThrow(() => buffers = FillMeshPipeline.Schedule(input),
-                "exact pre-count sizing must prevent the in-job out-of-range write for a multi-point MoveTo");
+            FillGraphOutput buffers = default;
+            Assert.DoesNotThrow(() =>
+            {
+                buffers = FillMeshGraph.Schedule(input);
+                buffers.Handle.Complete();
+            }, "exact pre-count sizing must prevent the in-job out-of-range write for a multi-point MoveTo");
 
-            // All rings degenerate → no polygons → default buffers (IsCreated == false). Dispose is a no-op
-            // on default, but call it to mirror real caller cleanup.
-            if (buffers.IsCreated)
-                buffers.Dispose();
+            // All rings degenerate → no polygons → default buffers (IsCreated == false). Dispose() is a
+            // no-op on default (FillGraphOutput.Dispose opens with `if (!IsCreated) return;`), so call it
+            // unguarded, mirroring real caller cleanup.
+            buffers.Dispose();
             visitOrder.Dispose();
             geometry.Dispose();
         }

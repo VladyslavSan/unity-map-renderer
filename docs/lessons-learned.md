@@ -203,7 +203,12 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   when its last layer goes), so no live child is ever orphaned. (Seen: S53b follow-up — per-tile root
   entities.)
 
-- **Don't guard a native container `Dispose()` with `if (x.IsCreated)` — it's a bloat antipattern.**
+- **`if (x.IsCreated) x.Dispose()` — mostly bloat, but NOT always. CORRECTED 2026-09-03.**
+  ~~The claim below that `NativeArray`'s `Dispose()` early-returns on `!IsCreated` is **FALSE**.~~ Raw
+  `NativeArray<T>.Dispose()` invalidates the safety handle and throws on a second call; only `NativeList<T>`
+  and structs with their own `if (!IsCreated) return;` no-op. Acting on the flat version of this rule, a
+  sweep of all 57 guards reddened **106 tests**. See `conventions.md` §"`if (x.IsCreated) x.Dispose();` —
+  know whether it is redundant or load-bearing" for the discriminator. Original text, premise included:
   `NativeArray`/`NativeList`/etc. `.Dispose()` already early-returns on `!IsCreated` (and on a default,
   never-allocated value). So `if (x.IsCreated) x.Dispose();` adds a redundant check that does *nothing* —
   just write `x.Dispose();`. Same for grow-realloc: `oldBuf.Dispose(); oldBuf = new NativeArray(...)` needs
@@ -225,6 +230,267 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   Keep scratch as `var x = new NativeArray<T>(…, Allocator.Temp)` locals and pass values (not the arrays) into
   helper methods — the pattern `LineRibbonJob`/`LineRibbonJob` follow. Only INPUT/OUTPUT containers
   (assigned before scheduling) belong as job fields.
+
+### A RED injection that removes an edge may also remove the node — then it proves reachability, not the dependency
+
+When RED-verifying a job graph by deleting a dependency edge, check whether that edge was the node's **only**
+link to the terminal handle. If it was, the injection orphans the node too, and the violation the safety
+system surfaces is an unreachability consequence — at deallocate time, naming whichever container is next
+touched synchronously — rather than the conflict you aimed at. The RED goes red, so the tooth looks verified;
+it verified a weaker claim.
+
+*2026-09-02, the fill graph:* two nodes wrote a shared counts array with no edge between them — a real bug.
+Dropping that edge threw, but named `RingAssemblyJob` and `FeatureGeometryType`, a bystander. Isolating the
+injection — remove the edge under test, keep the node reachable through the terminal, and route the one
+dispose that also depended on it — produced the intended message at the second job's `.Schedule()`, naming
+both jobs and the shared container. **An edge injection must preserve node reachability, or it is an
+orphaning injection wearing an edge injection's name.** Two of that stage's ten REDs were affected; both were
+re-run isolated.
+
+**The same signature can also defeat a positive control, and then the honest answer is "inconclusive".**
+Stage 2's curved arm relies on the geodetic/project nodes being genuinely dead — `GlobeFillSubdivideJob`
+takes only tile verts, indices and feature index, and projects internally, so it has no world-position input
+to read. That claim was established by **reading the job's field list**. The attempted positive control —
+re-scheduling those nodes anyway, correctly threaded into the terminal handle, expecting nothing to red —
+instead threw a job-safety `InvalidOperationException` naming a *different, unrelated* upstream job on each
+run (`RingAssemblyJob`, `RingSelectJob`, …): the bystander signature above. Root cause was not chased; the
+suspicion is scheduling-order sensitivity in deferred-length `IJobParallelFor.Schedule(NativeList, …)`, not a
+defect in the branch under test.
+
+Two things worth keeping from that. First, **an inconclusive control is evidence for neither side** — record
+it as inconclusive rather than letting "it threw" read as a refutation or "we tried" read as verification.
+Second, **when a control cannot be made to work, a structural reading can still settle the claim**: the field
+list either contains the input or it does not. Say which instrument answered the question. If you are
+re-deriving this deadness claim later, read the fields — do not retry that control unmodified.
+
+### A RED proves that SOME assertion in the test bites — not the one you had in mind
+
+A RED going red is where scrutiny normally stops, which is exactly why an inert assertion survives there. If
+a test asserts inside a loop or an `if`, the injection may redden it through a *different* assertion while
+the one the test is named for never executes.
+
+*2026-09-02, the fill graph:* a test named `…_BoundariesAndSumsMatchSubdividedArrays` had its boundary
+assertion behind `if (ci > 0)`, and the fixture produced exactly one chunk — so that branch never ran in the
+green case **or** the red one. The RED reddened via the sum assertions and read as verification of the whole
+test. This was the second inert-assertion case in one epic; the first was predicted inert and honestly
+recorded, and the difference was only that someone looked.
+
+**How to apply:** when an assertion sits inside a guard, assert the **guard is satisfiable** as a
+precondition — `Assert.Greater(chunks.Length, 1)`, `Assert.IsTrue(anySplitFired)` — which converts a silently
+skipped branch into a loud one. And when RED-verifying, confirm the *specific* assertion fired, not merely
+that the test failed: read the failure message and check it is the one you aimed at. Related:
+[[red-verify-counts-must-reconcile-with-names]].
+
+### A process-wide dispose-balance counter makes RED results order-dependent
+
+A leak counter implemented as a `static` (`FillGraphOutput.DebugLiveCount`, `MeshDataPayload.
+DebugLiveAllocCount`, `TileBuildGraph.DebugLiveCount`) is **process-wide**, and an EditMode batch run is one
+process. So a leak deliberately injected in one test poisons the baseline for **every** dispose-balance test
+in the same run, and a single injected defect surfaces as two or more failures.
+
+*Found during a RED set, 2026-09-02.* Two tests failed; it read as two defects until the shared static was
+noticed.
+
+**How to apply:** assert a **delta** around the operation under test, never an absolute "counter is zero" —
+capture the count before, act, capture after, compare. An absolute assertion is correct only for the first
+such test to run in a batch, and test order is not guaranteed. When a RED produces more dispose-balance
+failures than defects injected, suspect the shared static before suspecting a second bug. This applies to any
+counter a test both reads and perturbs, not just these three.
+
+### An exception unwinding through a `using` whose `Dispose()` also throws is silently replaced
+
+If a test triggers a job-safety violation and the enclosing `using` scope disposes a container that is still
+registered to a live job, the disposal throws *during unwinding* and the CLR reports **that** exception. The
+original — the one naming your actual defect — is discarded. You get a confident, precise, and entirely
+misleading diagnosis pointing at cleanup.
+
+*2026-09-02:* this masked the same write-write violation twice, through two different scopes — first the
+test's own `try` opening after the calls it needed to guard, then one level further out at the corpus loop's
+`using var mvtTile`. Fixing the inner one did not reveal the message, because the outer one took over. What
+worked was a throwaway diagnostic with **no `using` and no cleanup at all**, which let the first exception
+propagate untouched. When a safety-violation message names a container you did not expect, suspect the
+cleanup path before you re-derive the design: put the failing call in a scope that disposes nothing.
+
+### A test gap written down as a rationale becomes a requirement
+
+When you document *why* a code path exists, check that the reason is a design constraint and not an
+observation about the tests. Prose outlives the situation it described, and the next reader takes it as
+intent.
+
+*2026-09-02:* `ProjectionDispatch.Schedule`'s XML doc justified keeping its `case null` branch with "every
+existing test leaves `LayerInput.Projection` unset, so a missed null case would silently lose the whole
+corpus." That sentence is true, and it is a statement about a **coverage gap** — production never passes
+null (`StyledFillTileBuilder.cs:428` passes `projection ?? DefaultProjection`). Written as a rationale, it
+reads as a requirement, and it made the gap look deliberate to two independent review arms: both accepted a
+tooth that reached the dispatch only through the branch production never takes.
+
+**How to apply:** a comment of the form "the tests do X, therefore the code must do Y" is a defect report,
+not a design note. Fix the tests and delete the sentence, or state plainly that the branch exists for a
+production case and name it. Related: [[tooth-vacuous-or-overclaiming]].
+
+### A job's container fields are validated whether or not `Execute()` reads them — nested structs included
+
+Unity's schedule-time container validation walks **every** container field on a job struct, and recurses into
+nested structs. A field left at literal `default` fails at `Schedule` even if the job's body never touches it.
+There is no "unused field" exemption, and `[ReadOnly]` does not grant one.
+
+*Stage 1 (2026-09-02):* an additive optional `NativeArray<int>` on an existing job broke all its callers at
+runtime while compiling clean — a `NativeArray` job field left `default` fails validation regardless of
+`[ReadOnly]`, and even through `.Run()`, which still goes via `JobsUtility.Schedule`. The fix was to make the
+discriminator a **value type** (a `bool`), which has no such constraint.
+
+*The scratch-struct refactor (same day):* grouping 19 scratch columns into one struct passed as a single job
+field surfaced the same rule one level deeper — a hand-built instance in a test left one unused column
+`default` and the gate failed with `EarcutBatchJob.Scratch.PerPolyFeatureIdx has not been assigned or
+constructed`. So a grouped scratch struct is **all-or-nothing**: every container in it must be constructed by
+every caller, including callers whose job ignores most of them.
+
+**How to apply:** give a grouped scratch struct a single `Allocate()` that constructs every field, and build
+it that way everywhere — hand-construction is what reintroduces the hazard. When adding an optional field to
+an existing job, a value type is safe additive and a container is not; the failure is invisible until a gate
+run, because it compiles clean.
+
+### A job writing several `Mesh.MeshData` streams takes the whole `MeshData`, not one field per stream
+
+Every stream view of one `Mesh.MeshData` — each `GetVertexData<T>(stream)` and `GetIndexData<T>()` — is
+tracked by the safety system under **one shared handle**. So two *writable* views of the same `MeshData`
+cannot be two job fields: scheduling throws *"Stream0 is the same … as Stream1, two containers may not be the
+same (aliasing)"*. The working shape is the one Unity documents for `MeshData` in a job — pass the
+`Mesh.MeshData` itself as a single field and resolve every view **inside `Execute()`**, where the job holds
+exclusive access to the whole struct and extracting several views from within its own execution needs no
+cross-view aliasing check. The caller still sizes it (`SetVertexBufferParams`/`SetIndexBufferParams`) on the
+main thread beforehand.
+
+*Stage 2 (2026-09-02).* The first framing of this was **wrong and is corrected here**: the failure looked
+like a *call-order* bug — declaring the index buffer before taking the vertex views — because reordering the
+calls changed which pair collided first. Call order is not the constraint; the number of writable views held
+as job fields is. Reordering only moves the collision.
+
+**The transferable part is why the stage's own probe missed it.** A probe had already established that a
+scheduled Burst job can write a `MeshData`-derived `NativeArray` and read it back after `Complete()` — but it
+calibrated a **single** stream, and the defect only exists with two or more. A probe that answers "can a job
+touch this at all?" does not answer "can a job touch *several of these*?", and the second question is the one
+the real code asks. When a probe clears an API, check that its shape matches the shape production will use —
+count included. See also *blind spots don't transfer between instruments*.
+
+### "What production passes" is not one value — name the configuration
+
+An audit that records what production passes to a behaviour-selecting field will generalise from **the
+shipped scene** to **production** if nobody stops it. Those are different, and the difference silently
+inverts a finding.
+
+*2026-09-02 → corrected 2026-09-03.* An audit recorded `LayerInput.Projection` as "production passes a real
+projection; the shipped scene is `UseGlobe: 1`", and twelve tests leaving it unset were filed as driving an
+arm production never takes. But `MapHost` passes `UseGlobe ? new SphericalProjection() : null` — **null is
+the production value for the planar case**, and `ProjectionDispatch`'s `case null` maps it to
+`WebMercatorProjection`, matching the seam arm's `?? DefaultProjection`. Those tests were exercising a real
+production path: the wrong *shipped configuration*, which is still worth fixing, but not a phantom arm. The
+overstated form was repeated in briefs for a full working session before the code was re-read.
+
+The sibling row in the same audit — `LayerInput.Clip`, where `FromInspectorUnits` disables only on a negative
+value and the config default is `0.0` — was correct, which is why the table as a whole read as trustworthy.
+
+**How to apply:** when recording what production passes, **name the configuration** ("globe passes
+`SphericalProjection`; planar passes `null`"), never just "production". If a field's production value depends
+on a launch-time or per-scene switch, the audit row has as many entries as the switch has values. And a
+default encoded in two places — here `?? DefaultProjection` in one arm and `case null` in another — is worth
+collapsing to one, because it is exactly what lets two arms disagree without any test noticing. Related:
+[[unset-field-drives-the-wrong-arm]], [[test-quality-audit-catalogued]].
+
+### A source-text fence must match the IDENTIFIER, not the syntax around it
+
+A structure test that greps source for a forbidden construct is only as good as its pattern. Matching a
+*syntactic* form — `"[NativeDisableContainerSafetyRestriction]"` with its brackets — passes anything spelled
+differently: the fully-qualified `[Unity.Collections.LowLevel.Unsafe.NativeDisableContainerSafetyRestriction]`,
+an aliased `using`, or attribute syntax with arguments. The fence reads green while the construct is present.
+
+*2026-09-02.* Caught only because the developer's first RED attempt used the qualified form, the test stayed
+green, and they asked why instead of switching to the form that worked. Both spellings compile; only one was
+fenced.
+
+**How to apply:** match the **bare identifier** after stripping comments (the strip is what makes it safe) —
+an identifier like `NativeDisableContainerSafetyRestriction` cannot appear in compiling C# except as that
+attribute, however it is qualified. It is simpler than the bracketed pattern *and* strictly more complete.
+Two further rules for any file-scanning test: **enumerate the directory** rather than hand-listing files, or
+the fence covers whatever existed the day it was written and silently misses the next addition; and **assert
+it found files to scan**, or a moved or renamed directory satisfies every "zero occurrences" claim
+vacuously. Related: [[tooth-vacuous-or-overclaiming]].
+
+### A tool that matches nothing usually exits 0 — success and no-op are indistinguishable
+
+A bulk edit that silently changed nothing reports the same exit code as one that worked. Check the *effect*,
+never the exit status.
+
+*2026-09-02:* a rename across nine files used BSD `sed` with `\b` word boundaries. macOS `sed` does not
+support `\b`, so every substitution matched nothing — and `sed` exited **0** on all nine. `perl -i -pe` does
+support it. Caught only because the developer looked at the files afterwards.
+
+This is one instance of a shape that has bitten this project repeatedly, and it is worth recognising as a
+class:
+
+| the tool | how it looks like success | what actually proves it |
+|---|---|---|
+| BSD `sed`/`grep` with an unsupported escape | exit 0, no matches | `git diff` after the edit |
+| Burst failing to compile a job | falls back to managed IL, tests still pass | `Library/Bee` artifacts, or a log grep for compile errors |
+| the Unity test gate crashing | leaves the *previous* run's results XML in place, looking current | the results file's own timestamp, and new test names present by name |
+| a chunk/branch assertion inside `if (…)` | the test passes | a precondition asserting the guard is satisfiable |
+
+**The rule:** for any step whose failure mode is "did nothing", the check must observe the change, not the
+command. `git diff` for edits, artifacts on disk for builds, named results for test runs.
+
+### A design doc that *names* its own tooth is the easiest place for a missing tooth to hide
+
+A rule stated as "a structure test greps for X" or "the Editor's check catches Y" reads as settled to every
+later reader — reviewer, planner and developer alike. Nobody re-checks a claim that sounds like a report of
+existing coverage, so the gap survives exactly as long as the sentence does. This is worse than a rule with
+no tooth: the prose actively suppresses the question.
+
+*Epic A (2026-09-02) — four instances, none found by reading the doc:*
+
+- §7 rule 2 said "a structure test greps for both attributes and allows exactly the earcut batch job's
+  fields." No such test existed. Found only because a developer needed one of those attributes and asked
+  whether it was allowed.
+- §7's first qualification said the schedule-time write-write check "is contingent on the JobsDebugger
+  toggle… a gate whose debugger is off proves nothing here." Nothing read the toggle — so every
+  dependency-edge RED in the epic rested on an unobserved environment flag. (`JobsUtility.JobDebuggerEnabled`
+  is readable *and* settable, so this one is a tooth, not a log grep — unlike the Burst-compile hazard next
+  to it, which genuinely cannot be seen from inside a test.)
+- Stage 1's tooth list kept a chunk-plan tooth after `ChunkPlanJob` was deleted — a tooth pointing at nothing.
+- Stages 2–3 kept teeth asserting "the layer produces ≥3 meshes" after chunking was retracted — teeth
+  nothing can satisfy, which read as coverage while being unsatisfiable.
+
+The last two share a cause with the first two: a decision was amended in one section, and the sections that
+depended on it were not swept. An amendment banner at the top of a section does not reach a reader who lands
+in the middle of it.
+
+**How to apply:** when a doc sentence asserts that something is *checked*, name the check — file and test
+name — or write it as an obligation ("stage N must add…"), never as a report. When a decision is retracted,
+grep the whole doc for what depended on it in the same edit; the banner is not the sweep. And when a tooth's
+subject is deleted, delete the tooth in that commit — a tooth whose target no longer exists is
+indistinguishable from coverage until someone tries to run it. Related:
+[[recorded-limitation-needs-an-observing-tooth]], [[tooth-vacuous-or-overclaiming]].
+
+### `AllTilesSettled()` is TRUE before the first tick — a settle loop that checks first never runs
+
+`TileManager.AllTilesSettled()` returns `_desired.Count == 0 && every loaded tile Built`. `_desired` is
+populated by the cover recompute inside `LateUpdate()`, so **before the first tick both collections are empty
+and the predicate reads true**. A drive shaped `while (!view.AllTilesSettled()) { view.LateUpdate(); … }`
+therefore exits on its first evaluation, never pumps, and never requests a tile.
+
+*2026-09-03.* Cost about half an hour on a new tooth. Its diagnostic read
+`guard=0 loaded=0 settled=True drawItems=0` — every number pointing at a drive that never started, while the
+assertion that actually fired complained about a mesh count. The failure looked like the production fix under
+test was broken.
+
+This is **not** silent vacuity in the existing suite: `ThrottleTests`' equivalent loop is protected by outcome
+assertions (`sawPartialTileFrame`, `totalMeshes > totalTiles`) that cannot pass on an empty drive. The cost is
+**diagnosability** — a fixture that never starts is indistinguishable from a fix that does not work.
+
+**How to apply:** pump before you test the predicate (`do { LateUpdate(); } while (!settled)`, or a `for` loop
+whose body pumps first), and assert a **drive precondition** before any outcome assertion — that a tile was
+loaded, or a kick observed. `TileManagerBackgroundRegistrationTests`' step-progression tooth has the right
+shape: `Assert.GreaterOrEqual(kickTick, 0, "drive precondition: …")`. A test's drive is a guard like any
+other, and the rule for guards applies: assert it was satisfiable.
 
 ## Test workflow
 
@@ -346,3 +612,20 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   that restores the cancellation and re-hides the bug. Fix it where it is wrong — a degenerate direction has
   no probe, so take the function's existing behind-camera fallback, which computes exactly the direction-free
   answer the degenerate case wants. (2026-08-02, S116.)
+
+- **A settle predicate is vacuously true on an empty cover — the drive runs zero iterations.**
+  `for (f = 0; f < N && !view.AllTilesSettled(); f++) { view.LateUpdate(); }` evaluates the predicate
+  *before the first pump*. With an empty cover "all tiles settled" is already true, so the body never
+  runs, `LateUpdate()` is never called, and the test measures a map that never built anything — while
+  `Assert.IsTrue(view.AllTilesSettled())` passes happily. Use the guard the codebase already has
+  (`ThrottleTests.cs`, `MapViewEntitiesBackendTests.cs`, `MapViewSnapshotTests.cs`):
+  `for (int f = 0; f < N && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)`. The
+  `LoadedTileCount() > 0` conjunct is the whole fix — it makes "settled" mean *settled having loaded
+  something* rather than *settled having done nothing*.
+  Diagnosing it: a **monotonic** counter reading 0 against a 0 baseline means the code never ran, so
+  suspect the drive before the production path. Confirm by asking whether the drive produced a mesh at
+  all (`GetTileMeshes(id)` null, `LoadedTileCount()` zero), and by diffing the loop condition against a
+  passing sibling — here a tooth two methods away used `kickTick < 0`, which is true at entry, so it
+  always pumped once. Every other bare `!AllTilesSettled()` site in the suite was checked and is safe
+  (each is preceded by an unconditional pump or an assertion forcing a non-empty cover); the bare shape
+  is a latent trap for *new* drives, not an existing bug. (2026-09-04.)

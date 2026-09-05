@@ -106,6 +106,44 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     thread-local byte delta works only in `Tools/core-tests`.
   - **Out of scope:** cold paths (parse, static init, throw-path `$"…"`).
 
+- **`if (x.IsCreated) x.Dispose();` — redundant almost everywhere, LOAD-BEARING where the same
+  already-disposed instance can be disposed again. The discriminator is "can this release site run twice
+  on the SAME, already-disposed instance?" — not "might the value be absent?".**
+  - *A never-allocated `default(NativeArray<T>)` disposes cleanly.* Absence is not the hazard, so a guard
+    that only protects against "might not exist" is noise. Likewise redundant in front of `NativeList<T>`
+    (its `Dispose()` early-returns on `!IsCreated`, `Unity.Collections/NativeList.cs:620-623`) and in front
+    of a type with its own struct-level `if (!IsCreated) return;` (`TileGeometryBuffers`, `FillGraphOutput`,
+    `TileBuildGraph`'s `_disposed`).
+  - *Load-bearing (KEEP):* a raw `NativeArray<T>` **that was allocated, disposed once, and may be disposed
+    again** — the copy-mutate-writeback idempotency idiom
+    `var x = Field; if (x.IsCreated) x.Dispose(); Field = x;`. A second `Dispose()` on an already-disposed
+    array throws; `NativeArray<T>` has no internal early-return, so the guard **is** the idempotency
+    mechanism and the writeback is what lets it see the disposed state. Prior art:
+    `MvtLayer.Dispose` (`Mvt/MvtModels.cs:196-222`).
+  - *Measured, the expensive way:* sweeping all 57 on the assumption they were redundant **reddened 106
+    tests**. Exactly **7** were load-bearing (`MvtModels.cs` ×4, `NativeFilterEvaluator.cs` ×2,
+    `MvtValueCompactionTests.cs` ×1 — a test that disposes once in its body and again in `finally`).
+    The other 50 removals were correct. Delete by the discriminator above, never in bulk.
+
+- **`[ReadOnly]` belongs on a job field whose type contains a native container — including a generic type
+  parameter, whose argument may. Elsewhere it is a no-op: harmless where it sits, not worth adding, and never
+  worth removing in bulk.**
+  - *Why it is a no-op on a scalar:* a job field is a by-value copy, so nothing outside the job can observe a
+    write to it — "read-only" already holds unconditionally, attribute or not. Unity's schedule-time
+    validation walks **native container** fields; a field with no container in it is never on that walk. Unity
+    ships `[ReadOnly] public int Num;` in its own Collections test fixtures — the habit is not a smell.
+  - *The trap, and the reason NOT to sweep:* on a **generic** field the declaration site cannot see whether
+    the argument holds a container. `FillGatherJob.cs:54`'s `[ReadOnly] public TComparer Comparer;` is
+    **load-bearing** — the comparer holds two `NativeArray` fields built from the *same allocation* the job's
+    own `Vertices`/`RingOffsets` view, so without it the safety system sees one read-only and one implicitly
+    writable alias and throws at schedule (*"two containers may not be the same (aliasing)"*), caught by
+    `FillGraphBurstProbeTests`. A mechanical "strip it from anything that isn't a `Native*`" sweep deletes
+    exactly that one.
+  - *Also generic, inert only for now:* `ProjectPointsJob.cs:45` and `GlobeFillSubdivider.cs:63`
+    (`[ReadOnly] public TProj Projection;`) — inert while every projection struct stays stateless,
+    load-bearing the moment one holds a container.
+  - *Applied:* new code follows the containers-only half. The second half only ever answers "leave it".
+
 - **Mesh lifetime & ownership: data is a value type, the `Mesh` is a single-owner class.**
   - Blittable geometry *data* (`NativeArray`/`Mesh.MeshData`/`LayerMeshData`) are **value-type structs** the
     jobs write, disposed deterministically at the `ApplyAndDisposeWritableMeshData` boundary — never held,
@@ -117,6 +155,24 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   - Dispose-guard machinery + the `CountMeshObjects` leak baseline touch only the **class** side; structs stay
     trivial. Full contract (exit paths, cancellation, teeth) in
     **`docs/async-architecture.md` §"Disposal & cancellation contract"**.
+
+## Naming
+
+- **Names carry meaning; filler words do not.**
+  - `Scratch`, `Data`, `Info`, `Manager`, `Helper`, `Util`, `Temp`, `Stuff` may never be the part of a name
+    that carries the meaning. Name for what the thing holds or does.
+  - **Never name a shared type after one of its consumers** — `EarcutScratch` was used by four jobs; naming
+    it for one was wrong, not just vague. It is `FillTriangulationBuffers`.
+  - Grouped buffers join the existing family: `TileGeometryBuffers`, `FillGraphOutput`, `EvalArgBuffers`.
+  - Keep a qualifier that distinguishes (`FlatVx` — flattened across the layer's polygons), drop one that
+    does not (`FlatScratchVx`). Test: delete the word — if the name is still unambiguous, it was filler.
+  - **NOT yet enforced across the codebase — read this as the rule new and touched code is held to.**
+    `Scratch` alone still appears ~160 times outside the fill-graph path (symbols, `TileManager`,
+    placement, `TileBuildScratch*`), and `PathScratch`/`CumScratch`/`cumScratch`/`keysScratch` are live.
+    The fill-graph path was swept 2026-09-03; the rest is an outstanding mechanical sweep. Stating the
+    rule without this line made it read as already true — which is how `EarcutScratch` survived one
+    rename (the type was fixed, the field it was held in stayed `Scratch`) and how `FlatScratchVx`
+    outlived the doc that uses it as the example of what to fix.
 
 ## Documentation & tests
 

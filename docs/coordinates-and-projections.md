@@ -190,7 +190,7 @@ winding is uniform across fills, lines, and every projection, with **no per-proj
 boundary reverses triangle winding once, uniformly** — both `StyledFillTileBuilder` fill writes, the globe
 subdivide output, `StyledLineTileBuilder`, and the test `SyntheticLineMesh.Upload` — to yield a genuine
 Unity-front face for **stock Cull Back** (`MapFill`/`MapLine` `_Cull:2`, matching the already-stock
-`MapSymbolText`). The upstream IR (`TileMeshBuffers.TriangleIndices`, the subdivide job output) stays
+`MapSymbolText`). The upstream IR (`FillGraphOutput.TriangleIndices`, the subdivide job output) stays
 CCW/convention-neutral so the earcut and globe-subdivide parity oracles hash raw winding. Pinned by
 `GlobeFillWindingTests` / `GlobeLineWindingTests` — now an **absolute** check (front face points OUT of the
 surface, dominant sign +1) *plus* globe == Mercator, so an inversion can't hide behind a relative-only compare

@@ -300,7 +300,7 @@ namespace MapRenderer.Core.GeoJson
     /// <c>double2</c> at <see cref="GeoJsonSliceOptions.Extent"/>, origin top-left, Y down, quantized to
     /// integers. Exterior rings are CW-on-screen (POSITIVE shoelace under
     /// <c>Geometry.SignedArea</c>), holes CCW (negative) — the MVT convention
-    /// <c>MapRenderer.Jobs.RingAssemblyJob</c> classifies against, so a GeoJSON tile is indistinguishable
+    /// <c>RingAssemblyJob</c> classifies against, so a GeoJSON tile is indistinguishable
     /// from an MVT one downstream. Rings are implicitly closed (the first vertex is not repeated). Both
     /// clippers are orientation-preserving, so output winding equals the winding
     /// <see cref="GeoJsonParser"/> normalised. The Unity-front reversal for stock Cull Back stays where it

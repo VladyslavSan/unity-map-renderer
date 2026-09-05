@@ -83,6 +83,16 @@ namespace MapRenderer.Jobs.Mvt
         /// <see cref="MvtLayer.Dispose"/>.</summary>
         public NativeArray<uint> TagWords => _tagWords;
 
+        /// <summary>Per-feature start index into <see cref="TagWords"/>, by ordinal — forwarded the same way
+        /// as <see cref="TagWords"/> itself, so a batched native-filter job can read the whole column instead
+        /// of calling <see cref="TryGetFeatureSlice"/> once per feature. BORROWED from
+        /// <see cref="MvtLayer.FeatureTagOffsets"/>.</summary>
+        public NativeArray<int> TagOffsets => _tagOffsets;
+
+        /// <summary>Per-feature word count into <see cref="TagWords"/>, by ordinal — the twin of
+        /// <see cref="TagOffsets"/>. BORROWED from <see cref="MvtLayer.FeatureTagLengths"/>.</summary>
+        public NativeArray<int> TagLengths => _tagLengths;
+
         /// <summary>True and yields the key's table index when <paramref name="name"/> is one of this
         /// layer's keys.</summary>
         public bool TryGetKeyIndex(string name, out int keyIndex) => _keyIndex.TryGetValue(name, out keyIndex);

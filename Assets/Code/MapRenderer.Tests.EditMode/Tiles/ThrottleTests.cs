@@ -1,7 +1,7 @@
 // S55 acceptance tests — "Flatten tile-load lag spikes" throttle features.
 //
-// Tooth (a): Mesh build cap binds — MaxMeshBuildsPerTick limits kick-offs to at most N
-//            per Tick. Verified by asserting MeshBuildsKickedLastTick == cap (not all tiles)
+// Tooth (a): Mesh build cap binds — MaxMeshBuildsPerTick limits tiles admitted to at most N
+//            per Tick. Verified by asserting TileBuildsStartedLastTick == cap (not all tiles)
 //            on the first kick Tick, with >= 2 tiles in cover.
 //
 // Tooth (b): Per-MESH budget splits tiles across frames (S87 DECISIVE) — with the per-frame mesh-count
@@ -131,13 +131,16 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// Builds a z=5 (9-tile) cover with consume BLOCKED (<c>MaxConsumesPerTick = 0</c>) and every
-        /// tile's mesh build KICKED and COMPLETED (uncapped kicks + a generous wait). After this returns,
-        /// each tile has a completed <c>MeshBuildTask</c> awaiting consume; nothing is Built yet — the
-        /// caller sets the consume budget and pumps. Caller owns <c>Teardown()</c> + <c>DestroyImmediate(go)</c>.
+        /// tile's write step COMPLETE but UNCONSUMED. After this returns, each tile has write-complete,
+        /// unconsumed backlog; nothing is Built yet — the caller sets the consume budget and pumps. Caller
+        /// owns <c>Teardown()</c> + <c>DestroyImmediate(go)</c>.
         ///
-        /// The 2000ms wait covers all 9 concurrent mesh builds on slow / single-core machines (a fixed
-        /// 300ms was too tight — see S55 Tooth_c history). We cannot poll-for-all-completions without
-        /// consuming, so a generous sleep is used.
+        /// <para><b>Drive contract (job-scheduling-design.md §11 fork 2).</b> "Every tile kicked" is read off
+        /// <c>TileBuildsStartedLastTick</c> (once per tile, at its first kick — a source tile's prologue kick
+        /// or a background tile's measure kick). <c>Await</c> only completes whichever STEP is currently in
+        /// flight — a source tile needs the prologue-complete tick AND the write-kick tick before it is
+        /// consumable — so the drive pumps until <c>ConsumeBacklog</c> (write complete, unconsumed) covers
+        /// every loaded tile, which is exactly the backlog these teeth budget against.</para>
         /// </summary>
         private static (GameObject go, MapView view) SetupBlockedBacklog(StyleDocument style)
         {
@@ -153,22 +156,34 @@ namespace MapRenderer.Tests.Tiles
             view.LateUpdate();                     // request
 
             // The fetch task carries the DECODE too, so a cover's fetches complete measurably later than a
-            // fixed pair of sleeps can assume — and if the observe tick lands early, nothing is kicked and
-            // the backlog these teeth measure is empty. Pump until every loaded tile has been kicked
+            // fixed pair of sleeps can assume — and if the observe tick lands early, nothing is started and
+            // the backlog these teeth measure is empty. Pump until every loaded tile has been STARTED
             // instead. The DRIVE changed; what the teeth assert about the consume budget did not.
-            int kicked = 0;
+            int started = 0;
             for (int f = 0; f < 3000; f++)
             {
                 view.LateUpdate();
                 view.AwaitInFlightMeshBuilds();
-                kicked += view.MeshBuildsKickedLastTick();
-                if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
+                started += view.TileBuildsStartedLastTick();
+                if (view.LoadedTileCount() > 0 && started >= view.LoadedTileCount()) break;
             }
-            Assert.GreaterOrEqual(kicked, view.LoadedTileCount(),
-                "drive precondition: every cover tile must have been kicked, or there is no backlog to budget");
+            Assert.GreaterOrEqual(started, view.LoadedTileCount(),
+                "drive precondition: every cover tile must have been started, or there is no backlog to budget");
 
-            // Pure build-completion wait, no consume (MaxConsumesPerTick=0 keeps the cap intact).
-            view.AwaitInFlightMeshBuilds();
+            // Pump until every loaded tile's write step is complete but unconsumed — "write complete,
+            // unconsumed" is exactly the backlog this helper promises. AwaitInFlightMeshBuilds only
+            // completes whichever step is in flight; a source tile needs its prologue-complete tick AND its
+            // write-kick tick before ConsumeBacklog can see it.
+            for (int f = 0; f < 3000; f++)
+            {
+                view.LateUpdate();
+                view.AwaitInFlightMeshBuilds();
+                if (view.LoadedTileCount() > 0 && view.CaptureTelemetry().ConsumeBacklog >= view.LoadedTileCount())
+                    break;
+            }
+            Assert.GreaterOrEqual(view.CaptureTelemetry().ConsumeBacklog, view.LoadedTileCount(),
+                "drive precondition: every cover tile's write step must be complete but unconsumed, or there " +
+                "is no backlog to budget");
             return (go, view);
         }
 
@@ -179,7 +194,7 @@ namespace MapRenderer.Tests.Tiles
         /// tiles have ready fetch bytes. Uses z=5 (known 9-tile cover like S51 tests) to guarantee >= 2 tiles.
         ///
         /// Timing note: with the two-tick kick pattern (fetch observe on Tick N, kick on Tick N+1),
-        /// MeshBuildsKickedLastTick is 0 on the observe tick and 1 on the first kick tick.
+        /// TileBuildsStartedLastTick is 0 on the observe tick and 1 on the first kick tick.
         /// </summary>
         [Test]
         public void Tooth_a_MeshBuildCapBinds()
@@ -201,7 +216,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LateUpdate();
                 Assert.GreaterOrEqual(view.LoadedTileCount(), 2,
                     "Need at least 2 tiles at z=5 for the cap test to be non-vacuous.");
-                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(),
                     "Tooth (a): after Tick 1 (requests only), no kicks issued yet.");
 
                 // Pump to the FIRST kick tick instead of assuming it is tick 3. The fetch task now carries
@@ -211,19 +226,19 @@ namespace MapRenderer.Tests.Tiles
                 // DRIVE is what changed; the property is identical, and the assertion below is if anything
                 // sharper: on the first tick that kicks anything at all, it must kick exactly one.
                 // AwaitInFlightMeshBuilds neither kicks nor consumes, so the cap observation is untouched:
-                // the tooth is the exact MeshBuildsKickedLastTick()==1 value bound by MaxMeshBuildsPerTick=1
+                // the tooth is the exact TileBuildsStartedLastTick()==1 value bound by MaxMeshBuildsPerTick=1
                 // — DrainMeshBuilds ignores per-frame caps and would settle the whole cover in one call,
                 // destroying the per-tick-cap observation this loop exists to make (see DrainMeshBuilds's own
                 // doc comment).
                 int kickTickFrames = 0;
-                while (view.MeshBuildsKickedLastTick() == 0 && kickTickFrames++ < 3000)
+                while (view.TileBuildsStartedLastTick() == 0 && kickTickFrames++ < 3000)
                 {
                     view.LateUpdate();
-                    if (view.MeshBuildsKickedLastTick() > 0) break;
+                    if (view.TileBuildsStartedLastTick() > 0) break;
                     view.AwaitInFlightMeshBuilds();
                 }
 
-                Assert.AreEqual(1, view.MeshBuildsKickedLastTick(),
+                Assert.AreEqual(1, view.TileBuildsStartedLastTick(),
                     $"Tooth (a): cap=1 must limit kicks to exactly 1 on the FIRST tick that kicks at all " +
                     $"(loaded tiles = {view.LoadedTileCount()}). A 0 here means the pump gave up before any " +
                     "kick fired; anything above 1 is the cap failing to bind.");

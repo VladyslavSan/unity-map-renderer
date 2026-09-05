@@ -17,7 +17,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Tests.Jobs;
 using MapRenderer.Unity.Rendering.Meshing;
@@ -81,7 +81,7 @@ namespace MapRenderer.Tests.Meshing
                 // Warm-up (outside the measured region): JIT + one-time native growth. Its own MeshData —
                 // never reused for the measured call.
                 Mesh.MeshDataArray warmMda = Mesh.AllocateWritableMeshData(1);
-                StyledLineTileBuilder.WriteMeshData(warmMda[0], selection, geometry, paint, layout, Zoom,
+                SyncMeshWrite.Line(warmMda[0], selection, geometry, paint, layout, Zoom,
                     origin, out int warmVertexCount, out Bounds _);
                 warmMda.Dispose();
                 Assert.Greater(warmVertexCount, 0,
@@ -94,7 +94,7 @@ namespace MapRenderer.Tests.Meshing
                 {
                     Assert.That(() =>
                     {
-                        StyledLineTileBuilder.WriteMeshData(measuredMda[0], selection, geometry, paint, layout,
+                        SyncMeshWrite.Line(measuredMda[0], selection, geometry, paint, layout,
                             Zoom, origin, out int _, out Bounds _);
                     },
                     Is.Not.AllocatingGCMemory(),

@@ -20,7 +20,7 @@ namespace MapRenderer.Core.Geometry
     /// fewer than two vertices are discarded.</para>
     ///
     /// <para><b>Boundary is inclusive</b>, matching <see cref="RingWindowClipper"/> and
-    /// <c>MapRenderer.Jobs.RingClipJob</c>: a vertex exactly on the window edge is inside. An endpoint that
+    /// <c>RingClipJob</c>: a vertex exactly on the window edge is inside. An endpoint that
     /// was not clipped is passed through VERBATIM (rather than recomputed as <c>p0 + t·d</c>), so a run that
     /// crosses several fully-inside segments is bit-identical to the input and the continuity test between
     /// consecutive segments is exact; an endpoint that WAS clipped gets the boundary value assigned exactly

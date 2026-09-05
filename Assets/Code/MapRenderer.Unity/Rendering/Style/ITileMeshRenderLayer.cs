@@ -3,28 +3,32 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// The <see cref="RenderLayerBuild.TileMesh"/> capability — built once per <c>(tile, layer)</c> by the
-    /// Burst mesh pipeline and registered with a <see cref="Backend.ITileRenderBackend"/>. Today's fill/line
-    /// <c>WriteInto</c>, hoisted out of the base interface verbatim (design §3.2); later fill-extrusion and
-    /// raster implement this too. Symbols/text are deliberately NOT this capability — per ARCHITECTURE they
-    /// are a separate, placed-every-frame path, not a built-mesh static layer.
+    /// Burst mesh pipeline (job-scheduling-design.md §8) and registered with a
+    /// <see cref="Backend.ITileRenderBackend"/>. Symbols/text are deliberately NOT this capability — per
+    /// ARCHITECTURE they are a separate, placed-every-frame path, not a built-mesh static layer.
+    ///
+    /// <para><b>D1 (job-scheduling-design.md §8 stage 5 Group B):</b> merged with the former
+    /// <c>IGraphInputRenderLayer</c> — every implementer meshes on the job graph now, so a standalone
+    /// capability interface probed with <c>is</c> no longer earns its keep. <see cref="BuildGraphRequest"/>
+    /// is this capability's one member.</para>
     /// </summary>
     internal interface ITileMeshRenderLayer : IRenderLayer
     {
         /// <summary>
-        /// Off-main-thread: build the mesh from this layer's <b>already-selected</b> features straight into
-        /// <paramref name="md"/> — a caller-allocated <c>Mesh.MeshData</c> (allocated on the main thread at
-        /// kick; the worker-write path is spike-guarded). Reports the written <paramref name="vertexCount"/>
-        /// (0 = no geometry, with <paramref name="md"/> left untouched) and the worker-computed
-        /// <paramref name="bounds"/>. The caller wraps the writable array in a <see cref="MeshDataPayload"/>
-        /// and applies it on the main thread.
+        /// Builds this layer's graph build off the already-selected features — the prologue half of the
+        /// mesh build; the graph's write step does the rest. Returns <c>null</c> when there is nothing to
+        /// build for this layer; otherwise a rented <see cref="ILayerMeshBuild"/> of the layer's own kind
+        /// (<see cref="FillLayerBuild"/>/<see cref="FillExtrusionLayerBuild"/>/<see cref="LineLayerBuild"/>)
+        /// carrying exactly the columns its kind needs.
         ///
         /// <para><paramref name="selected"/> pairs each feature with its <b>ordinal</b> in the source layer,
         /// and <paramref name="geometry"/> is the whole source layer's tile geometry, materialized once per
@@ -35,23 +39,27 @@ namespace MapRenderer.Unity.Rendering.Style
         ///
         /// <para><b>There is no <c>TileId</c> parameter</b> (B7a review N1, retired in IR C1 P2). The buffer
         /// declares its own tile as <c>geometry.Tile</c>, exactly as it declares its own extent, so a caller
-        /// cannot pair a z0 buffer with a z1 address — the mispairing shape does not exist in the signature.
-        /// The parameter survived B7a only because LINE still minted its own buffer and had no
-        /// <paramref name="geometry"/> to read; P2 converted line and it went with the mint.</para>
+        /// cannot pair a z0 buffer with a z1 address — the mispairing shape does not exist in the signature.</para>
         ///
-        /// <para><paramref name="clip"/> is the global tile-buffer clip window. <b>Fill honours it; every
-        /// other kind ignores it BY DECISION.</b> Clipping an input polyline at the tile boundary turns the
-        /// join at that vertex into a cap — trading the alpha band for a notch at every seam — so the line
-        /// equivalent is clipping the tessellated RIBBON, a different and harder operation that is
-        /// deliberately not attempted here.</para>
-        ///
-        /// <para><paramref name="scratch"/> (perf/gc-elimination) is this build's rented per-build scratch —
-        /// <c>null</c> for a caller with no pool to draw from (tests, direct harness calls). An implementation
-        /// that has no use for it (line, today) simply ignores it.</para>
+        /// <para><paramref name="context"/>'s <c>BufferClip</c> is the global tile-buffer clip window.
+        /// <b>Fill honours it; every other kind ignores it BY DECISION.</b> Clipping an input polyline at the
+        /// tile boundary turns the join at that vertex into a cap — trading the alpha band for a notch at
+        /// every seam — so the line equivalent is clipping the tessellated RIBBON, a different and harder
+        /// operation that is deliberately not attempted here.</para>
         /// </summary>
-        void WriteInto(
-            Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-            double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-            TileBuildScratch scratch, out int vertexCount, out Bounds bounds);
+        /// <param name="selected">This layer's already-selected features, paired with their ordinal in the
+        /// source layer.</param>
+        /// <param name="geometry">The whole source layer's tile geometry — BORROWED, never disposed or
+        /// retained here.</param>
+        /// <param name="context">The shared per-kick worker-pass inputs (zoom, origin, projection, clip,
+        /// scratch).</param>
+        /// <param name="materialIndex">This layer's material slot — threaded into the build's <c>Rent</c>.</param>
+        /// <param name="payloadName">This layer's fallback mesh name — threaded into the build's <c>Rent</c>.</param>
+        ILayerMeshBuild BuildGraphRequest(
+            IReadOnlyList<SelectedTileFeature> selected,
+            TileGeometryBuffers                geometry,
+            in TileLayerProcessContext         context,
+            int                                materialIndex,
+            string                             payloadName);
     }
 }

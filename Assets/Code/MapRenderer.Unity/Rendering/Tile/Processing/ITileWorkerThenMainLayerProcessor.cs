@@ -8,9 +8,12 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// step (<see cref="ITileLayerProcessor.ProcessOnWorker"/>) is followed by exactly one main-thread
     /// completion step. Modelled first by <see cref="TileSymbolLayerProcessor"/>.
     ///
-    /// <para>Deliberately ARTIFACT-FREE — unlike <see cref="ITileMeshLayerProcessor.Complete"/>, this
-    /// contract returns nothing. The tail's output (e.g. a symbol layer's shaped symbol records) is
-    /// exposed and sunk by the implementor itself: sinks stay separate, only decode + dispatch unify.</para>
+    /// <para>Deliberately ARTIFACT-FREE — unlike <see cref="ITileMeshLayerProcessor"/>, whose
+    /// <see cref="ITileMeshLayerProcessor.TryTakeGraphRequest"/> hands the caller a real artifact (an
+    /// <c>ILayerMeshBuild</c>) before its own settlement step ever runs, this contract's
+    /// completion step returns nothing at any point. The tail's output (e.g. a symbol layer's shaped
+    /// symbol records) is exposed and sunk by the implementor itself: sinks stay separate, only decode +
+    /// dispatch unify.</para>
     /// </summary>
     internal interface ITileWorkerThenMainLayerProcessor : ITileLayerProcessor
     {

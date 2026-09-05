@@ -17,9 +17,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         public TileId Tile { get; init; }
 
         /// <summary>The evaluation zoom for THIS worker pass — the source differs by cadence, not a single
-        /// project-wide rule. Mesh passes (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>/
-        /// <see cref="TileLayerProcessorRunner.RunSourcelessWorkerPass"/>) bake at the tile's INTEGER zoom
-        /// (<c>id.Z</c> — S82 Decision 2, unchanged). The symbol pass
+        /// project-wide rule. The mesh pass (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) bakes at
+        /// the tile's INTEGER zoom (<c>id.Z</c> — S82 Decision 2, unchanged); a background tile's graph kick
+        /// (<c>TileManager.KickSourcelessBackground</c>, no worker pass since job-scheduling-design.md §8
+        /// stage 3) does the same. The symbol pass
         /// (<see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/>) evaluates at the fractional CAMERA
         /// zoom captured at build start (pre-A3 parity — symbol layout/paint always evaluated at display
         /// zoom). A4 keeps BOTH meanings deliberately (design doc §B Q4): the shared decode feed
@@ -39,12 +40,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// off <c>MapViewConfig</c> each Tick. <c>default</c> ⇒ disabled ⇒ the whole buffer is drawn.</summary>
         public TileBufferClip BufferClip { get; init; }
 
-        /// <summary>This build's rented <see cref="TileBuildScratch"/> (perf/gc-elimination) — populated by
-        /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/>/<see cref="TileLayerProcessorRunner.RunSourcelessWorkerPass"/>
-        /// for the duration of their worker pass, <c>null</c> everywhere else (tests, the symbol cadence, any
-        /// context built outside those two entries). A processor that reads a <c>null</c> Scratch must fall
-        /// back to allocating its own scratch, exactly as it did before pooling existed — never assume this is
-        /// non-null.</summary>
-        public TileBuildScratch Scratch { get; init; }
+        /// <summary>This build's rented <see cref="TileBuildBuffers"/> (perf/gc-elimination) — populated by
+        /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/> for the duration of its worker pass,
+        /// <c>null</c> everywhere else (tests, the symbol cadence, any context built outside that entry). A
+        /// processor that reads a <c>null</c> Buffers must fall back to allocating its own, exactly
+        /// as it did before pooling existed — never assume this is non-null.</summary>
+        public TileBuildBuffers Buffers { get; init; }
     }
 }

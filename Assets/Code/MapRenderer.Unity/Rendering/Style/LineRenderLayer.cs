@@ -5,12 +5,14 @@ using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Core.Expressions;
 using Line = MapRenderer.Core.Style.Line;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 
+using MapRenderer.Jobs.Lines;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
@@ -99,20 +101,22 @@ namespace MapRenderer.Unity.Rendering.Style
             }
         }
 
-        // `clip` is accepted and IGNORED by decision (see ITileMeshRenderLayer.WriteInto): clipping the input
-        // polyline turns the join at the boundary vertex into a cap, trading the seam band for a seam notch.
-        // `scratch` (perf/gc-elimination) is accepted and IGNORED too: line has no OrderBySortKey/
-        // BuildRingVisitOrder-shaped scratch to pool — only fill does, today.
-        //
-        // IR C1 P2: `geometry` is the source-layer's BORROWED buffer and is now genuinely consumed — the
-        // builder reads its rings, its tile and its extent, and never disposes it.
-        public void WriteInto(
-            Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-            double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-            Tile.Processing.TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
-            => Meshing.StyledLineTileBuilder.WriteMeshData(
-                md, selected, geometry, _paint, _layout, zoom, tileOriginRender,
-                out vertexCount, out bounds, projection);
+        // job-scheduling-design.md §8 stage 5: builds the prologue's graph build — the graph's write step
+        // does the mesh write. `context.BufferClip` is never read here, BY DECISION (see
+        // ITileMeshRenderLayer.BuildGraphRequest): clipping the input polyline turns the join at the
+        // boundary vertex into a cap, trading the seam band for a seam notch.
+        public Meshing.ILayerMeshBuild BuildGraphRequest(
+            IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+            in TileLayerProcessContext context, int materialIndex, string payloadName)
+        {
+            LineLayerInput input = Meshing.StyledLineTileBuilder.BuildLayerInput(
+                selected, geometry, _paint, _layout, context.Zoom, context.TileOriginRender,
+                out var colors, out var widths, context.Projection);
+            // The relocated emptiness gate — see FillRenderLayer.BuildGraphRequest's own comment; line's own
+            // discriminator is FeatureSelected, not RingVisitOrder (LineLayerInput has no such field).
+            if (!input.FeatureSelected.IsCreated) return null;
+            return Meshing.LineLayerBuild.Rent(input, colors, widths, materialIndex, payloadName);
+        }
 
         public void Dispose() => RenderLayerSet.DestroyMaterialInstance(Material);
     }

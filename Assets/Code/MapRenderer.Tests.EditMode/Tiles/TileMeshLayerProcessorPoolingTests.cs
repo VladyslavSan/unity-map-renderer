@@ -5,7 +5,7 @@
 // perf/gc-elimination, meshing follow-ups Stage A: TileMeshLayerProcessor and MeshDataPayload — the
 // per-dense-layer kick-time objects — used to be `new`d fresh on every AllocateForKick/Complete() call
 // (~208 alloc events / ~16.5 KB per tile-build on a liberty-shaped style). They are now rented from
-// TileMeshLayerProcessorPool/MeshDataPayloadPool (ConcurrentBag-backed, mirroring TileBuildScratchPool —
+// TileMeshLayerProcessorPool/MeshDataPayloadPool (ConcurrentBag-backed, mirroring TileBuildBuffersPool —
 // both objects cross the main/worker thread boundary between allocation and release, which is what rules
 // out UnityEngine.Pool here).
 
@@ -23,7 +23,7 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.Tiles
     /// <summary>
     /// Acceptance teeth for meshing follow-ups Stage A: pooling <see cref="TileMeshLayerProcessor"/> and
     /// <see cref="MeshDataPayload"/>. See <see cref="TileLayerProcessorRunnerTests"/>'s
-    /// <c>TileMeshLayerProcessor_FaultingWrite_ReturnsEmptyPayload_AndReleasesTrackedMeshData</c> for the
+    /// <c>FaultingGraphRequest_StillReturnsItsProcessor_AndLeaksNoRequest</c> for the
     /// sibling degenerate-path pool-return tooth (extended there, next to the existing fault-settlement
     /// coverage it builds on).
     /// </summary>
@@ -62,11 +62,8 @@ namespace MapRenderer.Tests.Tiles
         };
 
         /// <summary>Mirrors <c>TileMeshLayerProcessorSelectionAllocTests.UnreachedRenderLayer</c>: every
-        /// fixture layer here leaves <c>Geometry.IsCreated</c> false, so <c>WriteInto</c> is never reached
-        /// and <c>ProcessOnWorker</c> completes zero-vertex. That is deliberate, not incidental — it keeps
-        /// the zero-alloc tooth below isolated to the kick/consume OBJECT pooling this stage adds, rather
-        /// than mixing in <c>Upload()</c>'s unavoidable-and-out-of-scope <c>new Mesh{...}</c> allocation on
-        /// a real (non-zero-vertex) payload, which happens on every call regardless of pooling.</summary>
+        /// fixture layer here leaves <c>Geometry.IsCreated</c> false, so <c>BuildGraphRequest</c> is never
+        /// reached and <c>ProcessOnWorker</c> completes with no request.</summary>
         private sealed class UnreachedRenderLayer : ITileMeshRenderLayer
         {
             public UnreachedRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;
@@ -80,61 +77,35 @@ namespace MapRenderer.Tests.Tiles
             public void ApplyZoom(double zoom, double devicePixelRatio) { }
             public void Dispose() { }
 
-            public void WriteInto(
-                Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-                double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
+            public ILayerMeshBuild BuildGraphRequest(
+                IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                in TileLayerProcessContext context, int materialIndex, string payloadName)
             {
-                vertexCount = 0;
-                bounds      = default;
-                Assert.Fail("WriteInto must not be reached — this fixture's layers carry no adopted " +
+                Assert.Fail("BuildGraphRequest must not be reached — this fixture's layers carry no adopted " +
                             "geometry (IsCreated == false), by design.");
+                return null;
             }
         }
 
-        /// <summary>Mirrors <c>A6NonMvtDecoderTests.FakeFillTileMeshRenderLayer</c> — a real, vertex-producing
-        /// forward to <see cref="StyledFillTileBuilder.WriteMeshData"/>, used by the cross-build isolation
-        /// tooth below, which needs a genuinely-uploadable (VertexCount &gt; 0) payload to exercise
-        /// <see cref="MeshDataPayload.Upload"/>'s success path.</summary>
-        private sealed class ProducingFillRenderLayer : ITileMeshRenderLayer
-        {
-            private readonly Fill.PaintProperties _paint;
-            public StyleLayer StyleLayer { get; }
-            public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
-            public DrawPersistence Persistence => DrawPersistence.Persistent;
-            public int DrawIndex => 0;
-            public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
-            public Material Material => null;
-            public void ApplyZoom(double zoom, double devicePixelRatio) { }
-            public void Dispose() { }
-
-            public ProducingFillRenderLayer(StyleLayer styleLayer, Fill.PaintProperties paint)
-            {
-                StyleLayer = styleLayer;
-                _paint = paint;
-            }
-
-            public void WriteInto(
-                Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-                double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
-                => StyledFillTileBuilder.WriteMeshData(
-                    md, selected, geometry, _paint, zoom, tileOriginRender, out vertexCount, out bounds,
-                    projection, layout: null, clip: clip, scratch: scratch);
-        }
-
-        // ── Tooth 1: zero-alloc, warmed repeat kick+consume cycle ────────────────────────────────────
+        // ── Tooth 1: zero-alloc, warmed repeat kick+release cycle ────────────────────────────────────
 
         /// <summary>
         /// The tooth: a warmed repeat of <see cref="TileMeshLayerProcessor.AllocateForKick"/> →
-        /// <see cref="TileMeshLayerProcessor.ProcessOnWorker"/> → <see cref="TileMeshLayerProcessor.Complete"/>
-        /// → <see cref="MeshDataPayload.Upload"/>/<see cref="MeshDataPayload.Dispose"/>, over two style
-        /// layers, must allocate zero managed bytes once both kick-time wrapper types are rented from their
-        /// pools instead of `new`d. RED-verified by reverting <c>AllocateForKick</c>/<c>Complete</c> back to
-        /// `new TileMeshLayerProcessor(...)`/`new MeshDataPayload(...)` — must fail.
+        /// <see cref="TileMeshLayerProcessor.ProcessOnWorker"/> → <see cref="TileMeshLayerProcessor.Release"/>,
+        /// over two style layers, must allocate zero managed bytes once the kick-time wrapper is rented from
+        /// its pool instead of `new`d. RED-verified by reverting <c>AllocateForKick</c> back to
+        /// `new TileMeshLayerProcessor(...)` — must fail.
+        ///
+        /// <para>job-scheduling-design.md §8 stage 5 Group B: this tooth's cycle used to run through
+        /// <c>Complete()</c> → <see cref="MeshDataPayload.Upload"/>/<see cref="MeshDataPayload.Dispose"/> —
+        /// the seam-arm's kick-time <c>MeshDataPayload</c> pooling, which retired with the last seam-arm
+        /// kind: after B.3 nothing is allocated at kick, so there is no payload for THIS cycle to Upload or
+        /// Dispose any more. What survives, unaffected by B.1-B.5, is <see cref="TileMeshLayerProcessor"/>'s
+        /// OWN object pooling (<see cref="TileMeshLayerProcessorPool"/>) — the property this narrowed tooth
+        /// still observes.</para>
         /// </summary>
         [Test]
-        public void KickCompleteConsumeCycle_OverTwoLayers_WarmedRepeat_AllocatesNoGCMemory()
+        public void KickProcessRelease_OverTwoLayers_WarmedRepeat_AllocatesNoGCMemory()
         {
             MvtLayer roads  = MakeSourceLayer("roads", 30);
             MvtLayer places = MakeSourceLayer("places", 45);
@@ -145,16 +116,16 @@ namespace MapRenderer.Tests.Tiles
             var roadsRenderLayer  = new UnreachedRenderLayer(SelectAllLayer("roads-all", "roads"));
             var placesRenderLayer = new UnreachedRenderLayer(SelectAllLayer("places-all", "places"));
 
-            // ONE scratch instance reused across the whole test, exactly as ONE TileBuildScratch is rented
+            // ONE buffers instance reused across the whole test, exactly as ONE TileBuildBuffers is rented
             // for the whole duration of a real worker pass (see TileMeshLayerProcessorSelectionAllocTests).
-            var scratch = new TileBuildScratch();
+            var buffers = new TileBuildBuffers();
             var context = new TileLayerProcessContext
             {
                 Tile             = Tile,
                 Zoom             = Zoom,
                 TileOriginRender = double3.zero,
-                Projection       = null, // never read — WriteInto is unreachable in this fixture
-                Scratch          = scratch,
+                Projection       = null, // never read — BuildGraphRequest is unreachable in this fixture
+                Buffers          = buffers,
             };
 
             try
@@ -167,37 +138,18 @@ namespace MapRenderer.Tests.Tiles
                     roadsProcessor.ProcessOnWorker(tile, in context);
                     placesProcessor.ProcessOnWorker(tile, in context);
 
-                    IRenderLayerPayload roadsPayload  = roadsProcessor.Complete();
-                    IRenderLayerPayload placesPayload = placesProcessor.Complete();
-
-                    // VertexCount == 0 on both (see UnreachedRenderLayer) ⇒ Upload() takes its early-return,
-                    // no-`new Mesh` branch — genuinely exercised, genuinely zero-alloc, isolating this tooth
-                    // from Upload()'s unrelated, unavoidable, out-of-scope Mesh-object allocation.
-                    roadsPayload.Upload();
-                    placesPayload.Upload();
-                    roadsPayload.Dispose();
-                    placesPayload.Dispose();
+                    roadsProcessor.Release();
+                    placesProcessor.Release();
                 }
-
-                // Precondition, unmeasured: confirm the zero-vertex/null-mesh assumption the measured region
-                // above relies on actually holds for this fixture, before trusting an alloc-free reading.
-                TileMeshLayerProcessor precheckProcessor = TileMeshLayerProcessor.AllocateForKick(roadsRenderLayer, materialIndex: 0);
-                precheckProcessor.ProcessOnWorker(tile, in context);
-                IRenderLayerPayload precheckPayload = precheckProcessor.Complete();
-                Assert.AreEqual(0, precheckPayload.VertexCount,
-                    "precondition: this fixture must produce zero-vertex payloads (Upload() must be a genuine no-op)");
-                Assert.IsNull(precheckPayload.Upload(),
-                    "precondition: a zero-vertex payload's Upload() must return null without allocating a Mesh");
-                precheckPayload.Dispose();
 
                 // Warm the EXACT delegate the constraint measures below: JIT + any one-time pool/grow costs
                 // happen here, outside the measured region.
                 for (int i = 0; i < 8; i++) RunCycle();
 
                 Assert.That(RunCycle, Is.Not.AllocatingGCMemory(),
-                    "a warmed repeat of AllocateForKick + ProcessOnWorker + Complete + Upload/Dispose must not " +
-                    "allocate managed memory once TileMeshLayerProcessor/MeshDataPayload are pool-rented " +
-                    "instead of constructed fresh per layer per tile-build.");
+                    "a warmed repeat of AllocateForKick + ProcessOnWorker + Release must not allocate managed " +
+                    "memory once TileMeshLayerProcessor is pool-rented instead of constructed fresh per layer " +
+                    "per tile-build.");
             }
             finally
             {
@@ -225,6 +177,12 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void Upload_DoesNotReturnThePayloadToThePool_OnlyDisposeDoes()
         {
+            // job-scheduling-design.md §8 stage 5 Group B (§3.6): this tooth's subject is MeshDataPayload's
+            // OWN pool contract — it never needed the runner, only a vehicle to obtain a real,
+            // vertex-bearing payload. Post-migration (no more seam-arm processor to route one through), get
+            // one directly: allocate a tracked writable MeshDataArray, write real geometry into it with the
+            // still-kept (E2 ruling) StyledFillTileBuilder.WriteMeshData, then wrap it exactly the way the
+            // (retired) seam-arm settlement used to — MeshDataPayloadPool.Rent() + Reset(...).
             var feature = new InMemoryTileFeature
             {
                 GeometryType = TileGeometryType.Polygon,
@@ -233,34 +191,22 @@ namespace MapRenderer.Tests.Tiles
             var tileId = new TileId { Z = 0, X = 0, Y = 0 };
             const string sourceLayerName = "isolation-fixture-layer";
             var layer = new InMemoryTileLayer(
-                sourceLayerName, tileId, new IFeature[] { feature }, (uint)TileBackgroundLayerProcessor.Extent);
+                sourceLayerName, tileId, new IFeature[] { feature }, (uint)BackgroundQuad.Extent);
             using var fixtureTile = new InMemoryDecodedTile(layer);
+            TileGeometryBuffers geometry = layer.Geometry;
 
-            var styleLayer = new StyleLayer { Id = "isolation-fill", SourceLayer = sourceLayerName };
             var paint = new Fill.PaintProperties(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
-            var fillLayer = new ProducingFillRenderLayer(styleLayer, paint);
-
             var projection = new WebMercatorProjection();
-            var context = new TileLayerProcessContext
-            {
-                Tile             = tileId,
-                Zoom             = 0.0,
-                TileOriginRender = TileRenderOrigin.Project(tileId, projection),
-                Projection       = projection,
-            };
+            double3 renderOrigin = TileRenderOrigin.Project(tileId, projection);
+            var selected = new List<SelectedTileFeature> { new SelectedTileFeature { Feature = feature, Ordinal = 0 } };
 
-            var processor = TileMeshLayerProcessor.AllocateForKick(fillLayer, materialIndex: 0);
-            var decode = new SharedDisposable<IDecodedTile>(fixtureTile);
+            Mesh.MeshDataArray mda = MeshDataPayload.AllocateTracked(1);
+            SyncMeshWrite.Fill(mda[0], selected, geometry, paint, zoom: 0.0, renderOrigin,
+                out int vertexCount, out Bounds writeBounds, projection);
 
-            IRenderLayerPayload[] payloads;
-            try
-            {
-                payloads = TileLayerProcessorRunner.RunWorkerPass(
-                    decode, in context, new ITileMeshLayerProcessor[] { processor });
-            }
-            finally { decode.Release(); }
+            MeshDataPayload payload = MeshDataPayloadPool.Rent();
+            payload.Reset(mda, vertexCount, writeBounds, "isolation-fill", materialIndex: 0);
 
-            var payload = (MeshDataPayload)payloads[0];
             Assert.Greater(payload.VertexCount, 0, "precondition: the fixture must produce real geometry");
 
             Mesh mesh = payload.Upload();

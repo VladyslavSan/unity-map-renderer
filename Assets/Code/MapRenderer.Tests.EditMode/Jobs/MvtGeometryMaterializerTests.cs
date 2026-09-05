@@ -8,8 +8,8 @@ using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Geometry;
+using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.Jobs
 {
     /// <summary>
@@ -80,8 +80,9 @@ namespace MapRenderer.Tests.Jobs
     ///
     /// <para><c>RingCapacity</c> is exercised here rather than beside the other
     /// <c>TileGeometryBuffers</c> cases because it exists for this seam: once the sizing pre-pass moved into
-    /// the materializer, the capacity <c>FillMeshPipeline.Schedule</c> sizes Stage 2 from has to come back off
-    /// the buffer.</para>
+    /// the materializer, the capacity a fill mesher's own sizing stage needs (<c>FillSizingJob</c>, on the
+    /// graph now — job-scheduling-design.md §8 stage 4 Group B retired the synchronous
+    /// <c>FillMeshPipeline.Schedule</c> that used to size it) has to come back off the buffer.</para>
     /// </summary>
     [TestFixture]
     public class MvtGeometryMaterializerTests
@@ -92,9 +93,9 @@ namespace MapRenderer.Tests.Jobs
         /// <summary>
         /// T3 — the shared buffer carries <b>every</b> ring the source expresses, including rings too short
         /// to be a polygon. Fill's <c>rLen &lt; 3</c> filter belongs to <c>RingAssemblyJob</c>; a filter that
-        /// crept into the shared decode stage would starve the line consumer, and
-        /// <c>Schedule</c>'s output cannot see it (ring assembly re-filters, and nothing reads
-        /// <c>TileMeshBuffers.RingCount</c>). So the materializer is driven directly.
+        /// crept into the shared decode stage would starve the line consumer, and a fill mesher's own output
+        /// cannot see it (ring assembly re-filters, and nothing downstream reports the pre-filter ring
+        /// count). So the materializer is driven directly.
         /// </summary>
         [Test]
         public void Materialize_CarriesShortRingsUnfiltered()

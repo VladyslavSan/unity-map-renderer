@@ -1,3 +1,6 @@
+// Unity EditMode only. It exercises MapRenderer.Jobs.Mvt (the tile-decode seam, moved out of Core),
+// which Tools/core-tests does not compile — this file is not registered there.
+
 using System;
 using System.IO;
 using System.Collections.Generic;

@@ -10,9 +10,10 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 
@@ -194,7 +195,7 @@ namespace MapRenderer.Tests.Jobs
         /// <c>FeatureCount</c> — a number the tooth can read.</para>
         ///
         /// <para><b>Production configuration:</b> the real <see cref="TileMeshLayerProcessor"/>, which is the
-        /// only production caller of <c>ITileMeshRenderLayer.WriteInto</c> and therefore the one site
+        /// only production caller of <c>ITileMeshRenderLayer.BuildGraphRequest</c> and therefore the one site
         /// <i>on the mesh path</i> where the selection and the buffer are chosen. It resolves the
         /// source-layer once and takes both off that single local; this tooth is what makes that structural,
         /// rather than a comment.</para>
@@ -235,26 +236,24 @@ namespace MapRenderer.Tests.Jobs
             };
 
             TileMeshLayerProcessor processor = TileMeshLayerProcessor.AllocateForKick(renderLayer, materialIndex: 0);
-            IRenderLayerPayload payload = null;
             try
             {
                 processor.ProcessOnWorker(tile, in context);
-                payload = processor.Complete();
 
-                Assert.AreEqual(1, renderLayer.WriteIntoCallCount,
-                    "precondition: WriteInto must have been reached — an unreached layer records nothing and " +
-                    "every assertion below would be comparing defaults");
+                Assert.AreEqual(1, renderLayer.BuildGraphRequestCallCount,
+                    "precondition: BuildGraphRequest must have been reached — an unreached layer records " +
+                    "nothing and every assertion below would be comparing defaults");
                 Assert.AreEqual(2, renderLayer.ObservedFeatureCount,
-                    "the buffer handed to WriteInto must be the ROADS layer's (2 features), not the places " +
-                    "layer's (5). The ordinals in the selection index the source-layer the style layer names; " +
-                    "a buffer from any other layer makes every per-feature array a mis-attribution — and, " +
-                    "when the other layer is the shorter one, an in-range and therefore silent one.");
+                    "the buffer handed to BuildGraphRequest must be the ROADS layer's (2 features), not the " +
+                    "places layer's (5). The ordinals in the selection index the source-layer the style layer " +
+                    "names; a buffer from any other layer makes every per-feature array a mis-attribution — " +
+                    "and, when the other layer is the shorter one, an in-range and therefore silent one.");
                 AssertOrdinalsAddressTheBuffer(
                     renderLayer.ObservedSelection, renderLayer.ObservedGeometry, "roads via TileMeshLayerProcessor");
             }
             finally
             {
-                payload?.Dispose();
+                processor.Release();
             }
         }
 
@@ -318,11 +317,13 @@ namespace MapRenderer.Tests.Jobs
 
         // ── Test doubles ──────────────────────────────────────────────────────────────────────────────
 
-        /// <summary>Captures what the processor actually handed <c>WriteInto</c> — the selection and the
-        /// buffer, the two things clause C exists to compare — and writes nothing.</summary>
+        /// <summary>Captures what the processor actually handed <c>BuildGraphRequest</c> — the selection and
+        /// the buffer, the two things clause C exists to compare — and builds no request (§3.5-analogous:
+        /// <c>selected</c>/<c>geometry</c> are BuildGraphRequest parameters too, so recording them needs no
+        /// new production observability).</summary>
         private sealed class RecordingTileMeshRenderLayer : ITileMeshRenderLayer
         {
-            public int                       WriteIntoCallCount   { get; private set; }
+            public int                       BuildGraphRequestCallCount { get; private set; }
             public IReadOnlyList<SelectedTileFeature> ObservedSelection { get; private set; }
             public TileGeometryBuffers       ObservedGeometry     { get; private set; }
             public int                       ObservedFeatureCount => ObservedGeometry.FeatureCount;
@@ -338,16 +339,14 @@ namespace MapRenderer.Tests.Jobs
             public void ApplyZoom(double zoom, double devicePixelRatio) { }
             public void Dispose() { }
 
-            public void WriteInto(
-                Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-                double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
+            public ILayerMeshBuild BuildGraphRequest(
+                IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                in TileLayerProcessContext context, int materialIndex, string payloadName)
             {
-                WriteIntoCallCount++;
+                BuildGraphRequestCallCount++;
                 ObservedSelection = selected;
                 ObservedGeometry  = geometry;
-                vertexCount = 0;
-                bounds      = default;
+                return null;
             }
         }
     }

@@ -148,13 +148,13 @@ namespace MapRenderer.Tests.Text.Placement
 
             try
             {
-                var pairScratch = new SymbolTileBuffer();
-                AddPairSymbols(pairScratch, frame.SceneOriginRender);
+                var pairBuffer = new SymbolTileBuffer();
+                AddPairSymbols(pairBuffer, frame.SceneOriginRender);
 
                 // R3: duplicate — the collision verdict is harvested one Tick late.
-                system.Tick(in frame, plan.Build(pairScratch), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(pairBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(pairScratch), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(pairBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 // §10 D8: TWO symbols (icon+text), ONE candidate — the whole point of the pairing fix (fewer
@@ -208,8 +208,8 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 const float TextOffsetPx = 200f;
-                var mixedScratch = new SymbolTileBuffer();
-                AddPairSymbols(mixedScratch, frame.SceneOriginRender, textOptional, TextOffsetPx);
+                var mixedBuffer = new SymbolTileBuffer();
+                AddPairSymbols(mixedBuffer, frame.SceneOriginRender, textOptional, TextOffsetPx);
 
                 // A higher-priority blocker sitting on the TEXT half's translated box and nowhere near the
                 // icon's (±40 px around +200, vs. the icon's ±8 around 0). It lives on its OWN tile key so its
@@ -224,7 +224,7 @@ namespace MapRenderer.Tests.Text.Placement
                         UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1), LineIndex = 0,
                     },
                 };
-                TestSymbolTileBuffer.AddPoint(mixedScratch, frame.SceneOriginRender, blockerQuads, new float2(-40f, -40f), new float2(40f, 40f),
+                TestSymbolTileBuffer.AddPoint(mixedBuffer, frame.SceneOriginRender, blockerQuads, new float2(-40f, -40f), new float2(40f, 40f),
                     text: "blocker",
                     paint: SymbolPaint.Default,
                     textSizePx: 24f,
@@ -236,9 +236,9 @@ namespace MapRenderer.Tests.Text.Placement
 
                 // Two Ticks: the first schedules the collision, the second harvests its verdict (R3) — and,
                 // for the optional case, seeds the per-half drop mask the emit loop reads.
-                system.Tick(in frame, plan.Build(mixedScratch), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(mixedScratch), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(2, system.LastCandidateCount, "precondition: the blocker + the pair (one candidate each)");
@@ -299,18 +299,18 @@ namespace MapRenderer.Tests.Text.Placement
                         UvTopLeft = float2.zero, UvBottomRight = new float2(1, 1), LineIndex = 0,
                     },
                 };
-                var mixedScratch = new SymbolTileBuffer();
-                TestSymbolTileBuffer.AddPoint(mixedScratch, frame.SceneOriginRender, blockerQuads, new float2(-40f, -40f), new float2(40f, 40f),
+                var mixedBuffer = new SymbolTileBuffer();
+                TestSymbolTileBuffer.AddPoint(mixedBuffer, frame.SceneOriginRender, blockerQuads, new float2(-40f, -40f), new float2(40f, 40f),
                     paint: SymbolPaint.Default,
                     textSizePx: 24f,
                     sortKey: -1f,
                     featureIndex: 99,
                     tileKey: 0L);
-                AddPairSymbols(mixedScratch, frame.SceneOriginRender);
+                AddPairSymbols(mixedBuffer, frame.SceneOriginRender);
 
-                system.Tick(in frame, plan.Build(mixedScratch), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
-                system.Tick(in frame, plan.Build(mixedScratch), atlasTexture, deltaTime: float.PositiveInfinity,
+                system.Tick(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
                 Assert.AreEqual(2, system.LastCandidateCount, "the blocker + the pair (one candidate each)");

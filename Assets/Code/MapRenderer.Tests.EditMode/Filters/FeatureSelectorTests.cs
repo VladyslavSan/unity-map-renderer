@@ -1,6 +1,5 @@
-// Engine-free: this file is compiled verbatim by both the Unity EditMode runner
-// (Assets/Code/MapRenderer.Tests.EditMode/) and the fast dotnet test project (Tools/core-tests/).
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only. It exercises MapRenderer.Jobs.Tiles/.Mvt (the tile-decode seam, moved out of
+// Core), which Tools/core-tests does not compile — this file is not registered there.
 
 using MapRenderer.Core.Filters;
 using MapRenderer.Core.Json;

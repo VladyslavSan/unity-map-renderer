@@ -1,7 +1,10 @@
 // Unity EditMode only — needs the job runtime (NativeArray / IJob). NOT registered in core-tests.csproj.
-// NOTE: EditMode batch runs the job Burst-compiled; this differential validates the native port against the
-// managed reference. The greedy survivor decision is integer/branch logic (no reassociated float math), so the
-// two must be BIT-IDENTICAL — hence exact-set equality, not tolerance.
+// NOTE: Burst compiles this job only when Jobs ▸ Burst ▸ Enable Compilation is on AND it compiles — a compile
+// failure falls back to managed IL SILENTLY (FillGraphBurstProbeTests), so the runner alone doesn't decide it.
+// In this project's practice ./Tools/run-tests.sh (batch mode, confirmed via its log) is the Burst-compiled
+// path; the interactive Editor Test Runner is not verified that way. This differential validates the native
+// port against the managed reference. The greedy survivor decision is integer/branch logic (no reassociated
+// float math), so the two must be BIT-IDENTICAL — hence exact-set equality, not tolerance.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -9,8 +12,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Symbols;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>

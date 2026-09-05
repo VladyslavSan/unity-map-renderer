@@ -1,4 +1,4 @@
-// Unity EditMode only — NativeArray/NativeList ownership of MapRenderer.Jobs.TileGeometryBuffers.
+// Unity EditMode only — NativeArray/NativeList ownership of TileGeometryBuffers.
 // NOT registered in Tools/core-tests (the engine-free runner cannot compile Unity.Collections).
 
 using NUnit.Framework;
@@ -6,8 +6,7 @@ using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Geometry;
 namespace MapRenderer.Tests.Jobs
 {
     /// <summary>

@@ -24,7 +24,8 @@ namespace MapRenderer.Tests.Style
     /// S105 Slice 2 (A3): <see cref="SymbolFeatureExtractor.Extract"/> over the committed fixture's
     /// <c>centroids</c> layer (250 Point features with <c>NAME</c>/<c>ABBREV</c>) yields the right count,
     /// the right resolved text for the first feature (<c>"Aruba"</c>), an anchor that is the REAL
-    /// tile→geo→project chain (not a stub), and honours the layer filter. Engine-free; both runners.
+    /// tile→geo→project chain (not a stub), and honours the layer filter. Unity EditMode only (see
+    /// file header) — it drives a Waist-1 <c>TileGeometryBuffers</c> extraction.
     /// </summary>
     [TestFixture]
     public class SymbolFeatureExtractorTests

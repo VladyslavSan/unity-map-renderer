@@ -12,14 +12,15 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
+using MapRenderer.Jobs.Fill;
 namespace MapRenderer.Tests.Meshing
 {
     public class GlobeSubdivisionJobParityTests
@@ -72,17 +73,25 @@ namespace MapRenderer.Tests.Meshing
             double2[] tileVerts, int[] triangleIndices, int[] vertexFeatureIdx, int srcVertCount, int srcIndexCount,
             double maxEdgeAngleRad, int maxDepth, int maxOutputVertices)
         {
-            var nativeVerts = new NativeArray<double2>(tileVerts, Allocator.Persistent);
-            var nativeTris = new NativeArray<int>(triangleIndices, Allocator.Persistent);
-            var nativeFeat = new NativeArray<int>(vertexFeatureIdx, Allocator.Persistent);
+            var nativeVerts = new NativeList<double2>(tileVerts.Length, Allocator.Persistent);
+            nativeVerts.CopyFrom(tileVerts);
+            var nativeTris = new NativeList<int>(triangleIndices.Length, Allocator.Persistent);
+            nativeTris.CopyFrom(triangleIndices);
+            var nativeFeat = new NativeList<int>(vertexFeatureIdx.Length, Allocator.Persistent);
+            nativeFeat.CopyFrom(vertexFeatureIdx);
             var outVerts = new NativeList<GlobeFillVertex>(64, Allocator.Persistent);
             var outIndices = new NativeList<int>(64, Allocator.Persistent);
             try
             {
-                // Explicit constants — no implicit defaults (Run has none, but be explicit at every call site).
-                GlobeFillSubdivideDispatch.Run(
-                    proj, nativeVerts, nativeTris, nativeFeat, srcVertCount, srcIndexCount, id, extent, origin,
-                    maxEdgeAngleRad, maxDepth, maxOutputVertices, outVerts, outIndices);
+                // Explicit constants — no implicit defaults (Schedule has none, but be explicit at every call
+                // site). job-scheduling-design.md §8 stage 4 Group B: the synchronous Run entry point is
+                // retired — srcVertCount/srcIndexCount are unused by the scheduled form (it reads the lists'
+                // own lengths) but stay as parameters, still read by the mirror/roots build below.
+                JobHandle handle = GlobeFillSubdivideDispatch.Schedule(
+                    proj, nativeVerts, nativeTris, nativeFeat, id, extent, origin,
+                    maxEdgeAngleRad, maxDepth, maxOutputVertices, outVerts, outIndices, default);
+                JobHandle.ScheduleBatchedJobs();
+                handle.Complete();
 
                 var roots = SubdivisionCoverageValidator.BuildRootsFromRaw(
                     tileVerts, triangleIndices, vertexFeatureIdx, srcVertCount, srcIndexCount);

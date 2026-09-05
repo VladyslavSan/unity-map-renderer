@@ -1,5 +1,5 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only. It exercises MapRenderer.Jobs.Tiles/.Mvt (the tile-decode seam, moved out of
+// Core), which Tools/core-tests does not compile — this file is not registered there.
 
 using System;
 using System.Collections.Generic;
@@ -19,7 +19,7 @@ namespace MapRenderer.Tests.Style
     /// S13 / S60 — <see cref="Fill.PaintProperties"/>: classification, pinned values, BakeNumbers
     /// distinct-alpha, and SourceLayerResolver seam routing.
     ///
-    /// Engine-free (no UnityEngine). Runs in BOTH dotnet core-tests AND Unity EditMode.
+    /// Unity EditMode only (see file header) — it exercises the MapRenderer.Jobs.Tiles/.Mvt decode seam.
     ///
     /// S60 changes:
     ///   • All properties are <c>StyleProperty&lt;T&gt;</c>; XKind → <c>.Kind</c>; null-guard →

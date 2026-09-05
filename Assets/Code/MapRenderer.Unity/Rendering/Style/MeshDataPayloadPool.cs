@@ -12,7 +12,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// ThreadPool but not under Inline (both ends land on main there) — <see cref="ConcurrentBag{T}"/> makes
     /// it safe either way, not just the crossing case: <see cref="Rent"/> atomically removes an instance
     /// before handing it out, so no two renters, on any thread (main included), can ever observe the same
-    /// reference at once. Mirrors <c>TileBuildScratchPool</c>'s shape exactly; see its doc comment for the
+    /// reference at once. Mirrors <c>TileBuildBuffersPool</c>'s shape exactly; see its doc comment for the
     /// fuller rationale.
     /// </summary>
     internal static class MeshDataPayloadPool

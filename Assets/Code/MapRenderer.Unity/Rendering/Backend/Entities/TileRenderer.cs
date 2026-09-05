@@ -82,7 +82,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // Stall #2: reused scratch for one RemoveItems() batch — the record's layer entities plus any tile
         // root the batch empties, destroyed in ONE EntityManager.DestroyEntity(NativeArray) structural change
         // instead of one per layer. Persistent (reused every release); disposed in DoDispose.
-        private NativeList<Entity> _destroyScratch;
+        private NativeList<Entity> _destroyList;
 
         // ── Stall #3: ID-based layer creation (avoid the per-entity RenderMeshArray) ──────────────────
         // EG's ID route: register each layer material ONCE + each mesh on add, and point the entity at them
@@ -173,7 +173,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             _prevDefaultWorld = World.DefaultGameObjectInjectionWorld;
             World.DefaultGameObjectInjectionWorld = _world; // Entities Graphics reads the default world.
             _em = _world.EntityManager;
-            _destroyScratch = new NativeList<Entity>(64, Allocator.Persistent);
+            _destroyList = new NativeList<Entity>(64, Allocator.Persistent);
 
             _initGroup = _world.GetExistingSystemManaged<InitializationSystemGroup>();
             _simGroup  = _world.GetExistingSystemManaged<SimulationSystemGroup>();
@@ -461,11 +461,11 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             // Mirror DoDispose's own _world.IsCreated guard; inert during normal runtime (World alive).
             if (_world is not { IsCreated: true }) return;
 
-            _destroyScratch.Clear();
+            _destroyList.Clear();
             for (int i = 0; i < handles.Length; i++)
             {
                 if (!_items.TryGetValue(handles[i], out var item)) continue; // idempotent unknown handle
-                if (_em.Exists(item.Entity)) _destroyScratch.Add(item.Entity);
+                if (_em.Exists(item.Entity)) _destroyList.Add(item.Entity);
                 _items.Remove(handles[i]);
                 _eg.UnregisterMesh(item.MeshId); // stall #3: ID route requires explicit unregister
                 RegisteredMeshCount--;
@@ -475,7 +475,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                     root.ChildCount--;
                     if (root.ChildCount <= 0)
                     {
-                        if (_em.Exists(root.Root)) _destroyScratch.Add(root.Root);
+                        if (_em.Exists(root.Root)) _destroyList.Add(root.Root);
                         _tileRoots.Remove(item.TileId);
                     }
                     else
@@ -485,11 +485,11 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                 }
             }
 
-            if (_destroyScratch.Length > 0)
+            if (_destroyList.Length > 0)
             {
-                _em.DestroyEntity(_destroyScratch.AsArray());
+                _em.DestroyEntity(_destroyList.AsArray());
                 DestroyEntityBatchesLastRemove = 1;
-                EntitiesDestroyedLastRemove    = _destroyScratch.Length;
+                EntitiesDestroyedLastRemove    = _destroyList.Length;
             }
         }
 
@@ -550,7 +550,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         protected override void DoDispose()
         {
-            _destroyScratch.Dispose();
+            _destroyList.Dispose();
             _items.Clear();
             _tileRoots.Clear();
             if (_world != null && _world.IsCreated)

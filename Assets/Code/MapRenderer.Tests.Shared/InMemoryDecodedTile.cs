@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Tests

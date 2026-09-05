@@ -196,7 +196,7 @@ namespace MapRenderer.Unity.Text.Placement
                 maxSize: 512);
 
         // Reused reclaim-sweep scratch (cleared each EndFrame, never reallocated in steady state — T4).
-        private readonly List<WorldSymbolKey> _reclaimScratch = new();
+        private readonly List<WorldSymbolKey> _reclaimKeys = new();
 
         /// <summary>Profiler marker name constants (SSOT) for this type's per-frame work — referenced by the
         /// <see cref="ProfilerMarker"/> field below and by <c>ProfilerMarkerTests</c>.</summary>
@@ -416,16 +416,16 @@ namespace MapRenderer.Unity.Text.Placement
 
                 if (slot.IdleFrames >= IdleReclaimFrames)
                 {
-                    _reclaimScratch.Add(key);
+                    _reclaimKeys.Add(key);
                 }
             }
 
             // ONE transform write per tile container per frame — not per slot (the A1 defect this corrects).
             _tree.Rebuild(in frame);
 
-            for (int i = 0; i < _reclaimScratch.Count; i++)
+            for (int i = 0; i < _reclaimKeys.Count; i++)
             {
-                WorldSymbolKey key  = _reclaimScratch[i];
+                WorldSymbolKey key  = _reclaimKeys[i];
                 Slot          slot = _slots[key];
                 ReleaseChild(in key, slot);
                 slot.Mesh.DestroySafely();
@@ -435,17 +435,9 @@ namespace MapRenderer.Unity.Text.Placement
                 _slots.Remove(key);
             }
 
-            _reclaimScratch.Clear();
+            _reclaimKeys.Clear();
             }
         }
-
-        /// <summary>Held-frame residual for the symbol-placement throttle: re-rebase every live tile container
-        /// against this frame's floating-origin scene frame WITHOUT re-placing. Because symbols are billboarded
-        /// on the GPU from their tile-local anchors (never rebaked on camera motion), this one
-        /// transform-per-container write is ALL a skipped placement frame needs to keep them correctly
-        /// world-anchored — no slot clear (<see cref="BeginFrame"/> would wipe the meshes), no mesh rebuild.</summary>
-        /// <param name="frame">This frame's floating-origin scene frame (same input <see cref="EndFrame"/> rebases against).</param>
-        public void Rebase(in SceneFrame frame) => _tree.Rebuild(in frame);
 
         /// <summary>Lazily creates <paramref name="slot"/>'s text/icon child GameObject (MeshFilter bound to
         /// the slot's persistent, reused <see cref="Mesh"/> — no rebind afterward, only its buffers change)

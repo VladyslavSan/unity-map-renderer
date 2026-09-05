@@ -71,6 +71,7 @@ launching (so the file existing proves *this* run wrote it), greps the log for `
 | `3` | this project's Editor is open — close it |
 | `4` | compilation failed; **no tests ran** |
 | `5` | no results produced for this run (crash), or an unfiltered run matched zero tests |
+| `6` | the `Tools/core-tests` fast loop failed (or ran zero tests) — Unity was never launched |
 
 > The script is allowlisted in `.claude/settings.json` (`Bash(./Tools/run-tests.sh:*)`) so it runs
 > without a permission prompt. What it does, expanded, in case you need to invoke a step by hand:
@@ -116,6 +117,11 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
 - **Still run the Unity EditMode recipe (above) before declaring a stage done** — it's the source of truth
   for engine-integration tests that the fast project can't cover: `MeshBuilder`/`UnityEngine.Mesh`,
   `NativeArray`/Burst jobs, MonoBehaviours, and Burst-compilation correctness.
+- **`./Tools/run-tests.sh` runs this project too, before launching Unity** — it is part of the gate, not
+  a separate convenience script; a break here fails the script (exit `6`) without ever starting Unity.
+  This project went unbuilt by anything for weeks in 2026-08 and rotted silently because the gate never
+  exercised it — iterating here directly is still faster, but declaring a stage done no longer requires
+  remembering to run it separately.
 
 ### Unity CLI caveats
 - **The Editor must be closed.** Unity locks the project; batch mode can't run alongside an open Editor.

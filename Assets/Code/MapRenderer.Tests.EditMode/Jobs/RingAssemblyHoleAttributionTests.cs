@@ -10,7 +10,8 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Core.Expressions;
@@ -23,8 +24,10 @@ namespace MapRenderer.Tests.Jobs
     ///
     /// <para><b>Why it matters.</b> B7 replaces "the materializer receives exactly this layer's features" with
     /// "the buffer is shared and each consumer walks a ring <i>visit order</i>". Fill's visit order groups by
-    /// feature and keeps decode order <i>within</i> a feature. The hole sort in
-    /// <c>FillMeshPipeline.Schedule</c> tiebreaks on <b>ring index</b>, so bridge order is preserved iff the
+    /// feature and keeps decode order <i>within</i> a feature. The hole sort — <c>FillMeshPipeline.HoleRingComparer</c>,
+    /// run from <c>FillGatherJob</c> on the graph (job-scheduling-design.md §8 stage 4 Group B retired the
+    /// synchronous <c>FillMeshPipeline.Schedule</c> that used to run it directly) — tiebreaks on <b>ring
+    /// index</b>, so bridge order is preserved iff the
     /// holes being compared are always rings whose relative order the derive did not disturb — which is true
     /// exactly when a polygon's holes share its outer ring's feature.</para>
     ///

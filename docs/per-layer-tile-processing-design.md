@@ -146,7 +146,7 @@ revertible commit. Hard fences respected until each stage's own scope lifted one
 the mesh consume/dispose Model-B contract, and the `IDataSource`/`MvtTile` generalization.
 
 - **A1 — processor contract + fill/line fan-out.** `ITileLayerProcessor` (worker invocation over a shared decoded
-  tile) + `ITileMeshLayerProcessor` (the mesh-settlement capability, `Complete()` → `IRenderLayerPayload`) +
+  tile) + `ITileMeshLayerProcessor` (the mesh-settlement capability, `Complete()` → `MeshDataPayload`) +
   `TileLayerProcessorRunner.RunWorkerPass` (decode once, dense-order invoke, settle every processor exactly once)
   + the `TileMeshLayerProcessor` adapter around `ITileMeshRenderLayer.WriteInto`, all under
   `Rendering/Tile/Processing/`. `TileManager.KickMeshBuild` now allocates one processor per this-source layer at

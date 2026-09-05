@@ -19,7 +19,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Projection;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Jobs.Mvt;

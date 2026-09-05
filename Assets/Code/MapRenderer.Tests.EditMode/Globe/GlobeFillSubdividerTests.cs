@@ -1,33 +1,36 @@
 // S91-C (C-3): the globe fill subdivider (Burst job) must refine flat earcut triangles onto the sphere, pass
-// flat Mercator straight through, and never explode (depth cap + vertex budget). Run through the same dispatch
-// + NativeArray/NativeList path the fill builder uses.
+// flat Mercator straight through, and never explode (depth cap + vertex budget). Scheduled through the same
+// dispatch + NativeList path the fill graph uses (job-scheduling-design.md §8 stage 4 Group B: the
+// synchronous Run/RunTyped entry point is retired with its synchronous callers).
 
 using NUnit.Framework;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Fill;
 namespace MapRenderer.Tests.Globe
 {
     public class GlobeFillSubdividerTests
     {
         private const double Extent = 4096;
 
-        // One full-tile triangle → run the Burst subdivide job into NativeLists (caller disposes).
+        // One full-tile triangle → schedule the Burst subdivide job into NativeLists (caller disposes).
         private static void Run(IProjection proj, TileId id, int maxDepth, int budget,
             out NativeList<GlobeFillVertex> verts, out NativeList<int> idx)
         {
-            var tileVerts = new NativeArray<double2>(3, Allocator.Persistent);
-            tileVerts[0] = new double2(0, 0); tileVerts[1] = new double2(Extent, 0); tileVerts[2] = new double2(0, Extent);
-            var tris = new NativeArray<int>(3, Allocator.Persistent); tris[0] = 0; tris[1] = 1; tris[2] = 2;
-            var feat = new NativeArray<int>(3, Allocator.Persistent); // all feature 0
+            var tileVerts = new NativeList<double2>(3, Allocator.Persistent);
+            tileVerts.Add(new double2(0, 0)); tileVerts.Add(new double2(Extent, 0)); tileVerts.Add(new double2(0, Extent));
+            var tris = new NativeList<int>(3, Allocator.Persistent); tris.Add(0); tris.Add(1); tris.Add(2);
+            var feat = new NativeList<int>(3, Allocator.Persistent); feat.Add(0); feat.Add(0); feat.Add(0);
 
             verts = new NativeList<GlobeFillVertex>(64, Allocator.Persistent);
             idx   = new NativeList<int>(64, Allocator.Persistent);
-            GlobeFillSubdivideDispatch.Run(
-                proj, tileVerts, tris, feat, 3, 3, id, Extent, new double3(0, 0, 0),
-                GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, maxDepth, budget, verts, idx);
+            JobHandle handle = GlobeFillSubdivideDispatch.Schedule(
+                proj, tileVerts, tris, feat, id, Extent, new double3(0, 0, 0),
+                GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, maxDepth, budget, verts, idx, default);
+            JobHandle.ScheduleBatchedJobs();
+            handle.Complete();
 
             tileVerts.Dispose(); tris.Dispose(); feat.Dispose();
         }

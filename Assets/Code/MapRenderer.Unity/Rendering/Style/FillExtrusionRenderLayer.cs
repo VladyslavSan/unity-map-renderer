@@ -4,9 +4,11 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 
 namespace MapRenderer.Unity.Rendering.Style
 {
@@ -15,11 +17,14 @@ namespace MapRenderer.Unity.Rendering.Style
     /// runtime render object.
     ///
     /// <para><b>S23 I2b — roof + wall mesh, dedicated shader.</b> Replaces I1's flat 2D placeholder
-    /// (which reused <see cref="Meshing.StyledFillTileBuilder"/> and the FILL base material): <see cref="WriteInto"/>
-    /// now delegates to <see cref="Meshing.StyledFillExtrusionTileBuilder"/> (roof cap + side walls, VS
-    /// height extrusion along a per-vertex <c>sec φ</c>-baked extrude-up), and <see cref="TryCreate"/> clones
-    /// the dedicated <c>Map/FillExtrusion</c> base material (<see cref="Materials.MapMaterialSet.FillExtrusionMaterial"/>)
-    /// via <see cref="Materials.MaterialFactory.CreateFillExtrusionMaterial"/> instead of the flat FILL base.</para>
+    /// (which reused <see cref="Meshing.StyledFillTileBuilder"/> and the FILL base material):
+    /// <see cref="BuildGraphRequest"/> now delegates to <see cref="Meshing.StyledFillExtrusionTileBuilder"/>
+    /// (roof cap + side walls, VS height extrusion along a per-vertex <c>sec φ</c>-baked extrude-up), and
+    /// <see cref="TryCreate"/> clones the dedicated <c>Map/FillExtrusion</c> base material
+    /// (<see cref="Materials.MapMaterialSet.FillExtrusionMaterial"/>) via
+    /// <see cref="Materials.MaterialFactory.CreateFillExtrusionMaterial"/> instead of the flat FILL base.</para>
+    ///
+    /// <para><b>job-scheduling-design.md §8 stage 4:</b> the roof+walls mesh on the job graph.</para>
     ///
     /// Axes (design §"Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> /
     /// <see cref="DrawPersistence.Persistent"/>.
@@ -73,16 +78,20 @@ namespace MapRenderer.Unity.Rendering.Style
 
         public void ApplyZoom(double zoom, double devicePixelRatio) => _applier.ApplyZoom(zoom, devicePixelRatio);
 
-        // S23 I2b: the dedicated roof+wall builder — replaces I1's flat placeholder (StyledFillTileBuilder
-        // + FlatPlaceholderAdapter). StyledFillExtrusionTileBuilder reads its style directly from
-        // StyleLayer.Paint (a real FillExtrusion.PaintProperties), unlike the I1 adapter which carried none.
-        public void WriteInto(
-            Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-            double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-            Tile.Processing.TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
-            => Meshing.StyledFillExtrusionTileBuilder.WriteMeshData(
-                md, selected, geometry, _paint, zoom, tileOriginRender,
-                out vertexCount, out bounds, projection, clip, scratch);
+        // job-scheduling-design.md §8 stage 4: mirrors FillRenderLayer.BuildGraphRequest's shape — the
+        // graph's write step does the mesh write.
+        public Meshing.ILayerMeshBuild BuildGraphRequest(
+            IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+            in TileLayerProcessContext context, int materialIndex, string payloadName)
+        {
+            FillMeshPipeline.LayerInput input = Meshing.StyledFillExtrusionTileBuilder.BuildLayerInput(
+                selected, geometry, _paint, context.Zoom, context.TileOriginRender,
+                out var colors, out var bake,
+                context.Projection, context.BufferClip, context.Buffers);
+            // The relocated emptiness gate — see FillRenderLayer.BuildGraphRequest's own comment.
+            if (!input.RingVisitOrder.IsCreated) return null;
+            return Meshing.FillExtrusionLayerBuild.Rent(input, colors, bake, materialIndex, payloadName);
+        }
 
         public void Dispose() => RenderLayerSet.DestroyMaterialInstance(Material);
     }

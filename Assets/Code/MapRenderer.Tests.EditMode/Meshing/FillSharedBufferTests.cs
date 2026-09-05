@@ -10,7 +10,7 @@ using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Tests.Jobs;
 using MapRenderer.Unity.Rendering.Meshing;
 using Color = UnityEngine.Color;
@@ -239,8 +239,10 @@ namespace MapRenderer.Tests.Meshing
         /// 923 fill builds in the suite reach a rank <b>450 rings wide</b>, and the produced fill dropped from
         /// 30638 to 29982 vertices on the flat path and from 164535 to 137379 on the globe path. Every
         /// corpus-scale fill oracle in the repo is either a differential between two arms that would BOTH be
-        /// injected (cache vs fresh, sync vs async, view vs direct) or drives <c>FillMeshPipeline.Schedule</c>
-        /// with an identity visit order, bypassing this code entirely. So this was a genuine blind surface,
+        /// injected (cache vs fresh, sync vs async, view vs direct) or drives <c>FillMeshGraph.Schedule</c>
+        /// (job-scheduling-design.md §8 stage 4 Group B retired the synchronous <c>FillMeshPipeline.Schedule</c>
+        /// this paragraph originally named) with an identity visit order, bypassing this code entirely. So
+        /// this was a genuine blind surface,
         /// not a redundant one.</para>
         ///
         /// <para>The oracle is <b>covered area</b>, derived from the fixture's own geometry rather than
@@ -469,7 +471,7 @@ namespace MapRenderer.Tests.Meshing
             var mda = Mesh.AllocateWritableMeshData(1);
             try
             {
-                StyledFillTileBuilder.WriteMeshData(
+                SyncMeshWrite.Fill(
                     mda[0], selected, geometry, paint, 0.0,
                     TileRenderOrigin.Project(Tile, null),
                     out int vertexCount, out Bounds bounds, null, layout, clip);
@@ -510,7 +512,7 @@ namespace MapRenderer.Tests.Meshing
             featureColors[0]  = new Vector4(1f, 1f, 1f, 1f);
             try
             {
-                StyledFillTileBuilder.WriteGeometry(
+                SyncMeshWrite.FillGeometry(
                     mda[0], geometry, visitOrder, featureColors,
                     TileRenderOrigin.Project(tile, null), null, default,
                     out int vertexCount, out Bounds bounds);

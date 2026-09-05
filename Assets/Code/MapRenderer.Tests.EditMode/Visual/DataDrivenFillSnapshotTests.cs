@@ -16,7 +16,7 @@ namespace MapRenderer.Tests.Visual
     ///
     /// GPU context guard (inherited pattern):
     ///   If all renders come back all-black, tests degrade to Inconclusive.
-    ///   The DataDrivenColorBakeTests (engine-free) are the load-bearing CPU teeth for distinctness.
+    ///   The DataDrivenColorBakeTests (Unity EditMode) are the load-bearing CPU teeth for distinctness.
     ///   These snapshot tests confirm the full pipeline: bake → mesh → shader → GPU output.
     ///
     /// Acceptance teeth:
@@ -181,7 +181,7 @@ namespace MapRenderer.Tests.Visual
                     {
                         Assert.Inconclusive(
                             "Render is all-black: no GPU context. " +
-                            "DataDrivenColorBakeTests (engine-free) are the load-bearing CPU tooth for distinctness. " +
+                            "DataDrivenColorBakeTests (Unity EditMode) are the load-bearing CPU tooth for distinctness. " +
                             "Re-run as PlayMode: ./Tools/run-tests.sh PlayMode");
                         return;
                     }
@@ -197,7 +197,7 @@ namespace MapRenderer.Tests.Visual
 
                 Debug.Log($"[DataDrivenFillSnapshotTests] Distinct-color render: color clusters={clusters}");
 
-                // DataDrivenColorBakeTests (CPU, engine-free) already proved ≥2 distinct colors exist
+                // DataDrivenColorBakeTests (CPU, Unity EditMode) already proved ≥2 distinct colors exist
                 // in the bake. Here we just confirm ≥2 survived through the mesh→shader pipeline.
                 // If the test is Inconclusive (no GPU), the CPU test already covers distinctness.
                 if (clusters < 2)

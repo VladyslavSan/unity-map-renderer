@@ -134,7 +134,7 @@ namespace MapRenderer.Tests.Tiles
         /// admission-only fix would pass a vacuous version of this test. This fixture defeats that: it admits
         /// the whole cover centered on tile A (insertion order == A-priority), then PANS to tile B — a
         /// DIFFERENT, already-admitted tile — BEFORE anything is kicked. The two explicit
-        /// <c>MeshBuildsKickedLastTick() == 0</c> guards below prove the pan lands before any kick, so the
+        /// <c>TileBuildsStartedLastTick() == 0</c> guards below prove the pan lands before any kick, so the
         /// assertion that follows can only pass if PumpPending re-sorts its OWN kick order by the CURRENT
         /// (B-centered) priority — insertion order alone (stale, A-centered) would still kick A.</para>
         /// </summary>
@@ -173,7 +173,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LateUpdate();
                 Assert.GreaterOrEqual(view.LoadedTileCount(), 5,
                     "sanity: need a genuinely multi-tile cover for the cap to mean anything.");
-                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(),
                     "guard: nothing may be kicked yet — the pan below must land strictly BEFORE the first kick.");
 
                 var loadedBefore = new List<TileId>();
@@ -184,7 +184,7 @@ namespace MapRenderer.Tests.Tiles
                 // Pan onto B — still before anything kicks (second guard, right below).
                 view.Camera.Apply(new CameraPropertiesUpdate { Latitude = latB, Longitude = lonB });
                 view.LateUpdate();
-                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(),
                     "guard: still nothing kicked after the pan — if this fires, the fixture raced ahead of " +
                     "the pan and the test below would be vacuous.");
 
@@ -206,13 +206,13 @@ namespace MapRenderer.Tests.Tiles
                     "precondition: every fetch must have landed in ONE tick — if any are still in flight, " +
                     "the kick below would rank a PARTIAL ready-set and this tooth would be measuring " +
                     "decode-completion order, not priority order.");
-                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(),
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(),
                     "guard: the fetch-absorbing tick must not kick — if it does, the kick raced the " +
                     "decodes and the ready-set was partial after all.");
 
                 view.LateUpdate();
 
-                Assert.AreEqual(1, view.MeshBuildsKickedLastTick(),
+                Assert.AreEqual(1, view.TileBuildsStartedLastTick(),
                     "precondition: exactly one kick must fire on the first kicking tick (cap=1).");
 
                 // Sampled AT the kicking tick: if work is still in flight here, the kick chose from a
@@ -225,10 +225,21 @@ namespace MapRenderer.Tests.Tiles
                 string kickDiag = $"atKick: inFlight={view.InFlightCount()} loaded={atKick.Count} " +
                                   $"priorityArgMin={ArgMin(atKick, in kickCtx)}";
 
-                // Let that ONE kicked build complete and consume on the NEXT tick, without giving a second
-                // kick's build time to complete too.
-                view.AwaitInFlightMeshBuilds();
-                view.LateUpdate();
+                // job-scheduling-design.md §8 stage 3: a source tile's kicked build no longer completes+
+                // consumes in one more tick — it needs the prologue-complete tick, the write-kick tick, AND
+                // the consume tick (kickTick+3, not kickTick+1; TileBuildsStartedLastTick's own doc). One
+                // Await + one LateUpdate only completes whichever STEP is currently in flight. Pump
+                // (bounded) until B is Built instead of assuming a fixed tick count — the cap (1) still
+                // throttles NEW kicks each tick exactly as before, so this changes nothing about which tile
+                // gets picked, only how long B's OWN build takes to finish once picked. A may also get
+                // kicked during this window (it already could, pre-stage-3 — the ORIGINAL comment here
+                // already tolerated "a second kick", just not a second kick given time to COMPLETE); the
+                // assertions below still check A is not YET built at the moment B settles.
+                for (int f = 0; f < 20 && !view.TryGetBuiltTile(tileB); f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                }
 
                 string outcome = DescribeBuildOutcome(view, tileA, tileB) + " " + kickDiag;
 

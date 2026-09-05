@@ -3,7 +3,8 @@
 // Drives load→release of N tiles including the race (release a tile whose mesh build
 // completed but wasn't consumed) and asserts zero orphaned Mesh objects.
 //
-// S48 extension: MeshBuildResult now holds NativeArray-backed LayerMeshData payloads.
+// S48 extension: a tile's mesh build settles into a dense MeshDataPayload[], each slot a
+// NativeArray-backed payload.
 // The NativeArray leak guard is NON-VACUOUS:
 //   - MeshDataPayload.DebugLiveAllocCount tracks live allocations.
 //   - A positive counter after a full cycle means NativeArrays were produced but not Disposed.
@@ -23,18 +24,22 @@ using System.IO;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
+using Unity.Collections;
 using Unity.Entities;
+using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
@@ -262,21 +267,25 @@ namespace MapRenderer.Tests.Lifetime
         // ── Tooth 5b: Release mid-flight — no orphaned Mesh ──────────────────────────────────
 
         /// <summary>
-        /// The race: request tiles, kick mesh build tasks, then pan far away so tiles are
-        /// released while their mesh build is still in-flight (or just completed). After
-        /// the mesh build tasks complete, no Meshes must be created for the evicted tiles.
+        /// The race: request tiles, hold their mesh build's measure step genuinely in-flight on a gated
+        /// delay job, then pan far away so tiles are released while still held. After the delay job is
+        /// released, no Meshes must be created for the evicted tiles.
         ///
         /// This is the precise "race" described in S51 tooth 5: "release a tile whose mesh build
         /// result completed but wasn't consumed". ReleaseTile removes the tile from _loaded; the next
         /// PumpPending snapshot (foreach over _loaded) excludes the released tile, so
         /// ConsumeMeshBuild is never called for it — no Mesh is created.
         ///
-        /// Positive control: the test uses MaxConsumesPerTick=0 during the eviction window to FORCE the
-        /// mid-flight state deterministically. The build (fetch→kick) still runs, but the consume
-        /// is gated by MaxConsumesPerTick, so the mesh build task is in-flight when the tile is evicted.
-        /// After the eviction Tick, MaxConsumesPerTick is restored so the new cover can settle normally.
-        /// The test asserts view.ReleasedMidFlightCount() > 0 to prove the race genuinely occurred
-        /// (i.e., at least one tile had HasMeshBuild && !Built when released).
+        /// <para><b>Before/after (job-scheduling-design.md §8 stage 3, R1a).</b> Before: mid-flight by
+        /// TIMING — a kick-count loop, then pan, racing however fast the seam's managed build happened to
+        /// run. After: DETERMINISTIC. Source tiles now reach the graph's MEASURE step too (via the
+        /// prologue-complete hand-off), so <see cref="TileManager.GraphDepsForTest"/> — the same
+        /// production-legitimate deps-parameter seam stage 2 introduced for background tiles — can hold a
+        /// SOURCE tile's measure step genuinely in-flight. The drive pumps <c>LateUpdate()</c> ONLY (no
+        /// <c>Await</c> — it would <c>Complete()</c> the held graph and burn the whole spin bound, NIT 3)
+        /// until <c>GraphMeasureInFlight &gt;= 1</c>, asserted as the drive precondition, THEN pans. Because
+        /// the gate is still closed at that point, the graph provably cannot have completed — the positive
+        /// control below is now guaranteed by construction, not a coin flip against machine speed.</para>
         /// </summary>
         [Test]
         public void ReleaseMidFlight_NoOrphanedMesh()
@@ -287,78 +296,61 @@ namespace MapRenderer.Tests.Lifetime
             var style = MinimalStyle();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
-            // MaxConsumesPerTick = 0 BEFORE initialise: prevents the consume from running.
-            // Mesh build tasks are KICKED (build) but never consumed, guaranteeing the tiles
-            // are in HasMeshBuild=true, Built=false state when we evict them.
+            // MaxConsumesPerTick = 0 BEFORE initialise: prevents the consume from running while the delay
+            // job holds the measure step, so nothing races the deterministic gate below.
             view.Config.MaxConsumesPerTick = 0;
             view.Config.MaxMeshBuildsPerTick = 64;
-            // Evict the WHOLE condemned cover on the pan tick. At the default budget of 4 the release order
-            // decides whether the tiles that happen to be released are the ones whose build is still running,
-            // which makes the positive control below a coin flip once fetch completion is spread out by the
-            // decode. Releasing all of them removes the ordering dependence without weakening anything: the
-            // leak assertions are over the whole cover either way.
+            // Evict the WHOLE condemned cover on the pan tick — the leak assertions are over the whole
+            // cover either way, and releasing all of it removes any ordering dependence.
             view.Config.MaxReleasesPerTick = 64;
 
             int meshBefore = CountMeshObjects();
 
+            var gate    = new NativeArray<int>(1, Allocator.Persistent);
+            var started = new NativeArray<int>(1, Allocator.Persistent);
+            var outVals = new NativeArray<int>(2, Allocator.Persistent);
+            // Declared here, not inside try — an early failure must still be able to Complete() this in
+            // finally, unconditionally, before disposing gate/started/outVals (mirrors
+            // TileManagerBackgroundRegistrationTests' own delay-job discipline).
+            JobHandle delayHandle = default;
+
             try
             {
+                delayHandle = new SpinUntilGateJob
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                JobHandle.ScheduleBatchedJobs();
+                view.TileManager.GraphDepsForTest = delayHandle;
+
                 // Load initial cover at lon=0, z=5.
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
 
-                // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → completes immediately).
-                view.LateUpdate();
-                // The fetch task carries the tile's DECODE now, so a fixed 5 ms sleep no longer guarantees
-                // the fetches are observable by the next Tick — and if they are not, nothing is kicked, no
-                // tile is ever in-flight, and the positive control below reads 0 for a DRIVE reason rather
-                // than a behaviour one. Pump until EVERY cover tile has been kicked instead. Waiting for the
-                // first kick is not enough: fetches now complete at spread-out times, so the first kick tick
-                // may dispatch one or two tiles while the release budget below evicts a different, never-
-                // kicked handful — and the positive control reads 0 with every build still in flight.
-                // Property unchanged; only the drive is.
-                // AwaitInFlightMeshBuilds runs BEFORE LateUpdate, not after: it only supplies wall-clock for
-                // tiles kicked on an EARLIER iteration. The tile(s) kicked on the tick that satisfies the
-                // break condition are never awaited by this loop — their mesh-build task is still genuinely
-                // in-flight (Status.IsCompleted()==false) when eviction runs immediately below, which is what
-                // RenderTeardownRecord's ReleasedMidFlightCount actually counts (line ~2218: only a task that
-                // has NOT yet completed). Calling Await AFTER LateUpdate here (mirroring the ThrottleTests
-                // SetupBlockedBacklog rewrite) forces the just-kicked task to finish before the loop can
-                // break, defeating the positive control — RED-verified against this exact site.
-                int kicked = 0;
-                for (int f = 0; f < 3000; f++)
-                {
-                    view.AwaitInFlightMeshBuilds();
+                // Pump LateUpdate ONLY — no Await, which would Complete() the held graph. The tile's own
+                // prologue (a managed IWorkScheduler body, not a job) still runs and hands off to
+                // ScheduleMeasure; from there the delay job's Gate blocks every downstream measure job.
+                for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 1; f++)
                     view.LateUpdate();
-                    kicked += view.MeshBuildsKickedLastTick();
-                    if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
-                }
-                Assert.GreaterOrEqual(kicked, view.LoadedTileCount(),
-                    "drive precondition: every cover tile's mesh build must have been kicked before the pan, " +
-                    "or the eviction has no in-flight build to race");
+                DelayGateJobInstrument.WaitForStart(started);
+                Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,
+                    "drive precondition: at least one tile's measure step must be genuinely held in-flight " +
+                    "before the pan, or the eviction below has nothing in-flight to race.");
 
-                // Pan far east — before mesh build results are consumed.
-                // MaxConsumesPerTick=0 guarantees tiles are still in-flight (HasMeshBuild && !Built).
+                // Pan far east — while the measure step is still genuinely held (gate untouched).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
-                view.LateUpdate(); // cover recompute → evicts original tiles while they are in-flight
+                view.LateUpdate(); // cover recompute → evicts original tiles while genuinely in-flight
 
                 // ── Positive control: at least one tile must have been released mid-flight ──────
-                // This is the decisive assertion that separates "race exercised" from "vacuous pass".
-                // ReleasedMidFlightCount is incremented in ReleaseTile when HasMeshBuild &&
-                // !Built — meaning the mesh build was in-flight at the moment of release.
+                // Deterministic now: the gate is still closed, so the released tile's graph provably
+                // cannot have completed — ReleasedMidFlightCount() > 0 is guaranteed, not raced.
                 Assert.Greater(view.ReleasedMidFlightCount(), 0,
-                    "Positive control: at least one tile must have been released while its mesh build " +
-                    "was still in-flight (HasMeshBuild && !Built at the time of ReleaseTile). " +
-                    "If this is 0, the race did not occur — MaxConsumesPerTick=0 did not prevent consumption, " +
-                    "or no tiles had mesh build tasks by the eviction Tick. The leak-guard assertion " +
-                    "would be vacuously true (nothing was built → nothing to orphan).");
+                    "Positive control: at least one tile must have been released while its measure step " +
+                    "was still genuinely in-flight (the held delay job guarantees !IsStepComplete at " +
+                    "release time). If this is 0, no tile reached the graph before the pan.");
 
-                // Restore MaxConsumesPerTick so the new cover settles normally.
+                // Release the gate, restore budgets, and let the new cover settle normally.
+                gate[0] = 1;
                 view.Config.MaxConsumesPerTick = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
-            view.Config.MaxMeshBuildsPerTick = 64;
 
-                // Let the mesh build UniTasks for the evicted tiles complete on the ThreadPool.
-                // Then pump the new cover until it settles.
                 PumpUntilSettled(view, maxFrames: 500);
 
                 // The original tiles were evicted before mesh build was consumed.
@@ -387,11 +379,18 @@ namespace MapRenderer.Tests.Lifetime
             }
             finally
             {
+                // Unconditional, before any dispose — an early failure (before Teardown() completes it
+                // transitively) leaves nothing else to complete this held handle.
+                gate[0] = 1;
+                delayHandle.Complete();
                 if (go != null)
                 {
                     view.Teardown();
                     Object.DestroyImmediate(go);
                 }
+                gate.Dispose();
+                started.Dispose();
+                outVals.Dispose();
             }
         }
 
@@ -429,7 +428,7 @@ namespace MapRenderer.Tests.Lifetime
             var mda = MeshDataPayload.AllocateTracked(1);
             TileGeometryBuffers geometry = mvtLayer.Geometry; // BORROWED (IR C1 P3) — the tile owns it
             int vc; Bounds b;
-            StyledFillTileBuilder.WriteMeshData(
+            SyncMeshWrite.Fill(
                 mda[0], features, geometry, paint, 0.0,
                 new double3(tileOrigin.x, 0.0, tileOrigin.y), out vc, out b);
 
@@ -548,14 +547,15 @@ namespace MapRenderer.Tests.Lifetime
         /// hands its instance back to a shared <see cref="MeshDataPayloadPool"/> the moment it runs — so once
         /// <c>ConsumeMeshBuild</c>'s per-payload loop disposes a slot, that slot's OLD reference is no longer
         /// safe for anything to touch again: a subsequent <c>Rent()</c> (by this test, standing in for a
-        /// concurrent build) can receive and <c>Reset()</c> it before <c>DisposeWholeResult</c>'s later
-        /// unconditional sweep — over the SAME <c>MeshBuildResult.Payloads</c> array — would otherwise reach
+        /// concurrent build) can receive and <c>Reset()</c> it before <c>DisposeWholePayloads</c>'s later
+        /// unconditional sweep — over the SAME dense payload array (job-scheduling-design.md §8 stage 3: the
+        /// array <c>TileBuildGraph.CompleteWriteAndTakePayloads</c> hands back) — would otherwise reach
         /// it a second time. <c>TileManager.ConsumeMeshBuild</c> now nulls each slot the instant it disposes
         /// it, specifically so that sweep can never touch a recycled instance.
         ///
         /// <para>Drive: a single tile, two non-empty fill layers, consume throttled to exactly one mesh per
         /// tick (<c>MaxConsumesPerTick = 1</c>) so the tile's OWN <c>LateUpdate()</c> stops mid-array —
-        /// after disposing payload 0 but before payload 1, i.e. strictly before <c>DisposeWholeResult</c>
+        /// after disposing payload 0 but before payload 1, i.e. strictly before the unconditional sweep
         /// runs for this tile. At that exact point this test rents from the shared pool (standing in for a
         /// concurrent build) and marks the rented instance as its own. The cover is then allowed to finish
         /// settling. Pre-fix, the stale slot reference would let the finishing sweep silently free this
@@ -581,19 +581,30 @@ namespace MapRenderer.Tests.Lifetime
             {
                 view.LoadTestStyle(src, Cam(0, 0, 0.0), style: style);
 
-                int kicked = 0;
+                // A single Await only completes whichever STEP is currently in flight — this tile needs its
+                // prologue-complete tick AND its write-kick tick before it is consumable, so the drive pumps
+                // until ConsumeBacklog (write complete, unconsumed) sees it, not just until it was started.
+                int started = 0;
                 for (int f = 0; f < 3000; f++)
                 {
                     view.AwaitInFlightMeshBuilds();
                     view.LateUpdate();
-                    kicked += view.MeshBuildsKickedLastTick();
-                    if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
+                    started += view.TileBuildsStartedLastTick();
+                    if (view.LoadedTileCount() > 0 && started >= view.LoadedTileCount()) break;
                 }
                 Assert.AreEqual(1, view.LoadedTileCount(),
                     "precondition: a z=0 cover with a single tile keeps the whole scenario to ONE mesh-build " +
                     "result, so no other tile's payload activity can interleave with the probe below.");
-                Assert.GreaterOrEqual(kicked, 1, "drive precondition: the tile's mesh build must have been kicked");
-                view.AwaitInFlightMeshBuilds(); // the build task must be Succeeded before the budgeted tick below
+                Assert.GreaterOrEqual(started, 1, "drive precondition: the tile's mesh build must have been started");
+
+                for (int f = 0; f < 3000 && view.CaptureTelemetry().ConsumeBacklog < 1; f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                }
+                Assert.GreaterOrEqual(view.CaptureTelemetry().ConsumeBacklog, 1,
+                    "drive precondition: the tile's write step must be complete but unconsumed before the " +
+                    "budgeted tick below, or there is nothing for it to partially consume.");
 
                 // Consume exactly ONE mesh this tick. Two non-empty fill layers ⇒ ConsumeMeshBuild's budgeted
                 // loop must stop after payload 0 — the tile is not yet complete.
@@ -633,7 +644,7 @@ namespace MapRenderer.Tests.Lifetime
 
                 // Resume: finish this tile's remaining payload and let the cover settle — the tick that
                 // completes the tile is exactly when a pre-fix TileManager would sweep the (still-referenced)
-                // first slot a second time via DisposeWholeResult.
+                // first slot a second time via DisposeWholePayloads.
                 view.Config.MaxConsumesPerTick = 64;
                 for (int f = 0; f < 500; f++)
                 {
@@ -646,9 +657,9 @@ namespace MapRenderer.Tests.Lifetime
                 Assert.AreEqual(expectedAfterSettle, MeshDataPayload.DebugLiveAllocCount,
                     "a payload rented DURING a partial consume must not be silently freed by that tile's own " +
                     "completion — this would mean TileManager still held a stale reference to an " +
-                    "already-recycled payload (what `result.Payloads[slot] = null` after each Dispose() call " +
+                    "already-recycled payload (what `payloads[slot] = null` after each Dispose() call " +
                     "in ConsumeMeshBuild exists to prevent). RED-verified by removing either " +
-                    "`result.Payloads[slot] = null;` assignment in TileManager.ConsumeMeshBuild.");
+                    "`payloads[slot] = null;` assignment in TileManager.ConsumeMeshBuild.");
 
                 probe.Dispose();
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount, "no leaks after full cleanup");
@@ -663,17 +674,29 @@ namespace MapRenderer.Tests.Lifetime
         // ── Tooth 5-NativeArray-Race: mid-flight release disposes NativeArrays ─────────────────
 
         /// <summary>
-        /// S48 DECISIVE race test: a tile released mid-flight (mesh build in-flight, NativeArrays
-        /// not yet produced at release time) must have its NativeArrays disposed via the
-        /// <c>_pendingDisposal</c> holding pen after the mesh build task completes.
+        /// S48 DECISIVE race test: a tile released mid-flight (measure step genuinely held in-flight,
+        /// nothing consumed) must have every native resource it holds disposed via the pen after the held
+        /// step completes.
         ///
-        /// Asserts <see cref="MeshDataPayload.DebugLiveAllocCount"/> returns to
-        /// baseline after the full race cycle, proving no NativeArray leak.
+        /// <para><b>Before/after (job-scheduling-design.md §8 stage 3, R1a).</b> Before: mid-flight by
+        /// TIMING (kick-count loop then pan), and the single non-vacuity reading was
+        /// <c>MeshDataPayload.DebugLiveAllocCount</c> — bumped synchronously at kick under the OLD seam
+        /// model. After: DETERMINISTIC, via the same <c>GraphDepsForTest</c> gate as
+        /// <see cref="ReleaseMidFlight_NoOrphanedMesh"/> (see that tooth's doc for why source tiles can be
+        /// held this way now). The single-counter reading no longer works UNCHANGED: a fill layer allocates
+        /// NO <c>MeshDataArray</c> at kick any more (stall #5 — it is the graph arm), so for a fill-only
+        /// style <c>MeshDataPayload.DebugLiveAllocCount</c> alone would sit at baseline throughout and the
+        /// old assertion would be vacuously true for the wrong reason. The non-vacuity reading is now the
+        /// SUM of three deltas — <c>MeshDataPayload.DebugLiveAllocCount</c>, <c>FillGraphOutput.DebugLiveCount</c>,
+        /// <c>TileBuildGraph.DebugLiveCount</c> — read causally (while the gate is still closed, not
+        /// hopefully after a race), and all three must return to baseline once the pen drains.</para>
         /// </summary>
         [Test]
         public void NativeArray_ReleaseMidFlight_NoLeakedNativeArray()
         {
-            long countBefore = MeshDataPayload.DebugLiveAllocCount;
+            long payloadBefore = MeshDataPayload.DebugLiveAllocCount;
+            long graphOutputBefore = FillGraphOutput.DebugLiveCount;
+            long buildGraphBefore = TileBuildGraph.DebugLiveCount;
 
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var go    = new GameObject("MapView_NativeArrayLeak_Race");
@@ -681,115 +704,108 @@ namespace MapRenderer.Tests.Lifetime
             var style = MinimalStyle();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.WithTestCamera();
-            // MaxConsumesPerTick = 0: prevents the consume — mesh build tasks are kicked but
-            // not consumed, ensuring HasMeshBuild=true when tiles are evicted.
+            // MaxConsumesPerTick = 0: prevents consume from racing the deterministic gate below.
             view.Config.MaxConsumesPerTick = 0;
             view.Config.MaxMeshBuildsPerTick = 64;
-            // Evict the WHOLE condemned cover on the pan tick. At the default budget of 4 the release order
-            // decides whether the tiles that happen to be released are the ones whose build is still running,
-            // which makes the positive control below a coin flip once fetch completion is spread out by the
-            // decode. Releasing all of them removes the ordering dependence without weakening anything: the
-            // leak assertions are over the whole cover either way.
+            // Evict the WHOLE condemned cover on the pan tick — the leak assertions are over the whole
+            // cover either way, and releasing all of it removes any ordering dependence.
             view.Config.MaxReleasesPerTick = 64;
+
+            var gate    = new NativeArray<int>(1, Allocator.Persistent);
+            var started = new NativeArray<int>(1, Allocator.Persistent);
+            var outVals = new NativeArray<int>(2, Allocator.Persistent);
+            JobHandle delayHandle = default;
 
             try
             {
+                delayHandle = new SpinUntilGateJob
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                JobHandle.ScheduleBatchedJobs();
+                view.TileManager.GraphDepsForTest = delayHandle;
+
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
 
-                // First Tick: tiles enter cover + fetch kicks (FixtureSource sync → immediate).
-                view.LateUpdate();
-                // The fetch task carries the tile's DECODE now, so a fixed 5 ms sleep no longer guarantees
-                // the fetches are observable by the next Tick — and if they are not, nothing is kicked, no
-                // tile is ever in-flight, and the positive control below reads 0 for a DRIVE reason rather
-                // than a behaviour one. Pump until EVERY cover tile has been kicked instead. Waiting for the
-                // first kick is not enough: fetches now complete at spread-out times, so the first kick tick
-                // may dispatch one or two tiles while the release budget below evicts a different, never-
-                // kicked handful — and the positive control reads 0 with every build still in flight.
-                // Property unchanged; only the drive is.
-                // AwaitInFlightMeshBuilds runs BEFORE LateUpdate, not after: it only supplies wall-clock for
-                // tiles kicked on an EARLIER iteration. The tile(s) kicked on the tick that satisfies the
-                // break condition are never awaited by this loop — their mesh-build task is still genuinely
-                // in-flight (Status.IsCompleted()==false) when eviction runs immediately below, which is what
-                // RenderTeardownRecord's ReleasedMidFlightCount actually counts (line ~2218: only a task that
-                // has NOT yet completed). Calling Await AFTER LateUpdate here (mirroring the ThrottleTests
-                // SetupBlockedBacklog rewrite) forces the just-kicked task to finish before the loop can
-                // break, defeating the positive control — RED-verified against this exact site.
-                int kicked = 0;
-                for (int f = 0; f < 3000; f++)
-                {
-                    view.AwaitInFlightMeshBuilds();
+                // Pump LateUpdate ONLY — no Await, which would Complete() the held graph and burn the whole
+                // spin bound (NIT 3).
+                for (int f = 0; f < 3000 && view.CaptureTelemetry().GraphMeasureInFlight < 1; f++)
                     view.LateUpdate();
-                    kicked += view.MeshBuildsKickedLastTick();
-                    if (view.LoadedTileCount() > 0 && kicked >= view.LoadedTileCount()) break;
-                }
-                Assert.GreaterOrEqual(kicked, view.LoadedTileCount(),
-                    "drive precondition: every cover tile's mesh build must have been kicked before the pan, " +
-                    "or the eviction has no in-flight build to race");
+                DelayGateJobInstrument.WaitForStart(started);
+                Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,
+                    "drive precondition: at least one tile's measure step must be genuinely held in-flight " +
+                    "before the pan, or the eviction below has nothing in-flight to race.");
 
-                // Pan far east — evicting the original tiles while mesh build is in-flight.
+                // Pan far east — while the measure step is still genuinely held (gate untouched).
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
-                view.LateUpdate(); // cover recompute → evicts tiles → stashes in _pendingDisposal
+                view.LateUpdate(); // cover recompute → evicts tiles → stashes in the pen
 
-                // Positive control: at least one tile must have been released mid-flight.
+                // Positive control: at least one tile must have been released mid-flight — deterministic
+                // now, the same as ReleaseMidFlight_NoOrphanedMesh's own positive control.
                 Assert.Greater(view.ReleasedMidFlightCount(), 0,
-                    "Positive control: at least one tile must have been released while its mesh build " +
-                    "was still in-flight. If this is 0, the race did not occur and the NativeArray balance " +
-                    "assertion would be vacuously true.");
+                    "Positive control: at least one tile must have been released while its measure step " +
+                    "was still genuinely in-flight (the held delay job guarantees !IsStepComplete). If this " +
+                    "is 0, no tile reached the graph before the pan.");
 
                 // ── Non-vacuous holding-pen assertion (DECISIVE — acceptance tooth #4) ────────────
-                // No wait is needed here, and none is correct. DebugLiveAllocCount is bumped SYNCHRONOUSLY
-                // AT KICK on the main thread — MeshDataPayload.AllocateTracked (Interlocked.Increment) runs
-                // inside TileMeshLayerProcessor.AllocateForKick, in KickMeshBuild's main-thread prologue,
-                // BEFORE the IWorkScheduler.Schedule dispatch — not when the build itself finishes (on a
-                // ThreadPool worker, or inline on main, depending on policy). So every
-                // tile the kick-pump above kicked has already incremented the counter, and the payloads the
-                // pan just stashed in _pendingDisposal sit there undisposed: held > countBefore holds the
-                // instant we read it.
-                //
-                // CRITICAL: do NOT call Tick() here. Tick() calls DrainPendingDisposal() which would dispose
-                // the payload and decrement the counter before we can observe it — defeating this assertion.
-                long held = MeshDataPayload.DebugLiveAllocCount;
+                // Causal, not hopeful: read while the gate is STILL CLOSED, so the evicted tile's native
+                // resources provably cannot have been disposed yet — CRITICAL: do NOT call LateUpdate()
+                // here, it would drain the pen and defeat this assertion.
+                long payloadHeld = MeshDataPayload.DebugLiveAllocCount;
+                long graphOutputHeld = FillGraphOutput.DebugLiveCount;
+                long buildGraphHeld = TileBuildGraph.DebugLiveCount;
+                long heldDelta = (payloadHeld - payloadBefore) + (graphOutputHeld - graphOutputBefore) +
+                                  (buildGraphHeld - buildGraphBefore);
 
-                Assert.Greater(held, countBefore,
-                    $"Non-vacuous leak guard (DECISIVE): DebugLiveAllocCount must be > countBefore " +
-                    $"(baseline={countBefore}, held={held}) while the stashed mesh build payload sits " +
-                    "undisposed in _pendingDisposal. This proves a real NativeArray allocation was kicked and " +
-                    "sits live in the holding pen (premature disposal on the eviction path would drop it below " +
-                    "countBefore). " +
-                    "If this fails with held==countBefore, the z5 fixture produced no geometry " +
-                    "(confirm NativeArray_PositiveControl_LeakedAlloc_CounterNonZero still passes).");
+                Assert.Greater(heldDelta, 0,
+                    $"Non-vacuous leak guard (DECISIVE): the sum of the three live-count deltas " +
+                    $"(payload {payloadHeld - payloadBefore}, FillGraphOutput {graphOutputHeld - graphOutputBefore}, " +
+                    $"TileBuildGraph {buildGraphHeld - buildGraphBefore}) must be > 0 while the stashed tile's " +
+                    "native resources sit undisposed in the pen — a fill layer allocates no MeshDataPayload at " +
+                    "kick any more (stall #5), so TileBuildGraph/FillGraphOutput are what a fill-only style's " +
+                    "held tile actually shows live.");
 
-                // Restore MaxConsumesPerTick so the new cover can settle.
+                // Release the gate and restore budgets so the new cover can settle.
+                gate[0] = 1;
                 view.Config.MaxConsumesPerTick = 64;
                 view.Config.MaxMeshBuildsPerTick = 64;
-            view.Config.MaxMeshBuildsPerTick = 64;
 
-                // Let the ThreadPool mesh build tasks complete, then pump until the new cover settles.
-                // DrainPendingDisposal() is called inside each Tick — released tiles' NativeArrays are
-                // disposed as their tasks complete.
+                // Let the released graph complete, then pump until the new cover settles.
+                // DrainPendingDisposal() is called inside each Tick — released tiles' native resources are
+                // disposed as their held step completes.
                 PumpUntilSettled(view, maxFrames: 500);
 
                 // Final drain: ensure all pending disposal tasks have been processed.
-                // (Teardown() spins them to completion; calling it here before asserting the counter.)
+                // (Teardown() spins them to completion; calling it here before asserting the counters.)
                 view.Teardown();
                 Object.DestroyImmediate(go);
                 go = null;
 
-                long countAfter = MeshDataPayload.DebugLiveAllocCount;
-                Assert.AreEqual(countBefore, countAfter,
-                    $"S48 DECISIVE: DebugLiveAllocCount must return to baseline after load+mid-flight-release cycle. " +
-                    $"Baseline: {countBefore}, After cycle: {countAfter}. " +
-                    $"Delta of {countAfter - countBefore} means {countAfter - countBefore} LayerMeshData payload(s) " +
-                    "were allocated but not Disposed. Check: (a) _pendingDisposal holding pen in ReleaseTile, " +
-                    "(b) DrainPendingDisposal() called in Tick, (c) Teardown() spins+disposes pending tasks.");
+                long payloadAfter = MeshDataPayload.DebugLiveAllocCount;
+                long graphOutputAfter = FillGraphOutput.DebugLiveCount;
+                long buildGraphAfter = TileBuildGraph.DebugLiveCount;
+                Assert.AreEqual(payloadBefore, payloadAfter,
+                    $"S48 DECISIVE: MeshDataPayload.DebugLiveAllocCount must return to baseline after " +
+                    $"load+mid-flight-release cycle. Baseline: {payloadBefore}, after: {payloadAfter}.");
+                Assert.AreEqual(graphOutputBefore, graphOutputAfter,
+                    $"FillGraphOutput.DebugLiveCount must return to baseline after load+mid-flight-release " +
+                    $"cycle. Baseline: {graphOutputBefore}, after: {graphOutputAfter}.");
+                Assert.AreEqual(buildGraphBefore, buildGraphAfter,
+                    $"TileBuildGraph.DebugLiveCount must return to baseline after load+mid-flight-release " +
+                    $"cycle. Baseline: {buildGraphBefore}, after: {buildGraphAfter}. Check: (a) the pen in " +
+                    "RenderTeardownRecord, (b) DrainPendingDisposal() called in Tick, (c) Teardown() spins+" +
+                    "disposes pending tasks.");
             }
             finally
             {
+                gate[0] = 1;
+                delayHandle.Complete();
                 if (go != null)
                 {
                     view.Teardown();
                     Object.DestroyImmediate(go);
                 }
+                gate.Dispose();
+                started.Dispose();
+                outVals.Dispose();
             }
         }
 

@@ -80,12 +80,12 @@ namespace MapRenderer.Tests.Text.Placement
             };
             var fadeIds = new[] { SymbolStagingMath.LineFadeId(1, 0, 1, 0), SymbolStagingMath.LineFadeId(1, 0, 1, -1) };
             var wasPlaced = new byte[] { 0, 0 };
-            var pathScratch = new float2[3];
-            var cumScratch = new float[3];
+            var pathPoints = new float2[3];
+            var cumulativeLengths = new float[3];
             var p = Pools.New();
 
             int staged = SymbolStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs, anchors,
-                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f,
+                fadeIds, wasPlaced, pathPoints, cumulativeLengths, bearingRadians: 0f,
                 view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
@@ -135,12 +135,12 @@ namespace MapRenderer.Tests.Text.Placement
             };
             var fadeIds = new[] { SymbolStagingMath.LineFadeId(1, 0, 2, 0), SymbolStagingMath.LineFadeId(1, 0, 2, -1) };
             var wasPlaced = new byte[] { 0, 0 };
-            var pathScratch = new float2[2];
-            var cumScratch = new float[2];
+            var pathPoints = new float2[2];
+            var cumulativeLengths = new float[2];
             var p = Pools.New();
 
             int staged = SymbolStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs, anchors,
-                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f,
+                fadeIds, wasPlaced, pathPoints, cumulativeLengths, bearingRadians: 0f,
                 view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
@@ -294,12 +294,12 @@ namespace MapRenderer.Tests.Text.Placement
             };
             var fadeIds = new[] { SymbolStagingMath.LineFadeId(1, 0, 3, 0), SymbolStagingMath.LineFadeId(1, 0, 3, -1) };
             var wasPlaced = new byte[] { 0, 0 };
-            var pathScratch = new float2[2];
-            var cumScratch = new float[2];
+            var pathPoints = new float2[2];
+            var cumulativeLengths = new float[2];
             var p = Pools.New();
 
             int staged = SymbolStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs, anchors,
-                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f,
+                fadeIds, wasPlaced, pathPoints, cumulativeLengths, bearingRadians: 0f,
                 view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 

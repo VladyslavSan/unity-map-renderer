@@ -259,7 +259,7 @@ namespace MapRenderer.Tests.Rendering
                 "the root is not serialised into a scene/build, but IS visible/inspectable in the Hierarchy.");
 
             // Epic A / A2: background no longer owns a scene GameObject (its geometry is per-tile, produced
-            // by TileBackgroundLayerProcessor and owned by the backend) — only symbol presenters still take
+            // by BackgroundQuad and owned by the backend) — only symbol presenters still take
             // the shared-root parenting path (lazily, on first Present), so there is nothing eager left to
             // assert here for background; this test now only pins the shared root's own visibility contract.
         }

@@ -1,0 +1,23 @@
+# job-scheduling-design.md §8 stage 4 Group B — golden capture provenance
+#
+# Raw output of a one-shot capture harness (written, run, and deleted the same session — never committed
+# itself), run against commit f5e13c19 (stage 4 Group A landed; 973afaac, the docs-only descendant HEAD was
+# at when this ran, changes nothing these captures read) — the last commit where the synchronous fill
+# pipeline (FillMeshPipeline.Schedule, GlobeFillSubdivideDispatch.Run, StyledFillTileBuilder.WriteGeometry,
+# StyledFillExtrusionTileBuilder.WriteMeshData) was still the independent oracle Group B then deleted.
+#
+# Each line is one capture site's per-stream SHA-256 digests (base64), copied verbatim into the matching
+# frozen-golden constants below — this file is the durable record that they were captured from the
+# independent implementation, not re-derived from the graph after deletion (R6 / B.7):
+#   SITE1 → Assets/Code/MapRenderer.Tests.EditMode/Tiles/FillMeshGraphParityTests.cs (FrozenGoldensMercator / FrozenGoldensSpherical)
+#   SITE2 → Assets/Code/MapRenderer.Tests.EditMode/Tiles/FillMeshGraphGlobeParityTests.cs (FrozenGoldens)
+#   SITE3 → Assets/Code/MapRenderer.Tests.EditMode/Meshing/StyledFillExtrusionGraphWriteTests.cs (FrozenGoldensFlat / FrozenGoldensSpherical)
+#   SITE4 → Assets/Code/MapRenderer.Tests.EditMode/Tiles/TileBuildGraphTests.cs (FrozenGoldensFlat / FrozenGoldensSpherical)
+
+SITE1[WebMercatorProjection]: Vertex=BGT9vCbMRHS/Ni3PF1gWcHP4HK8NZKoEh+0AX5qcjyY= World=e5Kjjs7aiA1F+5QY8M53IoLBxLSTuEKehkCzPIMXCO8= Up=8j1uwFahQZ2mr/d02vWtnxyHtzu+DFiN5jMA/6NRO/k= FeatIdx=FufcsnPOzP5M4IKJAwSFCfn8TPyaCN/bm14hxU4Cs3Q= Indices=NHdZriRpUzF7iiWCExTHR6Iz5GwlLlBkZiyA/dG8Cdk= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=vZan4ovogL6+dDbAOpmv82Z1gd89/Piwz4fRI1hmd8w=
+SITE1[SphericalProjection]: Vertex=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= World=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= Up=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= FeatIdx=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= Indices=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=vZan4ovogL6+dDbAOpmv82Z1gd89/Piwz4fRI1hmd8w=
+SITE2: Vertex=AcGbVDk4/mSwr5eI+Cc8ayWxBemQB203q8UtpuRbBo8= Indices=btY5MlGiZZ+zg4jLxLT6c7aVaVtqQUzZgBA8dcb8iWM=
+SITE3[spherical=False]: Stream0=/BSPNaJt/vKUH5jnoGe18XG++7De4CQ5CaAkGo5/8cA= Stream1=5yoGCdWnImZda9zBFM2lMZ4cZpoio+676rYaTQc6Tj4= Stream2=RZIb0svnW8ClUJy19C/CWEwcYrSRiGcuVrCU8pAINPM= Stream3=w0d0VuQYBwTowLrop/6grGOE+BpegmcUjOUK9LwIE6I= Indices=UDPCPGXJU3OsWoNjbMg2T3AYq8M+lCd4AJOThHpv+uk= Bounds=U2c5vKyQgtfxmbjk+DwMuZ6m8SWFVpA+FZdtEiShrRs=
+SITE3[spherical=True]: Stream0=tJUK4zwrNyoRLVMZ+hBHegLaOsgS/SBC4P9HN4cNWlg= Stream1=PmL8WSDRfMIQhUwAFA6DbTEesrJelbEBdNV8mPqbSG4= Stream2=fJ1cviXi13njRn06G3/8YgQWBtN9fXHB8Ix1v4wlYSI= Stream3=3HWHJwTmrOom7Zvat5N8YT6edLs2X27ePjtWE+yofVI= Indices=jj1DDkisMtRSPuwxHLzATezR/ALcqfGn793kcQCqpkQ= Bounds=gokodWKrmk2WSnB0etMqXgtn1CTMRDmjLL82v96b+oE=
+SITE4[spherical=False]: Stream0=DP8+lbaDnqnXo32FewHCvd56e5FR2172oWesZmac3I0= Stream1=ycx4JigRdmfDwxwHaeX4v7o3nJZToxUkEf1l5+erqP0= Stream2=1RQ/sTquk3Cj4XlWFjd4hAT1L/dHby/JBckr7B8o5EA= Stream3=BqV3NujaZBIyhp8mGaJomHgLaTtc8qtEO5G+atpnKDA= Indices=vj5j3bGOJy3YqLoQJ3LmWF5nLYcjDgBIY19HQFkmEJ8= Bounds=Cdbs9HaYIDzj0sqYENY9VmlRQjWy7EScMyRVMFObTr8=
+SITE4[spherical=True]: Stream0=nb1J+NsjJ4eZoKrXrFnxHV5mLD2q8dHfOYrelF0pm1Y= Stream1=ycx4JigRdmfDwxwHaeX4v7o3nJZToxUkEf1l5+erqP0= Stream2=2JNye5+EaLy+vNY2MijWmE9aiunN9dm7SOJ5WPxbMvc= Stream3=BqV3NujaZBIyhp8mGaJomHgLaTtc8qtEO5G+atpnKDA= Indices=vj5j3bGOJy3YqLoQJ3LmWF5nLYcjDgBIY19HQFkmEJ8= Bounds=Wu+l0hNvh4iI1J63SzYxcI29CAwAKW1iUgUmW8k63kc=

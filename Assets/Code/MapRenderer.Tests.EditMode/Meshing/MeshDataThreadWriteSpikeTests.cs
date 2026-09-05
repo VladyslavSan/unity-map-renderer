@@ -1,8 +1,17 @@
-// S89 Stage B contract guard: the tile pipeline populates a Mesh.MeshData from a RAW
-// UniTask.RunOnThreadPool worker thread (NOT a blessed Unity Job worker), then applies on the main thread.
-// This is load-bearing for the allocate-at-kick / write-on-worker / apply-at-consume choreography — if a
-// Unity upgrade makes off-thread MeshData writes throw (GetVertexData's AtomicSafetyHandle rejecting off-job
-// access), Stage B breaks and this test names it precisely.
+// Before (S89 Stage B): the tile pipeline populated a Mesh.MeshData from a RAW UniTask.RunOnThreadPool
+// worker thread (NOT a blessed Unity Job worker), then applied on the main thread — this test was that
+// contract guard, load-bearing for the allocate-at-kick / write-on-worker / apply-at-consume choreography.
+//
+// After (job-scheduling-design.md §8 stage 4 Group B, §9 row 5): nothing writes Mesh.MeshData from a raw
+// managed worker any more. The write step is main-allocate (Mesh.AllocateWritableMeshData at kick) +
+// FillStreamWriteJob/FillExtrusionStreamWriteJob (a Burst IJob, scheduled through Unity's job system —
+// a DIFFERENT code path with its own safety semantics, not the RunOnThreadPool one this spike probes).
+//
+// Kept anyway, retitled as a standalone Unity-API capability probe rather than a production-path guard: if
+// a future feature ever wants the raw-worker-write pattern again, this is still the test that would catch a
+// Unity upgrade making it throw (GetVertexData's AtomicSafetyHandle rejecting off-job access). It proves
+// nothing about the CURRENT production write path — that is FillStreamWriteJob's own tests
+// (StyledFillExtrusionGraphWriteTests, TileBuildGraphTests).
 //
 // (Established once as a spike: writing works off-thread, but AllocateWritableMeshData /
 // ApplyAndDisposeWritableMeshData are main-thread only — "CreateNewMeshDatas can only be called from the

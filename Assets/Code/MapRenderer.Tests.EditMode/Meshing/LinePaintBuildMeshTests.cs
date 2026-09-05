@@ -13,7 +13,7 @@ using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
 using Unity.Mathematics;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 
@@ -134,7 +134,7 @@ namespace MapRenderer.Tests.Meshing
                 TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
             try
             {
-                StyledLineTileBuilder.WriteMeshData(
+                SyncMeshWrite.Line(
                     mda[0], TestTileMeshBuilder.Selection(features), geometry, paint, layout, TestZoom,
                     TestOriginMerc, out int vertexCount, out _);
 
@@ -196,7 +196,7 @@ namespace MapRenderer.Tests.Meshing
                 TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
             try
             {
-                StyledLineTileBuilder.WriteMeshData(
+                SyncMeshWrite.Line(
                     mda[0], TestTileMeshBuilder.Selection(features), geometry, paint, layout, TestZoom,
                     TestOriginMerc, out int vertexCount, out _);
 
@@ -267,7 +267,7 @@ namespace MapRenderer.Tests.Meshing
                 TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
             try
             {
-                StyledLineTileBuilder.WriteMeshData(
+                SyncMeshWrite.Line(
                     mda[0], TestTileMeshBuilder.Selection(features), geometry, paint, layout, TestZoom,
                     TestOriginMerc, out int vertexCount, out _);
 
@@ -336,7 +336,7 @@ namespace MapRenderer.Tests.Meshing
                 TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
             try
             {
-                StyledLineTileBuilder.WriteMeshData(
+                SyncMeshWrite.Line(
                     mda[0], TestTileMeshBuilder.Selection(features), geometry, paint, layout, TestZoom,
                     TestOriginMerc, out int vertexCount, out _);
 
@@ -368,7 +368,7 @@ namespace MapRenderer.Tests.Meshing
         // ── Tooth #3: line-miter-limit threaded (latent-bug fix) ────────────────
 
         /// <summary>
-        /// Before this stage, <see cref="StyledLineTileBuilder.WriteMeshData"/> hardcoded the ribbon job's
+        /// Before this stage, <see cref="SyncMeshWrite.Line"/>'s production predecessor hardcoded the ribbon job's
         /// miter limit to <c>2.0</c> regardless of style, so a style-authored <c>line-miter-limit</c> was
         /// silently ignored. A synthetic 90° corner (f = 1/cos(45°) = √2 ≈ 1.414) stays a sharp miter under
         /// the default limit (2.0 — <c>LineTessellatorTests.RightAngle_MiterJoin_ExactVertexCount</c>: 6

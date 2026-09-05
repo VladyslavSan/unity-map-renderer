@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
+using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
@@ -14,7 +16,8 @@ using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Common;
 using MapRenderer.Unity.Concurrency;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
 using BRGBackend = MapRenderer.Unity.Rendering.Backend.BRG;
 using EntBackend = MapRenderer.Unity.Rendering.Backend.Entities;
@@ -113,7 +116,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// a backlog) — it is NOT "uncapped"; set it high (e.g. 64) for effectively-uncapped.</summary>
             public int MaxConsumesPerTick;
 
-            /// <summary>S55: max mesh build kick-offs per Tick. Default 2 (MapView serialized field).
+            /// <summary>S55: max tiles admitted per Tick. Default 2 (MapView serialized field).
             /// Caps the background mesh build fan-out per frame without dropping work.
             /// 0 means uncapped (same as int.MaxValue) so unset config structs are harmless.</summary>
             public int MaxMeshBuildsPerTick;
@@ -157,27 +160,16 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── S47 mesh build payload (S51: Task → UniTask) ────────────────────────────────────
 
         /// <summary>
-        /// Mesh build payloads produced by one tile's background mesh build. S89 Stage C: a DENSE array —
-        /// one element per render layer bound to THIS task's source, in declared (draw) order. Each payload
-        /// carries its own global <see cref="Style.IRenderLayerPayload.MaterialIndex"/>, so the consume
-        /// step no longer relies on <c>cursor == materialIndex</c>. Replaces the S83b decision-5c full-width
-        /// sparse union (a slot per layer, null for other-source layers) — no dead slots per source.
-        /// </summary>
-        private struct MeshBuildResult
-        {
-            /// <summary>Dense per-<c>(tile, source)</c> payloads in draw order; each knows its material index.
-            /// Empty (0-vertex) this-source layers still take a slot (freed at consume).</summary>
-            public Style.IRenderLayerPayload[] Payloads;
-        }
-
-        /// <summary>
         /// Per-tile live record: the in-flight fetch request, the mesh build handle, and the built tile
         /// container GameObject.
         ///
-        /// S47/S51: the lifecycle is now:
+        /// S47/S51, extended by job-scheduling-design.md §8 stage 3: the lifecycle is now:
         ///   1. Fetch (Request → UniTask[SharedDisposable[IDecodedTile]] in-flight, stored as .Preserve())
-        ///   2. Mesh build kicked (MeshBuildTask in-flight; FetchCompleted = true)
-        ///   3. Mesh build consumed (Built = true; MeshBuildTask = default; Go = container)
+        ///   2. Mesh build kicked — <see cref="Step"/> becomes <see cref="BuildStep.Prologue"/>
+        ///      (MeshBuildTask in-flight, source tiles only) then <see cref="BuildStep.Measure"/> then
+        ///      <see cref="BuildStep.Write"/> (Graph in-flight, every tile — a background tile starts
+        ///      directly at Measure, no Prologue); FetchCompleted = true either way.
+        ///   3. Mesh build consumed (Built = true; Step = BuildStep.None; Go = container)
         ///
         /// Mid-flight release protection: ReleaseTile removes the tile from _loaded immediately,
         /// so PumpPending and DrainMeshBuilds — which iterate _loaded — never visit released
@@ -187,17 +179,25 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <c>MeshBuildTask</c> is a <see cref="WorkHandle{T}"/>: pollable across frames with no
         /// <c>.Preserve()</c> needed, and <c>GetResult()</c> is repeatable once terminal (the backing
         /// completion source never recycles). Unlike <c>default(UniTask{T})</c>, a <c>default</c>
-        /// <see cref="WorkHandle{T}"/> carries no source and every member throws — <see cref="HasMeshBuild"/>
-        /// is what makes that safe: every read of <c>MeshBuildTask</c> is guarded by it, so the field is only
-        /// ever touched while it holds a real handle.
+        /// <see cref="WorkHandle{T}"/> carries no source and every member throws — <see cref="Step"/>
+        /// being <see cref="BuildStep.Prologue"/> is what makes that safe: every read of <c>MeshBuildTask</c>
+        /// is guarded by it, so the field is only ever touched while it holds a real handle. <see cref="Graph"/>
+        /// is non-null iff <see cref="Step"/> is <see cref="BuildStep.Measure"/> or <see cref="BuildStep.Write"/>.
         /// </summary>
         private struct LoadedTile
         {
-            public UniTask<SharedDisposable<IDecodedTile>> Request;
-            public bool                        FetchCompleted; // fetch done; mesh build may be in-flight
-            public WorkHandle<MeshBuildResult> MeshBuildTask;  // default until fetch completes; default after consumed
-            public bool                        HasMeshBuild;   // true when MeshBuildTask is valid
-            public bool                        Built;          // mesh produced (or definitively absent/failed)
+            public UniTask<SharedDisposable<IDecodedTile>>          Request;
+            public bool                                             FetchCompleted; // fetch done; mesh build may be in-flight
+            public WorkHandle<Processing.TilePrologueOutput> MeshBuildTask; // default until fetch completes; default after consumed
+            public BuildStep                                        Step;           // which build step (if any) is in flight
+            public bool                                             Built;          // mesh produced (or definitively absent/failed)
+
+            /// <summary>The graph-arm build — non-null iff <see cref="Step"/> is
+            /// <see cref="BuildStep.Measure"/> or <see cref="BuildStep.Write"/>. Every tile ends up here: a
+            /// source tile's prologue hands its dense <c>ILayerMeshBuild[]</c> to
+            /// <see cref="Processing.TileBuildGraph.ScheduleMeasureFromDecode"/>; a background tile skips
+            /// the prologue and schedules directly via <see cref="Processing.TileBuildGraph.ScheduleMeasure"/>.</summary>
+            public Processing.TileBuildGraph Graph;
 
             /// <summary>S91-C: the tile's SW-corner projected render origin (double3) — the SINGLE bake-and-place
             /// origin shared by the mesh bake and the tile transform. Mercator: (mercX, 0, mercZ); globe: ECEF.</summary>
@@ -230,8 +230,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// payloads (draw order), <c>[0..denseCount)</c>. Advanced by
             /// <see cref="ConsumeMeshBuild"/> as the per-frame mesh/vertex budget allows; the tile is
             /// <see cref="Built"/> only once the cursor reaches the end. 0 until consume starts. While
-            /// <c>0 &lt; ConsumeCursor &lt; total</c> the tile is partially consumed (HasMeshBuild is
-            /// still true, the task is COMPLETE, and some layers are already in Meshes/DrawHandles).
+            /// <c>0 &lt; ConsumeCursor &lt; total</c> the tile is partially consumed (Step is
+            /// still BuildStep.Prologue, the task is COMPLETE, and some layers are already in Meshes/DrawHandles).
             /// </summary>
             public int ConsumeCursor;
 
@@ -472,7 +472,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // E1: only ITileMeshRenderLayer slots feed the REAL-SOURCE tile produce/consume loop — the
             // symbol slot (FramePlaced) never goes through this path at all, and A2's background slot goes
             // through the separate source-less ComputeSourcelessLayerIds (below) instead (background is
-            // TileMesh but not ITileMeshRenderLayer — its geometry comes from a processor, not WriteInto).
+            // TileMesh but not ITileMeshRenderLayer — its geometry comes from a processor, not BuildGraphRequest).
             // Filtering HERE (the one shared helper) keeps the kick, the ReleaseTile cache transfer, and the
             // Tick completeness probe in agreement for every REAL source.
             for (int li = 0; li < _layers.Count; li++)
@@ -552,7 +552,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         // Reused scratch for TilePriority.SortByPriority-style insertion sorts over _desired / PumpPending's
         // per-tick work list — grown (never shrunk) to fit the largest list sorted so far. Never reallocated
         // in steady state (the cover size that drives both lists' capacity stabilizes quickly).
-        private double[] _priorityKeysScratch = new double[64];
+        private double[] _priorityKeys = new double[64];
 
         // S105/A5b: the symbol-agnostic seam through which the DECOUPLED symbol-symbol subsystem is driven —
         // TileManager holds only this interface (never a symbol/store/glyph type). The per-tile mesh KICK
@@ -586,19 +586,19 @@ namespace MapRenderer.Unity.Rendering.Tile
         // S87: reusable scratch for one ConsumeMeshBuild call's newly-built meshes/handles (main-thread
         // only, not re-entrant). Cleared at the start of each call; merged into the tile's arrays at the end.
         // Reused so a partial consume frame doesn't allocate a fresh list per call.
-        private readonly List<Mesh> _consumeScratchMeshes = new(8);
+        private readonly List<Mesh> _consumeMeshes = new(8);
 
-        private readonly List<int> _consumeScratchHandles = new(8);
+        private readonly List<int> _consumeHandles = new(8);
 
         // S82: parallel to the two above — the global material index (layerId) of each newly-built mesh,
         // so a Built record can later be transferred into PreparedTileCache keyed per layer.
-        private readonly List<int> _consumeScratchMatIndices = new(8);
+        private readonly List<int> _consumeMatIndices = new(8);
 
         // S82: reusable scratch for the dense (declared-order) global material indices whose style layer's
         // source is a given sourceId (ComputeDenseLayerIds). ONLY ever consumed synchronously on the main
         // thread within the same call (transfer-to-cache, probe) — never captured across a thread boundary
         // (KickMeshBuild copies it into a fresh int[] before scheduling the background task).
-        private readonly List<int> _denseLayerIdsScratch = new(8);
+        private readonly List<int> _denseLayerIds = new(8);
 
         // ── S82: PreparedTileCache — cache built tile-layer Meshes so a revisit/style-toggle skips
         // re-decode/re-build/re-upload. Owns cached meshes; ReleaseTile transfers a Built tile's meshes
@@ -629,12 +629,17 @@ namespace MapRenderer.Unity.Rendering.Tile
         // When a tile is released mid-flight (ReleaseTile while MeshBuildTask is still running),
         // the handle has already been captured but not yet produced a result. We cannot dispose the
         // NativeArrays immediately — they don't exist yet. Instead we stash the handle here; each
-        // Tick drains completed tasks, disposing their NativeArray payloads. Teardown spins to
-        // completion and disposes everything remaining.
+        // Tick drains completed tasks, disposing their TilePrologueOutput's NativeArrays. Teardown
+        // spins to completion and disposes everything remaining.
         //
         // This list is only modified on the main thread (ReleaseTile, DrainPendingDisposal, Dispose
         // are all main-thread). No locking is required.
-        private readonly List<WorkHandle<MeshBuildResult>> _pendingDisposal = new(8);
+        private readonly List<WorkHandle<Processing.TilePrologueOutput>> _pendingDisposal = new(8);
+
+        // job-scheduling-design.md §6 exit (2)/(3): the graph arm's twin of the seam pen above — same
+        // main-thread-only contract, same reason it exists (a build released while genuinely in flight has
+        // no result yet to dispose).
+        private readonly List<Processing.TileBuildGraph> _pendingGraphDisposal = new(8);
 
         // ── teardown-cancel: the manager-lifetime token ───────────────────────────────────────────
         // Cancelled ONCE, at the very top of DoDispose, so every in-flight mesh build aborts before the
@@ -696,6 +701,18 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         private ManualResetEventSlim _meshBuildGateForTest;
+
+        /// <summary>The upstream dependency handle every graph kick's measure step waits on before any of
+        /// its own jobs run — threaded straight into <see cref="Processing.TileBuildGraph.ScheduleMeasure"/>'s
+        /// own <c>deps</c> parameter (job-scheduling-design.md E2's production-legitimate seam). Stage 3
+        /// threads it into BOTH graph kicks now: <see cref="KickSourcelessBackground"/> (background tiles)
+        /// and the source tile's prologue-complete hand-off (arm (1) of <see cref="PumpPending"/> /
+        /// <see cref="DrainMeshBuilds"/>'s (b)). Mirrors <see cref="MeshBuildGateForTest"/>'s role for the
+        /// seam arm: a test schedules its own delay job and hands over its handle here to hold a graph
+        /// genuinely in-flight. Stays test-only for the reason that survives past stage 3: the PROLOGUE step
+        /// is managed (an <c>IWorkScheduler</c> body, not a job) and yields no <c>JobHandle</c> for this to
+        /// gate — only the graph steps have one. Not self-clearing. Internal test-only.</summary>
+        internal JobHandle GraphDepsForTest { get; set; }
 
         // ── S84 mid-flight FETCH holding pen ──────────────────────────────────────────────────────
         // When a tile is released before its fetch completes (rapid zoom/cover churn), the preserved
@@ -994,7 +1011,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// Number of tiles released while their mesh build was still in-flight (HasMeshBuild
+        /// Number of tiles released while their mesh build was still in-flight (Step != BuildStep.None
         /// and not yet Built at the moment of release). Incremented by ReleaseTile. Read by tests
         /// to prove the mid-flight race actually occurred in <c>S51DisposalLeakGuardTests</c>.
         /// </summary>
@@ -1013,9 +1030,16 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         internal int CoverRecomputesLastTick { get; private set; }
 
-        /// <summary>S55: mesh build kicks issued in the most recent PumpPending call.
-        /// Exposed for tests; never call from production code.</summary>
-        internal int MeshBuildsKickedLastTick { get; private set; }
+        /// <summary>job-scheduling-design.md §11 fork 2: tiles NEWLY STARTED in the most recent PumpPending
+        /// call — incremented once per tile, at its FIRST kick (a source tile's prologue kick, or a
+        /// background tile's measure kick), never at a later step transition. This is the quantity
+        /// <see cref="Config.MaxMeshBuildsPerTick"/> bounds.</summary>
+        internal int TileBuildsStartedLastTick { get; private set; }
+
+        /// <summary>job-scheduling-design.md §3.2/§8 stage 2: <see cref="Mesh.MeshDataArray"/>s allocated by
+        /// the graph arm's write step (<see cref="Processing.TileBuildGraph.CompleteMeasureAndScheduleWrite"/>)
+        /// in the most recent PumpPending/DrainMeshBuilds pass — one per non-empty layer.</summary>
+        internal long MeshDataArraysAllocatedLastKick { get; private set; }
 
         /// <summary>S55/S87: sum of layer-mesh vertex counts consumed in the most recent PumpPending call.</summary>
         internal int VerticesConsumedLastTick { get; private set; }
@@ -1070,15 +1094,20 @@ namespace MapRenderer.Unity.Rendering.Tile
             // One shared pass over _loaded for Pending + ConsumeBacklog (S85 decision — reuse the loop, not
             // two). ConsumeBacklog mirrors PumpPending's consume-entry condition plus the
             // explicit !Built this method needs (that loop only ever sees _toRelease's !Built subset; this
-            // one walks every record, built or not).
-            int pending = 0, backlog = 0;
+            // one walks every record, built or not). job-scheduling-design.md §8 stage 3: a completed
+            // PROLOGUE has nothing to consume yet (it hands off to Measure, uncharged) — only a completed
+            // WRITE step is genuinely "write complete, unconsumed", so backlog counts that alone now.
+            int pending = 0, backlog = 0, prologue = 0, graphMeasure = 0, graphWrite = 0;
             foreach (var kv in _loaded)
             {
                 LoadedTile lt = kv.Value;
                 if (lt.Built) continue;
                 pending++;
-                if (lt.FetchCompleted && lt.HasMeshBuild && lt.MeshBuildTask.IsCompleted)
+                if (lt.Step == BuildStep.Write && lt.Graph.IsStepComplete)
                     backlog++;
+                if (lt.Step == BuildStep.Prologue) prologue++;
+                else if (lt.Step == BuildStep.Measure) graphMeasure++;
+                else if (lt.Step == BuildStep.Write) graphWrite++;
             }
 
             return new TileTelemetrySnapshot
@@ -1094,6 +1123,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                 LoadedTileCount        = _loaded.Count,
                 PendingTileCount       = pending,
                 ConsumeBacklog         = backlog,
+                PrologueInFlight       = prologue,
+                GraphMeasureInFlight   = graphMeasure,
+                GraphWriteInFlight     = graphWrite,
                 InFlightFetches        = InFlightCount,
                 ReleasedMidFlightCount = ReleasedMidFlightCount,
                 ReleasedMidFetchCount  = ReleasedMidFetchCount,
@@ -1179,6 +1211,26 @@ namespace MapRenderer.Unity.Rendering.Tile
             return all?.ToArray();
         }
 
+        /// <summary>Test-only, backend-agnostic: the global material index of each mesh in
+        /// <see cref="GetTileMeshes"/>, SAME order (both walk <c>_pipelines</c>/<c>lt.Meshes</c> in lockstep) —
+        /// tooth (g)'s own accessor, for asserting draw order across a tile with multiple layer kinds
+        /// (job-scheduling-design.md §8 stage 5 Group B: all graph-arm now, joined by dense request
+        /// index).</summary>
+        internal int[] GetTileMaterialIndices(TileId id)
+        {
+            List<int> all = null;
+            for (int s = 0; s < _pipelines.Count; s++)
+            {
+                if (_loaded.TryGetValue(new LoadedKey(id, _pipelines[s].Slot), out var lt) && lt.MaterialIndices != null)
+                {
+                    all ??= new List<int>(8);
+                    all.AddRange(lt.MaterialIndices);
+                }
+            }
+
+            return all?.ToArray();
+        }
+
         /// <summary>Test-only: scene-space bounds of all live tile draw items (for camera framing), via
         /// the instanced backend. <paramref name="tileSizeWorld"/> is the tile's world extent at the
         /// current zoom. Returns <c>default</c> if no backend / no tiles.</summary>
@@ -1234,7 +1286,13 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             CoverRecomputesLastTick = 0; // S95: reset each Tick; set below only if the full recompute runs
 
-            _projection = cfg.Projection; // cache for the mesh build bake (Level-1); same projection as origin + frame
+            // Defensive backstop, NOT the normalisation point. MapHost does pass null for planar
+            // (UseGlobe ? new SphericalProjection() : null), but MapCamera's constructor already resolves it
+            // (MapCamera.cs: `Projection = projection ?? new WebMercatorProjection()`), and MapView feeds
+            // Camera.Projection into the config — so cfg.Projection is non-null by the time this reads it and
+            // this `??` never fires in production. Kept only so a future config path that bypasses MapCamera
+            // fails as a wrong default rather than a NullReferenceException three layers down.
+            _projection = cfg.Projection ?? new WebMercatorProjection(); // cache for the mesh build bake (Level-1); same projection as origin + frame
 
             // A changed clip window means every cached mesh was baked against a different tile buffer, so the
             // PreparedTileCache must not serve them. Compared field-by-field rather than via ValueType.Equals,
@@ -1483,10 +1541,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // symbolPass left at its default (null) — a cap-deferred tile that settles via drain never
                 // attempts a symbol build either (§Q-Drain KEEP), matching the drain path's existing
                 // symbol-silent behaviour.
-                if (lt.FetchCompleted && lt.Decode != null && !lt.HasMeshBuild)
+                if (lt.FetchCompleted && lt.Decode != null && lt.Step == BuildStep.None)
                 {
                     lt.MeshBuildTask = KickMeshBuild(lt, id, lt.Decode, sourceId);
-                    lt.HasMeshBuild  = true;
+                    lt.Step          = BuildStep.Prologue;
                     // R1: the record KEEPS its reference — no transfer, no null-out. The kick took its own
                     // separate reference in KickMeshBuild's prologue; this `lt.Decode` stays live until
                     // funnel 1 (RenderTeardownRecord) or funnel 2 (DiscardFetchOutcome, if this `lt` copy
@@ -1498,25 +1556,69 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // inline here — drain ignores per-tick caps. Without this branch the record falls straight to
                 // the "else { lt.Built = true; }" no-mesh settle below (§F tooth 12) — invisible in exactly
                 // the deterministic/snapshot harnesses that settle via DrainMeshBuilds.
-                if (lt.FetchCompleted && !lt.HasMeshBuild && lt.Decode == null &&
+                // job-scheduling-design.md §8 stage 2: this is now a GRAPH kick, on every projection.
+                if (lt.FetchCompleted && lt.Step == BuildStep.None && lt.Decode == null &&
                     _pipelines[key.Slot].IsSourceless)
                 {
-                    lt.MeshBuildTask = KickSourcelessBackground(id, lt.TileOriginRender);
-                    lt.HasMeshBuild  = true;
+                    lt.Graph = KickSourcelessBackground(id, lt.TileOriginRender);
+                    lt.Step  = BuildStep.Measure;
                 }
 
-                // (b) Mesh build in-flight — spin and consume.
-                if (lt.HasMeshBuild)
+                // (b) A PROLOGUE build in-flight — spin, then hand off to the graph (job-scheduling-design.md
+                // §8 stage 3). No `else` below: a tile that just handed off here is picked up in THIS SAME
+                // iteration by (b')'s Measure/Write arm — one drain walks all three steps.
+                if (lt.Step == BuildStep.Prologue)
                 {
                     // Bridges into the UniTask I/O chain so WaitOffPlayerLoop applies: the WorkScheduler
                     // completes the handle on the completing thread, never posting to the PlayerLoop (I-2),
                     // so this park wakes without needing the PlayerLoop to advance.
-                    UniTask<MeshBuildResult> buildTask = lt.MeshBuildTask.ToUniTask();
+                    UniTask<Processing.TilePrologueOutput> buildTask = lt.MeshBuildTask.ToUniTask();
                     buildTask.WaitOffPlayerLoop(10000);
-                    // Drain ignores per-frame caps: unbounded budget consumes ALL layers in one call → Built.
-                    ConsumeMeshBuild(id, ref lt, int.MaxValue, int.MaxValue, out _, out _);
+
+                    if (!lt.MeshBuildTask.IsSucceeded)
+                    {
+                        FinishConsume(ref lt);
+                    }
+                    else
+                    {
+                        Processing.TilePrologueOutput output = lt.MeshBuildTask.GetResult();
+                        // Store BEFORE scheduling — see PumpPending's identical comment on why: a throw from
+                        // ScheduleMeasureFromDecode must find `_loaded[key]` already past the completed
+                        // MeshBuildTask, or a later drain re-GetResult()s a TilePrologueOutput whose columns
+                        // and decode reference the catch already freed — the exact double-free this guards.
+                        lt.MeshBuildTask = default;
+                        lt.Step          = BuildStep.None;
+                        _loaded[key]     = lt;
+                        lt.Graph = Processing.TileBuildGraph.ScheduleMeasureFromDecode(
+                            output.Layers, output.Decode, GraphDepsForTest);
+                        lt.Step = BuildStep.Measure;
+                    }
                 }
-                else
+
+                // (b') GRAPH measure/write in-flight — job-scheduling-design.md §3.3: Complete() from the
+                // main thread executes a not-yet-started job inline, so there is no PlayerLoop dependency to
+                // dead-end on — no WaitOffPlayerLoop, no timeout needed for this arm.
+                if (lt.Step == BuildStep.Measure || lt.Step == BuildStep.Write)
+                {
+                    if (lt.Step == BuildStep.Measure)
+                    {
+                        int allocated;
+                        using (PmMeshDataAllocate.Auto()) lt.Graph.CompleteMeasureAndScheduleWrite(out allocated);
+                        MeshDataArraysAllocatedLastKick += allocated;
+                        lt.Step = BuildStep.Write;
+                    }
+                    // CompleteWriteAndTakePayloads is idempotent — a tile arriving here ALREADY partially
+                    // consumed by an earlier Tick (Step == Write, Graph alive, some slots already nulled)
+                    // gets back the SAME array with those slots still nulled.
+                    Style.MeshDataPayload[] payloads = lt.Graph.CompleteWriteAndTakePayloads();
+                    // lt.Graph is NOT disposed here — see PumpPending's identical guard for why: FinishConsume
+                    // is the single disposal site, so both call sites keep the same invariant regardless of
+                    // budget (this one always completes in one call because the budget is int.MaxValue, but
+                    // the invariant does not rely on that).
+                    // Drain ignores per-frame caps: unbounded budget consumes ALL layers in one call → Built.
+                    ConsumeMeshBuild(id, ref lt, payloads, int.MaxValue, int.MaxValue, out _, out _);
+                }
+                else if (lt.Step == BuildStep.None && !lt.Built)
                 {
                     lt.Built = true;
                 }
@@ -1555,10 +1657,19 @@ namespace MapRenderer.Unity.Rendering.Tile
                 bool completed;
                 if (!lt.FetchCompleted)
                     completed = lt.Request.WaitOffPlayerLoop(timeoutMs);
-                else if (lt.HasMeshBuild)
+                else if (lt.Step == BuildStep.Prologue)
                 {
-                    UniTask<MeshBuildResult> buildTask = lt.MeshBuildTask.ToUniTask();
+                    UniTask<Processing.TilePrologueOutput> buildTask = lt.MeshBuildTask.ToUniTask();
                     completed = buildTask.WaitOffPlayerLoop(timeoutMs);
+                }
+                // job-scheduling-design.md §3.3: this method's contract is "advances no step, consumes
+                // nothing" — Complete() satisfies that (it does not take/consume payloads) and cannot throw
+                // TimeoutException, because a graph is bounded by in-flight CPU with no PlayerLoop dependency
+                // to dead-end on.
+                else if (lt.Step == BuildStep.Measure || lt.Step == BuildStep.Write)
+                {
+                    lt.Graph.Complete();
+                    completed = true;
                 }
                 else
                     continue; // fetch observed but not yet kicked (cap-deferred) — no in-flight task to park on.
@@ -1607,10 +1718,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             using var sFetchPoll = PmFetchPoll.Auto();
 
             // Reset per-tick observability counters.
-            MeshBuildsKickedLastTick = 0;
-            VerticesConsumedLastTick = 0;
-            TilesConsumedLastTick    = 0;
-            MeshesConsumedLastTick   = 0;
+            TileBuildsStartedLastTick     = 0;
+            VerticesConsumedLastTick      = 0;
+            TilesConsumedLastTick         = 0;
+            MeshesConsumedLastTick        = 0;
+            MeshDataArraysAllocatedLastKick = 0;
 
             // S55: treat 0 as uncapped for the kick + vertex caps (unset config field → harmless default).
             int buildCap = maxMeshBuildsPerTick > 0 ? maxMeshBuildsPerTick : int.MaxValue;
@@ -1633,9 +1745,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             SortByPriority(_toRelease, in priorityCtx);
 
             int pending          = 0;
-            int buildsKicked     = 0;
             int meshesConsumed   = 0;
             int verticesConsumed = 0;
+            bool scheduledThisPass = false;
 
             for (int i = 0; i < _toRelease.Count; i++)
             {
@@ -1644,21 +1756,65 @@ namespace MapRenderer.Unity.Rendering.Tile
                 string     sourceId = _pipelines[key.Slot].SourceId;
                 LoadedTile lt       = _loaded[key];
 
-                // ── Consume a completed mesh build MESH-by-mesh under the dual budget (S87) ──
-                if (lt.FetchCompleted && lt.HasMeshBuild && lt.MeshBuildTask.IsCompleted)
+                // ── (1) A completed PROLOGUE hands off to the graph — job-scheduling-design.md §8 stage 3 ──
+                // Nothing to consume here (no mesh, no budget charge): a faulted/cancelled prologue settles
+                // via FinishConsume exactly like a faulted seam build used to; a succeeded one schedules the
+                // measure graph and moves on. Step transitions of an already-admitted tile are uncharged —
+                // TileBuildsStartedLastTick is NOT bumped here (the tile already counted as started at its
+                // prologue kick, arm (5)).
+                if (lt.FetchCompleted && lt.Step == BuildStep.Prologue && lt.MeshBuildTask.IsCompleted)
+                {
+                    if (!lt.MeshBuildTask.IsSucceeded)
+                    {
+                        FinishConsume(ref lt);
+                        TilesConsumedLastTick++;
+                        _loaded[key] = lt;
+                        continue;
+                    }
+
+                    Processing.TilePrologueOutput output = lt.MeshBuildTask.GetResult();
+                    // Store BEFORE scheduling — ScheduleMeasure owns `output` from the call, including on
+                    // its own throw path, so the map must not keep a handle whose result the catch already
+                    // disposed. If ScheduleMeasure throws, the record is left Step == None, MeshBuildTask ==
+                    // default, Decode still the RECORD's own (untouched here) — arm (5) re-kicks it on a
+                    // later pass; the schedule error propagates readable rather than being masked by a second
+                    // free.
+                    lt.MeshBuildTask = default;
+                    lt.Step          = BuildStep.None;
+                    _loaded[key]     = lt;
+
+                    lt.Graph          = Processing.TileBuildGraph.ScheduleMeasureFromDecode(
+                        output.Layers, output.Decode, GraphDepsForTest);
+                    lt.Step           = BuildStep.Measure;
+                    scheduledThisPass = true;
+                    pending++; // measure step now in-flight
+                    _loaded[key] = lt;
+                    continue;
+                }
+
+                // ── (2) Consume a completed GRAPH write step, under the same dual budget ──────────────
+                if (lt.Step == BuildStep.Write && lt.Graph.IsStepComplete)
                 {
                     int meshBudgetLeft = consumeCap - meshesConsumed;
                     int vertBudgetLeft = vertsCap   - verticesConsumed;
-                    // Budget exhausted this frame (or consumeCap == 0 → blocked): defer the rest to the next Tick.
-                    // The tile keeps its ConsumeCursor; pending++ keeps Tick pumping until it drains.
                     if (meshBudgetLeft <= 0 || vertBudgetLeft <= 0)
                     {
                         pending++;
                         continue;
                     }
 
+                    // CompleteWriteAndTakePayloads is idempotent — the graph owns the array from its first
+                    // call on, so a tile resumed here across Ticks (Step stays Write; a budget-bound
+                    // ConsumeMeshBuild below can return incomplete) gets back the SAME array with whatever
+                    // slots an earlier call already nulled. lt.Graph is NOT disposed here: every other
+                    // Step == Write reader in this class (next Tick included) still expects it non-null — see
+                    // LoadedTile.Graph's own doc. FinishConsume disposes it, exactly once, only once
+                    // ConsumeMeshBuild actually reports complete.
+                    Style.MeshDataPayload[] payloads = lt.Graph.CompleteWriteAndTakePayloads();
+
+                    // A Burst job cannot fault — no faulted-task early-out needed here.
                     bool complete = ConsumeMeshBuild(
-                        id,                     ref lt, meshBudgetLeft, vertBudgetLeft,
+                        id, ref lt, payloads, meshBudgetLeft, vertBudgetLeft,
                         out int meshesThisCall, out int vertsThisCall);
 
                     meshesConsumed           += meshesThisCall;
@@ -1671,14 +1827,34 @@ namespace MapRenderer.Unity.Rendering.Tile
                     continue;
                 }
 
-                // ── Mesh build in-flight ───────────────────────────────────────────────────────
-                if (lt.FetchCompleted && lt.HasMeshBuild)
+                // ── (3) Complete a finished GRAPH measure step and schedule its write step ────────────
+                if (lt.Step == BuildStep.Measure && lt.Graph.IsStepComplete)
+                {
+                    // job-scheduling-design.md §11 fork 2: an already-admitted tile's write transition is
+                    // uncharged — it is not re-gated on its way through its own steps.
+                    int allocated;
+                    using (PmMeshDataAllocate.Auto()) lt.Graph.CompleteMeasureAndScheduleWrite(out allocated);
+                    MeshDataArraysAllocatedLastKick += allocated;
+                    lt.Step = BuildStep.Write;
+                    scheduledThisPass = true;
+                    pending++; // write step now in-flight
+                    _loaded[key] = lt;
+                    continue;
+                }
+
+                // ── (4) In-flight arms — neither step above has completed yet ──────────────────────────
+                if (lt.FetchCompleted && lt.Step == BuildStep.Prologue)
+                {
+                    pending++;
+                    continue;
+                }
+                if (lt.Step == BuildStep.Measure || lt.Step == BuildStep.Write)
                 {
                     pending++;
                     continue;
                 }
 
-                // ── Kick a mesh build from Decode ─────────────────────────────────────────
+                // ── (5) Kick a mesh build from Decode ─────────────────────────────────────────
                 if (lt.FetchCompleted && lt.Decode != null)
                 {
                     // Stall #2: don't start a NEW background build for a record already condemned to release
@@ -1690,7 +1866,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                         continue;
                     }
 
-                    if (buildsKicked >= buildCap)
+                    if (TileBuildsStartedLastTick >= buildCap)
                     {
                         // Cap reached this tick — the record keeps its reference (and with it the decoded
                         // tile's buffers) until a later Tick kicks, or teardown releases it.
@@ -1713,23 +1889,23 @@ namespace MapRenderer.Unity.Rendering.Tile
                     }
 
                     lt.MeshBuildTask = KickMeshBuild(lt, id, lt.Decode, sourceId, symbolPass);
-                    lt.HasMeshBuild  = true;
+                    lt.Step          = BuildStep.Prologue;
                     // R1: the record KEEPS its reference — no transfer, no null-out, no Release() here
                     // (which would free the tile mid-build). The kick took its own separate reference in
                     // KickMeshBuild's prologue; this `lt.Decode` stays live until funnel 1
                     // (RenderTeardownRecord) releases it, kicked or not.
-                    buildsKicked++;
-                    MeshBuildsKickedLastTick = buildsKicked;
+                    TileBuildsStartedLastTick++; // this is where a source tile is admitted — the only place it is charged
                     pending++; // mesh build now in-flight
                     _loaded[key] = lt;
                     continue;
                 }
 
-                // ── Epic A / A2 (design §E step 4, HIGH 2): kick a source-less (background) build ──────
+                // ── (6) Epic A / A2 (design §E step 4, HIGH 2): kick a source-less (background) build ────
                 // A pending record the Tick cover-loop only CREATED (never kicked — no Decode to
                 // dispatch on). Rides the SAME condemned-skip + buildCap throttle as the byte path above, so
                 // background loads at the shared build cadence, never as one synchronous cover-wide burst.
-                if (lt.FetchCompleted && !lt.HasMeshBuild && lt.Decode == null &&
+                // job-scheduling-design.md §8 stage 2: this is now a GRAPH kick, on every projection.
+                if (lt.FetchCompleted && lt.Step == BuildStep.None && lt.Decode == null &&
                     _pipelines[key.Slot].IsSourceless)
                 {
                     if (_releaseQueued.Contains(key))
@@ -1738,17 +1914,17 @@ namespace MapRenderer.Unity.Rendering.Tile
                         continue;
                     }
 
-                    if (buildsKicked >= buildCap)
+                    if (TileBuildsStartedLastTick >= buildCap)
                     {
                         pending++;
                         continue;
                     }
 
-                    lt.MeshBuildTask = KickSourcelessBackground(id, lt.TileOriginRender);
-                    lt.HasMeshBuild  = true;
-                    buildsKicked++;
-                    MeshBuildsKickedLastTick = buildsKicked;
-                    pending++; // mesh build now in-flight
+                    lt.Graph = KickSourcelessBackground(id, lt.TileOriginRender);
+                    lt.Step  = BuildStep.Measure;
+                    TileBuildsStartedLastTick++; // this is where a background tile is admitted — same as arm (5)
+                    scheduledThisPass = true;
+                    pending++; // measure step now in-flight
                     _loaded[key] = lt;
                     continue;
                 }
@@ -1788,6 +1964,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _loaded[key] = lt;
             }
 
+            // job-scheduling-design.md §3.3: flush once per pass, not per tile — a job scheduled from the
+            // main thread is not handed to workers until the batch is flushed or an implicit sync point
+            // arrives.
+            if (scheduledThisPass) JobHandle.ScheduleBatchedJobs();
+
             return pending;
         }
 
@@ -1824,7 +2005,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <see cref="DrainMeshBuilds"/> call sites pass nothing, so drain stays symbol-silent (unchanged —
         /// symbols never appeared in snapshots and no test drove symbols via drain).</para>
         /// </summary>
-        private WorkHandle<MeshBuildResult> KickMeshBuild(
+        private WorkHandle<Processing.TilePrologueOutput> KickMeshBuild(
             LoadedTile                       lt, TileId id, SharedDisposable<IDecodedTile> decode, string sourceId,
             Processing.ISymbolTileWorkerPass symbolPass = null)
         {
@@ -1855,25 +2036,21 @@ namespace MapRenderer.Unity.Rendering.Tile
             // used by the cache transfer/probe paths) — the dense ids are consumed synchronously below (one
             // processor built per id) before any worker capture; the scratch list itself is never captured
             // across the thread boundary.
-            ComputeDenseLayerIds(sourceId, _denseLayerIdsScratch);
-            int dense = _denseLayerIdsScratch.Count;
+            ComputeDenseLayerIds(sourceId, _denseLayerIds);
+            int dense = _denseLayerIds.Count;
 
-            // ── MAIN THREAD: one ITileMeshLayerProcessor per this-source layer, each pre-allocating its own
-            // writable MeshDataArray (Mesh.AllocateWritableMeshData is main-thread only — spike-verified).
-            // Epic A / A1: the worker writes into these processors' arrays in place; the main thread
-            // applies at consume. Every allocated array is wrapped by a processor's Complete()
-            // (written OR 0-vertex) — via TileLayerProcessorRunner's settlement loop below — so it is
-            // disposed exactly once on the main thread, including on a faulted tile.
+            // ── MAIN THREAD: one ITileMeshLayerProcessor per this-source layer, rented from its pool —
+            // job-scheduling-design.md §8 stage 5 Group B: the graph is the only mesher, so AllocateForKick
+            // allocates NO Mesh.MeshDataArray any more (that happens later, in the graph's write step; see
+            // PmMeshDataAllocate's OTHER bracket, around CompleteMeasureAndScheduleWrite). The worker builds
+            // each processor's graph request in place; the main thread hands it to the graph at consume.
             var processors = new Processing.ITileMeshLayerProcessor[dense];
-            using (PmMeshDataAllocate.Auto())
+            for (int d = 0; d < dense; d++)
             {
-                for (int d = 0; d < dense; d++)
-                {
-                    int li = _denseLayerIdsScratch[d];
-                    // ComputeDenseLayerIds already filtered to ITileMeshRenderLayer slots — safe cast.
-                    var layer = (Style.ITileMeshRenderLayer)layersSnapshot[li];
-                    processors[d] = Processing.TileMeshLayerProcessor.AllocateForKick(layer, li);
-                }
+                int li = _denseLayerIds[d];
+                // ComputeDenseLayerIds already filtered to ITileMeshRenderLayer slots — safe cast.
+                var layer = (Style.ITileMeshRenderLayer)layersSnapshot[li];
+                processors[d] = Processing.TileMeshLayerProcessor.AllocateForKick(layer, li);
             }
 
             var context = new Processing.TileLayerProcessContext
@@ -1902,7 +2079,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                     // FUNNEL 3 successor: the kick's OWN reference, acquired in the main-thread prologue above —
                     // no longer a transfer of the record's. It covers the mesh pass AND the un-parked symbol pass
                     // below, which is what makes those two cadences share a single decoded tile (and, with it,
-                    // one geometry buffer per source-layer across both). Releasing it here frees the tile's
+                    // one geometry buffer per source-layer across both). job-scheduling-design.md §8 stage 3: on
+                    // SUCCESS the reference TRANSFERS to the returned TilePrologueOutput (freed once handed to
+                    // TileBuildGraph.ScheduleMeasure, or by a pen's TilePrologueOutput.Dispose() if it never gets
+                    // that far); on a FAULT here it is released by the catch below — "transferred or released" is
+                    // exhaustive, so there is no `finally` any more. Releasing frees the tile's
                     // Allocator.Persistent buffers ONLY if it is the last reference — the record's own is always
                     // still outstanding at this point (RenderTeardownRecord is what drops it), and a parked
                     // symbol build may hold a further one of its own, taken during the symbol pass below.
@@ -1911,12 +2092,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                         // The fan-out point (Epic A / A1): read the already-decoded tile off the lease, run every
                         // this-source processor once in dense order against that same tile, then settle every one
                         // of them exactly once — the moved form of today's ensure-wrapped loop.
-                        Style.IRenderLayerPayload[] payloads =
+                        Processing.TilePrologueOutput output =
                             Processing.TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors, token);
-                        var result = new MeshBuildResult { Payloads = payloads }; // mesh domain closed, arrays settled
 
                         // Epic A / A5b (§Q5): fault domain 2, disjoint from the mesh domain above — the mesh
-                        // RESULT is already built, so a symbol fault below can never strand a mesh
+                        // OUTPUT is already built, so a symbol fault below can never strand a mesh
                         // MeshDataArray. The pass is infallible BY CONTRACT (owns its own try/catch), but this
                         // outer guard makes that invariant STRUCTURAL rather than a trust in the contract —
                         // belt-and-braces over the pass's own inner guard, exactly A1's per-processor
@@ -1936,54 +2116,59 @@ namespace MapRenderer.Unity.Rendering.Tile
                         { /* a contract-violating throw must not strand the mesh arrays */
                         }
 
-                        return result;
+                        output.Decode = decode; // transferred — see the comment above
+                        return output;
                     }
-                    finally
+                    catch
                     {
                         decode.Release();
+                        throw;
                     }
                 }, token);
             }
             catch
             {
                 // The hand-off itself — the closure/state-machine allocation, or the pool schedule — can
-                // throw SYNCHRONOUSLY (OOM) before the lambda runs, and the lambda's `finally` is the only
-                // release. Mirror TryParkBuild's Acquire->Enqueue guard: free the kick's reference here, or
-                // the tile's Allocator.Persistent buffers leak with nothing left to observe them.
+                // throw SYNCHRONOUSLY (OOM) before the lambda ever runs, so its own catch (above) never gets
+                // a chance to release. Mirror TryParkBuild's Acquire->Enqueue guard: free the kick's
+                // reference here, or the tile's Allocator.Persistent buffers leak with nothing left to
+                // observe them.
                 decode.Release();
                 throw;
             }
         }
 
         /// <summary>
-        /// Epic A / A2 (design §B Q1/Q2): starts a background mesh build for a SOURCE-LESS (background) tile
-        /// — no bytes, no decode. Called from <see cref="PumpPending"/> (under the shared build cap) and
-        /// <see cref="DrainMeshBuilds"/> (uncapped). Mirrors <see cref="KickMeshBuild"/>'s structure exactly,
-        /// minus the byte/decode plumbing (and its ownership guard — this kick acquires nothing): one
-        /// <see cref="Processing.TileBackgroundLayerProcessor"/> per background layer (dense order, by TYPE —
-        /// <see cref="ComputeSourcelessLayerIds"/>), each pre-allocating its own writable
-        /// <see cref="Mesh.MeshDataArray"/> on the MAIN THREAD, then
-        /// <see cref="Processing.TileLayerProcessorRunner.RunSourcelessWorkerPass"/> dispatched through
-        /// <see cref="WorkScheduler"/> (see <see cref="KickMeshBuild"/>'s doc for the policy contract).
+        /// Epic A / A2 (design §B Q1/Q2), job-scheduling-design.md §8 stage 3: starts the graph-arm build for
+        /// a SOURCE-LESS (background) tile — no bytes, no decode, no <c>IWorkScheduler</c>. Called from
+        /// <see cref="PumpPending"/> (under the shared build cap) and <see cref="DrainMeshBuilds"/>
+        /// (uncapped). Schedules the measure graph for every dense background layer
+        /// (<see cref="ComputeSourcelessLayerIds"/>) directly on the main thread — the quad materializer
+        /// (<see cref="Processing.BackgroundQuad.BuildLayerInput"/>) is small enough to run at kick time, so
+        /// the graph is scheduled without a managed prologue (background tiles skip the prologue step
+        /// entirely — unlike a source tile).
+        ///
+        /// <para>No projection gate — job-scheduling-design.md's E1 was resolved by reordering (the globe
+        /// subdivide stage landed first), so the graph builds both arms and this kicks on every projection.
+        /// Allocates NO <see cref="Mesh.MeshDataArray"/> here — that is the write step's job
+        /// (<see cref="Processing.TileBuildGraph.CompleteMeasureAndScheduleWrite"/>), which is where
+        /// <c>PmMeshDataAllocate</c> now brackets the allocation.</para>
+        ///
+        /// <para>Mints the full-tile-extent quad ONCE (<see cref="Processing.BackgroundQuad.MintFullExtentGeometry"/>)
+        /// and shares it, BORROWED, across every dense layer's <see cref="FillMeshPipeline.LayerInput"/> —
+        /// every background layer over one tile draws the identical quad, so one allocation backs all of
+        /// them. Ownership passes to <see cref="Processing.TileBuildGraph.ScheduleMeasure"/> as the per-tile
+        /// <c>ownedGeometry</c> argument, which disposes it once, after every layer — never per-layer (a
+        /// build's own Dispose never touches <c>Input.Geometry</c>, matching
+        /// <c>FillMeshPipeline.LayerInput.Geometry</c>'s own documented BORROWED contract).</para>
         /// </summary>
-        private WorkHandle<MeshBuildResult> KickSourcelessBackground(TileId id, double3 origin)
+        private Processing.TileBuildGraph KickSourcelessBackground(TileId id, double3 origin)
         {
             var    layersSnapshot = _layers.SnapshotLayers();
             double zoom           = id.Z;
 
-            ComputeSourcelessLayerIds(_denseLayerIdsScratch);
-            int dense = _denseLayerIdsScratch.Count;
-
-            var processors = new Processing.ITileMeshLayerProcessor[dense];
-            using (PmMeshDataAllocate.Auto())
-            {
-                for (int d = 0; d < dense; d++)
-                {
-                    int li    = _denseLayerIdsScratch[d];
-                    var layer = (Style.BackgroundRenderLayer)layersSnapshot[li];
-                    processors[d] = Processing.TileBackgroundLayerProcessor.AllocateForKick(layer, li);
-                }
-            }
+            ComputeSourcelessLayerIds(_denseLayerIds);
+            int dense = _denseLayerIds.Count;
 
             var context = new Processing.TileLayerProcessContext
             {
@@ -1994,14 +2179,29 @@ namespace MapRenderer.Unity.Rendering.Tile
                 BufferClip       = _bufferClip,
             };
 
-            CancellationToken token = _lifetimeCts.Token; // captured as a local so the lambda closes over the token, not `this`
+            TileGeometryBuffers geometry = Processing.BackgroundQuad.MintFullExtentGeometry(id);
 
-            return WorkScheduler.Schedule(_ =>
+            var builds = new Meshing.ILayerMeshBuild[dense];
+            for (int d = 0; d < dense; d++)
             {
-                Style.IRenderLayerPayload[] payloads =
-                    Processing.TileLayerProcessorRunner.RunSourcelessWorkerPass(in context, processors, token);
-                return new MeshBuildResult { Payloads = payloads };
-            }, token);
+                int li    = _denseLayerIds[d];
+                var layer = (Style.BackgroundRenderLayer)layersSnapshot[li];
+                string payloadName = layer?.StyleLayer?.Id ?? "background";
+
+                FillMeshPipeline.LayerInput input = Processing.BackgroundQuad.BuildLayerInput(
+                    context, geometry, out NativeArray<int> visitOrder, out NativeArray<Vector4> featureColors);
+                // BuildLayerInput's out visitOrder is folded into `input.RingVisitOrder` already — the
+                // build owns it (its own Dispose frees it); `geometry` is shared/borrowed, disposed once
+                // below via ScheduleMeasure's ownedGeometry argument, not per-layer.
+
+                // A background quad meshes through StyledFillTileBuilder.ScheduleWrite, exactly like a
+                // source fill layer — FillLayerBuild.Rent is unconditional here (the quad always produces a
+                // real visit order), so this build counts into LayerMeshBuildCounters' own live/total counters
+                // exactly like a source tile's, unlike the retired LayerRequest object-initializer bypass.
+                builds[d] = Meshing.FillLayerBuild.Rent(input, featureColors, li, payloadName);
+            }
+
+            return Processing.TileBuildGraph.ScheduleMeasure(builds, geometry, GraphDepsForTest);
         }
 
         /// <summary>
@@ -2014,42 +2214,33 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// also free any layers the active style does not render. Returns true when the tile is now fully
         /// consumed (<see cref="LoadedTile.Built"/>); false when partially consumed (resume next Tick).
         ///
-        /// Must be called on the Unity main thread, only when MeshBuildTask.IsCompleted, with positive
-        /// budget (the pump guards budget &lt;= 0). A partially-consumed tile keeps HasMeshBuild = true
+        /// Must be called on the Unity main thread, only when the build is complete, with positive
+        /// budget (the pump guards budget &lt;= 0). A partially-consumed tile keeps its build step in flight
         /// and !Built; its already-built meshes/handles live in lt.Meshes/lt.DrawHandles, the remaining layers
-        /// stay alive in the handle (re-fetched each call). Eviction's holding pen disposes the
+        /// stay alive in <paramref name="payloads"/> (re-fetched each call). Eviction's holding pen disposes the
         /// remainder (idempotent — already-consumed layers are no-ops).
+        ///
+        /// <para><paramref name="payloads"/> is the caller's — job-scheduling-design.md §8 stage 3: every
+        /// tile now reaches this method only via the graph's <c>CompleteWriteAndTakePayloads</c>; a faulted/
+        /// cancelled PROLOGUE is handled by the caller itself, before the graph even exists (a Burst job has
+        /// no fault channel, so this method never needs that early-out).</para>
         ///
         /// Mid-flight release: ReleaseTile removes the tile from _loaded, so this is never called for a
         /// released tile — the real discard protection is the _loaded-removal in ReleaseTile.
         /// </summary>
         private bool ConsumeMeshBuild(
-            TileId  id,             ref LoadedTile lt, int meshBudget, int vertBudget,
-            out int meshesConsumed, out int        vertsConsumed)
+            TileId id, ref LoadedTile lt, Style.MeshDataPayload[] payloads, int meshBudget, int vertBudget,
+            out int meshesConsumed, out int vertsConsumed)
         {
             meshesConsumed = 0;
             vertsConsumed  = 0;
 
-            var buildHandle = lt.MeshBuildTask;
-
-            // Faulted or cancelled — nothing to render; complete immediately.
-            if (!buildHandle.IsSucceeded)
-            {
-                FinishConsume(ref lt);
-                return true;
-            }
-
-            // GetResult() is re-callable across frames — the handle's backing completion source is a manual,
-            // non-recycling one, so no .Preserve() is needed (the pump calls this only when IsCompleted is
-            // true). Per-layer NativeArrays are disposed as each layer is consumed.
-            MeshBuildResult result = buildHandle.GetResult();
-
-            int denseCount        = result.Payloads?.Length ?? 0;
+            int denseCount        = payloads?.Length ?? 0;
             int currentLayerCount = _layers.Count;
 
-            _consumeScratchMeshes.Clear();
-            _consumeScratchHandles.Clear();
-            _consumeScratchMatIndices.Clear();
+            _consumeMeshes.Clear();
+            _consumeHandles.Clear();
+            _consumeMatIndices.Clear();
 
             // Consume the dense per-source payloads from the cursor until a budget binds or all are done.
             // Empty (0-vertex) layers are free — they only advance the cursor. The pump guarantees positive
@@ -2062,7 +2253,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 // resume position. A payload whose material index no longer exists (restyle shrank the layer
                 // set mid-flight) is freed without registering — the backend would otherwise throw on it.
                 int slot = cursor;
-                Style.IRenderLayerPayload payload = result.Payloads[slot];
+                Style.MeshDataPayload payload = payloads[slot];
                 cursor++;
 
                 int materialIndex = payload?.MaterialIndex ?? -1;
@@ -2073,7 +2264,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                     payload?.Dispose();
                     // perf/gc-elimination Stage A: null the slot the instant Dispose() has run — see the
                     // note on the main-path Dispose() below for why this is load-bearing, not cosmetic.
-                    result.Payloads[slot] = null;
+                    payloads[slot] = null;
                     continue;
                 }
 
@@ -2084,23 +2275,23 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 // perf/gc-elimination Stage A: MeshDataPayload.Dispose() returns the instance to a shared,
                 // cross-build ConcurrentBag pool — so the moment Dispose() returns, `payload` may already be
-                // some OTHER, concurrently-running build's live instance. result.Payloads[slot] must stop
-                // referencing it right here: DisposeWholeResult's later unconditional sweep (at `complete`,
+                // some OTHER, concurrently-running build's live instance. payloads[slot] must stop
+                // referencing it right here: DisposeWholePayloads's later unconditional sweep (at `complete`,
                 // possibly many frames from now) would otherwise call Dispose() a second time on whatever
                 // this slot still points to — which, if a concurrent build has since Rent()+Reset()'d it, is
                 // NOT a harmless idempotent no-op (that guarantee assumed the reference was never handed to
                 // anyone else) but a live double-free of that OTHER build's native array. Nulling here is
                 // what makes this Dispose() call provably the payload's last touch from this tile's result.
-                result.Payloads[slot] = null;
+                payloads[slot] = null;
 
                 if (mesh == null) continue; // empty layer — no AddLayer, no budget charge
 
                 int handle;
                 using (PmAddTileLayer.Auto())
                     handle = _instanced.AddTileLayer(mesh, lt.TileOriginRender, materialIndex, id);
-                _consumeScratchMeshes.Add(mesh); // S51: track for explicit destruction
-                _consumeScratchHandles.Add(handle);
-                _consumeScratchMatIndices.Add(materialIndex); // S82: which layerId this mesh belongs to
+                _consumeMeshes.Add(mesh); // S51: track for explicit destruction
+                _consumeHandles.Add(handle);
+                _consumeMatIndices.Add(materialIndex); // S82: which layerId this mesh belongs to
                 meshesConsumed++;
                 vertsConsumed += layerVerts;
             }
@@ -2109,27 +2300,37 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // Append this call's new meshes/handles/materialIndices to the tile's arrays (one realloc per
             // partial frame; load time only — steady state never re-enters consume, so no per-frame GC there).
-            AppendMeshes(ref lt.Meshes, _consumeScratchMeshes);
-            AppendInts(ref lt.DrawHandles,     _consumeScratchHandles);
-            AppendInts(ref lt.MaterialIndices, _consumeScratchMatIndices);
+            AppendMeshes(ref lt.Meshes, _consumeMeshes);
+            AppendInts(ref lt.DrawHandles,     _consumeHandles);
+            AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
 
             bool complete = cursor >= denseCount;
             if (complete)
             {
-                // Dispose the whole result (idempotent) — also frees any layers the active style does not
-                // render (beyond fillCount/lineCount) — then mark Built and release the task.
-                DisposeWholeResult(result);
+                // Dispose the whole payload array (idempotent) — also frees any layers the active style does
+                // not render (beyond fillCount/lineCount) — then mark Built and release the task.
+                DisposeWholePayloads(payloads);
                 FinishConsume(ref lt);
             }
 
             return complete;
         }
 
-        /// <summary>S87: marks a tile fully consumed — clears the mesh build task and sets Built.</summary>
+        /// <summary>S87: marks a tile fully consumed — clears the build task/graph and sets Built.
+        ///
+        /// <para>The single disposal site for <see cref="LoadedTile.Graph"/>: every <c>Step == Write</c>
+        /// reader in this class (job-scheduling-design.md §6, <c>LoadedTile.Graph</c>'s own doc) requires
+        /// <c>Graph</c> non-null for as long as <c>Step</c> reads <c>Write</c>, including across a
+        /// budget-bound <see cref="ConsumeMeshBuild"/> call that returns incomplete — disposing it any
+        /// earlier (its call sites used to, right after <c>CompleteWriteAndTakePayloads</c>) leaves a
+        /// partially-consumed tile with <c>Step == Write</c> and <c>Graph == null</c>, and the NEXT Tick's
+        /// guard dereferences it.</para></summary>
         private static void FinishConsume(ref LoadedTile lt)
         {
-            lt.HasMeshBuild  = false;
+            lt.Graph?.Dispose();
+            lt.Step          = BuildStep.None;
             lt.MeshBuildTask = default;
+            lt.Graph         = null;
             lt.Built         = true;
         }
 
@@ -2157,20 +2358,22 @@ namespace MapRenderer.Unity.Rendering.Tile
             arr = merged;
         }
 
-        /// <summary>S48/S87: disposes every payload in a result (null-slot-safe — a null empty-layer slot,
-        /// or a slot <see cref="ConsumeMeshBuild"/>'s per-payload loop already disposed AND NULLED, is a
-        /// no-op). The single place a <see cref="MeshBuildResult"/>'s NativeArrays are freed for a result
-        /// that was never partially consumed, called from every discard path.
-        ///
-        /// <para>perf/gc-elimination Stage A: this is NOT idempotent against re-Disposing the SAME live
-        /// reference — <c>ConsumeMeshBuild</c> nulls a slot the instant it disposes that payload precisely so
-        /// this sweep never gets the chance to (see that method's comment on why a pooled payload's identity
-        /// can no longer be assumed stable after its own Dispose() returns).</para></summary>
-        private static void DisposeWholeResult(MeshBuildResult result)
+        /// <summary>Disposes every payload in a dense per-source array — the array
+        /// <see cref="Processing.TileBuildGraph.CompleteWriteAndTakePayloads"/> hands back — (null-slot-safe:
+        /// a null empty-layer slot, or a slot <see cref="ConsumeMeshBuild"/>'s per-payload loop already
+        /// disposed AND NULLED, is a no-op). Called from every discard path for a result that was never
+        /// partially consumed. Idempotent against a null/already-nulled slot, but NOT (perf/gc-elimination
+        /// Stage A) against re-Disposing the SAME live reference — <c>ConsumeMeshBuild</c> nulls a slot the
+        /// instant it disposes that payload precisely so this sweep never gets the chance to (see that
+        /// method's comment on why a pooled payload's identity can no longer be assumed stable after its own
+        /// Dispose() returns). job-scheduling-design.md §8 stage 3: a source tile's PROLOGUE output has its
+        /// own array (<c>TilePrologueOutput.Layers</c>, an <c>ILayerMeshBuild[]</c>) — its disposal is
+        /// <see cref="Processing.TilePrologueOutput.Dispose"/>, not this method.</summary>
+        private static void DisposeWholePayloads(Style.MeshDataPayload[] payloads)
         {
-            if (result.Payloads == null) return;
-            for (int li = 0; li < result.Payloads.Length; li++)
-                result.Payloads[li]?.Dispose();
+            if (payloads == null) return;
+            for (int li = 0; li < payloads.Length; li++)
+                payloads[li]?.Dispose();
         }
 
         /// <summary>
@@ -2266,15 +2469,15 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// </summary>
         private void TransferBuiltMeshesToCache(TileId id, string sourceId, ref LoadedTile lt)
         {
-            ComputeDenseLayerIds(sourceId, _denseLayerIdsScratch);
+            ComputeDenseLayerIds(sourceId, _denseLayerIds);
 
             int trackedCount = lt.MaterialIndices?.Length ?? 0;
             for (int i = 0; i < trackedCount; i++)
                 _prepared.Put(new PreparedKey(CurrentStyle, id, lt.MaterialIndices[i]), lt.Meshes[i]);
 
-            for (int d = 0; d < _denseLayerIdsScratch.Count; d++)
+            for (int d = 0; d < _denseLayerIds.Count; d++)
             {
-                int  layerId = _denseLayerIdsScratch[d];
+                int  layerId = _denseLayerIds[d];
                 bool covered = false;
                 for (int i = 0; i < trackedCount; i++)
                     if (lt.MaterialIndices[i] == layerId)
@@ -2322,7 +2525,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             var key = new LoadedKey(id, slot);
 
             // S91-C: the SINGLE projected SW-corner render origin — shared by the mesh bake (threaded into
-            // WriteInto) and the tile transform. Mercator: (mercX, 0, mercZ) == MercatorBounds().min
+            // BuildGraphRequest) and the tile transform. Mercator: (mercX, 0, mercZ) == MercatorBounds().min
             // bit-for-bit, so placement is unchanged from the pre-desired-list path.
             double3 origin = TileRenderOrigin.Project(id, projection);
 
@@ -2350,17 +2553,17 @@ namespace MapRenderer.Unity.Rendering.Tile
             bool allCached = false;
             if (_cacheEnabled)
             {
-                ComputeDenseLayerIds(p.SourceId, _denseLayerIdsScratch);
+                ComputeDenseLayerIds(p.SourceId, _denseLayerIds);
                 // Seed from dense-layer COUNT, not an unconditional true: a source with zero dense mesh
                 // layers (a symbol-only source) has nothing in the prepared cache to hit, and the loop below
                 // never runs to falsify it — so an unconditional `true` made `allCached` vacuously true on
                 // every cover entry, sending the tile down BuildTileFromCache forever (no fetch, no kick),
                 // so its symbols never built with the cache on (the default). A zero-dense source is never
                 // "all cached" — it must fetch.
-                allCached = _denseLayerIdsScratch.Count > 0;
-                for (int d = 0; d < _denseLayerIdsScratch.Count; d++)
+                allCached = _denseLayerIds.Count > 0;
+                for (int d = 0; d < _denseLayerIds.Count; d++)
                 {
-                    if (!_prepared.Contains(new PreparedKey(CurrentStyle, id, _denseLayerIdsScratch[d])))
+                    if (!_prepared.Contains(new PreparedKey(CurrentStyle, id, _denseLayerIds[d])))
                     {
                         allCached = false;
                         break;
@@ -2371,7 +2574,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (allCached)
             {
                 _prepared.Hits++;
-                _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIdsScratch);
+                _loaded[key] = BuildTileFromCache(id, origin, _denseLayerIds);
                 // S105/A-1: a cache HIT re-shows the tile with NO fetch (so no bytes-ready). The symbol
                 // subsystem now PULLS this tile back into its loaded set and reconciles — restoring its
                 // kept-warm symbols — instead of us pushing a restore callback here.
@@ -2442,10 +2645,10 @@ namespace MapRenderer.Unity.Rendering.Tile
         private void SortByPriority(List<LoadedKey> list, in TilePriorityContext ctx)
         {
             int n = list.Count;
-            if (_priorityKeysScratch.Length < n)
-                _priorityKeysScratch = new double[math.max(n, _priorityKeysScratch.Length * 2)];
+            if (_priorityKeys.Length < n)
+                _priorityKeys = new double[math.max(n, _priorityKeys.Length * 2)];
 
-            double[] keys = _priorityKeysScratch;
+            double[] keys = _priorityKeys;
             for (int i = 0; i < n; i++)
             {
                 TileId tile = list[i].Tile;
@@ -2493,14 +2696,14 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// each layer's mesh (Model B — ownership transfers back to this record) and re-registers non-null
         /// ones with the backend via <c>AddTileLayer</c>; a <see langword="null"/> (empty-layer marker) entry
         /// is a no-op, reproducing the original prepare's "no mesh for this layer" outcome exactly. No fetch,
-        /// no decode, no mesh build, no upload — <see cref="MeshBuildsKickedLastTick"/> is untouched by
+        /// no decode, no mesh build, no upload — <see cref="TileBuildsStartedLastTick"/> is untouched by
         /// this path, which is the decisive falsifier a shallow (re-building) cache would trip.
         /// </summary>
         private LoadedTile BuildTileFromCache(TileId id, double3 origin, List<int> denseLayerIds)
         {
-            _consumeScratchMeshes.Clear();
-            _consumeScratchHandles.Clear();
-            _consumeScratchMatIndices.Clear();
+            _consumeMeshes.Clear();
+            _consumeHandles.Clear();
+            _consumeMatIndices.Clear();
 
             for (int d = 0; d < denseLayerIds.Count; d++)
             {
@@ -2511,15 +2714,15 @@ namespace MapRenderer.Unity.Rendering.Tile
                 int handle;
                 using (PmAddTileLayer.Auto())
                     handle = _instanced.AddTileLayer(mesh, origin, layerId, id);
-                _consumeScratchMeshes.Add(mesh);
-                _consumeScratchHandles.Add(handle);
-                _consumeScratchMatIndices.Add(layerId);
+                _consumeMeshes.Add(mesh);
+                _consumeHandles.Add(handle);
+                _consumeMatIndices.Add(layerId);
             }
 
             var lt = new LoadedTile { Built = true, FetchCompleted = true, TileOriginRender = origin };
-            AppendMeshes(ref lt.Meshes, _consumeScratchMeshes);
-            AppendInts(ref lt.DrawHandles,     _consumeScratchHandles);
-            AppendInts(ref lt.MaterialIndices, _consumeScratchMatIndices);
+            AppendMeshes(ref lt.Meshes, _consumeMeshes);
+            AppendInts(ref lt.DrawHandles,     _consumeHandles);
+            AppendInts(ref lt.MaterialIndices, _consumeMatIndices);
             return lt;
         }
 
@@ -2564,17 +2767,46 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _pendingFetchDisposal.Add(lt.Request);
             }
 
-            // A record with an unconsumed-or-partially-consumed mesh build must have its result's
-            // NativeArrays disposed — stash in the S48 holding pen. A partial record's already-consumed
-            // layers are safe because ConsumeMeshBuild nulled their Payloads[] slots as it disposed them,
-            // so the later DisposeWholeResult sweep skips them — it must NOT re-Dispose a live pooled
-            // reference (a recycled instance a concurrent build now owns). Genuine mid-flight (task still
-            // running) is counted; an S87 partial (task complete, cursor mid-way) is stashed but not counted.
-            if (lt.HasMeshBuild && !lt.Built)
+            // A record with an unconsumed PROLOGUE build must have its result's NativeArrays disposed —
+            // stash in the S48 holding pen. DrainPendingDisposal/DoDispose call TilePrologueOutput.Dispose()
+            // on the completed result, which sweeps every ILayerMeshBuild's own columns — the prologue's
+            // equivalent of DisposeWholePayloads, over its own ILayerMeshBuild[] rather than an
+            // MeshDataPayload[]. Genuine mid-flight (task still running at release) is counted; a task
+            // the worker finished but the pump had not yet observed (IsCompleted already true when release
+            // fires) is stashed but not counted, matching the pre-stage-3 seam pen's own treatment.
+            if (lt.Step == BuildStep.Prologue && !lt.Built)
             {
                 if (!lt.MeshBuildTask.IsCompleted)
                     ReleasedMidFlightCount++;
                 _pendingDisposal.Add(lt.MeshBuildTask);
+                // Mirrors the graph branch's "transfer nulls the source" discipline below — both callers
+                // Remove/Clear this record from _loaded immediately after, so nothing reads it again today,
+                // but nulling here costs nothing and keeps the two pen stashes uniform.
+                lt.MeshBuildTask = default;
+            }
+
+            // job-scheduling-design.md §6 exit (2)/(3): the graph-arm twin of the seam pen above — a record
+            // released while its measure/write step is genuinely in flight, complete but not yet consumed
+            // at all, OR partially consumed (Step still Write, some payloads already taken via
+            // CompleteWriteAndTakePayloads while others remain — FinishConsume, which alone would advance
+            // Step back to None, never ran). All three land here, not just the first two: lt.Graph stays
+            // live until FinishConsume disposes it, so a partial tile's still-live Graph is exactly as
+            // pen-worthy as one still mid-job. The transfer nulls the source (the double-free guard);
+            // DrainPendingDisposal's graph sweep completes then disposes it.
+            //
+            // ReleasedMidFlightCount is guarded by !lt.Graph.IsStepComplete, so a partial tile — whose write
+            // handle IS complete by definition (CompleteWriteAndTakePayloads already ran) — does NOT count
+            // here, matching the seam pen's own treatment of a partial (see its ReleasedMidFlightCount
+            // guard above, keyed the same way on task completion rather than on Built).
+            if ((lt.Step == BuildStep.Measure || lt.Step == BuildStep.Write) && !lt.Built)
+            {
+                if (!lt.Graph.IsStepComplete)
+                    ReleasedMidFlightCount++;
+                // TileBuildGraph.Dispose() (run by DrainPendingDisposal's graph sweep once IsStepComplete)
+                // owns the remaining (not-yet-consumed) payload slots itself now — CompleteWriteAndTakePayloads
+                // caches the array it returns, so there is no separate LoadedTile-side copy to sweep here.
+                _pendingGraphDisposal.Add(lt.Graph);
+                lt.Graph = null;
             }
 
             // Unregister the instanced draw items before destroying Mesh assets — one batched call so the
@@ -2589,29 +2821,43 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>
-        /// S48: Drains completed tasks from the mid-flight-discard holding pen, disposing their
-        /// NativeArray payloads. Called once per Tick and in Dispose.
+        /// S48: Drains completed PROLOGUE tasks from the mid-flight-discard holding pen, disposing their
+        /// <see cref="Processing.TilePrologueOutput"/>'s NativeArrays. Called once per Tick and in Dispose.
         ///
         /// Tasks not yet complete remain in the list for the next drain. This is a non-blocking
         /// poll — no spinning, no blocking.
         /// </summary>
         private void DrainPendingDisposal()
         {
-            if (_pendingDisposal.Count == 0) return;
-
-            // Iterate backwards so we can remove in-place without index shifting.
-            for (int i = _pendingDisposal.Count - 1; i >= 0; i--)
+            if (_pendingDisposal.Count > 0)
             {
-                var handle = _pendingDisposal[i];
-                if (!handle.IsCompleted)
+                // Iterate backwards so we can remove in-place without index shifting.
+                for (int i = _pendingDisposal.Count - 1; i >= 0; i--)
+                {
+                    var handle = _pendingDisposal[i];
+                    if (!handle.IsCompleted)
+                        continue; // still in-flight; check again next Tick
+
+                    // Task completed (succeeded, faulted, or cancelled).
+                    if (handle.IsSucceeded)
+                        handle.GetResult().Dispose();
+                    // Faulted/cancelled: no output produced, nothing to dispose.
+
+                    _pendingDisposal.RemoveAt(i);
+                }
+            }
+
+            // job-scheduling-design.md §6: the graph arm's twin sweep — a Burst job cannot fault, so
+            // Handle.IsCompleted is the only gate; Dispose() completes (a no-op by the time this fires) and
+            // frees every owned container.
+            for (int i = _pendingGraphDisposal.Count - 1; i >= 0; i--)
+            {
+                var graph = _pendingGraphDisposal[i];
+                if (!graph.IsStepComplete)
                     continue; // still in-flight; check again next Tick
 
-                // Task completed (succeeded, faulted, or cancelled).
-                if (handle.IsSucceeded)
-                    DisposeWholeResult(handle.GetResult());
-                // Faulted/cancelled: no payloads produced, nothing to dispose.
-
-                _pendingDisposal.RemoveAt(i);
+                graph.Dispose();
+                _pendingGraphDisposal.RemoveAt(i);
             }
         }
 
@@ -2794,22 +3040,29 @@ namespace MapRenderer.Unity.Rendering.Tile
             _loaded.Clear();
 
             // S48: drain the mid-flight-discard holding pen — park to completion, then dispose the
-            // NativeArray payload; we're tearing down and must not leak. Runs AFTER the teardown loop
-            // above, so it also absorbs every mesh build that loop just stashed.
+            // TilePrologueOutput's NativeArrays; we're tearing down and must not leak. Runs AFTER the
+            // teardown loop above, so it also absorbs every mesh build that loop just stashed.
             // The handle's WorkScheduler completes it on the completing thread, never posting to the
             // PlayerLoop (I-2) — WaitOffPlayerLoop parks on a kernel event set by that completion,
             // deadlock-free (no PlayerLoop dependency).
             for (int i = 0; i < _pendingDisposal.Count; i++)
             {
                 var handle = _pendingDisposal[i];
-                UniTask<MeshBuildResult> buildTask = handle.ToUniTask();
+                UniTask<Processing.TilePrologueOutput> buildTask = handle.ToUniTask();
                 buildTask.WaitOffPlayerLoop(10000);
 
                 if (handle.IsSucceeded)
-                    DisposeWholeResult(handle.GetResult());
+                    handle.GetResult().Dispose();
             }
 
             _pendingDisposal.Clear();
+
+            // job-scheduling-design.md §6 exit (4): the graph arm's twin sweep — Complete() from the main
+            // thread executes a not-yet-started job inline (§3.3), so no WaitOffPlayerLoop/timeout is needed
+            // here the way the seam pen above needs one for its UniTask bridge.
+            foreach (var graph in _pendingGraphDisposal)
+                graph.Dispose();
+            _pendingGraphDisposal.Clear();
 
             // S84: the FETCH pen, drained the same way — park, then observe-and-discard through the single
             // abandonment funnel, so no fetch task is dropped unobserved (UnityWebRequestException flood on

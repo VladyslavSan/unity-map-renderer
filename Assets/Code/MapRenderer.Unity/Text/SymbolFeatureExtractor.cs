@@ -19,7 +19,7 @@ using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
 
 namespace MapRenderer.Unity.Text
@@ -48,7 +48,7 @@ namespace MapRenderer.Unity.Text
     ///
     /// <para><b>Landmine #5 — the fused-<c>RingAssemblyJob</c> fence.</b> Symbol has no polygon, hole, area or
     /// triangulation concept and rejects Polygon features outright, so it must never call
-    /// <c>FillMeshPipeline.Schedule</c>, never schedule or consume <c>RingAssemblyJob</c>/<c>RingClipJob</c>/
+    /// <c>FillMeshGraph.Schedule</c>, never schedule or consume <c>RingAssemblyJob</c>/<c>RingClipJob</c>/
     /// <c>EarcutJob</c>/<c>GlobeFillSubdivideJob</c>, and never apply an area/shoelace test to a symbol path —
     /// a Point feature's 1-point path has no area at all and a straight road has exactly zero.</para>
     ///
@@ -121,7 +121,7 @@ namespace MapRenderer.Unity.Text
             // Nothing created ⇒ no rings ⇒ no symbol is reachable (every emit below walks the bucketed ring
             // order), so this returns the same empty result the loop would — and it is what makes reading
             // Tile/Extent off the buffer safe, since `default` carries neither. Mirrors line's own guard,
-            // StyledLineTileBuilder.WriteInto's `!geometry.IsCreated` early return.
+            // StyledLineTileBuilder.BuildLayerInput's `!geometry.IsCreated` early return.
             TileGeometryBuffers geometry = tileLayer.Geometry;
             if (!geometry.IsCreated) return;
             TileId tileAddress = geometry.Tile;

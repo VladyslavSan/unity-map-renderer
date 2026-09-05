@@ -438,10 +438,11 @@ namespace MapRenderer.Tests.Text
             yield return PumpToQuiescence(loaded);
             long liveWithOneBlock = SymbolTileBlock.DebugLiveAllocCount; // the front pins this tile's block
 
-            // Rebuild the tile → a NEW block is baked; the OLD block is pinned by the front snapshot, so
-            // CompleteBuild's DisposeOrDefer DEFERS it. PHASE 1: wait until the rebuild has committed and the old
-            // block is genuinely deferred-but-alive (TWO live blocks) — so the phase-2 return-to-one is a REAL
-            // free of a deferred block, not a trivially-already-true baseline.
+            // Rebuild the tile → a NEW block is baked; the OLD block is still referenced by the front snapshot, so
+            // CompleteBuild's release of the entry's own reference leaves it alive (the snapshot's own reference
+            // survives). PHASE 1: wait until the rebuild has committed and the old block is genuinely
+            // referenced-but-alive (TWO live blocks) — so the phase-2 return-to-one is a REAL free, not a
+            // trivially-already-true baseline.
             DriveTileBytesReady(tile);
             bool deferred = false;
             for (int f = 0; f < 300; f++)
@@ -598,12 +599,12 @@ namespace MapRenderer.Tests.Text
                 // real fixture decodes to, so FirstDifference below is unambiguous regardless of the fixture's
                 // own content. BeginBuild+Bake+CompleteBuild run back-to-back (no CurrentBatch poll between
                 // them — see the header comment's coalescing argument).
-                var newScratch = new SymbolTileBuffer();
+                var replacementBuffer = new SymbolTileBuffer();
                 for (int i = 0; i < winnersBefore; i++)
-                    AddPointSymbol(newScratch, new double3(9000 + i * 10, 0, 9000), "replacement" + i, 900 + i, Tk(tile), 0.9f);
+                    AddPointSymbol(replacementBuffer, new double3(9000 + i * 10, 0, 9000), "replacement" + i, 900 + i, Tk(tile), 0.9f);
                 int gen = _subsystem.Store().BeginBuild(StoreKey(tile));
                 SymbolTileBlock newBlock = SymbolTileBlockBaker.Bake(
-                    newScratch, slotCount: 1, TileRenderOrigin.Project(tile, P), new SymbolStringTable());
+                    replacementBuffer, slotCount: 1, TileRenderOrigin.Project(tile, P), new SymbolStringTable());
                 Assert.IsTrue(_subsystem.Store().CompleteBuild(StoreKey(tile), gen, newBlock), "sanity: replacement block committed");
 
                 // (a) EVENT-keying check: the frame right after the store event (before any reconcile has had a
@@ -724,9 +725,11 @@ namespace MapRenderer.Tests.Text
         }
 
         // ═══ T9: the pin prevents a native USE-AFTER-FREE — a block a reconcile result still references is NOT freed
-        //         at a drop site while pinned; the gather derefs its NativeArrays safely; the pin release frees it.
-        //         RED-verify: revert the Release true-evict site's DisposeOrDefer to a direct Dispose → the block
-        //         frees at the drop site (the "not freed" assertion fails) and the gather derefs freed memory. ═══
+        //         at a drop site while a snapshot references it; the gather derefs its NativeArrays safely; the
+        //         snapshot's release frees it.
+        //         RED-verify: revert the Release true-evict site's `?.Release()` to a direct `?.Value.Dispose()` →
+        //         the block frees at the drop site (the "not freed" assertion fails) and the gather derefs freed
+        //         memory. ═══
 
         private static readonly WebMercatorProjection P = new WebMercatorProjection();
         private static SymbolTileStore.Key StoreKey(TileId t) => new SymbolTileStore.Key("s", t);
@@ -770,9 +773,9 @@ namespace MapRenderer.Tests.Text
             var result = new SymbolReconcileResult();
             reconciler.Run(snapshot, result);
 
-            // A store drop site fires while the snapshot pins the block → DisposeOrDefer must DEFER (not free it),
-            // so the gather below can still deref its NativeArrays.
-            store.Release(StoreKey(tile), transferredToCache: false); // active → true evict → DisposeOrDefer(block)
+            // A store drop site fires while the snapshot still references the block → the drop must NOT free it
+            // (the snapshot's own reference survives), so the gather below can still deref its NativeArrays.
+            store.Release(StoreKey(tile), transferredToCache: false); // active → true evict → releases the entry's own ref
             Assert.AreEqual(live0, SymbolTileBlock.DebugLiveAllocCount,
                 "the pinned block is NOT freed at the drop site (deferred) — reverting to a direct Dispose fails HERE");
 

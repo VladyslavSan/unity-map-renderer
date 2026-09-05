@@ -5,8 +5,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Fill;
 namespace MapRenderer.Tests.Jobs
 {
     /// <summary>

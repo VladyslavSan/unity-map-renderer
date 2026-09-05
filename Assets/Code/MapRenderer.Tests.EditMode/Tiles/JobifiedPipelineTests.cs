@@ -13,7 +13,8 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Expressions;
@@ -266,16 +267,18 @@ namespace MapRenderer.Tests.Tiles
                 Geometry       = geometry,
                 RingVisitOrder = visitOrder,
                 OriginRender   = new double3(originX, 0.0, originY), // == TileRenderOrigin.Project bit-for-bit for Mercator
+                Projection     = new WebMercatorProjection(), // was implicit (null ⇒ Mercator); now explicit
             };
 
-            TileMeshBuffers buffers = FillMeshPipeline.Schedule(pipelineInput);
+            FillGraphOutput buffers = FillMeshGraph.Schedule(pipelineInput);
+            buffers.Handle.Complete();
             try
             {
-                int vertCount  = buffers.VertexCount[0];
-                int indexCount = buffers.TotalIndexCount;
+                int vertCount  = buffers.TileVertices.Length;
+                int indexCount = buffers.TriangleIndices.Length;
 
-                string jobVertHash = HashDouble2Array(buffers.TileVertices, vertCount);
-                string jobIdxHash  = HashIntArray(buffers.TriangleIndices, indexCount);
+                string jobVertHash = HashDouble2ArrayFromList(buffers.TileVertices, vertCount);
+                string jobIdxHash  = HashIntArrayFromList(buffers.TriangleIndices, indexCount);
 
                 Assert.AreEqual(managedVertHash, jobVertHash,
                     $"Jobified vertex content hash does not match managed reference (vertCount: job={vertCount}). " +
@@ -286,8 +289,9 @@ namespace MapRenderer.Tests.Tiles
                     "This means the Burst earcut produces different triangle indices.");
 
                 // Force-clip count must match the managed pinned invariant.
-                Assert.AreEqual(managedForceClips, buffers.TotalForceClipCount,
-                    $"Force-clip count: job={buffers.TotalForceClipCount}, managed={managedForceClips}. " +
+                int jobForceClips = buffers.Counts[0].ForceClipCount;
+                Assert.AreEqual(managedForceClips, jobForceClips,
+                    $"Force-clip count: job={jobForceClips}, managed={managedForceClips}. " +
                     "Stall-guard behaviour must be identical between paths.");
             }
             finally
@@ -329,6 +333,7 @@ namespace MapRenderer.Tests.Tiles
                 Geometry       = geometry,
                 RingVisitOrder = visitOrder,
                 OriginRender   = new double3(bMin.x, 0.0, bMin.y),
+                Projection     = new WebMercatorProjection(), // was implicit (null ⇒ Mercator); now explicit
             };
 
             // Get single-tile reference.
@@ -336,30 +341,34 @@ namespace MapRenderer.Tests.Tiles
             int    singleIndexCount = 0;
             string singleVertHash   = null;
             string singleIdxHash    = null;
-            TileMeshBuffers singleBuffers = FillMeshPipeline.Schedule(singleInput);
+            FillGraphOutput singleBuffers = FillMeshGraph.Schedule(singleInput);
+            singleBuffers.Handle.Complete();
             try
             {
-                singleVertCount  = singleBuffers.VertexCount[0];
-                singleIndexCount = singleBuffers.TotalIndexCount;
-                singleVertHash   = HashDouble2Array(singleBuffers.TileVertices, singleVertCount);
-                singleIdxHash    = HashIntArray(singleBuffers.TriangleIndices, singleIndexCount);
+                singleVertCount  = singleBuffers.TileVertices.Length;
+                singleIndexCount = singleBuffers.TriangleIndices.Length;
+                singleVertHash   = HashDouble2ArrayFromList(singleBuffers.TileVertices, singleVertCount);
+                singleIdxHash    = HashIntArrayFromList(singleBuffers.TriangleIndices, singleIndexCount);
             }
             finally { singleBuffers.Dispose(); }
 
             // Schedule N tiles.
-            var allBuffers = new TileMeshBuffers[N];
+            var allBuffers = new FillGraphOutput[N];
             for (int i = 0; i < N; i++)
-                allBuffers[i] = FillMeshPipeline.Schedule(singleInput);
+            {
+                allBuffers[i] = FillMeshGraph.Schedule(singleInput);
+                allBuffers[i].Handle.Complete();
+            }
 
             int totalVerts = 0;
             try
             {
                 for (int i = 0; i < N; i++)
                 {
-                    int verts   = allBuffers[i].VertexCount[0];
-                    int indices = allBuffers[i].TotalIndexCount;
-                    string vh   = HashDouble2Array(allBuffers[i].TileVertices, verts);
-                    string ih   = HashIntArray(allBuffers[i].TriangleIndices, indices);
+                    int verts   = allBuffers[i].TileVertices.Length;
+                    int indices = allBuffers[i].TriangleIndices.Length;
+                    string vh   = HashDouble2ArrayFromList(allBuffers[i].TileVertices, verts);
+                    string ih   = HashIntArrayFromList(allBuffers[i].TriangleIndices, indices);
                     totalVerts += verts;
 
                     Assert.AreEqual(singleVertHash, vh,
@@ -479,6 +488,29 @@ namespace MapRenderer.Tests.Tiles
             var bytes = new List<byte>(count * 4);
             for (int i = 0; i < count; i++)
                 bytes.AddRange(BitConverter.GetBytes(arr[i]));
+            using var sha256 = SHA256.Create();
+            return Convert.ToBase64String(sha256.ComputeHash(bytes.ToArray()));
+        }
+
+        // job-scheduling-design.md §8 stage 4 Group B: the oracle now reads FillMeshGraph.Schedule's
+        // NativeList output — same byte layout as the NativeArray hashers above, over a NativeList view.
+        private static string HashDouble2ArrayFromList(NativeList<double2> list, int count)
+        {
+            var bytes = new List<byte>(count * 16);
+            for (int i = 0; i < count; i++)
+            {
+                bytes.AddRange(BitConverter.GetBytes(list[i].x));
+                bytes.AddRange(BitConverter.GetBytes(list[i].y));
+            }
+            using var sha256 = SHA256.Create();
+            return Convert.ToBase64String(sha256.ComputeHash(bytes.ToArray()));
+        }
+
+        private static string HashIntArrayFromList(NativeList<int> list, int count)
+        {
+            var bytes = new List<byte>(count * 4);
+            for (int i = 0; i < count; i++)
+                bytes.AddRange(BitConverter.GetBytes(list[i]));
             using var sha256 = SHA256.Create();
             return Convert.ToBase64String(sha256.ComputeHash(bytes.ToArray()));
         }

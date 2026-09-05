@@ -140,22 +140,22 @@ namespace MapRenderer.Core.View
         /// Stable ascending in-place sort of <paramref name="tiles"/> by <see cref="Key"/> — insertion sort
         /// (the cover/desired set is dozens of entries, so O(n²) beats allocating a
         /// <see cref="System.Comparison{T}"/> closure or boxing through <c>List&lt;T&gt;.Sort</c>'s
-        /// <c>IComparer</c> path). <paramref name="keysScratch"/> is caller-owned scratch, resized (never
+        /// <c>IComparer</c> path). <paramref name="sortKeys"/> is caller-owned scratch, resized (never
         /// implicitly shrunk) to fit — reused across calls so steady-state sorting allocates nothing. Ties
         /// break on <see cref="TileId"/> (Z, then X, then Y) for a deterministic order independent of the
         /// input list's own ordering.
         /// </summary>
         /// <param name="tiles">The list to sort in place.</param>
-        /// <param name="keysScratch">Caller-owned scratch array, grown (never shrunk) to at least
+        /// <param name="sortKeys">Caller-owned scratch array, grown (never shrunk) to at least
         /// <c>tiles.Count</c> by this call if it starts smaller.</param>
         /// <param name="ctx">The shared render-space priority context for this Tick.</param>
-        public static void SortByPriority(List<TileId> tiles, ref double[] keysScratch, in TilePriorityContext ctx)
+        public static void SortByPriority(List<TileId> tiles, ref double[] sortKeys, in TilePriorityContext ctx)
         {
             int n = tiles.Count;
-            if (keysScratch.Length < n)
-                keysScratch = new double[math.max(n, keysScratch.Length * 2)];
+            if (sortKeys.Length < n)
+                sortKeys = new double[math.max(n, sortKeys.Length * 2)];
 
-            double[] keys = keysScratch;
+            double[] keys = sortKeys;
             for (int i = 0; i < n; i++) keys[i] = Key(tiles[i], in ctx);
 
             for (int i = 1; i < n; i++)

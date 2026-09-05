@@ -1,10 +1,11 @@
 // Unity-side: CaptureSnapshot/OrderedBlocks read SymbolTileBlock's native columns directly, so this file is
-// Unity-EditMode-only, not in the engine-free core-tests loop. Entry.Block stays plain IDisposable —
-// dispose-once bookkeeping never needs the concrete type.
+// Unity-EditMode-only, not in the engine-free core-tests loop. Entry.Block wraps plain IDisposable, not the
+// concrete type — see Entry's comment for why T can't narrow.
 
 using System;
 using System.Collections.Generic;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text.Placement;
@@ -18,7 +19,21 @@ namespace MapRenderer.Unity.Text
     /// <para>Release-to-cache KEEPS symbols (a cache HIT has no re-fetch to rebuild them) in a bounded FIFO sized
     /// to the mesh cache. A build awaits glyph fetches, so a tile can be released mid-build:
     /// <see cref="BeginBuild"/>/<see cref="CompleteBuild"/> use a generation token so a released-mid-build tile
-    /// still commits (into the cached entry) and a superseded build is discarded.</para></summary>
+    /// still commits (into the cached entry) and a superseded build is discarded.</para>
+    ///
+    /// <para><b>Reference model.</b> A committed block is owned by a <see cref="SharedDisposable{T}"/>; the last
+    /// reference out disposes it, exactly once.
+    /// <list type="bullet">
+    /// <item>The store's entry holds exactly one reference, created with the wrapper at commit
+    /// (<see cref="CompleteBuild"/>) and released when the entry stops naming that block — whether the entry is
+    /// overwritten or removed from the map. Moves that keep the block (<see cref="BeginBuild"/>'s stale-survive,
+    /// <see cref="Restore"/>'s cache-hit) transfer the entry, not the reference, and release nothing.</item>
+    /// <item>A snapshot holds one reference per slice, taken in <see cref="SymbolSnapshot.Add"/> and dropped in
+    /// <see cref="SymbolSnapshot.Clear"/> — the only two sites permitted to touch <see cref="TileSlice.Pin"/>.
+    /// Every path that ends a snapshot's service (<see cref="ReleasePins"/>, or the next
+    /// <see cref="CaptureSnapshot"/>, which clears first) goes through <see cref="SymbolSnapshot.Clear"/>, so
+    /// acquire/release balance is structural, not a discipline.</item>
+    /// </list></para></summary>
     public sealed class SymbolTileStore
     {
         public readonly struct Key : System.IEquatable<Key>
@@ -32,13 +47,16 @@ namespace MapRenderer.Unity.Text
         }
 
         // One tile's baked block (a SymbolTileBlock) + the owning build's generation (stale-guard). Mutable so an
-        // in-flight build can write Block after a release moved the entry between maps. Block is plain IDisposable
-        // (dispose-once bookkeeping): kept on stale-survive / cache-hit moves, disposed at every real drop site
-        // (commit-overwrite, FIFO-evict, true-release, Clear).
+        // in-flight build can write Block after a release moved the entry between maps. The wrapper's T is
+        // IDisposable, NOT SymbolTileBlock: CompleteBuild is public and SymbolTileBlock is internal (a narrower T
+        // would be CS0051), and test doubles (FakeBlock/FakeDisposableBlock) commit plain IDisposables that are
+        // not SymbolTileBlock. Kept on stale-survive / cache-hit moves (the entry's reference transfers with it,
+        // released nothing); released at every real drop site (commit-overwrite, FIFO-evict, true-release, Clear)
+        // — the last reference out disposes the block, see the class doc's reference model.
         private sealed class Entry
         {
             public int Generation;
-            public IDisposable Block;
+            public SharedDisposable<IDisposable> Block;
         }
 
         private readonly Dictionary<Key, Entry> _active = new Dictionary<Key, Entry>();
@@ -132,8 +150,8 @@ namespace MapRenderer.Unity.Text
                 block?.Dispose(); // superseded or dropped mid-build — this build's bake never lands, never leaks
                 return false;
             }
-            DisposeOrDefer(e.Block); // single-owner swap: the entry's old block is replaced (deferred iff a snapshot pins it)
-            e.Block = block;
+            e.Block?.Release(); // the entry's own reference; the last one out disposes the superseded block
+            e.Block = block == null ? null : new SharedDisposable<IDisposable>(block);
             MarkCollectDirty(); // commit path only; the superseded early-return above stays unbumped
             return true;
         }
@@ -146,7 +164,7 @@ namespace MapRenderer.Unity.Text
             {
                 _active.Remove(key);
                 if (transferredToCache) EnqueueCached(key, e);
-                else DisposeOrDefer(e.Block); // true eviction (cache disabled / not built) — drop its block (deferred iff pinned)
+                else e.Block?.Release(); // true eviction (cache disabled / not built) — the last reference out disposes it
                 // One bump for the whole branch; inside the `if` so a no-op release doesn't dirty.
                 MarkCollectDirty();
             }
@@ -155,7 +173,7 @@ namespace MapRenderer.Unity.Text
                 // Not active but a stale cached copy may exist (cache-disabled) → drop it (true eviction).
                 if (RemoveCached(key, out Entry dropped))
                 {
-                    DisposeOrDefer(dropped.Block);
+                    dropped.Block?.Release();
                     MarkCollectDirty(); // a departing cached copy dropped → AppendDeparting changes.
                 }
             }
@@ -215,17 +233,9 @@ namespace MapRenderer.Unity.Text
         private readonly SymbolSnapshot _oracleSnapshot = new SymbolSnapshot();
         private readonly SymbolReconcileResult _oracleResult = new SymbolReconcileResult();
 
-        // Pin guard: live-snapshot refcount per block, plus blocks whose dispose was deferred while pinned. Mutated
-        // only by Pin/ReleasePins/DisposeOrDefer. Clear() NEVER wipes _pinCount — a captured snapshot still owes its
-        // ReleasePins, whose decrements must stay matched.
-        private readonly Dictionary<System.IDisposable, int> _pinCount = new Dictionary<System.IDisposable, int>();
-        private readonly List<System.IDisposable> _pendingDispose = new List<System.IDisposable>();
-        // Reused scratch so ReleasePins decrements each of a snapshot's DISTINCT blocks exactly once.
-        private readonly HashSet<System.IDisposable> _releaseScratch = new HashSet<System.IDisposable>();
-
         /// <summary>Capture the current collected tile set into <paramref name="into"/> (main thread) for an
         /// off-main <see cref="SymbolReconciler.Run"/> — identical scan order to the plan-aware collect. Each
-        /// block is PINNED; the caller MUST <see cref="ReleasePins"/> the snapshot when it leaves service.</summary>
+        /// block is referenced; the caller MUST <see cref="ReleasePins"/> the snapshot when it leaves service.</summary>
         internal void CaptureSnapshot(SymbolSnapshot into)
         {
             into.Clear();
@@ -234,77 +244,31 @@ namespace MapRenderer.Unity.Text
                 Entry e = kv.Value;
                 // A null Block means nothing to render; in production a committed slot always has one.
                 if (e.Block == null) continue;
-                TileSlice slice = into.Add();
-                slice.Block = (SymbolTileBlock)e.Block; slice.IsDeparting = false;
-                Pin(e.Block);
+                into.Add(e.Block, isDeparting: false);
             }
             foreach (KeyValuePair<Key, double> dep in _departing)
             {
                 if (!_cachedIndex.TryGetValue(dep.Key, out LinkedListNode<KeyedEntry> node)) continue;
                 Entry e = node.Value.Entry;
                 if (e.Block == null) continue;
-                TileSlice slice = into.Add();
-                slice.Block = (SymbolTileBlock)e.Block; slice.IsDeparting = true;
-                Pin(e.Block);
+                into.Add(e.Block, isDeparting: true);
             }
         }
 
-        // Pin one snapshot occurrence of a block (null blocks — a symbol-only commit — are inert, never pinned).
-        private void Pin(System.IDisposable block)
-        {
-            if (block == null) return;
-            _pinCount[block] = (_pinCount.TryGetValue(block, out int c) ? c : 0) + 1;
-        }
+        /// <summary>Release <paramref name="snapshot"/>'s block references — the snapshot leaves service and is
+        /// left empty. A block still referenced by another live snapshot, or by its store entry, survives.
+        /// Idempotent: releasing an already-released snapshot releases nothing. A named forward to
+        /// <see cref="SymbolSnapshot.Clear"/>, which does the actual release — kept on the store (12 call sites,
+        /// and the name every existing test/caller already uses) rather than moved.</summary>
+        internal void ReleasePins(SymbolSnapshot snapshot) => snapshot.Clear();
 
-        /// <summary>Release <paramref name="snapshot"/>'s pins — decrement each distinct block; at 0, unpin and
-        /// dispose it if a drop site deferred that. A block shared with another live snapshot survives.</summary>
-        internal void ReleasePins(SymbolSnapshot snapshot)
-        {
-            _releaseScratch.Clear();
-            for (int i = 0; i < snapshot.Count; i++)
-            {
-                System.IDisposable block = snapshot.Slices[i].Block;
-                if (block == null || !_releaseScratch.Add(block)) continue; // distinct blocks only
-                if (!_pinCount.TryGetValue(block, out int c)) continue;     // defensive: no matching Pin ⇒ skip
-                if (--c == 0)
-                {
-                    _pinCount.Remove(block);
-                    int idx = _pendingDispose.IndexOf(block);
-                    if (idx >= 0) { _pendingDispose.RemoveAt(idx); block.Dispose(); } // deferred dispose fires now
-                }
-                else _pinCount[block] = c;
-            }
-        }
-
-        // Dispose a block at a drop site — unless it is pinned by a live snapshot, in which case defer until the
-        // last ReleasePins frees it (never free a block an off-main reconcile is reading). Null-safe.
-        private void DisposeOrDefer(System.IDisposable block)
-        {
-            if (block == null) return;
-            if (_pinCount.ContainsKey(block))
-            {
-                if (!_pendingDispose.Contains(block)) _pendingDispose.Add(block);
-            }
-            else block.Dispose();
-        }
-
-        /// <summary>Drop everything (a restyle purges the mesh cache too) — disposes every active AND cached block.
-        ///
-        /// <para>Disposes via <see cref="DisposeOrDefer"/>; the conditional <c>_pendingDispose</c> flush frees only
-        /// blocks no longer pinned (a still-pinned one waits for its <see cref="ReleasePins"/> — Clear must never
-        /// free a block a live snapshot still reads). <c>_pinCount</c> is deliberately NOT wiped.</para></summary>
+        /// <summary>Drop everything (a restyle purges the mesh cache too) — releases every active AND cached
+        /// entry's own reference; a block still referenced by a live snapshot survives until that snapshot's
+        /// own release (see the class doc's reference model).</summary>
         public void Clear()
         {
-            foreach (KeyValuePair<Key, Entry> kv in _active) DisposeOrDefer(kv.Value.Block);
-            foreach (KeyedEntry keyed in _cachedOrder) DisposeOrDefer(keyed.Entry.Block);
-            // Straggler flush: free only deferred blocks no longer pinned; a pinned one waits for its ReleasePins.
-            for (int i = _pendingDispose.Count - 1; i >= 0; i--)
-            {
-                System.IDisposable block = _pendingDispose[i];
-                if (_pinCount.ContainsKey(block)) continue; // still pinned ⇒ leave it (a live snapshot owes ReleasePins)
-                _pendingDispose.RemoveAt(i);
-                block.Dispose();
-            }
+            foreach (KeyValuePair<Key, Entry> kv in _active) kv.Value.Block?.Release();
+            foreach (KeyedEntry keyed in _cachedOrder) keyed.Entry.Block?.Release();
             _active.Clear();
             _cachedIndex.Clear();
             _cachedOrder.Clear();
@@ -316,7 +280,7 @@ namespace MapRenderer.Unity.Text
 
         // Reused reconcile scratch (main-thread) — keeps ReconcileActiveSet alloc-free in steady state (the set +
         // two move-lists never grow once cover stabilises). Per-frame no-GC contract.
-        private readonly HashSet<Key> _loadedScratch = new HashSet<Key>();
+        private readonly HashSet<Key> _loadedKeys = new HashSet<Key>();
         private readonly List<Key> _reconcileRelease = new List<Key>();
         private readonly List<Key> _reconcileRestore = new List<Key>();
 
@@ -330,13 +294,13 @@ namespace MapRenderer.Unity.Text
             // Deliberately does NOT MarkCollectDirty() here: it runs EVERY frame and on a stable cover moves
             // nothing, so a self-bump would dirty every frame and the memo would never fire. Real effects inherit
             // their bumps from Release/Restore/PurgeExpiredDeparting. (THE critical correctness point.)
-            _loadedScratch.Clear();
-            for (int i = 0; i < loaded.Count; i++) _loadedScratch.Add(loaded[i]);
+            _loadedKeys.Clear();
+            for (int i = 0; i < loaded.Count; i++) _loadedKeys.Add(loaded[i]);
 
             // Release actives that left the loaded set (collect first — cannot mutate _active while iterating).
             _reconcileRelease.Clear();
             foreach (KeyValuePair<Key, Entry> kv in _active)
-                if (!_loadedScratch.Contains(kv.Key)) _reconcileRelease.Add(kv.Key);
+                if (!_loadedKeys.Contains(kv.Key)) _reconcileRelease.Add(kv.Key);
             for (int i = 0; i < _reconcileRelease.Count; i++)
             {
                 Key key = _reconcileRelease[i];
@@ -360,21 +324,21 @@ namespace MapRenderer.Unity.Text
         // Drop departing stamps whose grace elapsed or whose cached entry was evicted. A purged tile stops being
         // collected as departing but stays warm on the cached side. Grace exceeds the fade duration, so a purge
         // only drops an already-invisible symbol — never mid-fade.
-        private readonly List<Key> _departingPurgeScratch = new List<Key>();
+        private readonly List<Key> _departingPurgeKeys = new List<Key>();
         private void PurgeExpiredDeparting(double nowSeconds)
         {
             if (_departing.Count == 0) return;
-            _departingPurgeScratch.Clear();
+            _departingPurgeKeys.Clear();
             foreach (KeyValuePair<Key, double> kv in _departing)
-                if (nowSeconds >= kv.Value || !_cachedIndex.ContainsKey(kv.Key)) _departingPurgeScratch.Add(kv.Key);
-            for (int i = 0; i < _departingPurgeScratch.Count; i++) _departing.Remove(_departingPurgeScratch[i]);
+                if (nowSeconds >= kv.Value || !_cachedIndex.ContainsKey(kv.Key)) _departingPurgeKeys.Add(kv.Key);
+            for (int i = 0; i < _departingPurgeKeys.Count; i++) _departing.Remove(_departingPurgeKeys[i]);
             // Bump iff ≥1 removed — those tiles stop being collected as departing. Usually removes nothing.
-            if (_departingPurgeScratch.Count > 0) MarkCollectDirty();
+            if (_departingPurgeKeys.Count > 0) MarkCollectDirty();
         }
 
         /// <summary>Test-only: the raw single-tile block committed for <paramref name="key"/> (what
         /// <see cref="CompleteBuild"/> stored), or null. Internal Debug-prefixed seam, no production caller.</summary>
-        internal SymbolTileBlock DebugBlockFor(Key key) => (SymbolTileBlock)FindCurrent(key)?.Block;
+        internal SymbolTileBlock DebugBlockFor(Key key) => (SymbolTileBlock)FindCurrent(key)?.Block?.Value;
 
         private Entry FindCurrent(Key key)
         {
@@ -394,7 +358,7 @@ namespace MapRenderer.Unity.Text
                 _cachedOrder.RemoveFirst();
                 _cachedIndex.Remove(oldest.Value.Key);
                 _departing.Remove(oldest.Value.Key); // keep departing ⊆ cached
-                DisposeOrDefer(oldest.Value.Entry.Block); // over-cap eviction is a genuine drop (deferred iff a snapshot pins it)
+                oldest.Value.Entry.Block?.Release(); // over-cap eviction is a genuine drop — the entry's own reference
             }
         }
 

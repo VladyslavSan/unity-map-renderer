@@ -352,7 +352,7 @@ namespace MapRenderer.Tests.Style
         public void ShaderStructure_LineLitForwardPass_ConsumesDistanceAlongAsPerVertexAttribute()
         {
             // Resolved by name (move-proof) — the lit forward pass now lives under Map/Line/Lit/.
-            string text = File.ReadAllText(ShaderPropertyParser.MapShaderPath("Line_LitForwardPass.hlsl"));
+            string text = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_LitForwardPass.hlsl"));
 
             // S67 + UV-channel cleanup: dashU is computed in the shared Line_VertexExtrude helper; the
             // forward pass calls it and carries the result in the line uv channel (uv.x — the native
@@ -368,7 +368,7 @@ namespace MapRenderer.Tests.Style
             // _DashCount: S67 factored the dash logic into Line_VertexExtrude.hlsl (shared by all passes).
             // Assert the guard is present there — still a single-site check, just in the helper.
             // Shared helper, resolved by name (move-proof) — stays in the Map/Line/ kind root.
-            string extrudeText = File.ReadAllText(ShaderPropertyParser.MapShaderPath("Line_VertexExtrude.hlsl"));
+            string extrudeText = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_VertexExtrude.hlsl"));
             Assert.That(extrudeText, Does.Contain("sideAndDist.y"),
                 "Line_VertexExtrude.hlsl must consume per-vertex distanceAlong (input.sideAndDist.y) to form dashU.");
             Assert.That(extrudeText, Does.Contain("dashU"),

@@ -5,14 +5,21 @@ namespace MapRenderer.Unity.Concurrency
     /// synchronously on the calling thread — the WebGL fix (docs/web-target.md), since nothing is
     /// dispatched to a worker that will never run it.
     ///
-    /// <para><b>This is a transitional bridge, not the destination.</b> <see cref="Schedule{T}"/> takes a
-    /// managed <see cref="System.Func{T,TResult}"/> closure — exactly the shape a native/Burst rewrite
-    /// eliminates — so this interface does not survive jobification and is not itself a design to converge
-    /// on. The destination is a Burst job struct over native columns, dispatched <c>.Run()</c>, in the shape
-    /// <c>NativeFilterEvaluationJob</c> (<c>MapRenderer.Jobs/Mvt/NativeFilterEvaluationJob.cs</c>) already
-    /// established. A new off-main site should ask first whether its body can be nativized into that shape;
-    /// routing it through <see cref="IWorkScheduler"/> is the fallback for a still-managed body, not the
-    /// default move.</para></summary>
+    /// <para><b>A bridge for the managed bodies that remain — not a design to converge on, but not going
+    /// away soon either.</b> <see cref="Schedule{T}"/> takes a managed
+    /// <see cref="System.Func{T,TResult}"/> closure, exactly the shape a native/Burst rewrite eliminates, so
+    /// a body that can be nativized should be, and routing a new site through here is the fallback rather
+    /// than the default move.</para>
+    ///
+    /// <para><b>Corrected 2026-09-04, twice over.</b> This paragraph used to name the destination as a Burst
+    /// job "dispatched <c>.Run()</c>". That is wrong for the tile path: the job system schedules from the
+    /// main thread only, so the destination shape is a <b>scheduled graph node</b>
+    /// (<c>docs/job-scheduling-design.md</c> §3.2 and §4 rule 1), not a synchronous run. It also claimed
+    /// this interface "does not survive jobification". It survives as long as any managed body does, and the
+    /// remaining ones are not close to gone: tile-layer selection still runs a per-feature evaluator loop,
+    /// paint bake needs a native expression VM that does not exist and is its own project, and the symbol
+    /// pass rides the kick regardless. Treat this as the dispatch policy for residual managed bodies, with
+    /// one platform switch, and stop scheduling its deletion.</para></summary>
     internal interface IWorkScheduler
     {
         /// <summary>Runs <paramref name="body"/> under this policy and hands back a pollable handle.

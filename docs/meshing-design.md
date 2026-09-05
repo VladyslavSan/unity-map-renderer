@@ -24,7 +24,7 @@ The only survivor is `LineTessellator`, where "tessellate" now means strictly **
 | Former loose meaning | Now called | Lives in |
 |----------------------|-----------|----------|
 | the whole decode→mesh chain | **the mesh pipeline** | `FillMeshPipeline`, the `StyledFill/LineTileBuilder`s |
-| inserting curvature points (globe) | **Subdivide** | `SubdivideCenterline`, `GlobeFillSubdivideJob` |
+| inserting curvature points (globe) | **Subdivide** | `LineSubdivideJob` (line), `GlobeFillSubdivideJob` (fill) — job-scheduling-design.md §8 stage 5 Group B retired the managed `SubdivideCenterline` this row used to name |
 | earcut / ribbon-offset | **Triangulate** (the only surviving "tessellate") | `Earcut`, `LineTessellator` (oracle), `LineRibbonJob` |
 | "build one whole tile's mesh" (async scheduling) | **mesh build** (worker) + **consume** (main thread) | `TileManager` (`KickMeshBuild`, `MeshBuildTask`, `MaxMeshBuildsPerTick` / `ConsumeMeshBuild`, `MaxConsumesPerTick`) |
 
@@ -58,8 +58,8 @@ overload it replaced.
 
 | Kind | Order | Where |
 |------|-------|-------|
-| **Fill** | Decode → **Clip** → Assemble → **Triangulate** (earcut, flat tile space) → **Project** → *(globe only)* **Subdivide** | `FillMeshPipeline.Schedule` does Decode→Clip→Assemble→Triangulate→Project; `StyledFillTileBuilder` adds the globe Subdivide (`GlobeFillSubdivideDispatch`, gated by `!double.IsInfinity(proj.MaxRefineAngleRad)`) then writes the mesh. |
-| **Line** | Decode → **Subdivide** (centerline, tile space) → **Project** → **Triangulate** (ribbon) | `StyledLineTileBuilder.WriteMeshData` (called via `LineRenderLayer.WriteInto`): `SubdivideCenterline` → per-point `TileToGeoJob` + `IProjection.ProjectPoint` → `LineRibbonJob` → writes the mesh. |
+| **Fill** | Decode → **Clip** → Assemble → **Triangulate** (earcut, flat tile space) → **Project** → *(globe only)* **Subdivide** | `FillMeshGraph.Schedule` (job-scheduling-design.md §8 stage 4 Group B retired the synchronous `FillMeshPipeline.Schedule` this row used to name) schedules Decode→Clip→Assemble→Triangulate→Project, and on the curved arm the globe Subdivide too (`GlobeFillSubdivideDispatch.Schedule` + `GlobeFillScatterJob`, gated by `!double.IsInfinity(proj.MaxRefineAngleRad)` — inside the graph now, not bolted on after it); `StyledFillTileBuilder` schedules the graph then schedules the write step. |
+| **Line** | Decode → **Subdivide** (centerline, tile space) → **Project** → **Triangulate** (ribbon) | `LineMeshGraph.Schedule` (job-scheduling-design.md §8 stage 5 Group B retired the synchronous per-ring loop this row used to name) schedules `LineRingGatherJob` → `TileToGeoJob`/`ProjectionDispatch` → `LineSubdivideJob` → `TileToGeoJob`/`ProjectionDispatch` → `LineRibbonBatchJob`; `LineRenderLayer.BuildGraphRequest` builds the request via `StyledLineTileBuilder.BuildLayerInput`, and `LineStreamWriteJob` writes the mesh. `StyledLineTileBuilder.WriteMeshData` is a synchronous convenience over the same graph, kept public and test-facing. |
 
 **Why fills Triangulate *before* Project.** Ear-clipping is a **planar 2D algorithm**, and triangle
 **connectivity is projection-invariant** — which vertices form a triangle doesn't change when you bend the sheet
@@ -94,34 +94,37 @@ property of the arithmetic.
 **Lines are deliberately NOT clipped.** Clipping an input polyline at the tile boundary turns the join at that
 vertex into a **cap**, trading the alpha band for a notch at every seam. The line equivalent is clipping the
 tessellated *ribbon* — a different and harder operation, not attempted here. Symbols already clip (the
-single-world `[0, extent)` anchor rule); fill-extrusion and raster are untouched. `ITileMeshRenderLayer.WriteInto`
-therefore carries the knob to every kind but only `FillRenderLayer` acts on it.
+single-world `[0, extent)` anchor rule); fill-extrusion and raster are untouched. `ITileMeshRenderLayer.BuildGraphRequest`
+therefore carries the knob (`context.BufferClip`) to every kind but only `FillRenderLayer` acts on it.
 
 Alternative mechanisms for the same defect — per-tile stencil masks, a clip plane, a shader-side discard on
 tile-space UV — are all viable and all out of scope.
 
 ## Threading & lifetime (both kinds)
 
-The Burst jobs run via `.Run()` **on the mesh-build worker thread**, not the main thread — only `Mesh.MeshData`
-**Allocate** (at kick) and **Apply** (at consume) are main-thread. Mesh *data* (`NativeArray` /
-`TileMeshBuffers` / `MeshData`) is a value-type struct disposed deterministically at the apply boundary; the
-`Mesh` is the single-owner class. Full contract: [`async-architecture.md`](async-architecture.md) §"Disposal &
-cancellation contract" and the mesh-ownership rule in [`conventions-short.md`](conventions-short.md).
+job-scheduling-design.md §8 stage 4 Group B: fill's jobs are scheduled through `FillMeshGraph.Schedule` (the
+job graph the pump completes), not run synchronously — the `.Run()`-on-the-mesh-build-worker-thread shape
+below is the line path's, and fill's own retired shape before Group B. Only `Mesh.MeshData` **Allocate** (at
+kick) and **Apply** (at consume) are main-thread, for both kinds. Mesh *data* (`NativeArray` /
+`FillGraphOutput` / `MeshData`) is a value-type struct disposed deterministically at the apply boundary
+(fill: at the write graph's dispose nodes); the `Mesh` is the single-owner class. Full contract:
+[`async-architecture.md`](async-architecture.md) §"Disposal & cancellation contract" and the mesh-ownership
+rule in [`conventions-short.md`](conventions-short.md).
 
 ## Key types
 
 | Type | Assembly | Role |
 |------|----------|------|
-| `FillMeshPipeline` | `MapRenderer.Jobs` | Fill: coordinates Decode→Clip→Assemble→Triangulate→Project; owns `LayerInput`. Produces `TileMeshBuffers`. |
+| `FillMeshGraph` | `MapRenderer.Jobs` | Fill: schedules the Decode→Clip→Assemble→Triangulate→Project job graph over one `FillMeshPipeline.LayerInput`. Produces an uncompleted `FillGraphOutput`. (`FillMeshPipeline` survives only as the home of `LayerInput` and `HoleRingComparer` — its own `Schedule` retired with Group B, job-scheduling-design.md §8 stage 4.) |
 | `RingClipJob` | `MapRenderer.Jobs` | Fill Clip: Sutherland–Hodgman of each ring against the tile-buffer window, in tile space. Winding- and space-preserving. |
 | `TileBufferClip` | `MapRenderer.Core` | The knob: how much buffer to keep, in tile units at extent 4096, converted to the layer's own extent in one place. `default` ⇒ disabled. |
-| `TileRenderOrigin` | `MapRenderer.Core` | The single source of a tile's bake/RTC origin (SW corner projected). Engine-free, shared by fills/lines/symbols/camera — **not** fill-specific, so it lives in Core, not on `FillMeshPipeline`. |
+| `TileRenderOrigin` | `MapRenderer.Core` | The single source of a tile's bake/RTC origin (SW corner projected). Engine-free, shared by fills/lines/symbols/camera — **not** fill-specific, so it lives in Core, not on the fill mesher. |
 | `TileToGeoJob` | `MapRenderer.Jobs` | Project stage part 1: tile-space → geodetic surface (projection-independent). Takes a `TileId`. |
 | `LineRibbonJob` | `MapRenderer.Jobs` | Line Triangulate: projection-agnostic 3D ribbon from a `(point, up)` array. |
 | `LineTessellator` | `MapRenderer.Core` | The planar differential **oracle** for `LineRibbonJob` (`LineRibbonJobTests`). |
-| `StyledFillTileBuilder` | `MapRenderer.Unity` | Fill orchestration: color eval → `FillMeshPipeline` → globe Subdivide → write mesh. |
+| `StyledFillTileBuilder` | `MapRenderer.Unity` | Fill orchestration: color eval → `FillMeshGraph` → write mesh (globe subdivide is a graph node on the curved arm, not a separate step). |
 | `StyledLineTileBuilder` | `MapRenderer.Unity` | Line orchestration: Subdivide → Project → `LineRibbonJob` → write mesh. |
-| `MeshDataPayload` / `IRenderLayerPayload` | `MapRenderer.Unity` | The per-`(tile, layer)` mesh handle the consume loop uploads + disposes. |
+| `MeshDataPayload` | `MapRenderer.Unity` | The per-`(tile, layer)` mesh handle the consume loop uploads + disposes. |
 | `TileManager` | `MapRenderer.Unity` | The tile-build loop: `KickMeshBuild` / `MeshBuildTask` (build) and `ConsumeMeshBuild` (consume), throttled by `MaxMeshBuildsPerTick` / `MaxConsumesPerTick`. |
 
 ---
@@ -508,7 +511,7 @@ Every painted layer declares:
 | **Fill** | `TileMesh` — once per `(tile,layer)`, Burst kernels, `Mesh.MeshData` | `Persistent` — backend redraws (BRG `OnPerformCulling` / EG entities / MeshRenderers) | global index | shipped |
 | **Line** | `TileMesh` (same) | `Persistent` | global index | shipped |
 | **Symbol/text** | `FramePlaced` — global collision → per-slot billboard mesh rebuilt every `Tick` | `Persistent` — a persistent per-slot `MeshRenderer` (`LabelSlotPresenter`) swaps its mesh each `Tick`, so the backend redraws it with no orchestrator | global index **per symbol layer** | shipped |
-| **Background** | `TileMesh` — per-covered-tile, source-less (`TileBackgroundLayerProcessor`) | `Persistent` — one quad per covered tile, same as fill/line | global index | shipped |
+| **Background** | `TileMesh` — per-covered-tile, source-less (`BackgroundQuad` + `TileBuildGraph`) | `Persistent` — one quad per covered tile, same as fill/line | global index | shipped |
 | **Raster** *(future)* | `TileMesh` — per-tile textured quad | `Persistent` | global index | reserved seat |
 | **Fill-extrusion** *(future)* | `TileMesh` (+ ZWrite on) | `Persistent` | global index | reserved seat |
 
@@ -537,7 +540,10 @@ internal interface IRenderLayer : IDisposable
     void ApplyZoom(double zoom);
 }
 
-// TileMesh capability — the mesh WriteInto (fill, line; later fill-extrusion, raster).
+// TileMesh capability (fill, line, fill-extrusion; raster still open). Design-stage sketch: the shipped
+// interface (job-scheduling-design.md §8 stage 5 Group B) is BuildGraphRequest, not WriteInto — every
+// implementer meshes on the job graph now, there is no synchronous mesh-write member left on this
+// interface at all.
 internal interface ITileMeshRenderLayer : IRenderLayer
 {
     void WriteInto(Mesh.MeshData md, IReadOnlyList<ITileFeature> features, double zoom, double extent,
@@ -614,9 +620,11 @@ express) — no implementor today.
 (`MaterialFactory.CreateBackgroundMaterial`; reusing the fill shader's flat lit path keeps the ground look
 consistent with fills). Colour binds as a uniform (`_BaseColor`/`_Opacity`) over white vertex colours (the
 line-colour pattern — background has no features to bake per-vertex). Geometry is **per-covered-tile**:
-`TileBackgroundLayerProcessor` synthesizes one full-tile-extent quad per covered tile (reusing
-`StyledFillTileBuilder.WriteMeshData` — earcut winding + globe subdivision for free) and registers each with the
-active `ITileRenderBackend`, exactly like fill/line. So the background is **projection-correct** (flat on
+`BackgroundQuad` synthesizes one full-tile-extent quad per covered tile and hands it to `TileBuildGraph`,
+which meshes it through the Burst job graph (earcut winding + globe subdivision for free); each is then
+registered with the active `ITileRenderBackend`, exactly like fill/line. *(Before the job-graph epic this
+read `TileBackgroundLayerProcessor` reusing `StyledFillTileBuilder.WriteMeshData`; that processor is
+retired and the synchronous writer is no longer on the background path.)* So the background is **projection-correct** (flat on
 Mercator, curved on the globe) and a mid-stack background occludes layers below it and not above. The
 `Bootstrapper` hardcoded sky survives only as the above-horizon clear / no-style default. (The ±85.05°–90° polar
 caps still have no surface — a pre-existing globe/tile-cover limitation shared by fill/line, deferred to the
@@ -630,6 +638,15 @@ globe track.)
   texture-array / BRG per-instance texture id / per-tile material — decided in the raster stage).
 - **Fill-extrusion** = `TileMesh` + `Persistent` + ZWrite on. One `ITileMeshRenderLayer` class + one factory arm;
   the depth-vs-transparent-band interaction is its stage's design problem.
+  **Update (job-scheduling-design.md §8 stage 4, Group A):** the roof now meshes on the job graph, same as
+  fill (`ITileMeshRenderLayer.BuildGraphRequest`, `FillMeshGraph` — the capability lived on the now-deleted
+  `IGraphInputRenderLayer` at the time this note was written; §8 stage 5 Group B merged it into
+  `ITileMeshRenderLayer` itself); at the time this note was written the walls stayed a prologue-built managed
+  loop (`BuildLayerInput`'s `WriteWalls` call) — unchanged by the line graph landing, since walls read raw
+  ring vertices directly, not earcut/ribbon output (`docs/job-scheduling-design.md` §8 stage 4's own "what
+  stage 4 actually does" note). **Update (job-scheduling-design.md §8 stage 5, the wall-job-graph stage):**
+  the walls moved off the prologue too — `WriteWalls` is deleted, and the wall chain now schedules alongside
+  the roof in `FillExtrusionMeshGraph.Schedule`, owned by `TileBuildGraph.LayerBuild`, not `BuildLayerInput`.
 
 ## Non-goals / open questions
 
@@ -686,9 +703,14 @@ bound is 1.5⁴ ≈ 5.06× — the alternating case that maximises output also f
 as-is (over-estimating is the only safe direction under Burst), but ~3× more than needed, and it is ~26 MB
 transient for a 50 k-vertex ring.
 
-**F-CLIP-5 — `FillMeshPipeline.Schedule` has no `try/finally`.** A throw between an allocation and an exit
-leaks. Pre-existing shape — it already leaks `tileVerts` and the per-poly arrays the same way — but the clip
-stage adds three more containers to the leak set.
+**F-CLIP-5 — MOOT: `FillMeshPipeline.Schedule` is retired.** job-scheduling-design.md §8 stage 4 Group B
+deleted the method this finding named (no `try/finally` around its allocations; a throw between an
+allocation and an exit leaked `tileVerts`, the per-poly arrays, and — after the clip stage — three more
+containers). The replacement, `FillMeshGraph.Schedule`, disposes through dispose NODES scheduled onto the
+job graph rather than a main-thread `try/finally` — a different mechanism this finding was never re-derived
+against, so whether an equivalent leak-on-throw risk exists there is genuinely open, not closed by this
+retirement. Re-assess against `FillMeshGraph.Schedule`/`FillGraphOutput`'s dispose-node graph if this class
+of leak matters again.
 
 **F-CLIP-6 — hole containment after clipping.** `RingAssemblyJob.RingContainedIn` tests a hole's centroid (then
 its first vertex) against the outer ring. Clipping can move a hole's centroid, so for a strongly concave

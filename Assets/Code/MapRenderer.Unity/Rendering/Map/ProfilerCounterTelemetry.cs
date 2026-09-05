@@ -38,6 +38,9 @@ namespace MapRenderer.Unity.Rendering.Map
             internal const string LoadedTiles       = "MapRenderer.Tiles.Loaded";
             internal const string PendingTiles      = "MapRenderer.Tiles.Pending";
             internal const string ConsumeBacklog    = "MapRenderer.Tiles.ConsumeBacklog";
+            internal const string PrologueInFlight     = "MapRenderer.Tiles.PrologueInFlight";
+            internal const string GraphMeasureInFlight = "MapRenderer.Tiles.GraphMeasureInFlight";
+            internal const string GraphWriteInFlight   = "MapRenderer.Tiles.GraphWriteInFlight";
             internal const string InFlightFetches   = "MapRenderer.Tiles.InFlightFetches";
             internal const string ReleasedMidFlight = "MapRenderer.Tiles.ReleasedMidFlight";
             internal const string ReleasedMidFetch  = "MapRenderer.Tiles.ReleasedMidFetch";
@@ -80,6 +83,9 @@ namespace MapRenderer.Unity.Rendering.Map
         private static ProfilerCounterValue<int>    _loadedTiles       = Count(CounterNames.LoadedTiles);
         private static ProfilerCounterValue<int>    _pendingTiles      = Count(CounterNames.PendingTiles);
         private static ProfilerCounterValue<int>    _consumeBacklog    = Count(CounterNames.ConsumeBacklog);
+        private static ProfilerCounterValue<int>    _prologueInFlight     = Count(CounterNames.PrologueInFlight);
+        private static ProfilerCounterValue<int>    _graphMeasureInFlight = Count(CounterNames.GraphMeasureInFlight);
+        private static ProfilerCounterValue<int>    _graphWriteInFlight   = Count(CounterNames.GraphWriteInFlight);
         private static ProfilerCounterValue<int>    _inFlightFetches   = Count(CounterNames.InFlightFetches);
         private static ProfilerCounterValue<int>    _releasedMidFlight = Count(CounterNames.ReleasedMidFlight);
         private static ProfilerCounterValue<int>    _releasedMidFetch  = Count(CounterNames.ReleasedMidFetch);
@@ -154,6 +160,9 @@ namespace MapRenderer.Unity.Rendering.Map
             _loadedTiles.Value       = snap.LoadedTileCount;
             _pendingTiles.Value      = snap.PendingTileCount;
             _consumeBacklog.Value    = snap.ConsumeBacklog;
+            _prologueInFlight.Value     = snap.PrologueInFlight;
+            _graphMeasureInFlight.Value = snap.GraphMeasureInFlight;
+            _graphWriteInFlight.Value   = snap.GraphWriteInFlight;
             _inFlightFetches.Value   = snap.InFlightFetches;
             _releasedMidFlight.Value = snap.ReleasedMidFlightCount;
             _releasedMidFetch.Value  = snap.ReleasedMidFetchCount;

@@ -6,8 +6,6 @@ using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Protobuf;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
-
 namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>
@@ -130,8 +128,8 @@ namespace MapRenderer.Jobs.Mvt
             // hints (a miscount only mis-SIZES a list, never changes what is decoded, see its doc); a fixed
             // native array sized at valueCount would turn an undercount into an out-of-bounds crash. The
             // native array is materialized below, inside the try, once the true count is known.
-            var valuesScratch = new List<MvtValueNative>(valueCount);
-            var stringScratch = new List<string>(valueCount);
+            var sortValues = new List<MvtValueNative>(valueCount);
+            var stringBuffer = new List<string>(valueCount);
 
             // Per-feature tag-word BYTE BOUNDS only (two small int lists, not a uint[] per feature) — the
             // words themselves are never parsed into managed memory; resolved to Properties after the full
@@ -174,7 +172,7 @@ namespace MapRenderer.Jobs.Mvt
                     case LayerValues when wt == 2:
                     {
                         var (s, e) = r.ReadLengthDelimited();
-                        valuesScratch.Add(DecodeValue(r.Slice(s, e), stringScratch));
+                        sortValues.Add(DecodeValue(r.Slice(s, e), stringBuffer));
                         break;
                     }
                     case LayerFeatures when wt == 2:
@@ -239,10 +237,10 @@ namespace MapRenderer.Jobs.Mvt
                 // Materialize the value table from the transient scratch NOW, at the top of the try, so a
                 // throw anywhere below still leaves `values` visible to `finally`.
                 values = new NativeArray<MvtValueNative>(
-                    valuesScratch.Count, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                for (int i = 0; i < valuesScratch.Count; i++)
-                    values[i] = valuesScratch[i];
-                string[] valueStrings = stringScratch.ToArray();
+                    sortValues.Count, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                for (int i = 0; i < sortValues.Count; i++)
+                    values[i] = sortValues[i];
+                string[] valueStrings = stringBuffer.ToArray();
 
                 FlattenFeatureColumn(r, tagStart, tagEnd, featCount, ref tagOffsets, ref tagLengths, ref tagWords);
 

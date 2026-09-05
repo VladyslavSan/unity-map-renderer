@@ -121,6 +121,19 @@ drawing any conclusion from a web build:
 - Never conclude from wasm *size*: a one-line string constant moved it 21 KB and made a void build look
   valid.
 
+**Not yet built — the reading the tile pipeline will need.** `job-scheduling-design.md` §7.4 specifies a
+worker-index sample: each mesh-build graph's last node records `[NativeSetThreadIndex]` into a
+`NativeReference<int>`, and telemetry counts graphs that completed on thread 0 versus on a worker. **Nothing
+implements this today** (no `[NativeSetThreadIndex]` anywhere in `Assets/Code`), so this paragraph is an
+obligation on whoever lands it, not a description of an existing check.
+
+Why it belongs here: a web player whose graphs all report thread 0 is running the pipeline **inline on the
+main thread** — Burst off, or workers absent — and will merely render slowly rather than fail. That is the
+same class of silent lie as a Burst-off build, and it needs the same treatment: read it beside
+`Tools/build.sh web`'s `burst:` line, as a manual check, because the sample only exists in a running player.
+Per §7.4 this is the *only* reading that may be used to claim off-main execution — a build-step trail proves
+scheduling order, never placement.
+
 ## Threading
 
 What runs off the main thread here, what silently does not, and what that costs this

@@ -30,10 +30,15 @@ Driven by `TileManager`, which owns the loaded-tile set (`_loaded`):
 TileManager.Tick(cameraProperties, selectionConfig)          // once per frame, but mostly idle
   ├─ CoverSelect      : pick the visible tile cover for this camera (z/x/y set)
   ├─ Request/Release  : fetch newly-covered tiles, release departed ones (kept-warm in a cache)
-  └─ on fetched bytes : SymbolTileBytesReady(source, tile, bytes)   ── push ──►  SymbolLabelSubsystem
+  └─ per-tile kick    : SymbolWorkerFactory.TryBeginBuild(source, tile)   ── kick ──►  SymbolSubsystem
+                          → RunWorkerAndHandoff(decode)
 ```
 
-`SymbolLabelSubsystem.OnTileBytesReady` does **not** build inline — it **enqueues** the MVT bytes. The
+`TileManager`'s per-tile mesh-build kick (`KickMeshBuild`) drives the symbol pass now, not a push event:
+it asks `SymbolWorkerFactory` (an `ISymbolTileWorkerFactory`, implemented by `SymbolSubsystem`) for an
+`ISymbolTileWorkerPass` via `TryBeginBuild`, then hands that pass the decoded tile through
+`RunWorkerAndHandoff`. `SymbolSubsystem` does **not** build inline there — `RunWorkerAndHandoff` **enqueues**
+the MVT bytes. The
 decode → feature-extract (off the main thread) → glyph-shape → atlas-append is drained a bounded number per
 frame by `PumpBuilds`. Decode + per-layer extract run through
 `Rendering.Tile.Processing.TileLayerProcessorRunner.RunSymbolWorkerPass` (the symbol cadence's own decode-once
@@ -607,7 +612,8 @@ occluder ⇒ no-op.
 `SymbolFeatureExtractor.ProjectPath` (`:164-173`) projects only the original MVT vertices, so a long segment
 renders as a straight screen chord instead of the projected curve. **Fix:** subdivide per
 `IProjection.MaxRefineAngleRad` (Mercator = ∞ ⇒ no split), as the mesh line path does
-(`StyledLineTileBuilder.SubdivideCenterline`), ported to an engine-free `Core` helper. **Hazard:**
+(`LineSubdivideJob`, job-scheduling-design.md §8 stage 5 Group B — this note's own engine-free `Core` helper,
+`LineCurvatureSubdivision`, is exactly the ported form it already recommends). **Hazard:**
 `LineAnchor.Segment` (`:20`) indexes the path vertex array — computed against the tile-local path
 (`LineAnchorPlacement.Compute`, `SymbolFeatureExtractor.cs:106`) but resolved against the render path
 (`LabelStagingMath.cs:126`). Subdividing only `ProjectPath` silently desyncs those indices (in range, wrong
@@ -683,7 +689,9 @@ tile-coverage cull in `CurrentBatch`, §1.5), `SymbolTileLabelStore` (active/cac
 `Placement/LabelViewDistance`. `MapRenderer.Core/Geo/`: `IProjection`
 (`Project`, `TryGetHorizonOccluder`, `MaxRefineAngleRad`), `SphericalProjection` (`ProjectPoint` `:51-55`,
 occluder `:81-86`), `WebMercator`, `CameraPoseMath`, `SceneFrame`, `FloatingOrigin`. Mesh-path prior art:
-`StyledLineTileBuilder.SubdivideCenterline`, `ProjectPointsJob<TProj>`, `FrustumTileSelector`.
+`LineSubdivideJob` (job-scheduling-design.md §8 stage 5 Group B — this note's own engine-free
+`LineCurvatureSubdivision` is the ported form the mesh path's `SubdivideCenterline` retired in favour of),
+`ProjectPointsJob<TProj>`, `FrustumTileSelector`.
 
 ## Relationship to other work
 

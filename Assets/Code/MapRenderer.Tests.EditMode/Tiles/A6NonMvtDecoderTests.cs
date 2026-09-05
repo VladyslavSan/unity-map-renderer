@@ -15,7 +15,8 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
@@ -46,9 +47,9 @@ namespace MapRenderer.Tests.Tiles
             public IDecodedTile Decode(TileId id, byte[] bytes) => _tile;
         }
 
-        /// <summary>Mirrors <see cref="FillRenderLayer.WriteInto"/>'s forward to
-        /// <see cref="StyledFillTileBuilder.WriteMeshData"/> without needing a real Unity <see cref="Material"/>
-        /// (this test drives the WriteInto-path fan-out, not material binding).</summary>
+        /// <summary>Mirrors <see cref="FillRenderLayer.BuildGraphRequest"/>'s forward without needing a real
+        /// Unity <see cref="Material"/> (this test drives the fan-out into the job graph, not material
+        /// binding).</summary>
         private sealed class FakeFillTileMeshRenderLayer : ITileMeshRenderLayer
         {
             private readonly Fill.PaintProperties _paint;
@@ -68,13 +69,16 @@ namespace MapRenderer.Tests.Tiles
             public void ApplyZoom(double zoom, double devicePixelRatio) { }
             public void Dispose() { }
 
-            public void WriteInto(
-                Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-                double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
-                => StyledFillTileBuilder.WriteMeshData(
-                    md, selected, geometry, _paint, zoom, tileOriginRender, out vertexCount, out bounds,
-                    projection, layout: null, clip: clip, scratch: scratch);
+            public ILayerMeshBuild BuildGraphRequest(
+                IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                in TileLayerProcessContext context, int materialIndex, string payloadName)
+            {
+                FillMeshPipeline.LayerInput input = StyledFillTileBuilder.BuildLayerInput(
+                    selected, geometry, _paint, context.Zoom, context.TileOriginRender, out var colors,
+                    context.Projection, layout: null, context.BufferClip, context.Buffers);
+                if (!input.RingVisitOrder.IsCreated) return null;
+                return FillLayerBuild.Rent(input, colors, materialIndex, payloadName);
+            }
         }
 
         [Test]
@@ -93,7 +97,7 @@ namespace MapRenderer.Tests.Tiles
             // exactly as MvtDecoder does — the shared InMemoryTileLayer/InMemoryDecodedTile pair.
             var layer = new InMemoryTileLayer(
                 FixtureSourceLayerName, tileId, new IFeature[] { feature },
-                (uint)TileBackgroundLayerProcessor.Extent);
+                (uint)BackgroundQuad.Extent);
             using var fixtureTile = new InMemoryDecodedTile(layer);
             var fakeDecoder = new FakeTileDecoder(fixtureTile);
 
@@ -112,23 +116,35 @@ namespace MapRenderer.Tests.Tiles
             var processor = TileMeshLayerProcessor.AllocateForKick(fillLayer, materialIndex: 0);
             var decode = new SharedDisposable<IDecodedTile>(fakeDecoder.Decode(tileId, MalformedMvtBytes));
 
-            IRenderLayerPayload[] payloads;
+            TilePrologueOutput output = TileLayerProcessorRunner.RunWorkerPass(
+                decode, in context, new ITileMeshLayerProcessor[] { processor });
+            Assert.AreEqual(1, output.Layers.Length);
+
+            // job-scheduling-design.md §8 stage 5 Group B: the graph is the only mesher now — drive it
+            // synchronously, the way TileManager.KickMeshBuild's pump does. ScheduleMeasureFromDecode takes
+            // ownership of `decode` from here — released exactly once, by graph.Dispose() below. The
+            // payload must be read/uploaded BEFORE graph.Dispose() runs: Dispose() sweeps whatever
+            // CompleteWriteAndTakePayloads handed out that the caller never consumed (TileBuildGraph's own
+            // doc), so disposing first would silently zero-vertex the very payload this test asserts on.
+            TileBuildGraph graph = TileBuildGraph.ScheduleMeasureFromDecode(output.Layers, decode);
+            Mesh mesh;
             try
             {
-                payloads = TileLayerProcessorRunner.RunWorkerPass(
-                    decode, in context, new ITileMeshLayerProcessor[] { processor });
+                graph.CompleteMeasureAndScheduleWrite(out _);
+                MeshDataPayload[] payloads = graph.CompleteWriteAndTakePayloads();
+
+                Assert.AreEqual(1, payloads.Length);
+                Assert.IsNotNull(payloads[0], "the worker pass must settle a payload even under the fake decoder.");
+                Assert.AreEqual(4, payloads[0].VertexCount,
+                    "the injected non-MvtDecoder decoder's feature must flow through StyledFillTileBuilder " +
+                    "unchanged and produce the flat 4-vertex quad (Mercator, no subdivision) — the same oracle " +
+                    "TileBackgroundQuadProjectionTests.BackgroundQuad_FlatOnMercator_NoSubdivision asserts. Zero " +
+                    "or a fault here means the fan-out ignored the injected decoder.");
+
+                mesh = payloads[0].Upload();
             }
-            finally { decode.Release(); }
+            finally { graph.Dispose(); }
 
-            Assert.AreEqual(1, payloads.Length);
-            Assert.IsNotNull(payloads[0], "the worker pass must settle a payload even under the fake decoder.");
-            Assert.AreEqual(4, payloads[0].VertexCount,
-                "the injected non-MvtDecoder decoder's feature must flow through StyledFillTileBuilder " +
-                "unchanged and produce the flat 4-vertex quad (Mercator, no subdivision) — the same oracle " +
-                "TileBackgroundQuadProjectionTests.BackgroundQuad_FlatOnMercator_NoSubdivision asserts. Zero " +
-                "or a fault here means the fan-out ignored the injected decoder.");
-
-            Mesh mesh = payloads[0].Upload();
             try
             {
                 Assert.IsNotNull(mesh, "a non-zero-vertex payload must upload a real mesh.");

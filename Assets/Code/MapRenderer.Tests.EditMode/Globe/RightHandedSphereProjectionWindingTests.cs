@@ -107,6 +107,9 @@ namespace MapRenderer.Tests.Globe
             var selected = TestTileMeshBuilder.Select(layer, mvtLayer, z);
             Assert.Greater(selected.Count, 0, "expected boundary_3 line features in this tile");
 
+            // These two struct literals bind to BuildLineFromLayer<TProj>, not the IProjection-typed
+            // overload (this is tooth (g)'s own point for the second: RightHandedSphereProjection is never
+            // registered with Burst) — see that overload's own doc note.
             Mesh flat  = TestTileMeshBuilder.BuildLineFromLayer(mvtLayer, selected, layer.Paint, layer.Layout, z, id, new WebMercatorProjection());
             Mesh rh    = TestTileMeshBuilder.BuildLineFromLayer(mvtLayer, selected, layer.Paint, layer.Layout, z, id, new RightHandedSphereProjection());
             Assert.IsNotNull(flat, "Mercator line must produce geometry");

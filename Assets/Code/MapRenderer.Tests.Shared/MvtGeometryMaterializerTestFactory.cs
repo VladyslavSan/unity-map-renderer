@@ -5,8 +5,8 @@ using System.Collections.Generic;
 using Unity.Collections;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Geometry;
+using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests
 {
     /// <summary>

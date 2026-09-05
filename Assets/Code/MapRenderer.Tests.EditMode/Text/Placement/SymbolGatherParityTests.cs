@@ -47,6 +47,14 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class SymbolGatherParityTests
     {
+        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
+        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
+        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        private long _liveBlocks;
+        [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
+        [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
+            "this test baked a block it never disposed — release the snapshot and Clear() the store");
+
         // Identity projection matrices: every corner projects (clip.w == 1 > 0) so a HUGE minCoverage forces every
         // tile below threshold deterministically — Keep/Fade/Drop is then driven purely by coverageAbovePrev, no
         // camera framing needed (the filter's classification, not its exact coverage number, is what we exercise).

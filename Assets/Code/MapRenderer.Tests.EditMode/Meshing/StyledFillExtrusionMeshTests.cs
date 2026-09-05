@@ -111,10 +111,9 @@ namespace MapRenderer.Tests.Meshing
                     $"edge {edge}: extrude-up must be identical for the floor/roof pair at B.");
             }
 
-            // RED-VERIFY (not executable by this developer — no Unity gate access; do this by hand before
-            // trusting the tooth): temporarily bake `H·extrudeUp` directly into `Position` at build time
-            // (e.g. in AddWallVertex, `position += extrudeUp * (t > 0.5f ? _someHeight : 0)`) — floorA/roofA
-            // then diverge and the `Assert.AreEqual(floorA, roofA, ...)` line above must fail.
+            // RED-VERIFIED (2026-09-04): baking `extrudeUp * 10` into `Position` for t>0.5 in AddWallVertex
+            // failed "edge 0: floorA and roofA must coincide in position (height-agnostic footprint)." —
+            // T1's own message, confirming the tooth can fail.
             Object.DestroyImmediate(mesh);
         }
 
@@ -305,7 +304,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(1, roofSign,
                 $"{label}: roof front face must point OUT (Unity-front under stock Cull Back). The roof " +
                 "reuses StyledFillTileBuilder's already-calibrated 2↔3 index swap, so this failing would be " +
-                "surprising — check StyledFillExtrusionTileBuilder.WriteFlatRoof/WriteGlobeRoof first.");
+                "surprising — check FillExtrusionStreamWriteJob (StyledFillExtrusionTileBuilder.WriteJob.cs) first.");
             Assert.AreEqual(1, wallSign,
                 $"{label}: wall front face must point OUT (Unity-front under stock Cull Back). With the outward " +
                 "normal independently confirmed above, this is an absolute winding check: REMEDY is to reverse " +

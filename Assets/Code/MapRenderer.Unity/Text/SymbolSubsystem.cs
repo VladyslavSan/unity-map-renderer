@@ -13,7 +13,6 @@ using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Jobs;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Text.Placement;
@@ -258,8 +257,8 @@ namespace MapRenderer.Unity.Text
         private HashSet<long> _coverageAboveThisFrame = new();
         private readonly Dictionary<long, double> _coverageDepartingUntil = new();  // TileKey → fade-out deadline
         private readonly HashSet<long> _coverageFadingTiles = new();                // vestigial for Build; telemetry
-        private readonly Dictionary<long, byte> _tileDecisionScratch = new();       // classify each tile once/rebuild
-        private readonly List<long> _coverageDepartingPurgeScratch = new();
+        private readonly Dictionary<long, byte> _tileDecisions = new();       // classify each tile once/rebuild
+        private readonly List<long> _coverageDepartingPurgeKeys = new();
 
         private SymbolStoreTelemetrySnapshot _telemetry;
 
@@ -389,13 +388,13 @@ namespace MapRenderer.Unity.Text
         {
             // A restyle inline-drains the reconcile pipeline BEFORE clearing the store, so a stale worker can
             // never write the back buffer afterward: cancel, block the in-flight worker to terminal, release both
-            // snapshot pins, Clear (now-unpinned blocks dispose immediately), reset buffers.
+            // snapshot pins, Clear, reset buffers. Ordering between the ReleasePins pair and store.Clear() is no
+            // longer load-bearing (SharedDisposable): either order reaches the same single 0-transition.
             _buildCts.Cancel();
             DrainInFlightReconcile();
             _store.ReleasePins(_frontSnapshot);
             _store.ReleasePins(_backSnapshot);
             _store.Clear();
-            _frontSnapshot.Clear(); _backSnapshot.Clear();
             _frontResult.Clear();   _backResult.Clear();
             _frontSetVersion++; // every front-content change bumps, so the gather memo is invalidated
             _reconcileScheduledGen = -1;
@@ -903,7 +902,7 @@ namespace MapRenderer.Unity.Text
                     SymbolTileCoverageFilter.ClassifyActive(_blockTileKeys, _frontResult.BlockId, _frontResult.IsDeparting,
                         _camera.Projection, frame.SceneOriginRender, viewProj, viewportLogicalPx, frame.Rebase, minCoverage,
                         _coverageAbovePrev, _coverageAboveThisFrame, _coverageDepartingUntil, _coverageFadingTiles,
-                        now, DepartingGraceSeconds, _tileDecisionScratch, _blockDecision, _planDecision, out culled);
+                        now, DepartingGraceSeconds, _tileDecisions, _blockDecision, _planDecision, out culled);
                 }
                 LastTileCoverageCulledCount = culled;
 
@@ -948,8 +947,7 @@ namespace MapRenderer.Unity.Text
             }
             else
             {
-                _store.ReleasePins(_backSnapshot); // the failed snapshot leaves service (NO swap)
-                _backSnapshot.Clear();
+                _store.ReleasePins(_backSnapshot); // the failed snapshot leaves service (NO swap) — Clear()s itself
             }
             _reconcileInFlight = false;
         }
@@ -1008,7 +1006,6 @@ namespace MapRenderer.Unity.Text
             _store.ReleasePins(_frontSnapshot);
             _store.ReleasePins(_backSnapshot);
             _store.Clear();
-            _frontSnapshot.Clear(); _backSnapshot.Clear(); // so the test's later Dispose can't double-release
         }
 
         /// <summary>Drops coverage-fade deadlines whose grace window has elapsed. A purged tile is no longer
@@ -1017,11 +1014,11 @@ namespace MapRenderer.Unity.Text
         private void PurgeExpiredCoverageDeadlines(double now)
         {
             if (_coverageDepartingUntil.Count == 0) return;
-            _coverageDepartingPurgeScratch.Clear();
+            _coverageDepartingPurgeKeys.Clear();
             foreach (KeyValuePair<long, double> kv in _coverageDepartingUntil)
-                if (now >= kv.Value) _coverageDepartingPurgeScratch.Add(kv.Key);
-            for (int i = 0; i < _coverageDepartingPurgeScratch.Count; i++)
-                _coverageDepartingUntil.Remove(_coverageDepartingPurgeScratch[i]);
+                if (now >= kv.Value) _coverageDepartingPurgeKeys.Add(kv.Key);
+            for (int i = 0; i < _coverageDepartingPurgeKeys.Count; i++)
+                _coverageDepartingUntil.Remove(_coverageDepartingPurgeKeys[i]);
         }
 
         /// <summary>Logs once if the glyph atlas overflowed (glyphs dropped) — suggesting a larger atlas.</summary>
@@ -1047,8 +1044,9 @@ namespace MapRenderer.Unity.Text
         protected override void DoDispose()
         {
             // Teardown runs the SAME inline-drain protocol as a restyle — cancel, drain to terminal, release both
-            // snapshots' pins, THEN Clear. A test tearing down while GateForTest is held MUST open the gate first,
-            // or DrainInFlightReconcile hangs.
+            // snapshots' pins, THEN Clear (ordering between the two is no longer load-bearing — SharedDisposable
+            // makes both idempotent). A test tearing down while GateForTest is held MUST open the gate first, or
+            // DrainInFlightReconcile hangs.
             _buildCts.Cancel();   // stop any in-flight build + the reconcile token before glyph/atlas state is disposed
             DrainInFlightReconcile();
             _store.ReleasePins(_frontSnapshot);
@@ -1058,7 +1056,6 @@ namespace MapRenderer.Unity.Text
             DrainAndDiscardParkedBuilds(); // parked builds die with teardown too
             _readyTails.Clear(); // ready-but-untailed builds die with the store slot cleared below
             _store.Clear();
-            _frontSnapshot.Clear(); _backSnapshot.Clear();
             _frontResult.Clear();   _backResult.Clear();
             _frontSetVersion++; // decorative here (Build never runs again post-Dispose) — kept for uniformity
             _reconcileScheduledGen = -1;

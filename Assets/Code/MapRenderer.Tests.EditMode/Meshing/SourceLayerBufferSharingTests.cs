@@ -12,13 +12,14 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Core.Text;
 using MapRenderer.Unity.Text;
+using MapRenderer.Tests.Tiles;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests.Meshing
@@ -82,7 +83,8 @@ namespace MapRenderer.Tests.Meshing
             public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context)
                 => _log.Add((_style.SourceLayer,
                              SourceLayerResolver.ResolveTileLayer(_style, tile)?.Geometry.Vertices ?? default));
-            public IRenderLayerPayload Complete() => new NullPayload();
+            public bool TryTakeGraphRequest(out ILayerMeshBuild build) { build = null; return false; }
+            public void Release() { }
         }
 
         private sealed class BufferProbeSymbolProcessor : ITileWorkerThenMainLayerProcessor
@@ -97,14 +99,6 @@ namespace MapRenderer.Tests.Meshing
                 => _log.Add((_style.SourceLayer,
                              SourceLayerResolver.ResolveTileLayer(_style, tile)?.Geometry.Vertices ?? default));
             public void CompleteOnMain(CancellationToken ct) { }
-        }
-
-        private sealed class NullPayload : IRenderLayerPayload
-        {
-            public int VertexCount => 0;
-            public int MaterialIndex => 0;
-            public Mesh Upload() => null;
-            public void Dispose() { }
         }
 
         private static StyleLayer Fill(string id, string sourceLayer) => new StyleLayer
@@ -160,9 +154,8 @@ namespace MapRenderer.Tests.Meshing
                     new BufferProbeMeshProcessor(fillB, meshLog),
                     new BufferProbeMeshProcessor(fillC, meshLog),
                 };
-                IRenderLayerPayload[] payloads =
-                    TileLayerProcessorRunner.RunWorkerPass(handle, in context, meshProcessors);
-                foreach (IRenderLayerPayload p in payloads) p?.Dispose();
+                TilePrologueOutput meshOutput = TileLayerProcessorRunner.RunWorkerPass(handle, in context, meshProcessors);
+                for (int i = 0; i < meshOutput.Layers.Length; i++) meshOutput.Layers[i]?.Dispose();
 
                 var symbolProcessors = new ITileWorkerThenMainLayerProcessor[]
                 {

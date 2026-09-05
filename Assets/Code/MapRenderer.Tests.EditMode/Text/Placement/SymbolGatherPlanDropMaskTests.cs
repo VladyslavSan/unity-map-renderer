@@ -54,6 +54,14 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class SymbolGatherPlanDropMaskTests
     {
+        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
+        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
+        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        private long _liveBlocks;
+        [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
+        [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
+            "this test baked a block it never disposed — release the snapshot and Clear() the store");
+
         private static readonly WebMercatorProjection P = new WebMercatorProjection();
 
         // Render-space offset separating the DROP symbol from the centre-anchored KEEP symbol so the two do NOT

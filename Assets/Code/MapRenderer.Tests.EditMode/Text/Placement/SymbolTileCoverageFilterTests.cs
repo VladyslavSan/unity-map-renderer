@@ -55,7 +55,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // Fresh, empty cross-frame state for a test that doesn't care about history (a first-touch tile).
         private static (HashSet<long> abovePrev, HashSet<long> aboveThisFrame, Dictionary<long, double> departingUntil,
-            HashSet<long> fadingOut, Dictionary<long, byte> decisionScratch) FreshState()
+            HashSet<long> fadingOut, Dictionary<long, byte> tileDecisions) FreshState()
             => (new HashSet<long>(), new HashSet<long>(), new Dictionary<long, double>(), new HashSet<long>(), new Dictionary<long, byte>());
 
         [Test]
@@ -71,13 +71,13 @@ namespace MapRenderer.Tests.Text.Placement
             var aboveThisFrame = new HashSet<long>();
             var departingUntil = new Dictionary<long, double> { [TinyTileKey] = 10.0 };
             var fadingOut = new HashSet<long>();
-            var decisionScratch = new Dictionary<long, byte>();
+            var tileDecisions = new Dictionary<long, byte>();
             var decisions = new List<byte>();
             var blockDecision = new List<byte>();
 
             SymbolTileCoverageFilter.ClassifyActive(blockTileKeys, blockId, isDeparting, projection: null, SceneOrigin, ViewProj,
                 Viewport, Rebase, MinCoverage, abovePrev, aboveThisFrame, departingUntil, fadingOut, now: 0.0,
-                GraceSeconds, decisionScratch, blockDecision, decisions, out int culledViaNullProjection);
+                GraceSeconds, tileDecisions, blockDecision, decisions, out int culledViaNullProjection);
             Assert.AreEqual(0, culledViaNullProjection);
             CollectionAssert.AreEqual(
                 new[] { SymbolTileCoverageFilter.Keep, SymbolTileCoverageFilter.Keep }, decisions,
@@ -87,7 +87,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             SymbolTileCoverageFilter.ClassifyActive(blockTileKeys, blockId, isDeparting, Projection, SceneOrigin, ViewProj, Viewport,
                 Rebase, minCoverage: 0.0, abovePrev, aboveThisFrame, departingUntil, fadingOut, now: 0.0,
-                GraceSeconds, decisionScratch, blockDecision, decisions, out int culledViaZeroThreshold);
+                GraceSeconds, tileDecisions, blockDecision, decisions, out int culledViaZeroThreshold);
             Assert.AreEqual(0, culledViaZeroThreshold);
             CollectionAssert.AreEqual(
                 new[] { SymbolTileCoverageFilter.Keep, SymbolTileCoverageFilter.Keep }, decisions,
@@ -105,18 +105,18 @@ namespace MapRenderer.Tests.Text.Placement
             var blockId = new List<int> { 0, 1, 0 };                          // three records across both blocks
             var isDeparting = new List<byte> { 0, 0, 0 };
 
-            var (abovePrev, aboveThisFrame, departingUntil, fadingOut, decisionScratch) = FreshState();
+            var (abovePrev, aboveThisFrame, departingUntil, fadingOut, tileDecisions) = FreshState();
             var blockDecision = new List<byte>();
             var decisions = new List<byte>();
             SymbolTileCoverageFilter.ClassifyActive(blockTileKeys, blockId, isDeparting, Projection, SceneOrigin,
                 ViewProj, Viewport, Rebase, MinCoverage, abovePrev, aboveThisFrame, departingUntil, fadingOut,
-                now: 0.0, GraceSeconds, decisionScratch, blockDecision, decisions, out int culled);
+                now: 0.0, GraceSeconds, tileDecisions, blockDecision, decisions, out int culled);
 
             CollectionAssert.AreEqual(
                 new[] { SymbolTileCoverageFilter.Drop, SymbolTileCoverageFilter.Drop, SymbolTileCoverageFilter.Drop },
                 decisions, "every record on the below-coverage tile drops, whichever of the two blocks it rode");
             Assert.AreEqual(3, culled, "culled counts RECORDS (3), not distinct blocks (2) or tiles (1)");
-            Assert.AreEqual(1, decisionScratch.Count, "the shared tile key is classified once — both blocks collapse in the scratch");
+            Assert.AreEqual(1, tileDecisions.Count, "the shared tile key is classified once — both blocks collapse in the scratch");
         }
 
         [Test]
@@ -136,20 +136,20 @@ namespace MapRenderer.Tests.Text.Placement
             var aboveThisFrame = new HashSet<long>();
             var departingUntil = new Dictionary<long, double>();
             var fadingOut = new HashSet<long>();
-            var decisionScratch = new Dictionary<long, byte>();
+            var tileDecisions = new Dictionary<long, byte>();
             var blockDecision = new List<byte>();
             var decisions = new List<byte>();
 
             SymbolTileCoverageFilter.ClassifyActive(blockTileKeys, blockId, isDeparting, Projection, SceneOrigin,
                 ViewProj, Viewport, Rebase, MinCoverage, abovePrev, aboveThisFrame, departingUntil, fadingOut,
-                now: 5.0, GraceSeconds, decisionScratch, blockDecision, decisions, out int culled);
+                now: 5.0, GraceSeconds, tileDecisions, blockDecision, decisions, out int culled);
 
             Assert.AreEqual(SymbolTileCoverageFilter.Keep, decisions[0], "active Big tile is above → Keep");
             Assert.AreEqual(SymbolTileCoverageFilter.Keep, decisions[1], "departing record short-circuits to Keep");
             Assert.AreEqual(0, culled, "nothing dropped");
-            Assert.IsTrue(decisionScratch.ContainsKey(BigTileKey), "sanity: the ACTIVE block WAS classified");
+            Assert.IsTrue(tileDecisions.ContainsKey(BigTileKey), "sanity: the ACTIVE block WAS classified");
             // The fence: the departing-only tile is never classified, so it mutates NO cross-frame state.
-            Assert.IsFalse(decisionScratch.ContainsKey(TinyTileKey), "departing-only tile must not be classified at all");
+            Assert.IsFalse(tileDecisions.ContainsKey(TinyTileKey), "departing-only tile must not be classified at all");
             Assert.IsFalse(departingUntil.ContainsKey(TinyTileKey), "departing-only tile must not get a fade deadline stamped");
             Assert.IsFalse(fadingOut.Contains(TinyTileKey), "departing-only tile must not be marked fading");
             Assert.IsFalse(aboveThisFrame.Contains(TinyTileKey), "departing-only tile must not enter the above set");

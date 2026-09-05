@@ -446,7 +446,6 @@ MonoBehaviour:
     MaxReleasesPerTick: 4
     MaxConcurrentTileLoads: 12
     PriorityStrategy: 0
-    SymbolPlacementThrottleFrames: 1
     FillTileBufferClip: 0
     SymbolTileCoverageCull: 0.001
     SymbolMaxDistanceFraction: 1

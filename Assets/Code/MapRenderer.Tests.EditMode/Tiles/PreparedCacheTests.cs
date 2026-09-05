@@ -16,7 +16,6 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
@@ -157,7 +156,7 @@ namespace MapRenderer.Tests.Tiles
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.LateUpdate();
-                int kicks = view.MeshBuildsKickedLastTick();
+                int kicks = view.TileBuildsStartedLastTick();
                 PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile),
@@ -255,6 +254,86 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreEqual(0, view.PreparedCacheHits(), "Disabled must never register a hit, ever.");
                 Assert.Greater(view.PreparedCacheMisses(), 1,
                     "The revisit must register a SECOND miss (re-prepared again), not a hit.");
+            }
+            finally
+            {
+                view.Teardown();
+                Object.DestroyImmediate(go);
+            }
+        }
+
+        // ── (g)'s revisit clause: a two-mesh tile, cache hit, no re-kick ────────────────────────
+
+        /// <summary>
+        /// job-scheduling-design.md §8 stage 3 tooth (f)/(g): a two-mesh (fill + line) tile — both produced
+        /// by the graph arm (§8 stage 5 Group B retired the seam arm) — evicted to the cache and revisited must be a PURE cache
+        /// hit: <see cref="TileManager.BuildTileFromCache"/> is synchronous admission-time work (no fetch,
+        /// no kick, no async pipeline), so <c>TileBuildsStartedLastTick()</c> must read 0 on the tick the
+        /// tile becomes built again — the falsifier that catches a shallow cache which silently RE-BUILT
+        /// instead of transferring (which the mesh-count/hit-count assertions alone would not catch, since
+        /// a re-build produces the same counts).
+        /// </summary>
+        [Test]
+        public void TwoMeshTile_RevisitAfterEviction_IsACacheHit_WithNoReKick()
+        {
+            byte[] bytes = SampleTileFixture.Bytes();
+            var src      = TestDataSource.FromBytes(bytes);
+            var style    = StyleParser.Parse(@"{
+                ""version"": 8,
+                ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
+                ""layers"": [
+                    { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                      ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
+                    { ""id"": ""geolines-stroke"", ""type"": ""line"", ""source"": ""maplibre"",
+                      ""source-layer"": ""geolines"",
+                      ""paint"": { ""line-color"": [""rgba"", 100, 200, 50, 1], ""line-width"": 10 } }
+                ]
+            }");
+            var go   = new GameObject("MapView_S89_TwoMeshRevisit");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick   = int.MaxValue;
+            view.Config.MaxReleasesPerTick   = 0; // uncapped — synchronous whole-cover eviction+transfer
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must build on first visit.");
+                Assert.AreEqual(2, view.GetTileMeshes(TrackedTile)?.Length ?? 0,
+                    "drive precondition: both layers must produce a real mesh — the revisit clause needs a " +
+                    "genuinely two-mesh tile, not one with an empty line layer.");
+
+                // Evict — transfers both meshes to the cache.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "the tile must leave the cover.");
+                PumpUntilSettled(view);
+
+                int hitsBefore = view.PreparedCacheHits();
+
+                // Revisit — one deterministic tick: BuildTileFromCache runs synchronously on admission.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile),
+                    "a cache hit must build the tile SYNCHRONOUSLY on admission — no fetch, no kick, no " +
+                    "async pipeline (BuildTileFromCache's own contract).");
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(),
+                    "no re-kick on a hit — the falsifier: a shallow cache that silently RE-BUILT instead of " +
+                    "transferring would start a build on this exact tick.");
+                // Greater-than, not exactly +1: at this zoom the whole cover (not just TrackedTile) re-enters
+                // on one pan, so every previously-evicted tile in it registers its own hit on the same tick.
+                // TrackedTile's OWN hit is what the assertions above/below (built synchronously, 2 meshes)
+                // already pin; this just confirms the cache's hit counter moved at all.
+                Assert.Greater(view.PreparedCacheHits(), hitsBefore,
+                    "the revisit must register at least one cache hit — including TrackedTile's own.");
+                Assert.AreEqual(2, view.GetTileMeshes(TrackedTile)?.Length ?? 0,
+                    "the cache hit must restore BOTH meshes — a shallow cache that only remembered one " +
+                    "layer would show here.");
             }
             finally
             {

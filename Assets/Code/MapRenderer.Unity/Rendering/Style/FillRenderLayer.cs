@@ -1,14 +1,17 @@
 using System.Collections.Generic;
 using UnityEngine;
+using Unity.Collections;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Tile.Processing;
 
 namespace MapRenderer.Unity.Rendering.Style
 {
@@ -168,16 +171,21 @@ namespace MapRenderer.Unity.Rendering.Style
             PushPatternScale();
         }
 
-        // IR C1 P2: the `TileId id` parameter B7a left on the seam is gone. Fill's tile address is always
-        // `geometry.Tile`, the producer's own declaration — the same rule that sources the extent from
-        // `geometry.Extent`.
-        public void WriteInto(
-            Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-            double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-            Tile.Processing.TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
-            => Meshing.StyledFillTileBuilder.WriteMeshData(
-                md, selected, geometry, _paint, zoom, tileOriginRender, out vertexCount, out bounds,
-                projection, _layout, clip, scratch);
+        // job-scheduling-design.md §8 stage 5 Group B: the graph is the only mesher — rents the build the
+        // graph's write step consumes; FillMeshGraph does the mesh write.
+        public Meshing.ILayerMeshBuild BuildGraphRequest(
+            IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+            in TileLayerProcessContext context, int materialIndex, string payloadName)
+        {
+            FillMeshPipeline.LayerInput input = Meshing.StyledFillTileBuilder.BuildLayerInput(
+                selected, geometry, _paint, context.Zoom, context.TileOriginRender, out var colors,
+                context.Projection, _layout, context.BufferClip, context.Buffers);
+            // The relocated emptiness gate (job-scheduling-design.md §3.2's HasWork, moved here) — precondition
+            // 8's own contract is what makes the null path leak nothing: every BuildLayerInput empty path
+            // returns `default` with every `out` column left `default`, so there is nothing to dispose here.
+            if (!input.RingVisitOrder.IsCreated) return null;
+            return Meshing.FillLayerBuild.Rent(input, colors, materialIndex, payloadName);
+        }
 
         public void Dispose() => RenderLayerSet.DestroyMaterialInstance(Material);
     }

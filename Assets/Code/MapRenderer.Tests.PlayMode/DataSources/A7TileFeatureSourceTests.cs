@@ -95,7 +95,7 @@ namespace MapRenderer.Tests.PlayMode.DataSources
                 };
                 var layer = new InMemoryTileLayer(
                     FixtureSourceLayerName, new TileId { Z = 0, X = 0, Y = 0 }, new IFeature[] { feature },
-                    (uint)TileBackgroundLayerProcessor.Extent);
+                    (uint)BackgroundQuad.Extent);
                 return new InMemoryDecodedTile(layer);
             }
 

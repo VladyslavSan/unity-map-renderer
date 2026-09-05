@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     ///
     /// Deliberately independent of mesh disposal and the symbol symbol sink — the two sibling capability
     /// interfaces extend this base without touching each other's code: <see cref="ITileMeshLayerProcessor"/>
-    /// (A1, mesh settlement — returns a disposable <see cref="IRenderLayerPayload"/>) and
+    /// (A1, mesh settlement — returns a disposable <see cref="Style.MeshDataPayload"/>) and
     /// <see cref="ITileWorkerThenMainLayerProcessor"/> (A3, a main-thread tail — artifact-free; the symbol
     /// sink stays the coordinator's own <c>SymbolTileStore</c>).
     /// </summary>

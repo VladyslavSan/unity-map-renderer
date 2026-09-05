@@ -1,12 +1,13 @@
 // EditMode only. Reaches the internal FillMeshPipeline.HoleRingComparer via Jobs'
 // InternalsVisibleTo("MapRenderer.Tests.EditMode"). Uses the Recorder-based Is.Not.AllocatingGCMemory() — the
 // only live GC meter in this Mono runner (GC.GetAllocatedBytesForCurrentThread() returns 0 here; see
-// FillMeshBuildScratchPoolTests). NOT registered in core-tests.csproj (FillMeshPipeline lives in Jobs, which
+// FillMeshBuildBuffersPoolTests). NOT registered in core-tests.csproj (FillMeshPipeline lives in Jobs, which
 // core-tests does not compile).
 //
-// SCOPE OF THIS TOOTH: FillMeshPipeline.Schedule cannot be measured at zero — it still allocates ~15 managed
-// arrays per call (the once-per-build handle-arrays, DELIBERATELY not pooled — they hold live NativeArray
-// handles behind an untoothed pi<polyCount invariant; see gc-elimination-worklist.md). So this pins the
+// SCOPE OF THIS TOOTH: FillMeshGraph.Schedule (job-scheduling-design.md §8 stage 4 Group B retired the
+// synchronous FillMeshPipeline.Schedule this comment used to name) cannot be measured at zero either — it
+// still allocates schedule-time managed work per call (the boxed IProjection dispatch switch,
+// JobHandle.CombineDependencies, a ScheduleDispose call per graph node/buffer). So this pins the
 // per-POLYGON win directly at the mechanism: the hole-ring sort now runs in a REUSED NativeArray (off the GC
 // heap) through a struct comparer taken by generic constraint (no boxing) — where the retired code allocated
 // a managed `new int[holeCount]` every polygon (the inline lambda it also dropped was already compiler-cached
@@ -19,7 +20,8 @@ using Unity.Mathematics;
 using Unity.Collections;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests.Meshing

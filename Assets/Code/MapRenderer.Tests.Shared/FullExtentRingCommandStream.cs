@@ -2,7 +2,7 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// The full-tile-extent ring as an MVT command stream — <b>the encoding tile-geometry IR B5 RETIRED</b>
-    /// from <c>TileBackgroundLayerProcessor</c>, kept here as a test-owned oracle.
+    /// from <c>BackgroundQuad</c>, kept here as a test-owned oracle.
     ///
     /// <para>At extent 4096 it decodes to the closed 4-point ring
     /// <c>(0,0)→(4096,0)→(4096,4096)→(0,4096)</c>: MoveTo×1 + LineTo×3 + ClosePath, zigzag-encoded per the

@@ -8,7 +8,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Jobs;
+using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Jobs.Tiles;
@@ -61,15 +61,6 @@ namespace MapRenderer.Tests.Tiles
 
         // ── Test doubles (kept in the test assembly per convention — no production observability added) ──
 
-        private sealed class FakePayload : IRenderLayerPayload
-        {
-            public int VertexCount { get; }
-            public int MaterialIndex { get; }
-            public FakePayload(int materialIndex, int vertexCount = 0) { MaterialIndex = materialIndex; VertexCount = vertexCount; }
-            public Mesh Upload() => null;
-            public void Dispose() { }
-        }
-
         /// <summary>Captures the observed <see cref="IDecodedTile"/> reference into a shared box, so a test
         /// can compare it across cadences.</summary>
         private sealed class CapturingMeshProcessor : ITileMeshLayerProcessor
@@ -78,7 +69,8 @@ namespace MapRenderer.Tests.Tiles
             public LayerPhase Phase => LayerPhase.WorkerOnly;
             public CapturingMeshProcessor(IDecodedTile[] box) => _box = box;
             public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context) => _box[0] = tile;
-            public IRenderLayerPayload Complete() => new FakePayload(0);
+            public bool TryTakeGraphRequest(out ILayerMeshBuild build) { build = null; return false; }
+            public void Release() { }
         }
 
         private sealed class CapturingSymbolProcessor : ITileWorkerThenMainLayerProcessor

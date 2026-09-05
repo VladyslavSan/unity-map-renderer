@@ -1,4 +1,5 @@
 using System;
+using Unity.Collections;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Jobs.Expressions;
 
@@ -29,15 +30,20 @@ namespace MapRenderer.Jobs.Tiles
     }
 
     /// <summary>
-    /// A per-selection native predicate over one layer's features, addressed by ordinal — the product
+    /// A per-selection native predicate over one layer's features — the product
     /// <see cref="INativeFilterSource.TryBindNativeFilter"/> hands back. Owns the rebound binding and any
     /// evaluator scratch it needs; the caller disposes it in the same <c>finally</c> as its selection loop.
     /// </summary>
     internal interface INativeFeatureMatcher : IDisposable
     {
-        /// <summary>True iff the layer's feature at <paramref name="ordinal"/> matches — an evaluation
-        /// error excludes, mirroring <see cref="MapRenderer.Core.Filters.CompiledFilter"/>'s
-        /// caught-exception → exclude.</summary>
-        bool Matches(int ordinal);
+        /// <summary>Evaluates every feature of this matcher's own layer, ordinal <c>[0, featureCount)</c>,
+        /// against the bound program in ONE Burst job and returns the match column: index <c>i != 0</c>
+        /// means feature <c>i</c> matched — an evaluation error excludes, mirroring
+        /// <see cref="MapRenderer.Core.Filters.CompiledFilter"/>'s caught-exception → exclude. No
+        /// <c>featureCount</c> parameter: the matcher already knows it (it sized its own result columns from
+        /// it at construction), so there is one source for the bound, not two the caller could let drift.
+        /// The returned array is owned by this matcher — valid until <see cref="IDisposable.Dispose"/>,
+        /// never disposed by the caller.</summary>
+        NativeArray<byte> MatchAll();
     }
 }

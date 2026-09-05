@@ -15,7 +15,8 @@ namespace MapRenderer.Tests.Visual
     /// S13 snapshot tests for FillPaint-driven rendering behavior.
     ///
     /// These are Unity-only tests (use UnityEngine.Mesh, rendering, etc.).
-    /// The engine-free counterparts live in FillPaintTests.cs (shared with dotnet core-tests).
+    /// The CPU-side counterparts live in FillPaintTests.cs (also Unity EditMode only, not shared with
+    /// dotnet core-tests — see that file's header).
     ///
     /// Acceptance teeth:
     ///   #3: Opacity no-rebuild — changing _Opacity changes rendered alpha/brightness WITHOUT

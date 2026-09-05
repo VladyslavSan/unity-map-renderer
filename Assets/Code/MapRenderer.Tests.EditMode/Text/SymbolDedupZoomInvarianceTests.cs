@@ -37,6 +37,14 @@ namespace MapRenderer.Tests.Text
     [TestFixture]
     public class SymbolDedupZoomInvarianceTests
     {
+        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
+        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
+        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        private long _liveBlocks;
+        [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
+        [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
+            "this test baked a block it never disposed — release the snapshot and Clear() the store");
+
         private static void AddPoint(SymbolTileBuffer buffer, double3 anchor, string text, int feature, TileId tile) =>
             TestSymbolTileBuffer.AddPoint(buffer, anchor, quads: null, boundsMin: float2.zero, boundsMax: float2.zero,
                 text: text, featureIndex: feature, tileKey: SymbolTileKey.Pack(tile));
@@ -81,16 +89,16 @@ namespace MapRenderer.Tests.Text
             var store = new SymbolTileStore(cacheCap: 8);
             var k1 = new SymbolTileStore.Key("src", t1);
             var k2 = new SymbolTileStore.Key("src", t2);
-            var t1Scratch = new SymbolTileBuffer();
-            AddPoint(t1Scratch, coAnchor, "Co", 1, t1);
-            AddPoint(t1Scratch, splitA, "Split", 2, t1);
-            AddPoint(t1Scratch, splitB, "Split", 3, t1);
-            var t2Scratch = new SymbolTileBuffer();
-            AddPoint(t2Scratch, coAnchor, "Co", 4, t2); // the co-located twin in the OTHER tile
+            var t1Buffer = new SymbolTileBuffer();
+            AddPoint(t1Buffer, coAnchor, "Co", 1, t1);
+            AddPoint(t1Buffer, splitA, "Split", 2, t1);
+            AddPoint(t1Buffer, splitB, "Split", 3, t1);
+            var t2Buffer = new SymbolTileBuffer();
+            AddPoint(t2Buffer, coAnchor, "Co", 4, t2); // the co-located twin in the OTHER tile
             SymbolTileBlock block1 = SymbolTileBlockBaker.Bake(
-                t1Scratch, slotCount: 1, double3.zero, store.StringTable);
+                t1Buffer, slotCount: 1, double3.zero, store.StringTable);
             SymbolTileBlock block2 = SymbolTileBlockBaker.Bake(
-                t2Scratch, slotCount: 1, double3.zero, store.StringTable);
+                t2Buffer, slotCount: 1, double3.zero, store.StringTable);
             store.CompleteBuild(k1, store.BeginBuild(k1), block1);
             store.CompleteBuild(k2, store.BeginBuild(k2), block2);
 
@@ -139,6 +147,7 @@ namespace MapRenderer.Tests.Text
                     Assert.AreEqual(baseline.IsDeparting[i], s.IsDeparting[i], $"isDeparting differs at index {i}, gate {gates[g]}");
                 }
             }
+            store.Clear();
         }
     }
 }

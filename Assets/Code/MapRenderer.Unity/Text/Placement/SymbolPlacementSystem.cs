@@ -18,7 +18,7 @@ using UnityEngine;
 using MapRenderer.Unity.Common;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Symbols;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Materials;
@@ -239,7 +239,7 @@ namespace MapRenderer.Unity.Text.Placement
         // this set for keys it enumerated out of _fadeOpacity, so a stale entry is never read.) Keeping it in
         // lockstep with the store is why both live inside EaseFade rather than in the emit loop.
         private NativeHashSet<long> _seenFade; // NOT readonly — allocated in the ctor
-        private NativeList<long> _fadeScratchKeys; // NOT readonly — allocated in the ctor; reused decay-sweep buffer
+        private NativeList<long> _fadeSweepKeys; // NOT readonly — allocated in the ctor; reused decay-sweep buffer
 
         // FadeIds of symbols the gather cull (tile-coverage / B-3 distance) hit THIS frame but whose fade is still
         // alive: instead of a hard skip (which would pop the symbol — a pre-cull produces no geometry, so nothing
@@ -520,18 +520,6 @@ namespace MapRenderer.Unity.Text.Placement
         // transform: MapView.LateUpdate does SyncToCamera → tile rebase → places symbols, in that order.
         private readonly MapCamera _camera;
 
-        // Symbol-placement throttle (rapid-zoom stutter fix): the full per-frame place (project→collide→emit,
-        // the ~100 ms main-thread SymbolTick) runs only every PlacementThrottleFrames-th frame. On the held
-        // frames between, only WorldRenderer.Rebase runs — one transform per tile container — and the GPU
-        // keeps billboarding the existing slot meshes to correct world positions. Held-frame deltaTime is
-        // accumulated so the A-4 fade advances at the true elapsed rate on the recompute frame. Default 1 ==
-        // every frame (throttle OFF), so tests and any single-Tick caller are byte-for-byte unchanged;
-        // MapView sets it > 1 in production. Every-N (not camera-delta) so fades never freeze on a still camera.
-        internal int PlacementThrottleFrames = 1;
-        private int   _framesSinceLastPlacement;
-        private float _heldDeltaTime;
-        private bool  _hasPlacedOnce;
-
         /// <summary>
         /// The default world materials are <see cref="MaterialExtensions.CloneWithParent"/> clones of the
         /// <see cref="MapMaterialSet.SymbolTextWorld"/>/<see cref="MapMaterialSet.SymbolIconWorld"/> bases
@@ -599,7 +587,7 @@ namespace MapRenderer.Unity.Text.Placement
             _fadeOpacity = new NativeHashMap<long, float>(FadeMapInitialCapacity, Allocator.Persistent);
             _seenFade    = new NativeHashSet<long>(FadeMapInitialCapacity, Allocator.Persistent);
             _forceFadeOut = new NativeHashSet<long>(FadeMapInitialCapacity, Allocator.Persistent);
-            _fadeScratchKeys = new NativeList<long>(FadeMapInitialCapacity, Allocator.Persistent);
+            _fadeSweepKeys = new NativeList<long>(FadeMapInitialCapacity, Allocator.Persistent);
             _gatherTrigger = new NativeList<GatherTrigger>(Allocator.Persistent);
             _slotVisibleThisFrame = new NativeList<bool>(Allocator.Persistent);
             _gatherCulledCounts = new NativeArray<int>((int)GatherTrigger.Dropped + 1, Allocator.Persistent);
@@ -647,33 +635,11 @@ namespace MapRenderer.Unity.Text.Placement
             float deltaTime = float.PositiveInfinity, IReadOnlyList<SymbolRenderLayer> symbolLayers = null,
             Texture2D spriteTexture = null)
         {
-            // Throttle: hold this frame (no re-place) unless it's a recompute frame. Skipped only once the
-            // pipeline has placed at least once, so the very first Tick always builds. Held frames just
-            // re-rebase the existing meshes (GPU billboards them) and accumulate their dt for the fade.
-            if (PlacementThrottleFrames > 1 && _hasPlacedOnce)
-            {
-                _framesSinceLastPlacement++;
-                if (!float.IsInfinity(deltaTime)) _heldDeltaTime += deltaTime;
-                if (_framesSinceLastPlacement < PlacementThrottleFrames)
-                {
-                    WorldRenderer.Rebase(in frame);
-                    return;
-                }
-            }
-
-            // On a recompute frame, advance the fade by the WHOLE elapsed time since the last place (this
-            // frame + every held frame), or the fade would slow by the throttle ratio. Infinity (snap) rides through.
-            float effectiveDeltaTime = float.IsInfinity(deltaTime) ? deltaTime : deltaTime + _heldDeltaTime;
-
             using (PmGather.Auto())
                 GatherIntoMirror(plan); // sets _mirrorNonDroppedCount — read below, not plan.WinnerCount (Should-Fix 3:
                                         // WinnerCount includes Dropped symbols; telemetry/gating must not)
-            TickCore(frame, atlas, effectiveDeltaTime, symbolLayers, _mirrorNonDroppedCount, spriteTexture);
+            TickCore(frame, atlas, deltaTime, symbolLayers, _mirrorNonDroppedCount, spriteTexture);
             RefreshTelemetry();   // after the pass, so the levels are this Tick's
-
-            _framesSinceLastPlacement = 0;
-            _heldDeltaTime            = 0f;
-            _hasPlacedOnce            = true;
         }
 
 
@@ -1560,7 +1526,7 @@ namespace MapRenderer.Unity.Text.Placement
                 Bearing = bearingRadians, Viewport = viewportLogicalPx,
                 MetresPerLogicalPixel = metresPerLogicalPixel, // W1: per-frame ruler, patched per curved symbol
                 View = view,                                  // W3: per-frame view transform (curved arm only)
-                PathScratch = _stagePath.AsArray(), CumScratch = _stageCumulativeLength.AsArray(),
+                PathPoints = _stagePath.AsArray(), CumulativeLengths = _stageCumulativeLength.AsArray(),
                 Boxes = _stageBoxes.AsArray(), StagedQuads = _stageQuads.AsArray(),
                 Candidates = _stageCandidates.AsArray(), Emit = _stageEmit.AsArray(), OutCounts = _stageCounts,
             }.Run();
@@ -1603,14 +1569,14 @@ namespace MapRenderer.Unity.Text.Placement
         private void DecayUnseenFadeSymbols(float deltaTime)
         {
             float step = deltaTime / FadeDurationSeconds;
-            _fadeScratchKeys.Clear();
+            _fadeSweepKeys.Clear();
             // NativeHashMap has no .Keys collection; enumerate its key/value pairs (read-only — removals are
-            // deferred into _fadeScratchKeys below, so we never mutate the map mid-enumeration).
+            // deferred into _fadeSweepKeys below, so we never mutate the map mid-enumeration).
             foreach (var kv in _fadeOpacity)
-                if (!_seenFade.Contains(kv.Key)) _fadeScratchKeys.Add(kv.Key);
-            for (int i = 0; i < _fadeScratchKeys.Length; i++)
+                if (!_seenFade.Contains(kv.Key)) _fadeSweepKeys.Add(kv.Key);
+            for (int i = 0; i < _fadeSweepKeys.Length; i++)
             {
-                long id = _fadeScratchKeys[i];
+                long id = _fadeSweepKeys[i];
                 float next = math.max(_fadeOpacity[id] - step, 0f);
                 if (next <= FadeEpsilon) _fadeOpacity.Remove(id);
                 else _fadeOpacity[id] = next;
@@ -1757,7 +1723,7 @@ namespace MapRenderer.Unity.Text.Placement
             _stageCounts.Dispose(); _stagePath.Dispose(); _stageCumulativeLength.Dispose();
             _placedLastFrame.Dispose(); // R2: native set, ctor-allocated alongside the other persistent containers
             _droppedHalvesLastFrame.Dispose(); // Stage C: same lifetime as _placedLastFrame
-            _fadeOpacity.Dispose(); _seenFade.Dispose(); _forceFadeOut.Dispose(); _fadeScratchKeys.Dispose(); // fade collections, same lifetime
+            _fadeOpacity.Dispose(); _seenFade.Dispose(); _forceFadeOut.Dispose(); _fadeSweepKeys.Dispose(); // fade collections, same lifetime
             _gatherTrigger.Dispose(); // gather Cull→Compact per-symbol verdict buffer
             _slotVisibleThisFrame.Dispose(); // per-slot zoom-visibility lookup, SymbolCullJob input
             _gatherCulledCounts.Dispose(); // per-trigger culled tally, SymbolCompactJob output bridge

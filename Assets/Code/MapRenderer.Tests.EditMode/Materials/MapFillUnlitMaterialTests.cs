@@ -97,7 +97,7 @@ namespace MapRenderer.Tests.Materials
         {
             // The mesh-emitted semantic set — StyledFillTileBuilder's FillVertexDescriptors
             // (StyledFillTileBuilder.cs): Position, Normal, Tangent, Color, TexCoord0. Background reuses
-            // this same builder (TileBackgroundLayerProcessor), so the same set covers both.
+            // this same builder (BackgroundQuad), so the same set covers both.
             var emittedByBuilder = new HashSet<string>(System.StringComparer.Ordinal)
             {
                 "POSITION", "NORMAL", "TANGENT", "COLOR", "TEXCOORD0",

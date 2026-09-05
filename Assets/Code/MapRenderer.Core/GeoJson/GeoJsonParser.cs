@@ -305,7 +305,7 @@ namespace MapRenderer.Core.GeoJson
         /// <summary>
         /// Reads an RFC 7946 §3.1.6 LinearRing — four or more positions, first identical to last — and
         /// returns it IMPLICITLY CLOSED (the closing duplicate stripped), which is the convention
-        /// production's MVT decoder (<c>MapRenderer.Jobs.MvtDecodeJob</c>) produces and every downstream
+        /// production's MVT decoder (<c>MvtDecodeJob</c>) produces and every downstream
         /// stage assumes.
         /// </summary>
         private static List<GeoCoordinate> ReadLinearRing(JsonValue value, int featureIndex)

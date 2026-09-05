@@ -165,7 +165,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         // ── F-3: two fault domains — a contract-violating symbol throw never strands a mesh array ───────
         // AllTilesSettled() is NOT decisive (ConsumeMeshBuild's faulted-task guard settles either way via
         // silent-discard). The decisive observable is MeshDataPayload.DebugLiveAllocCount: WITH the wrap the
-        // task completes with a real MeshBuildResult (consume runs, array disposed); WITHOUT it, the
+        // kick task completes with a real TilePrologueOutput (consume runs, array disposed); WITHOUT it, the
         // kick-allocated writable array leaks past settle. RED-verified in the A5b stage report.
         [UnityTest]
         public IEnumerator F3_SymbolFaultNeverStrandsMeshArray_LambdaWrapCatches()

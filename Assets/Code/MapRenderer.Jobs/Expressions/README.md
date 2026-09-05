@@ -28,13 +28,14 @@ allocation.
           ▼
   binding: slot → this layer's key / value-string ids   (absent string → -1 never-match sentinel)
           │
-          │  NativeFilterEvaluationJob.Execute     (once per feature, Burst)
+          │  NativeFilterEvaluationJob.Execute     (once per layer-selection, Burst — [0, featureCount))
           ▼
-  matched (bool) + error code
+  matched (bool) + error code, per feature
 ```
 
-`NativeFilterEvaluator` is the synchronous seam that runs the job for one feature and reports the result —
-the entry point both the selection path and the dense-vs-managed parity oracle call.
+`MvtNativeFeatureMatcher.MatchAll` is the batched seam: it runs the job once over a layer's whole feature
+range and reports the result column — the entry point both the selection path and the dense-vs-managed
+parity oracle call.
 
 ## Components
 
@@ -44,11 +45,11 @@ the entry point both the selection path and the dense-vs-managed parity oracle c
 | `NativeFilterProgram` | `Expressions/` | The compiled program: a bounded opcode list + the key-name and literal-string tables the binding resolves. |
 | `NativeFilterOperation` / `NativeOperation` | `Expressions/` | One opcode (operation + operand + immediate) and the operation enum. |
 | `NativeValue` | `Expressions/` | The VM's blittable tagged value: Number / Boolean / String (as an id) / Null. |
-| `NativeFilterEvaluationJob` | `Mvt/` | The `[BurstCompile]` `IJob`: a post-order stack machine that runs one program against one feature's columns. |
-| `NativeFilterEvaluator` | `Mvt/` | Runs the job synchronously and maps the result — the parity/selection seam. |
+| `NativeFilterEvaluationJob` | `Mvt/` | The `[BurstCompile]` `IJob`: a post-order stack machine that runs one program against the layer's whole feature range in one dispatch. |
+| `MvtNativeFeatureMatcher` | `Mvt/` | Owns the rebound binding + the per-feature result/error/kind columns; runs the batched job once per selection — the parity/selection seam. |
 | `NativeFilterRebind` | `Mvt/` | Rebinds a program's key names + literal strings to a specific tile-layer's ids. |
 
-**Why the split across two folders:** the job, evaluator and rebind name `MvtValueNative` — a
+**Why the split across two folders:** the job, matcher and rebind name `MvtValueNative` — a
 format-specific column type a general production type may not reference in its signatures — so they live in
 the `Mvt/` decoder folder. Everything format-agnostic (the compiler, program, opcodes, value) lives here in
 `Expressions/`.

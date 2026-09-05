@@ -6,7 +6,7 @@
 // `new List<SelectedTileFeature>()` in TileMeshLayerProcessor.ProcessOnWorker — one per (tile ×
 // resolving style-layer), grown from empty by doubling (~318 KB/tile-build on a liberty-shaped style,
 // see devloop's meshing-residual-breakdown.md §1 Row 1). This pins the fix: selection now appends into
-// the build's already-pooled TileBuildScratch instead.
+// the build's already-pooled TileBuildBuffers instead.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -18,9 +18,10 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 
@@ -39,7 +40,7 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>
         /// Builds an <see cref="MvtLayer"/> of <paramref name="count"/> point features and NO adopted
         /// <see cref="MvtLayer.Geometry"/> (stays <c>default</c>/<c>IsCreated == false</c>) — deliberately, so
-        /// <c>ProcessOnWorker</c>'s <c>geometry.IsCreated</c> gate skips <c>WriteInto</c> entirely and only the
+        /// <c>ProcessOnWorker</c>'s <c>geometry.IsCreated</c> gate skips <c>BuildGraphRequest</c> entirely and only the
         /// selection step (this tooth's fence) runs, not the fill/line geometry pipeline (measured elsewhere,
         /// and already zero-alloc — see <c>meshing-residual-breakdown.md</c> §1).
         /// </summary>
@@ -75,20 +76,18 @@ namespace MapRenderer.Tests.Tiles
             public void ApplyZoom(double zoom, double devicePixelRatio) { }
             public void Dispose() { }
 
-            public void WriteInto(
-                Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-                double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
+            public ILayerMeshBuild BuildGraphRequest(
+                IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                in TileLayerProcessContext context, int materialIndex, string payloadName)
             {
-                vertexCount = 0;
-                bounds      = default;
-                Assert.Fail("WriteInto must not be reached — this fixture's layers carry no adopted " +
+                Assert.Fail("BuildGraphRequest must not be reached — this fixture's layers carry no adopted " +
                             "geometry (IsCreated == false), by design, to isolate the selection step.");
+                return null;
             }
         }
 
         /// <summary>
-        /// Non-vacuity + correctness precondition for the new scratch-buffer overload, checked OUTSIDE the
+        /// Non-vacuity + correctness precondition for the new pooled-buffers overload, checked OUTSIDE the
         /// measured region: a null (match-all) filter over N features selects exactly N, in declared order.
         /// </summary>
         [Test]
@@ -96,9 +95,9 @@ namespace MapRenderer.Tests.Tiles
         {
             MvtLayer roads = MakeSourceLayer("roads", 30);
             StyleLayer styleLayer = SelectAllLayer("roads-all", "roads");
-            var scratch = new TileBuildScratch();
+            var buffers = new TileBuildBuffers();
 
-            SelectedTileFeature[] buffer = scratch.SelectionBuffer(roads.Features.Count);
+            SelectedTileFeature[] buffer = buffers.SelectionBuffer(roads.Features.Count);
             int selectedCount = FeatureSelector.SelectFeatures(styleLayer, roads, Zoom, buffer);
 
             Assert.AreEqual(30, selectedCount, "a null filter must select every feature.");
@@ -109,13 +108,13 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>
         /// The tooth: a warmed <see cref="TileMeshLayerProcessor.ProcessOnWorker"/>, run across TWO style
         /// layers resolving to different-sized source layers (the shape a real worker pass repeats over every
-        /// layer) with a REAL, non-null <see cref="TileBuildScratch"/>, must allocate zero managed bytes.
+        /// layer) with a REAL, non-null <see cref="TileBuildBuffers"/>, must allocate zero managed bytes.
         /// RED against the un-fixed <c>new List&lt;SelectedTileFeature&gt;()</c> site — forcing that
-        /// allocating path even when <c>Scratch != null</c> reds THIS test alone (RED-verified in review:
+        /// allocating path even when <c>Buffers != null</c> reds THIS test alone (RED-verified in review:
         /// 31/31 → 30/31, only this case failed; the read-count and precondition teeth did not shift).
         /// </summary>
         [Test]
-        public void ProcessOnWorker_OverTwoLayers_WithPooledScratch_AllocatesNoGCMemory()
+        public void ProcessOnWorker_OverTwoLayers_WithPooledBuffers_AllocatesNoGCMemory()
         {
             MvtLayer roads  = MakeSourceLayer("roads", 30);
             MvtLayer places = MakeSourceLayer("places", 45);
@@ -129,16 +128,16 @@ namespace MapRenderer.Tests.Tiles
             TileMeshLayerProcessor roadsProcessor  = TileMeshLayerProcessor.AllocateForKick(new UnreachedRenderLayer(roadsLayer),  materialIndex: 0);
             TileMeshLayerProcessor placesProcessor = TileMeshLayerProcessor.AllocateForKick(new UnreachedRenderLayer(placesLayer), materialIndex: 1);
 
-            // ONE scratch instance for the whole test, exactly as ONE TileBuildScratch is rented for the
+            // ONE buffers instance for the whole test, exactly as ONE TileBuildBuffers is rented for the
             // whole duration of a real worker pass and reused sequentially across every layer it processes.
-            var scratch = new TileBuildScratch();
+            var buffers = new TileBuildBuffers();
             var context = new TileLayerProcessContext
             {
                 Tile             = Tile,
                 Zoom             = Zoom,
                 TileOriginRender = double3.zero,
-                Projection       = null, // never read — WriteInto is unreachable in this fixture
-                Scratch          = scratch,
+                Projection       = null, // never read — BuildGraphRequest is unreachable in this fixture
+                Buffers          = buffers,
             };
 
             try
@@ -149,7 +148,7 @@ namespace MapRenderer.Tests.Tiles
                     placesProcessor.ProcessOnWorker(tile, in context);
                 }
 
-                // Warm the EXACT delegate the constraint measures below: JIT + the scratch buffers' one-time
+                // Warm the EXACT delegate the constraint measures below: JIT + the buffers' one-time
                 // grow-from-empty happen here, outside the measured region (see allocgcmemory-constraint-
                 // false-positives note: warming the exact delegate avoids cross-thread/JIT false positives on
                 // a very fast, single-invocation path).
@@ -157,12 +156,12 @@ namespace MapRenderer.Tests.Tiles
 
                 Assert.That(RunBothLayers, Is.Not.AllocatingGCMemory(),
                     "ProcessOnWorker must not allocate managed memory for feature selection once it appends " +
-                    "into the pooled TileBuildScratch instead of `new List<SelectedTileFeature>()`.");
+                    "into the pooled TileBuildBuffers instead of `new List<SelectedTileFeature>()`.");
             }
             finally
             {
-                roadsProcessor.Complete()?.Dispose();
-                placesProcessor.Complete()?.Dispose();
+                roadsProcessor.Release();
+                placesProcessor.Release();
                 tile.Dispose();
             }
         }

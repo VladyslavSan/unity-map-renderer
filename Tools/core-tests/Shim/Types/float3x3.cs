@@ -15,6 +15,17 @@ namespace Unity.Mathematics
             this.c2 = c2;
         }
 
+        // Row-major argument order, column-major storage — matches Unity.Mathematics' own 9-scalar
+        // constructor (verified against UnityEngine.MathematicsModule.dll: m00,m01,m02 is row 0).
+        public float3x3(float m00, float m01, float m02,
+                         float m10, float m11, float m12,
+                         float m20, float m21, float m22)
+        {
+            c0 = new float3(m00, m10, m20);
+            c1 = new float3(m01, m11, m21);
+            c2 = new float3(m02, m12, m22);
+        }
+
         // S2 (symbol projection): SceneFrame.Rebase defaults to identity on Mercator.
         public static readonly float3x3 identity =
             new float3x3(new float3(1f, 0f, 0f), new float3(0f, 1f, 0f), new float3(0f, 0f, 1f));

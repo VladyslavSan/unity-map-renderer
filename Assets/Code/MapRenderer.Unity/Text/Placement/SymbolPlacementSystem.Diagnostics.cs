@@ -25,9 +25,8 @@ namespace MapRenderer.Unity.Text.Placement
         /// (band 0 = the top 10% of the screen, band 9 = the bottom 10%).</summary>
         private const int BreakdownBandCount = 10;
 
-        /// <summary>Set by <see cref="RequestSymbolBreakdown"/>, consumed (and cleared) by the next real
-        /// placement Tick's <see cref="CaptureSymbolBreakdown"/>. A held (throttled) frame never runs TickCore,
-        /// so the request survives until an actual recompute frame captures it.</summary>
+        /// <summary>Set by <see cref="RequestSymbolBreakdown"/>, consumed (and cleared) by the next placement
+        /// Tick's <see cref="CaptureSymbolBreakdown"/>.</summary>
         private bool _breakdownRequested;
 
         /// <summary>Arm a one-shot symbol-breakdown capture: the next placement Tick logs a per-layer +

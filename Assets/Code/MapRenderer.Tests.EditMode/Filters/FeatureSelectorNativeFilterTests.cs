@@ -9,7 +9,7 @@ using MapRenderer.Core.Filters;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Expressions;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Jobs.Tiles;
@@ -250,7 +250,7 @@ namespace MapRenderer.Tests.Filters
         }
 
         [Test]
-        public void FeatureSelector_ProbesTheNativeSeam_AndDispatchesPerFeature()
+        public void FeatureSelector_ProbesTheNativeSeam_AndBatchMatchesEveryFeature()
         {
             MvtLayer layer = FindNativeBindableLayer(out JsonValue filterJson);
             Assert.IsNotNull(layer, "precondition: at least one fixture layer must native-bind at least one covered filter");
@@ -262,8 +262,8 @@ namespace MapRenderer.Tests.Filters
 
             Assert.That(spy.TryBindNativeFilterCalls, Is.GreaterThanOrEqualTo(1),
                 "FeatureSelector must probe the INativeFilterSource seam for a VM-compilable filter");
-            Assert.That(spy.MatchesCalls, Is.EqualTo(layer.Features.Count),
-                "every feature must be addressed through the native matcher, not silently skipped to managed");
+            Assert.That(spy.MatchAllCalls, Is.EqualTo(1),
+                "the whole layer must be addressed through ONE batched MatchAll call, not per-feature dispatch");
         }
 
         // ── T3 — fallback correctness (both refusal gates) ──────────────────────────────────────
@@ -372,7 +372,7 @@ namespace MapRenderer.Tests.Filters
             private readonly MvtLayer _inner;
             private readonly bool _forceRefuse;
             internal int TryBindNativeFilterCalls;
-            internal int MatchesCalls;
+            internal int MatchAllCalls;
 
             internal NativeFilterSourceSpy(MvtLayer inner, bool forceRefuse = false)
             {
@@ -406,10 +406,10 @@ namespace MapRenderer.Tests.Filters
                     _inner = inner;
                 }
 
-                public bool Matches(int ordinal)
+                public NativeArray<byte> MatchAll()
                 {
-                    _owner.MatchesCalls++;
-                    return _inner.Matches(ordinal);
+                    _owner.MatchAllCalls++;
+                    return _inner.MatchAll();
                 }
 
                 public void Dispose() => _inner.Dispose();

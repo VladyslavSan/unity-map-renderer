@@ -22,5 +22,14 @@ namespace MapRenderer.Jobs.Mvt
         /// <summary>This feature's slice into <see cref="TagWords"/>: its start index and word count (not
         /// pair count), by the feature's layer ordinal. False for an out-of-range ordinal.</summary>
         bool TryGetFeatureSlice(int featureOrdinal, out int offset, out int count);
+
+        /// <summary>Per-feature start index into <see cref="TagWords"/>, by layer ordinal — the batched-job
+        /// column form of <see cref="TryGetFeatureSlice"/>'s offset half, for a caller that evaluates every
+        /// feature in one pass instead of one ordinal at a time.</summary>
+        NativeArray<int> TagOffsets { get; }
+
+        /// <summary>Per-feature word count into <see cref="TagWords"/>, by layer ordinal — the twin of
+        /// <see cref="TagOffsets"/>.</summary>
+        NativeArray<int> TagLengths { get; }
     }
 }

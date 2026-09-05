@@ -1,7 +1,11 @@
 // Unity EditMode only — needs the job runtime (NativeArray / IJob). NOT registered in core-tests.csproj.
-// NOTE: EditMode batch runs the job Burst-compiled; this differential validates that the Burst SymbolStageJob and
-// the managed SymbolStagingMath reference make the SAME placement DECISIONS. Unlike SymbolCollisionJob (integer/branch
-// logic → bit-identical), staging has float trig (sincos/atan2 per glyph), so Burst may differ ~1 ULP from Mono.
+// NOTE: Burst compiles this job only when Jobs ▸ Burst ▸ Enable Compilation is on AND it compiles — a compile
+// failure falls back to managed IL SILENTLY (FillGraphBurstProbeTests), so the runner alone doesn't decide it.
+// In this project's practice ./Tools/run-tests.sh (batch mode, confirmed via its log) is the Burst-compiled
+// path; the interactive Editor Test Runner is not verified that way. This differential validates that the
+// Burst SymbolStageJob and the managed SymbolStagingMath reference make the SAME placement DECISIONS. Unlike
+// SymbolCollisionJob (integer/branch logic → bit-identical), staging has float trig (sincos/atan2 per glyph),
+// so Burst may differ ~1 ULP from Mono.
 // The hazard is a 1-ULP flip at a text-max-angle / span-fit boundary changing WHICH anchors stage — that shows up
 // as a different staged/box/quad COUNT (asserted EXACT) or candidate integer field, not as sub-ULP geometry noise
 // (asserted within a tight tolerance). Runs over bent lines whose curvature sits near text-max-angle.
@@ -12,8 +16,7 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Symbols;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
@@ -108,7 +111,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // one, so they silently take different branches and the differential fails on geometry
                 // rather than on the real cause. Default 0 keeps the bend cases byte-identical.
                 MetresPerLogicalPixel = metresPerLogicalPixel,
-                PathScratch = path, CumScratch = cum,
+                PathPoints = path, CumulativeLengths = cum,
                 Boxes = oBoxes, StagedQuads = oQuads, Candidates = oCands, Emit = oEmit, OutCounts = counts,
             }.Run();
 

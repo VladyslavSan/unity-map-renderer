@@ -7,8 +7,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Geometry;
 namespace MapRenderer.Tests.Geometry
 {
     /// <summary>
@@ -112,8 +111,8 @@ namespace MapRenderer.Tests.Geometry
             var vertices   = new NativeArray<double2>(total, Allocator.Persistent);
             var offsets    = new NativeArray<int>(corpus.Count + 1, Allocator.Persistent);
             var featureIdx = new NativeArray<int>(corpus.Count, Allocator.Persistent);
-            var scratchA   = new NativeArray<double2>(longest * RingClipJob.ScratchLengthMultiplier, Allocator.Persistent);
-            var scratchB   = new NativeArray<double2>(longest * RingClipJob.ScratchLengthMultiplier, Allocator.Persistent);
+            var bufferA   = new NativeArray<double2>(longest * RingClipJob.BufferLengthMultiplier, Allocator.Persistent);
+            var bufferB   = new NativeArray<double2>(longest * RingClipJob.BufferLengthMultiplier, Allocator.Persistent);
             var outVerts   = new NativeList<double2>(total * 4, Allocator.Persistent);
             var outOffsets = new NativeList<int>(corpus.Count + 1, Allocator.Persistent);
             var outFeature = new NativeList<int>(corpus.Count, Allocator.Persistent);
@@ -142,8 +141,8 @@ namespace MapRenderer.Tests.Geometry
                     RingVisitOrder    = visitOrder,
                     ClipMin           = clipMin,
                     ClipMax           = clipMax,
-                    ScratchA          = scratchA,
-                    ScratchB          = scratchB,
+                    BufferA          = bufferA,
+                    BufferB          = bufferB,
                     OutVertices       = outVerts,
                     OutRingOffsets    = outOffsets,
                     OutRingFeatureIdx = outFeature
@@ -164,8 +163,8 @@ namespace MapRenderer.Tests.Geometry
                 vertices.Dispose();
                 offsets.Dispose();
                 featureIdx.Dispose();
-                scratchA.Dispose();
-                scratchB.Dispose();
+                bufferA.Dispose();
+                bufferB.Dispose();
                 outVerts.Dispose();
                 outOffsets.Dispose();
                 outFeature.Dispose();

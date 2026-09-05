@@ -1,7 +1,11 @@
 // Unity EditMode only — needs the job runtime (NativeArray / IJobParallelFor). NOT registered in core-tests.csproj.
-// NOTE: EditMode batch runs the job Burst-compiled; this differential validates that the Burst SymbolCullJob and
-// an independent managed reference reach the SAME per-record verdict. Dropped/Departing/Coverage/Zoom are pure
-// integer/branch logic ⇒ bit-identical; Horizon/Distance carry double-precision `dot` math where Burst MAY
+// NOTE: Burst compiles this job only when Jobs ▸ Burst ▸ Enable Compilation is on AND it compiles — a compile
+// failure falls back to managed IL SILENTLY (FillGraphBurstProbeTests), so the runner alone doesn't decide it.
+// In this project's practice ./Tools/run-tests.sh (batch mode, confirmed via its log) is the Burst-compiled
+// path; the interactive Editor Test Runner is not verified that way. This differential validates that the
+// Burst SymbolCullJob and an independent managed reference reach the SAME per-record verdict.
+// Dropped/Departing/Coverage/Zoom are pure integer/branch logic ⇒ bit-identical; Horizon/Distance carry
+// double-precision `dot` math where Burst MAY
 // FMA-reorder ⇒ a ULP flip is possible ONLY at the cull boundary, so those fixture records sit CLEARLY on one
 // side of their threshold (never at it) — same hazard SymbolStageJobTests documents.
 
@@ -10,8 +14,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Jobs;
-
+using MapRenderer.Jobs.Symbols;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>

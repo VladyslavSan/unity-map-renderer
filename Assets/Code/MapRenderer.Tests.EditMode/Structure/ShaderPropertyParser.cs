@@ -1,6 +1,7 @@
-// Shared, engine-free text-parsing helpers for shader/registry file inspection.
+// Editor-only (NOT engine-free) text-parsing helpers for shader/registry file inspection.
 // Used by InstanceStructShaderParityTests, MaterialPropertyRegistryParityTests, and
-// NoRawStringMaterialAccessGuardTests.
+// NoRawStringMaterialAccessGuardTests. Not registered in Tools/core-tests — see
+// EngineFreeShaderPaths for the engine-free equivalent that project uses instead.
 //
 // Path resolution is move-proof: everything is anchored via UnityEditor.AssetDatabase (GUID-based
 // lookup + the MapRenderer.Unity.asmdef location), not relative filesystem arithmetic off a test

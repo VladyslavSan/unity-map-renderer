@@ -17,12 +17,14 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Tests.Tiles;
 using Fill = MapRenderer.Core.Style.Fill;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
                                                         // 'Color' ambiguous with UnityEngine's
@@ -50,7 +52,7 @@ namespace MapRenderer.Tests.Visual
 
         // The synthetic buffered feature: a closed ring (-64,-64) → (4160,-64) → (4160,4160) → (-64,4160) —
         // the exact 64-unit-buffered rectangle every real fixture produces. MoveTo×1 + LineTo×3 + ClosePath,
-        // zigzag-encoded per the MVT spec, the same shape as TileBackgroundLayerProcessor's full-extent ring
+        // zigzag-encoded per the MVT spec, the same shape as BackgroundQuad's full-extent ring
         // (whose 8192/8191 are zigzag(±4096); these are zigzag(-64)=127 and zigzag(±4224)=8448/8447).
         private static readonly uint[] BufferedRingGeometry =
             { 9, 127, 127, 26, 8448, 0, 0, 8448, 8447, 0, 15 };
@@ -342,7 +344,11 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>Builds one tile's fill mesh through the production worker fan-out, so the clip travels the
         /// real <see cref="TileLayerProcessContext"/> → <see cref="TileMeshLayerProcessor"/> →
-        /// <see cref="ITileMeshRenderLayer.WriteInto"/> path rather than being handed to the builder.</summary>
+        /// <see cref="ITileMeshRenderLayer.BuildGraphRequest"/> path rather than being handed to the builder —
+        /// then, job-scheduling-design.md §8 stage 5 Group B: the graph is the only mesher now, so this
+        /// harness drives it synchronously the way <c>TileManager.KickMeshBuild</c>'s pump does
+        /// (<c>ScheduleMeasureFromDecode</c> → <c>CompleteMeasureAndScheduleWrite</c> →
+        /// <c>CompleteWriteAndTakePayloads</c>), since there is no pump here to do it a tick later.</summary>
         private static Mesh BuildTileMesh(TileId id, double3 origin, TileBufferClip clip, IProjection projection)
         {
             var feature = new InMemoryTileFeature
@@ -371,16 +377,21 @@ namespace MapRenderer.Tests.Visual
             var processor = TileMeshLayerProcessor.AllocateForKick(fillLayer, materialIndex: 0);
             var decode    = new SharedDisposable<IDecodedTile>(new SeamTileDecoder(seamTile).Decode(id, SeamDecoderBytes));
 
-            IRenderLayerPayload[] payloads;
+            TilePrologueOutput output = TileLayerProcessorRunner.RunWorkerPass(
+                decode, in context, new ITileMeshLayerProcessor[] { processor });
+            Assert.AreEqual(1, output.Layers.Length);
+
+            // ScheduleMeasureFromDecode takes ownership of `decode` from here — released exactly once, by
+            // graph.Dispose() below (see that method's own doc).
+            TileBuildGraph graph = TileBuildGraph.ScheduleMeasureFromDecode(output.Layers, decode);
             try
             {
-                payloads = TileLayerProcessorRunner.RunWorkerPass(
-                    decode, in context, new ITileMeshLayerProcessor[] { processor });
+                graph.CompleteMeasureAndScheduleWrite(out _);
+                MeshDataPayload[] payloads = graph.CompleteWriteAndTakePayloads();
+                Assert.AreEqual(1, payloads.Length);
+                return payloads[0]?.Upload();
             }
-            finally { decode.Release(); }
-
-            Assert.AreEqual(1, payloads.Length);
-            return payloads[0].Upload();
+            finally { graph.Dispose(); }
         }
 
         // ── Fakes (mirroring A6NonMvtDecoderTests' fan-out fixtures) ──────────────────────────────
@@ -397,8 +408,8 @@ namespace MapRenderer.Tests.Visual
             public IDecodedTile Decode(TileId id, byte[] bytes) => _tile;
         }
 
-        /// <summary>Mirrors <c>FillRenderLayer.WriteInto</c>'s forward without needing a real Material —
-        /// this scene binds its own.</summary>
+        /// <summary>Mirrors <c>FillRenderLayer.BuildGraphRequest</c>'s forward without needing a real
+        /// Material — this scene binds its own.</summary>
         private sealed class SeamFillRenderLayer : ITileMeshRenderLayer
         {
             private readonly Fill.PaintProperties _paint;
@@ -418,13 +429,16 @@ namespace MapRenderer.Tests.Visual
             public void ApplyZoom(double zoom, double devicePixelRatio) { }
             public void Dispose() { }
 
-            public void WriteInto(
-                Mesh.MeshData md, IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
-                double zoom, double3 tileOriginRender, IProjection projection, TileBufferClip clip,
-                TileBuildScratch scratch, out int vertexCount, out Bounds bounds)
-                => StyledFillTileBuilder.WriteMeshData(
-                    md, selected, geometry, _paint, zoom, tileOriginRender, out vertexCount, out bounds,
-                    projection, layout: null, clip: clip, scratch: scratch);
+            public ILayerMeshBuild BuildGraphRequest(
+                IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                in TileLayerProcessContext context, int materialIndex, string payloadName)
+            {
+                FillMeshPipeline.LayerInput input = StyledFillTileBuilder.BuildLayerInput(
+                    selected, geometry, _paint, context.Zoom, context.TileOriginRender, out var colors,
+                    context.Projection, layout: null, context.BufferClip, context.Buffers);
+                if (!input.RingVisitOrder.IsCreated) return null;
+                return FillLayerBuild.Rent(input, colors, materialIndex, payloadName);
+            }
         }
     }
 }

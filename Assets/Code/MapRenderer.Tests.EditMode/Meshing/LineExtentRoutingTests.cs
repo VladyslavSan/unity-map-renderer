@@ -8,7 +8,6 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
 using MapRenderer.Unity.Rendering.Meshing;
 using Line = MapRenderer.Core.Style.Line;
 

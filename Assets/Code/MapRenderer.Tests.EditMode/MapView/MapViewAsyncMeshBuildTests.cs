@@ -1,11 +1,19 @@
 // S47 acceptance tests — async non-blocking tile mesh build.
 //
 // EditMode half: the off-main-thread marker (D5), the profiler-recorder harness (D3), the drain-mechanism
-// tooth (D4), and the off-main round-trip sanity check (no settle-poll). The async-settle teeth (tile
-// cover recompute, tooth 1 deferred-build, tooth 3 geometry parity, tooth 4 cancellation) live in the
-// PlayMode half (MapRenderer.Tests.PlayMode.MapViews.MapViewAsyncMeshBuildTests).
+// tooth (D4), and the BuildMeshData/UploadMesh round-trip sanity check (no settle-poll, main-thread — see
+// Tooth 2's retirement note). The async-settle teeth (tile cover recompute, tooth 1 deferred-build, tooth 3
+// geometry parity, tooth 4 cancellation) live in the PlayMode half
+// (MapRenderer.Tests.PlayMode.MapViews.MapViewAsyncMeshBuildTests).
 //
-// Tooth 2: Non-blocking — BuildMeshData runs off the main thread (verified via thread-id hook).
+// Tooth 2: RETIRED (job-scheduling-design.md §8 stage 4 Group B, E2) — before: "WriteMeshData runs on a
+//   ThreadPool thread and produces vertices" (a direct WriteMeshData call, driven by this test). After: the
+//   production build never calls WriteMeshData off-main at all — the graph arm's write step is a Burst job
+//   (FillStreamWriteJob), scheduled through Unity's job system, which is main-thread-only now that
+//   WriteMeshData schedules rather than runs (see WriteMeshData's own doc). Tooth 2b below (marker
+//   zero-hits on main) already covers the write step and needed no change. The round-trip sanity check a
+//   few tests down used to write off-main too (matching the pre-Group-B production shape) — it now writes
+//   on the main thread, matching what production actually does.
 // Tooth 2b: Main-thread PmBuildMesh sample count == 0 after async load (S46 profiler-marker harness);
 //           pins the concrete numeric criterion from S47 tooth 2 acceptance.
 // Tooth 5: Drain determinism — DrainMeshBuilds() + AllTilesSettled() == true.
@@ -13,8 +21,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
-using System.Threading;
-using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using UnityEngine;
@@ -24,7 +30,7 @@ using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
@@ -98,68 +104,7 @@ namespace MapRenderer.Tests.MapViews
             }
         }
 
-        // ── Tooth 2: non-blocking — BuildMeshData runs off the main thread ────────────────────
-
-        /// <summary>
-        /// Verifies that the decode/mesh build work runs on a background thread, not the main thread.
-        ///
-        /// We use a test hook: override BuildMeshData via a test-only static delegate that records
-        /// the thread id. Since we can't inject a hook into StyledFillTileBuilder directly, we
-        /// instead verify the structural property: the managed thread id captured INSIDE a
-        /// Task.Run equals the thread id we observe spinning outside (background ≠ main).
-        ///
-        /// Practical approach: run the fixture through BuildMeshData on a Task.Run; verify the
-        /// captured thread id is NOT the main thread id.
-        /// </summary>
-        [Test]
-        public void Tooth2_BuildMeshData_RunsOffMainThread()
-        {
-            byte[] bytes     = SampleTileFixture.Bytes();
-            using var    mvtTile   = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
-            var    style     = MinimalStyle();
-            var    fillLayer = style.Layers[0];
-            var    paint     = new Fill.PaintProperties(fillLayer);
-            var    features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
-            var    mvtLayer  = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
-
-            Assert.IsNotNull(mvtLayer, "Fixture must contain 'countries' MVT layer");
-            Assert.Greater(features.Count, 0, "FeatureSelector must return at least 1 feature");
-
-            var (bMin, _) = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
-            var tileOrigin = new double2(bMin.x, bMin.y);
-
-            int mainThreadId     = Thread.CurrentThread.ManagedThreadId;
-            int capturedThreadId = mainThreadId; // will be overwritten in the task
-
-            // AllocateWritableMeshData is main-thread only; build INTO it on a background task and
-            // capture the thread id (S89 Stage B: the worker-write path, spike-guarded).
-            var mda = Mesh.AllocateWritableMeshData(1);
-            var task = Task.Run(() =>
-            {
-                capturedThreadId = Thread.CurrentThread.ManagedThreadId;
-                // IR C1 P3: the layer's own buffer, BORROWED — the decoded tile owns and frees it.
-                TileGeometryBuffers geometry = mvtLayer.Geometry;
-                StyledFillTileBuilder.WriteMeshData(
-                    mda[0], TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), geometry, paint, 0.0,
-                    new double3(tileOrigin.x, 0.0, tileOrigin.y), out int vc, out _);
-                return vc;
-            });
-
-            int vertexCount = task.GetAwaiter().GetResult();
-
-            try
-            {
-                Assert.AreNotEqual(mainThreadId, capturedThreadId,
-                    "Tooth 2: WriteMeshData must run on a background ThreadPool thread (not the main thread). " +
-                    $"Main thread id: {mainThreadId}, captured thread id: {capturedThreadId}.");
-
-                Assert.Greater(vertexCount, 0, "WriteMeshData must produce at least one vertex off the main thread");
-            }
-            finally
-            {
-                mda.Dispose(); // never applied — dispose the writable array
-            }
-        }
+        // ── Tooth 2: RETIRED — see this file's header comment for the before/after. ───────────
 
         // ── Tooth 2b: S46 profiler-marker harness — main-thread PmBuildMesh count == 0 ────────
 
@@ -177,7 +122,9 @@ namespace MapRenderer.Tests.MapViews
         ///   Concrete bound: ZERO main-thread PmBuildMesh samples after a full async tile load.
         ///
         /// Two recorders (both CollectOnlyOnCurrentThread = main thread only):
-        ///   A) MapRenderer.Meshing.StyledFillTileBuilder.WriteMeshData  → must be ZERO  (build moved off main thread)
+        ///   A) MapRenderer.Meshing.StyledFillTileBuilder.BuildLayerInput → must be ZERO (prologue off main
+        ///      thread; job-scheduling-design.md §8 stage 3 — production fires this marker now, not
+        ///      WriteMeshData, which stays reachable only through a direct call, e.g. from tests)
         ///   B) MapRenderer.Mesh.Upload      → must be > ZERO (consume/upload still runs on main thread)
         ///
         /// Recorder B is the positive control: it confirms that PumpUntilSettled actually built the
@@ -189,7 +136,7 @@ namespace MapRenderer.Tests.MapViews
         [UnityTest]
         public IEnumerator Tooth2b_MainThreadBuildMarker_ZeroHits_AfterAsyncLoad()
         {
-            const string buildMarkerName  = StyledFillTileBuilder.ProfilerMarkerNames.WriteMeshData;
+            const string buildMarkerName  = StyledFillTileBuilder.ProfilerMarkerNames.BuildLayerInput;
             const string uploadMarkerName = "MapRenderer.Mesh.Upload";
 
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
@@ -317,11 +264,15 @@ namespace MapRenderer.Tests.MapViews
         // ── BuildMeshData / UploadMesh split sanity ────────────────────────────────────────────
 
         /// <summary>
-        /// Sanity test: BuildMeshData (off-main) → UploadMesh (main) round-trip produces the same
-        /// vertex count and positions as the synchronous BuildMesh convenience.
+        /// Sanity test: BuildMeshData → UploadMesh round-trip produces the same vertex count and positions
+        /// as the synchronous BuildMesh convenience.
         ///
-        /// Both paths call the same <c>ProjectVerticesManaged</c> loop, so positions must be
-        /// bit-for-bit identical (no ULP drift from the split).
+        /// job-scheduling-design.md §8 stage 4 Group B: <c>WriteMeshData</c> now SCHEDULES the graph rather
+        /// than running it, and job scheduling is main-thread-only (see <c>WriteMeshData</c>'s own doc) — so
+        /// this write happens on the main thread too, matching what production actually does (the graph
+        /// arm's write step is scheduled from the pump, never from a worker). Both paths still go through
+        /// the same <c>FillStreamWriteJob</c>, so positions must be bit-for-bit identical (no ULP drift from
+        /// the split).
         /// </summary>
         [Test]
         public void BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh()
@@ -345,18 +296,14 @@ namespace MapRenderer.Tests.MapViews
                 mvtLayer, TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), paint, 0.0,
                 new TileId { Z = 0, X = 0, Y = 0 });
 
-            // Split path (production shape): allocate on main, WRITE off the main thread, apply on main.
+            // Split path (production shape): allocate, schedule+write (WriteMeshData is main-thread-only —
+            // see its own doc), apply — all on THIS (main) thread.
             var mda = Mesh.AllocateWritableMeshData(1);
-            var task = Task.Run(() =>
-            {
-                // IR C1 P3: the layer's own buffer, BORROWED — the decoded tile owns and frees it.
-                TileGeometryBuffers geometry = mvtLayer.Geometry;
-                StyledFillTileBuilder.WriteMeshData(
-                    mda[0], TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), geometry, paint, 0.0,
-                    new double3(tileOrigin.x, 0.0, tileOrigin.y), out int vc, out _);
-                return vc;
-            });
-            int splitVertexCount = task.GetAwaiter().GetResult();
+            // IR C1 P3: the layer's own buffer, BORROWED — the decoded tile owns and frees it.
+            TileGeometryBuffers geometry = mvtLayer.Geometry;
+            SyncMeshWrite.Fill(
+                mda[0], TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), geometry, paint, 0.0,
+                new double3(tileOrigin.x, 0.0, tileOrigin.y), out int splitVertexCount, out _);
 
             Mesh splitMesh = null;
             if (splitVertexCount > 0)

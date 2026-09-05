@@ -35,8 +35,6 @@ namespace MapRenderer.Tests.Structure
     [TestFixture]
     public class StyledLineBuilderStructureTests
     {
-        private const string WriteMeshDataAnchor = "void WriteMeshData(";
-
         /// <summary>Types that belong to the FILL assembly path. Line must reference none of them.</summary>
         private static readonly string[] ForbiddenFillStageTokens =
         {
@@ -50,9 +48,16 @@ namespace MapRenderer.Tests.Structure
         // IR C1 P2: "MvtGeometryMaterializer" left this set with the mint it named. Its replacements are the
         // identifiers of the mechanism the file uses NOW — the borrowed buffer type and the ordinal join —
         // so a gutted or re-pointed file still cannot satisfy the zero-counts trivially.
+        //
+        // job-scheduling-design.md §8 stage 5 Group B: RingFeatureIdx/FeatureGeometryType/LineRibbonJob/
+        // RingOffsets retired from this SET (though the first three still appear in prose comments) — the
+        // per-ring buffer read and the ribbon build both moved into the Burst job graph
+        // (LineRingGatherJob/LineRibbonBatchJob, MapRenderer.Jobs/LineMeshGraph.cs), which this file no
+        // longer touches by name; it schedules and completes the graph, then writes. The replacements name
+        // THAT mechanism, so a gutted file still cannot satisfy the zero-counts trivially.
         private static readonly string[] RequiredTokens =
         {
-            "TileGeometryBuffers", "RingFeatureIdx", "FeatureGeometryType", "LineRibbonJob", "RingOffsets",
+            "TileGeometryBuffers", "LineMeshGraph", "LineGraphOutput", "LineLayerInput", "LineStreamWriteJob",
         };
 
         [Test]
@@ -79,18 +84,37 @@ namespace MapRenderer.Tests.Structure
             }
         }
 
+        /// <summary>
+        /// Vestige sweep (ordinal 7): re-founded file-wide. The retired synchronous <c>WriteMeshData</c> was
+        /// this tooth's whole subject — its per-ring loop was the only place a mint/dispose could have crept
+        /// back in. <c>WriteMeshData</c> moved to the test assembly (zero production callers), so extracting
+        /// its body is no longer meaningful; the fence now scans BOTH partial files that make up
+        /// <c>StyledLineTileBuilder</c> (it is declared <c>partial</c> across
+        /// <c>StyledLineTileBuilder.cs</c> and <c>StyledLineTileBuilder.WriteJob.cs</c>), comments stripped.
+        /// This is STRICTLY STRONGER than the method-body version: a mint or a <c>geometry.Dispose()</c>
+        /// ANYWHERE in the type now reds it, not only inside one method.
+        /// </summary>
         [Test]
         public void LineBuilderMintsNoBufferAndDisposesNone_ItBorrows()
         {
-            string body = StripLineComments(ExtractMethodBody(LineBuilderSource(), WriteMeshDataAnchor));
+            string body = StripLineComments(LineBuilderSource() + LineBuilderWriteJobSource());
 
-            // Non-vacuity: an anchor miss would extract an empty or wrong body and pass every count below.
-            Assert.Greater(body.Length, 0, "precondition: extracted a non-empty WriteMeshData body");
-            StringAssert.Contains("LineRibbonJob", body,
-                "precondition: the extracted body really is the one that builds the ribbon");
-            StringAssert.Contains("geometry.RingFeatureIdx", body,
-                "precondition: the extracted body really does READ the buffer it is claimed to borrow — " +
-                "without this, a body that never touched geometry at all would satisfy both zero-counts");
+            // Non-vacuity anchors, re-pointed from the retired method-body extraction: a wrong or gutted
+            // scan would still need to explain away BOTH of these, present across the two files today.
+            // LineMeshGraph.Schedule is deliberately NOT an anchor here — precondition 13 measured its one
+            // occurrence to be INSIDE the method that moved out of production, so keeping it would red this
+            // fence immediately against otherwise-correct code.
+            Assert.GreaterOrEqual(CountOccurrences(body, "BuildLayerInput("), 1,
+                "precondition: the builder still passes the borrowed `geometry` on to build the graph's " +
+                "input — without this, a gutted file would satisfy both zero-counts below vacuously");
+            Assert.GreaterOrEqual(CountOccurrences(body, "LineLayerInput"), 1,
+                "precondition: the builder still constructs and returns a LineLayerInput from the borrowed " +
+                "geometry — without this, a gutted file would satisfy both zero-counts below vacuously. (Not " +
+                "the bare word 'geometry': BuildLayerInput's own parameter declaration already contains it, " +
+                "so a stub with a gutted body but an intact signature would satisfy that trivially and make " +
+                "the check no longer independent of the `BuildLayerInput(` anchor above. `LineLayerInput` " +
+                "appears a second time only at `return new LineLayerInput`, deep in the body, which a gutted " +
+                "implementation cannot reach.)");
 
             // Three mint APIs exist on the buffer type: .Materialize(), TileGeometryBuffers.Allocate(...) and
             // TileGeometryBuffers.AdoptDerivedLists(...). Greping only the first would leave a per-layer
@@ -100,10 +124,10 @@ namespace MapRenderer.Tests.Structure
                      { ".Materialize(", "TileGeometryBuffers.Allocate(", "TileGeometryBuffers.AdoptDerivedLists(" })
             {
                 Assert.AreEqual(0, CountOccurrences(body, mintToken),
-                    $"IR C1 P2 INVERTED this from 1 to 0. WriteMeshData must mint NOTHING — '{mintToken}' found. " +
-                    "The source-layer's buffer is materialized once per worker pass by TileGeometryStore and " +
-                    "lent to every style layer naming that source-layer. A mint here is the " +
-                    "61-decodes-per-pass regression B7 retired, re-introduced one layer down.");
+                    $"IR C1 P2 INVERTED this from 1 to 0. StyledLineTileBuilder must mint NOTHING — " +
+                    $"'{mintToken}' found. The source-layer's buffer is materialized once per worker pass by " +
+                    "TileGeometryStore and lent to every style layer naming that source-layer. A mint here is " +
+                    "the 61-decodes-per-pass regression B7 retired, re-introduced one layer down.");
             }
             Assert.AreEqual(0, CountOccurrences(body, "geometry.Dispose()"),
                 "…and must free NOTHING. Disposing a BORROWED buffer frees geometry sibling layers are still " +
@@ -113,86 +137,39 @@ namespace MapRenderer.Tests.Structure
                 "behavioural signal is missing.");
         }
 
-        [Test]
-        public void WriteMeshData_StagesRibbonInNativeScratch_NotManagedLists()
-        {
-            string body = StripLineComments(ExtractMethodBody(LineBuilderSource(), WriteMeshDataAnchor));
+        // job-scheduling-design.md §8 stage 5 Group B: WriteMeshData_StagesRibbonInNativeScratch_
+        // NotManagedLists is RETIRED here, not "made to pass". Its subject was the cross-ring staging
+        // accumulators (NativeList<LinePositionNormal>/<LineWidthColor>/<Vector2>) that used to live INSIDE
+        // WriteMeshData's own per-ring loop, block-copied into the Mesh.MeshData at the end. B.5 deleted
+        // that loop: the ribbon is now built by LineRibbonBatchJob (MapRenderer.Jobs/LineMeshGraph.cs) and
+        // written straight into the Mesh.MeshData by LineStreamWriteJob — there is no cross-ring staging
+        // step left anywhere for a managed List<> to sneak into.
+        //
+        // NOT because a managed List<> would fail to compile here: a `new List<T>()` local in WriteMeshData's
+        // own (managed, non-Burst) C# body is perfectly legal — the deleted fence counted a token in a
+        // METHOD BODY, not a field on a job struct, and even for a job struct the guard is a RUNTIME
+        // reflection check at Schedule()/Run() (thrown only when Burst is actually invoked), not a compile
+        // error. The real replacement coverage is a runtime measurement, not a compiler guarantee:
+        // LineBuildAllocTests.WriteMeshData_OverAConstantStyle_AllocatesNoGCMemory (LineBuildAllocTests.cs:49)
+        // is a live Is.Not.AllocatingGCMemory() check over this exact method, now routed through the graph —
+        // Burst-toggle-independent (it measures the managed call site, not a job-compile artifact) and it
+        // would catch a reintroduced managed List<> the same way it already catches any other GC-heap
+        // regression on this path.
 
-            // Non-vacuity: an anchor miss would extract an empty or wrong body and pass every count below.
-            Assert.Greater(body.Length, 0, "precondition: extracted a non-empty WriteMeshData body");
-            StringAssert.Contains("LineRibbonJob", body,
-                "precondition: the extracted body really is the one that builds the ribbon");
-
-            Assert.AreEqual(0, CountOccurrences(body, "new List<"),
-                "the ribbon-staging accumulators must be NativeList<>, not managed List<> — a managed List " +
-                "allocates on the GC heap every WriteMeshData call.");
-
-            // Element types unique to the new cross-ring accumulators (not the pre-existing per-ring
-            // NativeList<int>/NativeList<LineRibbonVertex> scratch), so this half is discriminating rather
-            // than satisfied by scratch that already existed before this stage.
-            Assert.GreaterOrEqual(CountOccurrences(body, "NativeList<LinePositionNormal>"), 1,
-                "expected a NativeList<LinePositionNormal> staging accumulator (stream 0)");
-            Assert.GreaterOrEqual(CountOccurrences(body, "NativeList<LineWidthColor>"), 1,
-                "expected a NativeList<LineWidthColor> staging accumulator (stream 3)");
-            Assert.GreaterOrEqual(CountOccurrences(body, "NativeList<Vector2>"), 1,
-                "expected a NativeList<Vector2> staging accumulator (stream 2)");
-        }
-
-        /// <summary>
-        /// Idiom rework (native-scratch cleanup pass): <c>WriteMeshData</c> disposes every owned native
-        /// handle via `using`, not a hand-rolled <c>= default;</c> + try/finally.
-        ///
-        /// <para><b>What this replaces.</b> The prior form of this tooth (<c>…ConstructsNativeContainersInsideTry
-        /// _NotBeforeCleanupScope</c>) pinned that every <c>new NativeList&lt;</c>/<c>new NativeArray&lt;</c> sat
-        /// AFTER a <c>try</c> token — guarding against a constructor throw before the try leaving an
-        /// already-built handle outside `finally`'s reach. That hazard is now structurally impossible: a
-        /// `using var`/`using (…)` declaration wraps ITS OWN construction and disposal in one statement
-        /// (the compiler emits the try/finally), so a throw partway through a run of declarations still
-        /// disposes every handle already built — with no default-init dance needed to make it safe. The
-        /// invariant survives; the mechanism that was pinning it is retired along with the pattern it guarded.</para>
-        /// </summary>
-        [Test]
-        public void WriteMeshData_DisposesNativeScratchViaUsing_NotHandRolledTryFinally()
-        {
-            string body = StripLineComments(ExtractMethodBody(LineBuilderSource(), WriteMeshDataAnchor));
-
-            // Non-vacuity: an anchor miss would extract an empty or wrong body and pass every count below.
-            Assert.Greater(body.Length, 0, "precondition: extracted a non-empty WriteMeshData body");
-            Assert.GreaterOrEqual(
-                CountOccurrences(body, "new NativeList<") + CountOccurrences(body, "new NativeArray<"), 1,
-                "precondition: the extracted body really does construct native scratch — without this the " +
-                "assertions below would pass vacuously on a body with none");
-
-            // No hand-rolled default-init: a NativeList/NativeArray handle declared `= default;` (then
-            // constructed later) is the retired try/finally shape, not the `using`-based one.
-            Assert.AreEqual(0,
-                Regex.Matches(body, @"Native(List|Array)<[^;=]*>\s+\w+\s*=\s*default;").Count,
-                "WriteMeshData must not default-init a NativeList/NativeArray handle before constructing it " +
-                "— that pattern belongs to the retired hand-rolled try/finally, not `using`-based disposal.");
-
-            // No hand-rolled cleanup scope and no manual .Dispose() call on owned scratch — every native
-            // handle is released by a `using` declaration going out of scope, never by hand. Word-boundary +
-            // brace-anchored, not a bare substring: "finally" alone would false-positive on prose (this very
-            // file's class doc uses "the consumer that finally OBSERVES...", and a future comment here could
-            // too) — `\bfinally\s*\{` only matches the keyword immediately opening a block.
-            Assert.AreEqual(0, Regex.Matches(body, @"\bfinally\s*\{").Count,
-                "WriteMeshData must contain no `finally` block — disposal is `using`-based now, so there is " +
-                "no hand-rolled cleanup scope left to guard.");
-            Assert.AreEqual(0, CountOccurrences(body, ".Dispose()"),
-                "WriteMeshData must contain no explicit '.Dispose()' call on its own scratch — every owned " +
-                "native handle is released by a `using` declaration going out of scope, never by hand.");
-
-            // Both `using` FORMS must be present: `using var` for the buffers that live through the mesh copy
-            // at the end (the per-feature columns + the cross-ring accumulators), and a nested `using (…) { }`
-            // block for the 11 per-ring scratch buffers, which release BEFORE the mesh copy — a block is what
-            // lets them dispose earlier than the method's own end (the old manual early-Dispose() call this
-            // replaces).
-            Assert.GreaterOrEqual(CountOccurrences(body, "using var "), 1,
-                "expected at least one `using var` scratch declaration (the buffers that live to the mesh copy)");
-            Assert.GreaterOrEqual(CountOccurrences(body, "using ("), 1,
-                "expected at least one nested `using (…)` block (the per-ring scratch, released before the " +
-                "mesh copy to keep peak native memory down)");
-        }
+        // Vestige sweep (ordinal 7): WriteMeshData_DisposesNativeScratchViaUsing_NotHandRolledTryFinally is
+        // RETIRED here, not re-founded. All five `using var` sites this tooth pinned were INSIDE the retired
+        // synchronous WriteMeshData's own body — after it moved to the test assembly, this file has ZERO
+        // `using var` sites left, so the tooth's own non-vacuity precondition
+        // (`Assert.GreaterOrEqual(CountOccurrences(body, "using var "), 1)`) would fail on correct code if
+        // re-founded file-wide. The `using`-based-disposal idiom left production entirely with the method
+        // that used it; there is nothing left here to fence. (A weaker second reason also holds: BuildLayerInput's
+        // deliberate `catch { …Dispose(); throw; }` would red a file-wide no-manual-`.Dispose()` clause — but
+        // `finally {` is already zero file-wide and the `= default;` regex matches nothing, so this is not the
+        // deciding reason, only a note against re-founding the clause as-is.) The property this tooth
+        // protected — no handle stranded by a throw partway through construction — is now carried by the
+        // language wherever a `using var` remains elsewhere in the codebase, and by the runtime
+        // alloc/disposal suites (LineBuildAllocTests, DisposalLeakGuardTests) rather than by a structural
+        // fence.
 
         private static string LineBuilderSource()
         {
@@ -203,29 +180,15 @@ namespace MapRenderer.Tests.Structure
             return File.ReadAllText(path);
         }
 
-        private static string ExtractMethodBody(string source, string signatureAnchor)
+        /// <summary>The type's second partial file (job-scheduling-design.md §8 stage 5) — the write-step
+        /// job lives here. Ordinal 7's re-founded fence must scan both.</summary>
+        private static string LineBuilderWriteJobSource()
         {
-            int anchorIndex = source.IndexOf(signatureAnchor, StringComparison.Ordinal);
-            Assert.GreaterOrEqual(anchorIndex, 0,
-                $"expected to find the method-definition anchor '{signatureAnchor}'");
-
-            int braceStart = source.IndexOf('{', anchorIndex);
-            Assert.GreaterOrEqual(braceStart, 0, "expected an opening brace after the method signature");
-
-            int depth = 0;
-            int i = braceStart;
-            for (; i < source.Length; i++)
-            {
-                if (source[i] == '{') depth++;
-                else if (source[i] == '}')
-                {
-                    depth--;
-                    if (depth == 0) break;
-                }
-            }
-            Assert.Less(i, source.Length, "unbalanced braces scanning the method body");
-
-            return source.Substring(braceStart, i - braceStart + 1);
+            string path = Path.Combine(
+                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Meshing",
+                "StyledLineTileBuilder.WriteJob.cs");
+            Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
+            return File.ReadAllText(path);
         }
 
         private static int CountOccurrences(string text, string token)

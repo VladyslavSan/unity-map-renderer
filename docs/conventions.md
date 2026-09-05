@@ -342,6 +342,92 @@ to the next when the one above is genuinely impossible.
 `$"…"` on an exception path run once (or only on failure). Pooling them trades readability for nothing; the
 ladder is for the recurring loops only.
 
+### `if (x.IsCreated) x.Dispose();` — know whether it is redundant or load-bearing
+
+Both exist in this codebase, and the difference is not cosmetic. **The discriminator is "can this release
+site run twice?", not "is the container created?"**
+
+**Redundant — delete it.** The dominant shape is a container allocated *before* a `try` and released once
+in the `finally`. If the `finally` is running, the `try` was entered, so the allocation succeeded and
+`IsCreated` cannot be false. The guard is worse than noise: it implies a partial-construction failure that
+cannot occur, so a reader has to reconstruct what it protects and the answer is nothing. Equally redundant
+in front of a type carrying its own struct-level `if (!IsCreated) return;` (`TileGeometryBuffers`,
+`FillGraphOutput`) — the call-site guard just duplicates it — and in front of `NativeList<T>`, whose
+`Dispose()` really does early-return on `!IsCreated` (`Unity.Collections/NativeList.cs:620-623`).
+
+**Load-bearing — keep it.** A raw `NativeArray<T>` field that was allocated, disposed once, and may be
+disposed *again* — the copy-mutate-writeback idempotency idiom:
+
+    NativeArray<uint> tags = FeatureTagWords;
+    if (tags.IsCreated) tags.Dispose();
+    FeatureTagWords = tags;
+
+A second `Dispose()` on an already-disposed `NativeArray<T>` throws; the type has no internal early-return,
+so the guard **is** the idempotency mechanism, and the writeback is what lets the guard observe the disposed
+state on the next call. Prior art with the reasoning in its own summary: `MvtLayer.Dispose`
+(`Assets/Code/MapRenderer.Jobs/Mvt/MvtModels.cs:196-222`).
+
+**The discriminator is "can this release site run twice on the SAME, already-disposed instance?"** — not
+"might this value be absent?". A never-allocated `default(NativeArray<T>)` disposes cleanly, so absence is
+not the hazard and a guard defending against it is noise. `TilePrologueOutput.Layers` is the worked example
+post the per-layer build-object stage: a `BuildGraphRequest` call that found nothing to build
+(`job-scheduling-design.md` §8 stage 5) returns `null` rather than a struct with uncreated fields, so the
+slot holds `null`, and its disposal (`Layers[i]?.Dispose()`) skips the call entirely — the null-conditional
+operator recognizes absence for a reference type exactly the way an `IsCreated` guard does for a value type,
+without duplicating any type's own internal guard, because neither is a *second* dispose.
+
+**This was measured the expensive way, so do not re-derive it.** `lessons-learned.md` carried this rule from
+2026-07-03 as a flat "the guard is a bloat antipattern", on the stated premise that
+"`NativeArray`/`NativeList`/etc. `.Dispose()` already early-returns on `!IsCreated`". **That premise is false
+for `NativeArray`.** Acting on it, a blanket sweep deleted all 57 guards and reddened **106 tests** — every
+path disposing a decoded MVT tile twice, across `Tests.Mvt`, `Style.FillPaintTests`,
+`Style.SymbolFeatureExtractorTests`, `Text.SymbolBuffer*`. Exactly seven of the 57 were load-bearing (`MvtModels.cs` x4, `NativeFilterEvaluator.cs` x2, and
+`MvtValueCompactionTests.cs` x1 — a test disposing once in its body and again in `finally`); the other 50
+removals were correct. A rule that is
+*mostly* right is the dangerous kind: it survives review because its examples are real, and it fails only
+where nobody looked.
+
+### `[ReadOnly]` on a job field — containers only, and never sweep it
+
+> **`[ReadOnly]` belongs on a job field whose type contains a native container — including a generic type
+> parameter, whose argument may. Elsewhere it is a no-op: harmless where it sits, not worth adding, and
+> never worth removing in bulk.**
+
+**What the attribute actually does.** It *modulates* Unity's schedule-time validation, which is driven by the
+field's **type**; it never triggers it. Prior art from the other direction is already in the tree:
+`RingAssemblyJob.cs:49-53` records that a `NativeArray` field left at its literal `default` fails that
+validation *"even when `[ReadOnly]` and even when never read"*.
+
+**Why a scalar annotation is inert rather than misleading.** A job field is a by-value copy, so nothing
+outside the job can observe a write to it — "read-only" holds unconditionally with or without the attribute,
+and the attribute cannot add a guarantee that already holds. Unity's own diagnostic for the mechanism is
+phrased entirely in terms of containers, and the reflection pass that consumes the attribute is the one
+walking native container fields; a field with no container is never on that walk. Unity itself ships
+`[ReadOnly] public int Num;` across its Collections job test fixtures. There is no third state: as a scalar
+annotation it is not meaningful and it is not actively wrong — `AttributeTargets.Field` simply does not
+inspect the field's type.
+
+**The generic exception, which is why there is a rule at all.** On a generic field the declaration site
+cannot see whether the type argument holds a container:
+
+- `FillGatherJob.cs:54` — `[ReadOnly] public TComparer Comparer;`. `TComparer` is
+  `FillMeshPipeline.HoleRingComparer`, which holds two `NativeArray` fields built from the **same
+  allocations** this job's `Vertices`/`RingOffsets` already view. Without the attribute the safety system
+  sees one read-only and one implicitly writable alias of that allocation and throws at schedule time —
+  `InvalidOperationException`, *"two containers may not be the same (aliasing)"*. Observed by
+  `FillGraphBurstProbeTests`. **This attribute is load-bearing and a sweep would delete it.**
+- `ProjectPointsJob.cs:45`, `GlobeFillSubdivider.cs:63` — `[ReadOnly] public TProj Projection;`. Inert today
+  because every projection struct is stateless; load-bearing the moment one holds a container.
+
+**Sweep verdict: no — not as its own change, and not opportunistically.** A repo-wide audit enumerated every
+`[ReadOnly]` under `MapRenderer.Jobs/` and `MapRenderer.Unity/Rendering/Meshing/` (147 real attribute sites
+across 27 files; 117 on containers, 30 not). The cost of "tidying" the 30 is a 12-file diff that changes no
+behaviour and whose one plausible mechanical form — strip it from anything that isn't a `Native*` —
+introduces a real schedule-time throw. Opportunistic removal is *worse* than a deliberate sweep here,
+because it spreads that edit while its one dangerous case is invisible unless the editor happens to open
+`FillGatherJob`'s doc. If the noise ever genuinely bothers someone it is a five-minute change *then*, on a
+codebase that has not meanwhile been half-swept.
+
 ### Mesh lifetime & ownership: data is a value type, the `Mesh` is a single-owner class
 
 Two resource classes, kept strictly apart (platform-forced, not stylistic — jobs can't touch a
@@ -366,6 +452,43 @@ Two resource classes, kept strictly apart (platform-forced, not stylistic — jo
 one-screen summary.
 
 ---
+
+## Names carry meaning; filler words do not
+
+A type or field name should tell a reader what the thing **holds or does**. A word that would fit equally
+well on any temporary buffer anywhere in the codebase is doing no work, and its presence usually hides that
+the name was never chosen.
+
+**Banned as the substance of a name:** `Scratch`, `Data`, `Info`, `Manager`, `Helper`, `Util`, `Temp`,
+`Stuff`. They are not forbidden tokens — `TileBuildScratchPool` may keep its name until something else makes
+it worth touching — but none of them may be the part of the name that carries the meaning.
+
+**Name for content, in the established shape.** This codebase already has the right idiom for a value that
+groups buffers: `TileGeometryBuffers`, `FillGraphOutput`, `EvalArgBuffers`, `KeyBindingBuffers`. A new one
+joins that family — `FillTriangulationBuffers`, not `EarcutScratch`.
+
+**Never name a shared thing after one of its consumers.** `EarcutScratch` was used by four jobs (sizing,
+gather, earcut, aggregate); naming it for the third of them was not merely vague but wrong, and it would have
+misled every later reader about what may touch it.
+
+**A qualifier that distinguishes is worth keeping.** `FlatVx` earns `Flat` — the column is flattened across
+every polygon of the layer and indexed by an offset table. `FlatScratchVx` adds nothing with `Scratch`. Ask of
+each word: if I deleted it, would the name become ambiguous? If not, it is filler.
+
+**This rule is NOT yet enforced across the codebase — read it as what new and touched code is held to.**
+As of 2026-09-03 the fill-graph path has been swept, and `Scratch` alone still appears about 160 times
+elsewhere (symbols, `TileManager`, placement, `TileBuildScratch`/`TileBuildScratchPool`), alongside live
+`PathScratch`, `CumScratch`, `cumScratch`, `keysScratch`, `valuesScratch`. Clearing the rest is an
+outstanding mechanical sweep, deliberately sequenced so it does not move identifiers a stage plan is
+citing while a developer executes against it.
+
+Saying this matters, because stating a rule without it makes the rule read as already true. That is how
+two of the examples above survived: `EarcutScratch` was renamed to `FillTriangulationBuffers` while the
+field holding it stayed `Scratch` — the type was fixed and the concept was not — and `FlatScratchVx`
+outlived by months the very passage that uses it as the specimen of what to fix.
+
+See also *Type-explicit builder naming* and *Descriptive names, not positional* — the same principle at the
+type and parameter level.
 
 ## Documentation & tests
 

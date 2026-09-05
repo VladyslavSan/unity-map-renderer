@@ -44,8 +44,10 @@ namespace MapRenderer.Tests
         private static readonly IWorkScheduler TestWorkScheduler = new ThreadPoolWorkScheduler();
 
         /// <summary>Wire a deterministic square (px×px) offscreen camera into <paramref name="view"/> so its
-        /// tile loop has a non-null camera / viewport. Chains after <c>AddComponent&lt;MapView&gt;()</c>.</summary>
-        public static MapViewComponent WithTestCamera(this MapViewComponent view, int px = 1080)
+        /// tile loop has a non-null camera / viewport. Chains after <c>AddComponent&lt;MapView&gt;()</c>.
+        /// <paramref name="projection"/> defaults to <c>null</c> — <see cref="MapCamera"/>'s own default
+        /// (WebMercator) — pass <c>new SphericalProjection()</c> to drive a test through the curved arm.</summary>
+        public static MapViewComponent WithTestCamera(this MapViewComponent view, int px = 1080, IProjection projection = null)
         {
             if (_testViewportRt == null || _testViewportRt.width != px)
                 _testViewportRt = new RenderTexture(px, px, 0);
@@ -56,7 +58,7 @@ namespace MapRenderer.Tests
             cam.enabled       = false;             // never renders — only supplies a deterministic ViewportPx
             cam.targetTexture = _testViewportRt;
 
-            view.SetCamera(new MapCamera(cam, CameraProperties.Default));
+            view.SetCamera(new MapCamera(cam, CameraProperties.Default, projection: projection));
             return view;
         }
 
@@ -179,8 +181,12 @@ namespace MapRenderer.Tests
         /// throttle.</summary>
         public static int CoverRecomputesLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.CoverRecomputesLastTick : 0;
 
-        /// <summary>S55: mesh build kicks issued in the most recent Tick.</summary>
-        public static int MeshBuildsKickedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshBuildsKickedLastTick : 0;
+        /// <summary>job-scheduling-design.md §11 fork 2: tiles newly started (first kicked) in the
+        /// most recent Tick — once per tile, the quantity <c>MaxMeshBuildsPerTick</c> bounds.</summary>
+        public static int TileBuildsStartedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TileBuildsStartedLastTick : 0;
+        /// <summary>job-scheduling-design.md §3.2/§8 stage 2: Mesh.MeshDataArrays allocated by the graph
+        /// arm's write step in the most recent Tick.</summary>
+        public static long MeshDataArraysAllocatedLastKick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshDataArraysAllocatedLastKick : 0;
         /// <summary>S55: sum of vertex counts consumed in the most recent Tick.</summary>
         public static int VerticesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.VerticesConsumedLastTick : 0;
         /// <summary>S55/S87: number of tiles that reached Built (fully consumed) in the most recent Tick.</summary>
@@ -214,6 +220,9 @@ namespace MapRenderer.Tests
 
         /// <summary>The Mesh assets built for a loaded tile (one per rendered layer), or null if not built.</summary>
         public static Mesh[] GetTileMeshes(this MapViewComponent view, TileId id) => view.TileManager?.GetTileMeshes(id);
+
+        /// <summary>The global material index of each mesh in <see cref="GetTileMeshes"/>, same order.</summary>
+        public static int[] GetTileMaterialIndices(this MapViewComponent view, TileId id) => view.TileManager?.GetTileMaterialIndices(id);
 
         /// <summary>Scene-space bounds of the live tiles (for framing a snapshot camera). <paramref name="tileSizeWorld"/>
         /// is the tile's world extent at the current zoom.</summary>

@@ -24,8 +24,8 @@ namespace MapRenderer.Tests.Style
     /// <see cref="SpriteAtlasView"/> resolves <c>icon-image</c> per feature and lays out an
     /// <see cref="SymbolQuad"/>-carrying <see cref="SymbolStyle.SymbolFeature"/> (<c>Kind == Icon</c>)
     /// independently of the existing text path (<c>Kind == Text</c>, unchanged). Mirrors
-    /// <c>SymbolFeatureExtractorTests</c>'s hand-encoded MultiPoint pattern. Engine-free; runs in both
-    /// runners.
+    /// <c>SymbolFeatureExtractorTests</c>'s hand-encoded MultiPoint pattern. Unity EditMode only (see
+    /// file header) — it drives a Waist-1 <c>TileGeometryBuffers</c> extraction.
     /// </summary>
     [TestFixture]
     public class SymbolFeatureExtractorIconTests

@@ -1,7 +1,8 @@
 // Unity EditMode only — SymbolTileBlock/Baker need Unity.Collections' NativeArray despite living under
 // MapRenderer.Unity/Text/Placement; internal, reached here via InternalsVisibleTo("MapRenderer.Tests.EditMode").
-// NOT registered in core-tests.csproj (the engine-free dispose-lifecycle teeth live in
-// Tests.EditMode/Text/SymbolTileStoreTests.cs instead, using a fake IDisposable counter).
+// NOT registered in core-tests.csproj (the dispose-lifecycle teeth live in
+// Tests.EditMode/Text/SymbolTileStoreTests.cs instead, using a fake IDisposable counter — also Unity
+// EditMode only, since the reader cutover made it reference the Unity.Collections-backed SymbolTileBlock).
 
 using System;
 using System.Collections.Generic;
@@ -17,7 +18,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// <summary>
     /// Symbol-symbol perf Phase 1 / Stage 1 (design §4, §5 B): <see cref="SymbolTileBlockBaker.Bake"/>
     /// against a REAL <see cref="SymbolTileBlock"/> — the native-lifetime half of the Stage-1 acceptance
-    /// teeth (the engine-free dispose-SITE teeth — commit-overwrite / FIFO-evict / true-release / Clear — live
+    /// teeth (the dispose-SITE teeth — commit-overwrite / FIFO-evict / true-release / Clear — live
     /// in <c>SymbolTileStoreTests</c> against a fake <see cref="IDisposable"/> counter, since the store
     /// itself must stay Unity.Collections-free).
     /// </summary>

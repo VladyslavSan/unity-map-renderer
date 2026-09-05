@@ -7,11 +7,13 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
+using MapRenderer.Jobs.Lines;
 using Fill = MapRenderer.Core.Style.Fill;
 using Line = MapRenderer.Core.Style.Line;
 using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
@@ -73,7 +75,7 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// IR B7: "visit every ring, in decode order" — the identity visit order, for a test that drives
-        /// <c>FillMeshPipeline.Schedule</c> directly and has no selection or sort key to express. Caller owns
+        /// <c>FillMeshGraph.Schedule</c> directly and has no selection or sort key to express. Caller owns
         /// the returned array.
         /// </summary>
         internal static NativeArray<int> FullVisitOrder(TileGeometryBuffers geometry)
@@ -101,8 +103,8 @@ namespace MapRenderer.Tests
             // comparison silently stops being one.
             TileBufferClip clip = default,
             // perf/gc-elimination: null ⇒ the original allocating path; a caller measuring the pooled path's
-            // steady-state GC footprint passes its own TileBuildScratch and reuses it across calls.
-            MapRenderer.Unity.Rendering.Tile.Processing.TileBuildScratch scratch = null)
+            // steady-state GC footprint passes its own TileBuildBuffers and reuses it across calls.
+            MapRenderer.Unity.Rendering.Tile.Processing.TileBuildBuffers buffers = null)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
             // S91-C: the builder bakes relative to the tile's SW corner projected through the SAME projection —
@@ -112,8 +114,8 @@ namespace MapRenderer.Tests
             TileGeometryBuffers geometry = Materialize(features, id, extent);
             try
             {
-                StyledFillTileBuilder.WriteMeshData(mda[0], Selection(features), geometry, paint, zoom,
-                    renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip, scratch);
+                SyncMeshWrite.Fill(mda[0], Selection(features), geometry, paint, zoom,
+                    renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip, buffers);
                 return Finish(mda, vertexCount, bounds, "TestFill");
             }
             finally { geometry.Dispose(); }
@@ -132,7 +134,7 @@ namespace MapRenderer.Tests
             TileGeometryBuffers geometry = Materialize(features, id, extent);
             try
             {
-                StyledFillExtrusionTileBuilder.WriteMeshData(mda[0], Selection(features), geometry, paint, zoom,
+                SyncMeshWrite.FillExtrusion(mda[0], Selection(features), geometry, paint, zoom,
                     renderOrigin, out int vertexCount, out Bounds bounds, projection, clip);
                 return Finish(mda, vertexCount, bounds, "TestFillExtrusion");
             }
@@ -151,7 +153,7 @@ namespace MapRenderer.Tests
             TileGeometryBuffers geometry = Materialize(features, id, extent);
             try
             {
-                StyledLineTileBuilder.WriteMeshData(mda[0], Selection(features), geometry, paint, layout, zoom,
+                SyncMeshWrite.Line(mda[0], Selection(features), geometry, paint, layout, zoom,
                     new double3(origin.x, 0.0, origin.y), out int vertexCount, out Bounds bounds);
                 return Finish(mda, vertexCount, bounds, "TestLine");
             }
@@ -170,7 +172,7 @@ namespace MapRenderer.Tests
             TileGeometryBuffers geometry = Materialize(features, id, extent);
             try
             {
-                StyledLineTileBuilder.WriteMeshData(mda[0], Selection(features), geometry, paint, layout, zoom,
+                SyncMeshWrite.Line(mda[0], Selection(features), geometry, paint, layout, zoom,
                     renderOrigin, out int vertexCount, out Bounds bounds, projection);
                 return Finish(mda, vertexCount, bounds, "TestLineGlobe");
             }
@@ -197,7 +199,7 @@ namespace MapRenderer.Tests
             TileGeometryBuffers geometry = Materialize(layerFeatures, id, extent);
             try
             {
-                StyledLineTileBuilder.WriteMeshData(mda[0], selection, geometry, paint, layout, zoom,
+                SyncMeshWrite.Line(mda[0], selection, geometry, paint, layout, zoom,
                     new double3(origin.x, 0.0, origin.y), out int vertexCount, out Bounds bounds);
                 return Finish(mda, vertexCount, bounds, "TestLineLayer");
             }
@@ -215,7 +217,7 @@ namespace MapRenderer.Tests
             int vertexCount;
             try
             {
-                StyledLineTileBuilder.WriteMeshData(mda[0], Selection(features), geometry, paint, layout, zoom,
+                SyncMeshWrite.Line(mda[0], Selection(features), geometry, paint, layout, zoom,
                     new double3(origin.x, 0.0, origin.y), out vertexCount, out _);
             }
             finally { geometry.Dispose(); }
@@ -262,7 +264,7 @@ namespace MapRenderer.Tests
             AssertLayerPairing(layer, id);
             var mda = Mesh.AllocateWritableMeshData(1);
             double3 renderOrigin = TileRenderOrigin.Project(id, projection);
-            StyledFillTileBuilder.WriteMeshData(mda[0], selection, layer.Geometry, paint, zoom,
+            SyncMeshWrite.Fill(mda[0], selection, layer.Geometry, paint, zoom,
                 renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip);
             return Finish(mda, vertexCount, bounds, "TestFill");
         }
@@ -274,12 +276,24 @@ namespace MapRenderer.Tests
         {
             AssertLayerPairing(layer, id);
             var mda = Mesh.AllocateWritableMeshData(1);
-            StyledLineTileBuilder.WriteMeshData(mda[0], selection, layer.Geometry, paint, layout,
+            SyncMeshWrite.Line(mda[0], selection, layer.Geometry, paint, layout,
                 zoom, new double3(origin.x, 0.0, origin.y), out int vertexCount, out Bounds bounds);
             return Finish(mda, vertexCount, bounds, "TestLine");
         }
 
-        /// <summary>Line build over a DECODED layer, projection-aware (globe), borrowing its buffer.</summary>
+        /// <summary>Line build over a DECODED layer, projection-aware (globe), borrowing its buffer.
+        ///
+        /// <para><b>Note for callers passing a concrete struct literal</b> (<c>new SphericalProjection()</c>,
+        /// <c>new WebMercatorProjection()</c>, …) rather than an <see cref="IProjection"/>-typed variable:
+        /// overload resolution silently prefers this method's generic sibling,
+        /// <see cref="BuildLineFromLayer{TProj}"/>, for such a call (an exact-type match beats this
+        /// overload's implicit boxing conversion) — see that method's own doc. Existing call sites this
+        /// rebinds: <c>GlobeLineWindingTests.cs:54-55</c>, <c>RightHandedSphereProjectionWindingTests.cs:110-111</c>,
+        /// <c>GlobeLineSnapshotTests.cs:44</c>. Harmless — both siblings drive the SAME graph
+        /// (<c>LineMeshGraph.Schedule</c>'s switch dispatches to the identical <c>ScheduleTyped</c> call the
+        /// generic sibling makes directly), and <c>LineGraphParityTests.cs:50</c> keeps <c>Schedule</c>'s own
+        /// switch under cover independently — but worth knowing before "why did this call route through the
+        /// OTHER overload" surprises a future reader.</para></summary>
         public static Mesh BuildLineFromLayer(
             ITileLayer layer, IReadOnlyList<SelectedTileFeature> selection, Line.PaintProperties paint,
             Line.LayoutProperties layout, double zoom, TileId id, IProjection projection)
@@ -287,9 +301,70 @@ namespace MapRenderer.Tests
             AssertLayerPairing(layer, id);
             double3 renderOrigin = TileRenderOrigin.Project(id, projection);
             var mda = Mesh.AllocateWritableMeshData(1);
-            StyledLineTileBuilder.WriteMeshData(mda[0], selection, layer.Geometry, paint, layout,
+            SyncMeshWrite.Line(mda[0], selection, layer.Geometry, paint, layout,
                 zoom, renderOrigin, out int vertexCount, out Bounds bounds, projection);
             return Finish(mda, vertexCount, bounds, "TestLineGlobe");
+        }
+
+        /// <summary>job-scheduling-design.md §8 stage 5, tooth (g): line build over a DECODED layer for a
+        /// projection Burst never registers generically for — calls <c>LineMeshGraph.ScheduleTyped&lt;TProj&gt;</c>
+        /// directly (reached across the assembly boundary via <c>MapRenderer.Unity</c>'s
+        /// <c>InternalsVisibleTo("MapRenderer.Tests.Shared")</c> grant) rather than the closed
+        /// <c>LineMeshGraph.Schedule</c> switch this overload's <see cref="IProjection"/> sibling goes
+        /// through. This is the ONLY production-adjacent caller of <c>ScheduleTyped</c> from outside
+        /// <c>MapRenderer.Jobs</c> — kept in the test assembly, not production, because it has no production
+        /// caller (<c>RightHandedSphereProjectionWindingTests</c>' own tooth (g) shape). Overload resolution
+        /// prefers this generic form over the sibling for a concrete struct argument (an exact-type match
+        /// beats the sibling's implicit boxing conversion), so an existing call site passing a concrete
+        /// <c>readonly struct : IProjection</c> — never registered with Burst — binds here without an
+        /// explicit type argument.</summary>
+        public static Mesh BuildLineFromLayer<TProj>(
+            ITileLayer layer, IReadOnlyList<SelectedTileFeature> selection, Line.PaintProperties paint,
+            Line.LayoutProperties layout, double zoom, TileId id, TProj projection)
+            where TProj : struct, IProjection
+        {
+            AssertLayerPairing(layer, id);
+            double3 renderOrigin = TileRenderOrigin.Project(id, projection);
+
+            LineLayerInput input = StyledLineTileBuilder.BuildLayerInput(
+                selection, layer.Geometry, paint, layout, zoom, renderOrigin,
+                out NativeArray<Vector4> featureColors, out NativeArray<float> featureWidths, projection);
+
+            var mda = Mesh.AllocateWritableMeshData(1);
+            int    vertexCount = 0;
+            Bounds bounds      = default;
+
+            if (!input.FeatureSelected.IsCreated)
+                return Finish(mda, vertexCount, bounds, "TestLineGlobeTyped"); // no line geometry
+
+            using var featSelected = input.FeatureSelected;
+            using var featColors   = featureColors;
+            using var featWidths   = featureWidths;
+
+            LineGraphOutput output = LineMeshGraph.ScheduleTyped(input, projection, default);
+            output.Handle.Complete();
+            try
+            {
+                if (output.IsCreated && output.Error.Value == LineGraphCounts.Ok
+                    && output.Vertices.Length > 0 && output.Indices.Length > 0)
+                {
+                    (JobHandle handle, NativeArray<float3x2> boundsArr) =
+                        StyledLineTileBuilder.ScheduleStreamWrite(mda[0], output, featColors, featWidths);
+                    handle.Complete();
+                    try
+                    {
+                        float3x2 b = boundsArr[0];
+                        float3 c3 = (b.c0 + b.c1) * 0.5f;
+                        float3 sz = b.c1 - b.c0;
+                        bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
+                        vertexCount = output.Vertices.Length;
+                    }
+                    finally { boundsArr.Dispose(); }
+                }
+            }
+            finally { output.Dispose(); }
+
+            return Finish(mda, vertexCount, bounds, "TestLineGlobeTyped");
         }
 
         private static Mesh Finish(Mesh.MeshDataArray mda, int vertexCount, Bounds bounds, string name)

@@ -238,13 +238,13 @@ namespace MapRenderer.Unity.Text
             // this call's own stack frame, so concurrent calls never share it. `buffer` itself is
             // NOT one of these — it is rented per-build by SymbolSubsystem (the pairing-adjacency rule:
             // every layer processor of ONE build must write into the SAME buffer instance).
-            var glyphScratch = new List<PositionedGlyph>();
+            var glyphQuads = new List<PositionedGlyph>();
             // 4.4c (3b): reused per-call temp buffers the no-alloc TextQuadLayout/CurvedTextLayout overloads
             // clear-and-fill per symbol — copied into buffer's own growing pools right after, since those
             // pools accumulate EVERY symbol of the whole build and the no-alloc overloads always Clear() their
             // output first (a build-wide pool passed directly would erase every earlier symbol's quads/glyphs).
-            var quadScratch = new List<SymbolQuad>();
-            var curvedScratch = new List<CurvedGlyph>();
+            var quadCorners = new List<SymbolQuad>();
+            var curvedPlacements = new List<CurvedGlyph>();
 
             for (int el = 0; el < extractedLayers.Count; el++)
             {
@@ -349,7 +349,7 @@ namespace MapRenderer.Unity.Text
                         }
 
                         resolver ??= _glyphManager.CreateResolver(fontStack);
-                        // Zero-alloc overload: fills the reused glyphScratch instead of Shape(in) allocating
+                        // Zero-alloc overload: fills the reused glyphQuads instead of Shape(in) allocating
                         // its own List<PositionedGlyph>. The wrapping ShapedRun is still a fresh (small)
                         // allocation — TextQuadLayout/CurvedTextLayout.Layout both take a ShapedRun, and
                         // there is no caller-buffer variant of that adapter.
@@ -358,18 +358,18 @@ namespace MapRenderer.Unity.Text
                             Text = s.Text,
                             FontStack = fontStack,
                             Metrics = resolver,
-                        }, glyphScratch);
-                        ShapedRun run = new ShapedRun { Glyphs = glyphScratch, Direction = direction };
+                        }, glyphQuads);
+                        ShapedRun run = new ShapedRun { Glyphs = glyphQuads, Direction = direction };
                         if (s.Placement == SymbolPlacement.Point)
                         {
                             // Slice A: the per-feature options threaded from the style layer (anchor/offset/justify/
                             // max-width/line-height/letter-spacing/radial-offset). Was hardcoded TextLayoutOptions.Default.
-                            // No-alloc overload writes into the reused quadScratch (Clear()-ed internally); copy
-                            // its contents into buffer's own build-wide Quads pool right after (3b: quadScratch
+                            // No-alloc overload writes into the reused quadCorners (Clear()-ed internally); copy
+                            // its contents into buffer's own build-wide Quads pool right after (3b: quadCorners
                             // itself never allocates once its capacity has stabilized across symbols).
-                            TextLayoutBounds bounds = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions, quadScratch);
+                            TextLayoutBounds bounds = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions, quadCorners);
                             int textQuadStart = buffer.Quads.Count;
-                            for (int q = 0; q < quadScratch.Count; q++) buffer.Quads.Add(quadScratch[q]);
+                            for (int q = 0; q < quadCorners.Count; q++) buffer.Quads.Add(quadCorners[q]);
                             buffer.AddSymbol(new ShapedSymbol
                             {
                                 AnchorRender = s.AnchorRender,
@@ -379,7 +379,7 @@ namespace MapRenderer.Unity.Text
                                 BoundsMin = bounds.Min,
                                 BoundsMax = bounds.Max,
                                 QuadStart = textQuadStart,
-                                QuadCount = quadScratch.Count,
+                                QuadCount = quadCorners.Count,
                                 Text = s.Text, // A-3: cross-tile identity
                                 Paint = s.Paint,
                                 TextSizePx = s.TextSizePx,
@@ -403,16 +403,16 @@ namespace MapRenderer.Unity.Text
                             // #5: curved along-line symbol — per-glyph layout placed on the projected line each
                             // frame. Orientation is the line tangent, so no point-layout options / rotation-alignment.
                             // Same reused-then-copied pattern as the point-text branch above.
-                            CurvedTextLayout.Layout(run, _glyphManager.Atlas, curvedScratch);
+                            CurvedTextLayout.Layout(run, _glyphManager.Atlas, curvedPlacements);
                             int textGlyphStart = buffer.Glyphs.Count;
-                            for (int g = 0; g < curvedScratch.Count; g++) buffer.Glyphs.Add(curvedScratch[g]);
+                            for (int g = 0; g < curvedPlacements.Count; g++) buffer.Glyphs.Add(curvedPlacements[g]);
                             int textAnchorStart = buffer.AppendAnchors(s.LineAnchors, out int textAnchorCount);
                             int textPathStart = buffer.AppendPath(s.PathRender, s.PathUpRender, out int textPathCount);
                             buffer.AddSymbol(new ShapedSymbol
                             {
                                 Placement = s.Placement,
                                 Kind = SymbolKind.Text,
-                                GlyphStart = textGlyphStart, GlyphCount = curvedScratch.Count,
+                                GlyphStart = textGlyphStart, GlyphCount = curvedPlacements.Count,
                                 AnchorStart = textAnchorStart, AnchorCount = textAnchorCount, // A-2: build-time zoom-invariant anchors
                                 PathStart = textPathStart, PathCount = textPathCount,
                                 Text = s.Text, // A-3: carried for parity (line symbols are excluded from dedup in v1)

@@ -345,7 +345,7 @@ namespace MapRenderer.Tests.Style
                      {
                          "Assets/Code/MapRenderer.Unity/Text/SymbolFeatureExtractor.cs",
                          "Assets/Code/MapRenderer.Core/Text/Placement/SymbolStagingMath.cs",
-                         "Assets/Code/MapRenderer.Jobs/SymbolProjectionJob.cs",
+                         "Assets/Code/MapRenderer.Jobs/Symbols/SymbolProjectionJob.cs",
                      })
             {
                 string path = Path.Combine(

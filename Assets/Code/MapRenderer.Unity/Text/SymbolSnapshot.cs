@@ -3,7 +3,9 @@
 // System.IDisposable to the concrete Unity.Collections-backed SymbolTileBlock, so this file left the
 // core-tests.csproj fast loop (still compiled + run by the Unity EditMode runner).
 
+using System;
 using System.Collections.Generic;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Unity.Text.Placement;
 
 namespace MapRenderer.Unity.Text
@@ -12,15 +14,15 @@ namespace MapRenderer.Unity.Text
     /// Stage 4b (symbols-async-reconcile): the IMMUTABLE main-thread snapshot the off-main
     /// <see cref="SymbolReconciler"/> reads. Captured on a SCHEDULE frame by
     /// <see cref="SymbolTileStore.CaptureSnapshot"/> (main thread), it holds each collected tile's baked
-    /// native block + whether the tile is departing. The worker reads these <b>off-thread</b>; the store's pin
-    /// guard (<see cref="SymbolTileStore.Pin"/>/<see cref="SymbolTileStore.ReleasePins"/>) keeps every
+    /// native block + whether the tile is departing. The worker reads these <b>off-thread</b>; each slice's
+    /// own <see cref="SharedDisposable{T}"/> reference (see <see cref="SymbolSnapshot.Add"/>) keeps every
     /// referenced <see cref="TileSlice.Block"/> alive until the snapshot leaves service, so the off-thread reads
     /// are never a use-after-free (design §3.2).
     ///
     /// <para><b>Reused, alloc-light.</b> <see cref="Slices"/> is reused across captures — <see cref="Clear"/>
-    /// resets the count and nulls the reused slices' refs (so a disposed block is never held past a capture),
-    /// <see cref="Add"/> hands back a pooled <see cref="TileSlice"/>. Off the per-frame path (capture happens
-    /// only on a tile-event frame), but kept low-alloc anyway per the design's GC caveat (§4).</para>
+    /// releases and resets the count (so a disposed block is never held past a capture), <see cref="Add"/> fills
+    /// a pooled <see cref="TileSlice"/> in place. Off the per-frame path (capture happens only on a tile-event
+    /// frame), but kept low-alloc anyway per the design's GC caveat (§4).</para>
     /// </summary>
     internal sealed class SymbolSnapshot
     {
@@ -32,19 +34,25 @@ namespace MapRenderer.Unity.Text
         /// <summary>Live slice count (<see cref="Slices"/> beyond this are pooled/idle).</summary>
         public int Count { get; private set; }
 
-        /// <summary>#3a: reset to empty, nulling each live slice's refs (never hold a block past a capture) and
-        /// keeping the pooled <see cref="TileSlice"/> objects for reuse.</summary>
+        /// <summary>Reset to empty: DROP each live slice's block reference (the sole release site — the last one
+        /// out disposes the block), then reset the slices, keeping the pooled <see cref="TileSlice"/> objects.
+        /// Idempotent: a second call sees <see cref="Count"/> 0 and releases nothing.</summary>
         public void Clear()
         {
-            for (int i = 0; i < Count; i++) Slices[i].Reset();
+            for (int i = 0; i < Count; i++) { Slices[i].Pin.Release(); Slices[i].Reset(); }
             Count = 0;
         }
 
-        /// <summary>Append one tile (growing the pool if needed) and return it for the caller to fill.</summary>
-        public TileSlice Add()
+        /// <summary>Append one tile, TAKING a reference on its block for this snapshot's service life
+        /// (<see cref="Clear"/> drops it). The sole acquire site — see <see cref="TileSlice.Pin"/>.</summary>
+        public void Add(SharedDisposable<IDisposable> pin, bool isDeparting)
         {
             if (Count == Slices.Count) Slices.Add(new TileSlice());
-            return Slices[Count++];
+            TileSlice slice = Slices[Count++];
+            pin.Acquire();
+            slice.Pin = pin;
+            slice.Block = (SymbolTileBlock)pin.Value;
+            slice.IsDeparting = isDeparting;
         }
     }
 
@@ -53,7 +61,11 @@ namespace MapRenderer.Unity.Text
     /// <c>SymbolTileStore.Entry</c>'s collect-relevant members plus the departing flag.</summary>
     internal sealed class TileSlice
     {
-        /// <summary>The tile's baked native block (borrowed ref; the store owns disposal, pinned across the
+        /// <summary>The reference that KEEPS <see cref="Block"/> alive for this snapshot's whole service life.
+        /// Taken by <see cref="SymbolSnapshot.Add"/>, dropped by <see cref="SymbolSnapshot.Clear"/> — the only
+        /// two sites that may touch it. <see cref="Block"/> is the borrowed value this reference guarantees.</summary>
+        public SharedDisposable<IDisposable> Pin;
+        /// <summary>The tile's baked native block (borrowed ref; kept alive by <see cref="Pin"/> across the
         /// snapshot's life). The reconciler reads every per-symbol column straight off this — raw-order
         /// <see cref="SymbolTileBlock.Kinds"/>/
         /// <see cref="SymbolTileBlock.PairRoles"/>/<see cref="SymbolTileBlock.RepAnchor"/>/
@@ -65,6 +77,7 @@ namespace MapRenderer.Unity.Text
 
         public void Reset()
         {
+            Pin = null;
             Block = null;
             IsDeparting = false;
         }

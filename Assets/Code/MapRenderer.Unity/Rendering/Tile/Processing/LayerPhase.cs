@@ -3,11 +3,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// <summary>
     /// Epic A: which cadence(s) a
     /// <see cref="ITileLayerProcessor"/> runs on. A1/A2 implement only <see cref="WorkerOnly"/> — the
-    /// fill/line/background fan-out is entirely a worker-thread write into a main-thread-allocated mesh
-    /// array, so <see cref="TileLayerProcessorRunner.RunWorkerPass"/> and
-    /// <see cref="TileLayerProcessorRunner.RunSourcelessWorkerPass"/> reject <see cref="WorkerThenMain"/>
-    /// (those mesh passes have no main-thread tail to give it — a MESH processor requesting it is a
-    /// programming error, not a phase to silently downgrade to worker-only).
+    /// fill/line fan-out is entirely a worker-thread write into a main-thread-allocated mesh array (or, for
+    /// a graph-arm fill layer, a worker-thread build of the graph's measure-step input), so
+    /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/> rejects <see cref="WorkerThenMain"/> (that mesh
+    /// pass has no main-thread tail to give it — a MESH processor requesting it is a programming error, not
+    /// a phase to silently downgrade to worker-only).
     /// <see cref="WorkerThenMain"/> is A3's: symbol worker-side extraction (<c>TileSymbolLayerProcessor</c>)
     /// followed by a main-thread shaping tail, choreographed by
     /// <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> (worker half) plus the symbol
@@ -19,10 +19,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         WorkerOnly,
 
         /// <summary>A3+: a worker-side step followed by a main-thread completion step
-        /// (<see cref="ITileWorkerThenMainLayerProcessor.CompleteOnMain"/>). The MESH worker-pass
-        /// entries (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>,
-        /// <see cref="TileLayerProcessorRunner.RunSourcelessWorkerPass"/>) still reject this phase — they
-        /// have no tail; only <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> choreographs it.</summary>
+        /// (<see cref="ITileWorkerThenMainLayerProcessor.CompleteOnMain"/>). The MESH worker-pass entry
+        /// (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) still rejects this phase — it has no
+        /// tail; only <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> choreographs it.</summary>
         WorkerThenMain,
     }
 }

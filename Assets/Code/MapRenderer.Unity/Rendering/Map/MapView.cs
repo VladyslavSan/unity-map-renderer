@@ -163,8 +163,6 @@ namespace MapRenderer.Unity.Rendering.Map
             SymbolPlacementSystem = new SymbolPlacementSystem(Camera,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolTextWorld : null,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolIconWorld : null);
-            // Rapid-zoom stutter: run the full symbol place only every Nth frame (Inspector-tunable; 1 = off).
-            SymbolPlacementSystem.PlacementThrottleFrames = _config.SymbolPlacementThrottleFrames;
             // S105: the decoupled symbol-symbol subsystem produces the real map symbols SymbolPlacementSystem.Tick renders.
             // D11/E2: per-layer materials (SymbolTextWorld clone + text-halo-* bind) now live on each
             // SymbolRenderLayer (Layers.Build), not here. A5b: DATA arrives via TileManager's per-tile KICK
@@ -181,14 +179,14 @@ namespace MapRenderer.Unity.Rendering.Map
 
         // D10: reused scratch for SetStyle's symbol-layer derivation (below) — a restyle never allocates a
         // fresh list; the single registry (RenderLayerFactory) is walked once via Layers.Layers.
-        private readonly List<Symbol.StyleLayer> _symbolLayerScratch = new List<Symbol.StyleLayer>();
+        private readonly List<Symbol.StyleLayer> _symbolStyleLayers = new List<Symbol.StyleLayer>();
 
-        // D11/E2: the SymbolRenderLayer objects themselves (same walk as _symbolLayerScratch, same order) —
+        // D11/E2: the SymbolRenderLayer objects themselves (same walk as _symbolStyleLayers, same order) —
         // handed to SymbolPlacementSystem.Tick each frame so each layer's survivors draw with its own material/presenter.
         private readonly List<Style.SymbolRenderLayer> _symbolRenderLayers = new List<Style.SymbolRenderLayer>();
 
         // A-1: reused scratch for the per-frame loaded-tile pull handed to the subsystem's reconcile (no alloc).
-        private readonly List<Tile.LoadedTileKey> _symbolLoadedScratch = new List<Tile.LoadedTileKey>();
+        private readonly List<Tile.LoadedTileKey> _loadedTileKeys = new List<Tile.LoadedTileKey>();
 
         // ── SetStyle — the style is the single source of truth ─────────────────────────────────
         // There is no separate "Initialise": the map is fully valid at construction (an empty map whose
@@ -263,17 +261,17 @@ namespace MapRenderer.Unity.Rendering.Map
             // material + presenter) for SymbolPlacementSystem.Tick — same order, so the ordinal mapping stays 1:1.
             // A2: the Mercator-only background gate is gone — background is now a per-covered-tile TileMesh
             // layer projected through the same IProjection fill/line use, so the globe renders it correctly.
-            _symbolLayerScratch.Clear();
+            _symbolStyleLayers.Clear();
             _symbolRenderLayers.Clear();
             foreach (var layer in Layers.Layers)
                 if (layer is Style.SymbolRenderLayer s)
                 {
-                    _symbolLayerScratch.Add(s.SymbolLayer);
+                    _symbolStyleLayers.Add(s.SymbolLayer);
                     _symbolRenderLayers.Add(s);
                 }
 
             SymbolSubsystem.SetStyle(_style,
-                _symbolLayerScratch); // S105: group symbol layers + (re)build the shared glyph pipeline
+                _symbolStyleLayers); // S105: group symbol layers + (re)build the shared glyph pipeline
 
             TileManager.SetSources(specs, _config.Backend);
         }
@@ -486,8 +484,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 // cache-hit re-entries, releases tiles that left cover. Then aggregate the active symbols.
                 using (PmSymbolCollect.Auto())
                 {
-                    TileManager.CollectLoadedTileKeys(_symbolLoadedScratch);
-                    SymbolSubsystem.ReconcileLoadedTiles(_symbolLoadedScratch, now);
+                    TileManager.CollectLoadedTileKeys(_loadedTileKeys);
+                    SymbolSubsystem.ReconcileLoadedTiles(_loadedTileKeys, now);
                     // Stall #1: start ≤MaxBuildsPerFrame queued symbol builds and coalesce the atlas upload.
                     // AFTER reconcile so its loaded-set snapshot drops builds for tiles that just left cover.
                     SymbolSubsystem.PumpBuilds();

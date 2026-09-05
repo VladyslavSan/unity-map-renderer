@@ -33,12 +33,36 @@ namespace MapRenderer.Tests.Text
     [TestFixture]
     public class SymbolReconcilerTests
     {
+        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
+        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
+        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here — real
+        // blocks via DebugLiveAllocCount, and FakeBlock via the same mirrored counter below.
+        private long _liveBlocks;
+        private int _liveFakes;
+        [SetUp] public void BaselineBlocks()
+        {
+            _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
+            _liveFakes = FakeBlock.LiveCount;
+        }
+        [TearDown] public void NoLeakedBlocks()
+        {
+            Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
+                "this test baked a block it never disposed — release the snapshot and Clear() the store");
+            Assert.AreEqual(_liveFakes, FakeBlock.LiveCount,
+                "this test committed a FakeBlock it never disposed — Clear() the store");
+        }
+
         private const double ParityQ = 50.0;
 
         private sealed class FakeBlock : IDisposable
         {
+            // Mirrors SymbolTileBlock.DebugLiveAllocCount's idiom so the fixture's leak-guard TearDown can
+            // catch an abandoned fake commit too — every DisposeCount assertion in this fixture is 0 or 1,
+            // so decrementing unconditionally on every Dispose() call stays correct.
+            internal static int LiveCount;
             public int DisposeCount;
-            public void Dispose() => DisposeCount++;
+            public FakeBlock() => LiveCount++;
+            public void Dispose() { DisposeCount++; LiveCount--; }
         }
 
         private static SymbolTileStore.Key Key(TileId t) => new SymbolTileStore.Key("src", t);
@@ -198,6 +222,8 @@ namespace MapRenderer.Tests.Text
                 Assert.AreEqual(oracle.LocalIndex[i], result.LocalIndex[i], $"localIndex mismatch at {i}");
                 Assert.AreEqual(oracle.IsDeparting[i], result.IsDeparting[i], $"isDeparting mismatch at {i}");
             }
+            store.ReleasePins(snapshot);
+            store.Clear();
         }
 
         // ═══ T2: a disposal-causing mutation (over-cap FIFO evict) bumps the collect generation ═══
@@ -215,6 +241,7 @@ namespace MapRenderer.Tests.Text
             int g0 = store.CollectGeneration;
             store.Release(Key(b), transferredToCache: true); // over cap → evicts a (disposes its block) — must bump
             Assert.AreNotEqual(g0, store.CollectGeneration, "an over-cap FIFO evict changed the collected set → it must bump");
+            store.Clear(); // b is still cached (only a was evicted)
         }
 
         // ═══ T3: the reused RESULT (and index) SHRINKS — {A,B} → {B} → empty ═══
@@ -242,23 +269,33 @@ namespace MapRenderer.Tests.Text
             store.CaptureSnapshot(snapshot); reconciler.Run(snapshot, result);
             Assert.AreEqual(2, result.BlockId.Count, "{A,B} → two winners");
 
+            // Released here to keep the reference model explicit — CaptureSnapshot would release it anyway
+            // (its leading into.Clear() releases whatever the snapshot previously held).
+            store.ReleasePins(snapshot);
             store.Release(Key(a), transferredToCache: false); // drop A → active {B}
             store.CaptureSnapshot(snapshot); reconciler.Run(snapshot, result);
             Assert.AreEqual(1, result.BlockId.Count, "{B} → the reused result must SHRINK to one (no stale A)");
             Assert.AreEqual(SymbolTileKey.Pack(b), result.OrderedBlocks[result.BlockId[0]].TileKey, "…and the surviving winner is B's tile");
             Assert.AreEqual(0, result.LocalIndex[0], "…B's only (raw index 0) record");
 
+            store.ReleasePins(snapshot); // release the SECOND capture's pin on B before dropping it — same reason
             store.Release(Key(b), transferredToCache: false); // drop B → empty
             store.CaptureSnapshot(snapshot); reconciler.Run(snapshot, result);
             Assert.AreEqual(0, result.BlockId.Count, "empty set → the reused result must shrink to zero");
             Assert.AreEqual(0, result.LocalIndex.Count, "…and every parallel list too");
             Assert.AreEqual(0, result.OrderedBlocks.Count);
             Assert.AreEqual(0, result.ActiveCount);
+            store.ReleasePins(snapshot);
+            store.Clear();
         }
 
-        // ═══ T4: per-site defer/flush TIMING — a pinned block's dispose is DEFERRED until ReleasePins ═══
-        // RED-verify: revert DisposeOrDefer at the site back to a direct block?.Dispose() → the block disposes at
-        // the site (the live-alloc count drops WHILE still pinned) → the "unchanged while pinned" assertion fails.
+        // ═══ T4: per-site defer/flush TIMING — a block a snapshot still references is NOT disposed at the drop
+        //         site; it frees only when the last reference (the snapshot's) is released ═══
+        // RED-verify, per site: replace that site's `?.Release()` with `?.Value.Dispose()` → the block disposes
+        // at the site itself, so ReleasePins has nothing left to free → the `:361` "frees exactly once" assertion
+        // fails FOR THAT [Values] CASE ONLY (the `live0` baseline is taken after the drop site runs, so the
+        // preceding "unchanged" assert can't observe an already-completed dispose) — four independent,
+        // individually discriminating recipes.
         //
         // Reader cutover: CaptureSnapshot now casts Entry.Block to SymbolTileBlock, so a FakeBlock committed
         // here would throw at capture time — every block under test is a REAL baked block, and disposal is
@@ -270,7 +307,7 @@ namespace MapRenderer.Tests.Text
         public enum DeferSite { CommitOverwrite, ReleaseActiveTrueEvict, ReleaseStaleCached, FifoEvict }
 
         [Test]
-        public void DisposeOrDefer_DefersWhilePinned_FreesOnReleasePins([Values] DeferSite site)
+        public void DropSite_DefersWhileReferenced_FreesOnReleasePins([Values] DeferSite site)
         {
             var store = new SymbolTileStore(cacheCap: site == DeferSite.FifoEvict ? 1 : 8);
             var t = new TileId { Z = 5, X = 1, Y = 0 };
@@ -322,15 +359,16 @@ namespace MapRenderer.Tests.Text
             store.ReleasePins(snapshot);
             Assert.AreEqual(live0 - 1, SymbolTileBlock.DebugLiveAllocCount,
                 $"{site}: ReleasePins drops the pin to 0 → the deferred block frees exactly once");
+            store.Clear(); // the CommitOverwrite/FifoEvict sites leave an unpinned live block (t2 / u) behind
         }
 
-        // The restyle/teardown defensive flush: a block deferred while pinned, then Clear() called WITHOUT a prior
-        // ReleasePins (an out-of-order teardown) must still free it — the _pendingDispose flush in Clear.
-        // Clear must be SELF-SAFE: it must NEVER free a block a live snapshot still pins (still owes a ReleasePins),
-        // even on an out-of-order teardown (no prior ReleasePins). A block deferred while pinned survives Clear and
-        // is freed only when its snapshot is released — no UAF, no leak.
-        // RED-verify: the un-fixed UNCONDITIONAL flush disposes the still-pinned block at Clear → the "still alive
-        // after Clear" assertion fails (the live count drops while still pinned).
+        // R-4 — genuinely discriminating: Clear() must RELEASE the entry's own reference, not dispose the block
+        // outright. At Clear() time the block has exactly two references — the entry's and the snapshot's — so
+        // a Clear() that disposes instead of releases frees the block while the snapshot still references it:
+        // the exact restyle-mid-reconcile use-after-free this mechanism exists to prevent.
+        // RED-verify: replace SymbolTileStore.cs Clear()'s `kv.Value.Block?.Release()` with
+        // `kv.Value.Block?.Value.Dispose()` → the block frees at Clear() while the snapshot still references it
+        // → the "must NOT dispose" assertion below fails.
         [Test]
         public void Clear_KeepsPinnedDeferredBlockAlive_FreedOnReleasePins()
         {
@@ -342,27 +380,25 @@ namespace MapRenderer.Tests.Text
 
             var snapshot = new SymbolSnapshot();
             store.CaptureSnapshot(snapshot);                 // pins t's block
-            // Track THIS specific block (the pinned one) — the global live count can't distinguish it surviving
-            // from the unpinned overwrite block being freed, so key the tooth on this block's own array liveness.
+            // Track THIS specific block — the global live count can't distinguish it surviving from any other
+            // block this test creates, so key the tooth on this block's own array liveness.
             SymbolTileBlock pinnedBlock = snapshot.Slices[0].Block;
-            // Overwrite the entry → DisposeOrDefer sees it pinned → defers (not disposed).
-            var t2Buffer = new SymbolTileBuffer();
-            Point(t2Buffer, default, 0, "t2", null, 2, t);
-            Commit(store, Key(t), store.BeginBuild(Key(t)), t2Buffer);
-            Assert.IsTrue(pinnedBlock.Kinds.IsCreated, "sanity: the pinned block is still alive (deferred, not freed)");
 
-            store.Clear(); // teardown WITHOUT ReleasePins — must NOT free the still-pinned deferred block
+            store.Clear(); // teardown WITHOUT ReleasePins — releases the entry's own reference only
             Assert.IsTrue(pinnedBlock.Kinds.IsCreated,
-                "Clear must NOT dispose a still-pinned deferred block (self-safe against UAF)");
+                "Clear must NOT dispose a still-referenced block (self-safe against UAF)");
 
-            store.ReleasePins(snapshot); // the snapshot leaves service → NOW the deferred, unpinned block frees once
+            store.ReleasePins(snapshot); // the snapshot leaves service → the last reference drops → frees once
             Assert.IsFalse(pinnedBlock.Kinds.IsCreated,
-                "ReleasePins frees the (now-unpinned) deferred block exactly once — no leak");
+                "ReleasePins frees the (now-unreferenced) block exactly once — no leak");
         }
 
-        // ═══ T5: cross-snapshot refcount OVERLAP — a block pinned by TWO snapshots survives one release ═══
-        // RED-verify: make Pin a set-to-1 (no accumulation) → releasing the first snapshot drops it to 0 and
-        // disposes the block prematurely (while the second snapshot still references it) → this fails.
+        // ═══ T5: cross-snapshot refcount OVERLAP — a block referenced by TWO snapshots survives one release ═══
+        // R-3 — DECLARED SURVIVOR: s1 and s2 are two distinct SymbolSnapshot objects, each holding one slice, so
+        // any per-snapshot-dedupe injection is a no-op here. The only injection that isolates cross-snapshot
+        // accumulation is "don't acquire/release at all", which also reds R-1, R-2 and every T4 case — not
+        // discriminating. The property is now Interlocked.Increment: accumulation across independent acquirers
+        // is what the primitive IS, not a discipline this test can falsify in isolation. Kept for its assertions.
 
         [Test]
         public void Pin_RefcountsAcrossTwoSnapshots_SurvivesSingleRelease()
@@ -385,6 +421,65 @@ namespace MapRenderer.Tests.Text
             store.ReleasePins(s2);
             Assert.AreEqual(live0 - 1, SymbolTileBlock.DebugLiveAllocCount,
                 "the second release drops 1→0 → freed exactly once");
+        }
+
+        // ═══ R-1: releasing the SAME snapshot twice must NOT free a block another live snapshot still
+        //          references — the SymbolSubsystem.cs:947→:1055 shape (a demoted snapshot's pins released once
+        //          on swap, then again at teardown). Needs a SECOND live reference (s2) or the tooth is vacuous:
+        //          SymbolTileBlock's dispose is already idempotent, so a premature free with only one reference
+        //          left is unobservable. ═══
+        // RED-verify: move the release loop back into SymbolTileStore.ReleasePins (reset the slices in
+        // SymbolSnapshot.Clear() WITHOUT releasing Pin first) → the second ReleasePins(s1) decrements s1's slices
+        // a second time, the block's refcount hits 0 under s2 → the first assert below fails.
+
+        [Test]
+        public void ReleasePins_IsIdempotent_SecondReleaseDoesNotFreeUnderAnotherSnapshot()
+        {
+            var store = new SymbolTileStore(cacheCap: 8);
+            var t = new TileId { Z = 5, X = 1, Y = 0 };
+            var buffer = new SymbolTileBuffer();
+            Point(buffer, default, 0, "t", null, 1, t);
+            Commit(store, Key(t), store.BeginBuild(Key(t)), buffer); // refs = 1 (the store's own entry)
+
+            var s1 = new SymbolSnapshot(); store.CaptureSnapshot(s1); // refs = 2
+            var s2 = new SymbolSnapshot(); store.CaptureSnapshot(s2); // refs = 3
+            // Read the block BEFORE any release — Clear() nulls the slice, so this must be captured first.
+            SymbolTileBlock pinned = s1.Slices[0].Block;
+
+            store.Release(Key(t), transferredToCache: false); // the store's own reference drops → refs 2, still alive
+            store.ReleasePins(s1); // → refs 1 (s2 only)
+            store.ReleasePins(s1); // repeated release of the SAME already-empty snapshot — must be a no-op
+            Assert.IsTrue(pinned.Kinds.IsCreated,
+                "a repeated ReleasePins on the same snapshot must not free a block s2 still references");
+            store.ReleasePins(s2); // → refs 0
+            Assert.IsFalse(pinned.Kinds.IsCreated, "the block frees exactly once, on s2's release");
+        }
+
+        // ═══ R-2: re-capturing into a reused snapshot releases what it PREVIOUSLY captured, so a block dropped
+        //          from the store between two captures is freed by the second capture rather than stranded. ═══
+        // One assert, deliberately: Assert.AreEqual(0, s.Count) would pass whether or not the fix is present
+        // (Release(…, transferredToCache: false) already empties the store, so the re-capture yields Count == 0
+        // either way) — riding a vacuous assert on a real one reads as coverage it is not.
+        // RED-verify: drop the `Slices[i].Pin.Release()` call from SymbolSnapshot.Clear() → the re-capture
+        // resets the slice without releasing its reference → the block's refcount never reaches 0 → this fails.
+
+        [Test]
+        public void CaptureSnapshot_ReleasesThePreviousCaptureReferences()
+        {
+            var store = new SymbolTileStore(cacheCap: 8);
+            var t = new TileId { Z = 5, X = 1, Y = 0 };
+            var buffer = new SymbolTileBuffer();
+            Point(buffer, default, 0, "t", null, 1, t);
+            Commit(store, Key(t), store.BeginBuild(Key(t)), buffer);
+
+            var s = new SymbolSnapshot();
+            store.CaptureSnapshot(s);
+            store.Release(Key(t), transferredToCache: false); // store's own reference drops → refs 1 (s only), alive
+            long live0 = SymbolTileBlock.DebugLiveAllocCount;
+
+            store.CaptureSnapshot(s); // store is empty → s.Clear() releases the prior capture → refs 0 → freed
+            Assert.AreEqual(live0 - 1, SymbolTileBlock.DebugLiveAllocCount,
+                "the re-capture must release what the snapshot previously held");
         }
 
         // ═══ §10 D9 — P6: cross-tile identity, no Frankenstein pair ═══
@@ -423,6 +518,8 @@ namespace MapRenderer.Tests.Text
                 "only the finer tile's icon survives — the coarser tile's rider (its owner lost the race) is never emitted alone");
             Assert.AreEqual(SymbolTileKey.Pack(tileB), result.OrderedBlocks[result.BlockId[0]].TileKey, "the survivor is tile B's block");
             Assert.AreEqual(0, result.LocalIndex[0], "bIcon is tile B's only (raw index 0) record");
+            store.ReleasePins(snapshot);
+            store.Clear();
         }
 
         // ═══ §10 D9 — P13: no orphan rider, the INTRA-tile departing case (reconciler step (b)) ═══
@@ -480,6 +577,8 @@ namespace MapRenderer.Tests.Text
                 Assert.AreEqual(block.TileKey, prevBlock.TileKey);
                 Assert.AreEqual(block.MaterialIndexes[localIndex], prevBlock.MaterialIndexes[prevLocalIndex]);
             }
+            store.ReleasePins(snapshot);
+            store.Clear();
         }
 
         // Guards against a naive "drop every departing rider" fix: with NO active competitor, the departing
@@ -513,6 +612,8 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(SymbolPairRole.Rider, block.PairRoles[result.LocalIndex[1]]);
             Assert.AreEqual(result.BlockId[0], result.BlockId[1], "the pair shares one block");
             Assert.AreEqual(result.LocalIndex[0] + 1, result.LocalIndex[1], "the rider is the raw record immediately after its owner");
+            store.ReleasePins(snapshot);
+            store.Clear();
         }
     }
 }

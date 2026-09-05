@@ -9,7 +9,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.GeoJson;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Jobs.Tiles;
 

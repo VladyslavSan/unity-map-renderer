@@ -20,8 +20,8 @@ namespace MapRenderer.Tests
     /// the real job is proven separately (Unity-only <c>GlobeSubdivisionJobParityTests</c>) by ORDERED
     /// OUTPUT-STREAM equality — this class must not diverge from that mirror.
     ///
-    /// Engine-free (Unity.Mathematics only) so it runs in BOTH the Unity EditMode runner and the fast
-    /// dotnet core-tests, exactly like <see cref="MeshCoverageValidator"/>.
+    /// Unity EditMode only, like <see cref="MeshCoverageValidator"/> — it depends on
+    /// <c>MapRenderer.Jobs.Mvt</c> (the decode seam), which <c>Tools/core-tests</c> does not compile.
     ///
     /// Checks — magnitude AND fidelity AND coverage (design §6.2 "severity, not count"):
     ///   • MaxGapFracTile  — the worst render-space T-junction gap, as a fraction of the tile's render-space

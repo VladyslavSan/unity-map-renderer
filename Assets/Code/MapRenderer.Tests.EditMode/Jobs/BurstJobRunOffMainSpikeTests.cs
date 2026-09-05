@@ -18,7 +18,9 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Lines;
+using MapRenderer.Jobs.Projection;
 using MapRenderer.Unity.Rendering.Tile;
 
 namespace MapRenderer.Tests.Jobs
@@ -98,7 +100,7 @@ namespace MapRenderer.Tests.Jobs
                         Assert.AreEqual(refOut[i].z, workerOut[i].z, 1e-9f, $"v[{i}].z off-main == main");
                     }
                 }
-                finally { if (workerOut.IsCreated) workerOut.Dispose(); }
+                finally { workerOut.Dispose(); }
             }
             finally { refOut.Dispose(); refUp.Dispose(); }
         }
@@ -165,11 +167,11 @@ namespace MapRenderer.Tests.Jobs
             int idxCount = -1;
             var result = RunOnWorker(() =>
             {
-                // CCW unit square, no holes: polyVC=4 → scratchCap=4, idxCap=6.
+                // CCW unit square, no holes: polyVC=4 → workCap=4, idxCap=6.
                 var verts   = new NativeArray<double2>(4, Allocator.Persistent);
-                var holeCnt = new NativeArray<int>(1, Allocator.Persistent);
+                var sortedHoleCounts = new NativeArray<int>(1, Allocator.Persistent);
                 var outIdx  = new NativeArray<int>(6, Allocator.Persistent);
-                var outCnt  = new NativeArray<int>(1, Allocator.Persistent);
+                var outIndexCount  = new NativeArray<int>(1, Allocator.Persistent);
                 var force   = new NativeArray<int>(1, Allocator.Persistent);
                 var mergedVC = new NativeArray<int>(1, Allocator.Persistent);
                 var vx = new NativeArray<double>(4, Allocator.Persistent);
@@ -189,19 +191,19 @@ namespace MapRenderer.Tests.Jobs
                     new EarcutJob
                     {
                         PolyVertices = verts, OuterCount = 4,
-                        SortedHoleCounts = holeCnt, HoleCount = 0,
+                        SortedHoleCounts = sortedHoleCounts, HoleCount = 0,
                         OutIndices = outIdx, OutIndexOffset = 0,
-                        OutIndexCount = outCnt, OutForceClipCount = force,
+                        OutIndexCount = outIndexCount, OutForceClipCount = force,
                         OutMergedVertexCount = mergedVC,
                         Vx = vx, Vy = vy, Prev = prev, Next = next,
                         IsBridgeCopy = isBridge, Removed = removed, IsEar = isEar,
                     }.Run();
 
-                    return outCnt[0];
+                    return outIndexCount[0];
                 }
                 finally
                 {
-                    verts.Dispose(); holeCnt.Dispose(); outIdx.Dispose(); outCnt.Dispose(); force.Dispose();
+                    verts.Dispose(); sortedHoleCounts.Dispose(); outIdx.Dispose(); outIndexCount.Dispose(); force.Dispose();
                     mergedVC.Dispose();
                     vx.Dispose(); vy.Dispose(); prev.Dispose(); next.Dispose();
                     isBridge.Dispose(); removed.Dispose(); isEar.Dispose();

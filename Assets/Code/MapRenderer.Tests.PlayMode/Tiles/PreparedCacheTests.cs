@@ -16,7 +16,7 @@ using UnityEngine.TestTools;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
@@ -57,7 +57,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         }
 
         /// <summary>
-        /// Independent ground truth: the uniform baked vertex color a FRESH <see cref="StyledFillTileBuilder.WriteMeshData"/>
+        /// Independent ground truth: the uniform baked vertex color a FRESH <see cref="SyncMeshWrite.Fill"/>
         /// call produces at <paramref name="zoom"/>, built directly from Core (never TileManager/MapView).
         /// </summary>
         private static Color GroundTruthColorAtZoom(byte[] mvtBytes, StyleDocument style, TileId id, double zoom)
@@ -76,7 +76,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             var mda = MeshDataPayload.AllocateTracked(1);
             TileGeometryBuffers geometry = mvtLayer.Geometry; // BORROWED (IR C1 P3) — the tile owns it
             int vc; Bounds b;
-            StyledFillTileBuilder.WriteMeshData(mda[0], features, geometry, paint, zoom, tileOrigin, out vc, out b);
+            SyncMeshWrite.Fill(mda[0], features, geometry, paint, zoom, tileOrigin, out vc, out b);
             Assert.Greater(vc, 0, "Ground-truth build must produce geometry.");
 
             var payload = new MeshDataPayload(mda, vc, b, "ground-truth", materialIndex: 0);
@@ -183,7 +183,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.LateUpdate(); // the recompute (cover diff + probe) runs in THIS tick
-                int kicksOnRevisitTick = view.MeshBuildsKickedLastTick();
+                int kicksOnRevisitTick = view.TileBuildsStartedLastTick();
                 int hitsOnRevisitTick  = view.PreparedCacheHits();
                 yield return PumpUntilSettled(view);
 
@@ -254,7 +254,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0, Zoom = Z2 });
                 view.LateUpdate();
-                int kicksOnRevisit = view.MeshBuildsKickedLastTick();
+                int kicksOnRevisit = view.TileBuildsStartedLastTick();
                 yield return PumpUntilSettled(view);
 
                 Assert.IsTrue(view.TryGetBuiltTile(TrackedTile));
@@ -306,7 +306,12 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.LateUpdate();
-                Assert.AreEqual(0, view.MeshBuildsKickedLastTick(), "Revisit must be a hit, not a re-prepare.");
+                // TileBuildsStartedLastTick counts tiles admitted, not budget units — job-scheduling-design.md
+                // §11 fork 2 deleted the two-units-per-tile charge this assertion used to ride on top of. It
+                // no longer catches a write kick on a DIFFERENT cover tile during this same Tick (started <=
+                // the old kicked count, always); it still asserts exactly what this test claims — a revisit
+                // is a hit, not a re-prepare.
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(), "Revisit must be a hit, not a re-prepare.");
                 yield return PumpUntilSettled(view);
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,
                     "After a cache-hit revisit, NativeArray count must remain at baseline.");

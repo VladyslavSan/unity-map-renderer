@@ -178,27 +178,27 @@ namespace MapRenderer.Tests.Text.Placement
             using var plan = new TestSymbolPlan(projection);
             try
             {
-                var zeroScratch = new SymbolTileBuffer();
-                TestSymbolTileBuffer.AddPoint(zeroScratch, anchorRender, quads, bounds.Min, bounds.Max,
+                var zeroBuffer = new SymbolTileBuffer();
+                TestSymbolTileBuffer.AddPoint(zeroBuffer, anchorRender, quads, bounds.Min, bounds.Max,
                     paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: zeroTileKey);
                 using (var snapZero = new SnapshotRenderer(Size, Size))
                 {
                     // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                    system.Tick(in frame, plan.Build(zeroScratch), atlasTexture);
-                    system.Tick(in frame, plan.Build(zeroScratch), atlasTexture);
+                    system.Tick(in frame, plan.Build(zeroBuffer), atlasTexture);
+                    system.Tick(in frame, plan.Build(zeroBuffer), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (zero-AnchorLocal case): must not be culled.");
                     snapZero.Render(uCam);
                     zeroPixels = (byte[])snapZero.RawPixels.Clone();
                 }
 
-                var nonzeroScratch = new SymbolTileBuffer();
-                TestSymbolTileBuffer.AddPoint(nonzeroScratch, anchorRender, quads, bounds.Min, bounds.Max,
+                var nonzeroBuffer = new SymbolTileBuffer();
+                TestSymbolTileBuffer.AddPoint(nonzeroBuffer, anchorRender, quads, bounds.Min, bounds.Max,
                     paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: nonzeroTileKey);
                 using (var snapNonzero = new SnapshotRenderer(Size, Size))
                 {
                     // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
-                    system.Tick(in frame, plan.Build(nonzeroScratch), atlasTexture);
-                    system.Tick(in frame, plan.Build(nonzeroScratch), atlasTexture);
+                    system.Tick(in frame, plan.Build(nonzeroBuffer), atlasTexture);
+                    system.Tick(in frame, plan.Build(nonzeroBuffer), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (nonzero-AnchorLocal case): must not be culled.");
                     snapNonzero.Render(uCam);
                     nonzeroPixels = (byte[])snapNonzero.RawPixels.Clone();

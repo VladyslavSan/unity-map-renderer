@@ -1,13 +1,17 @@
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
+using System.Threading;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
@@ -22,14 +26,19 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// stream write), but the two geometry kinds diverge structurally:
     ///
     /// <list type="bullet">
-    /// <item><b>Roof</b> reuses <see cref="FillMeshPipeline.Schedule"/> UNCHANGED (the same earcut+project
+    /// <item><b>Roof</b> reuses <see cref="FillMeshGraph.Schedule"/> UNCHANGED (the same earcut+project
     /// chain the flat fill uses) — the roof is exactly a fill polygon at elevation 0, extruded in the VS.</item>
     /// <item><b>Walls</b> are NOT earcut output: they walk the RAW ring vertex sequences directly off the
     /// <b>borrowed</b> <see cref="TileGeometryBuffers"/> (before triangulation, so no bridge-copy duplicate
     /// vertices or hole-order permutation), one quad per boundary edge (both exterior AND hole rings — a
-    /// courtyard hole needs interior walls too). Each edge's world position is projected on the spot via
-    /// <see cref="TileToGeoJob.GeoAt"/> + <see cref="MapRenderer.Core.Geo.IProjection.ProjectPoint"/> (plain
-    /// C# loop, not a scheduled job — wall vertex counts are small next to a tile's triangulated roof).</item>
+    /// courtyard hole needs interior walls too). The ring gather (<see cref="RingSelectJob"/>), tile→geo
+    /// (<see cref="TileToGeoJob"/>), projection (<see cref="ProjectionDispatch"/>) and quad emission
+    /// (<c>WallQuadJob</c>, <c>StyledFillExtrusionTileBuilder.WallJob.cs</c>) are four Burst nodes SCHEDULED
+    /// by <see cref="FillExtrusionMeshGraph.Schedule"/> alongside the roof (job-scheduling-design.md §8 stage
+    /// 5, the wall-job stage) — this class no longer runs them synchronously; see that type's own doc.
+    /// "Byte-identical" is NOT inherited at the managed-vs-Burst projection boundary — see job-scheduling-
+    /// design.md §8 stage 5's opening invariant block (shared preamble, not line-specific) for the measured
+    /// per-field bound.</item>
     /// </list>
     ///
     /// <para><b>metres→world (OQ1, C1-A):</b> height is applied ENTIRELY in the vertex shader along a baked
@@ -66,13 +75,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// Clean-room: design follows the MapLibre Style Spec + this repo's own §2/§7 math. No MapLibre source
     /// read.
     /// </summary>
-    public static class StyledFillExtrusionTileBuilder
+    public static partial class StyledFillExtrusionTileBuilder
     {
         // Skip Unity's main-thread index validation / bounds recompute — same contract as StyledFillTileBuilder.
         private const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        private static readonly IProjection DefaultProjection = new WebMercatorProjection();
+        // internal, not private (vestige sweep): a test-assembly caller (via InternalsVisibleTo) reads this
+        // default the same way WriteMeshData used to, before it moved to the test assembly.
+        internal static readonly IProjection DefaultProjection = new WebMercatorProjection();
 
         /// <summary>
         /// Interleaved stream-0 payload: footprint position (elevation-0, world/origin-relative) + the
@@ -80,7 +91,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// Mirrors <see cref="StyledFillTileBuilder.FillPositionNormal"/>'s shape.
         /// </summary>
         [StructLayout(LayoutKind.Sequential)]
-        private struct PositionNormal
+        internal struct PositionNormal
         {
             public Vector3 Position;
             public Vector3 Normal;
@@ -96,10 +107,97 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// so uniform-only and bake-only both reduce to the plain uniform path when the other is zero.
         /// </summary>
         [StructLayout(LayoutKind.Sequential)]
-        private struct ExtrudeAndBake
+        internal struct ExtrudeAndBake
         {
             public Vector4 ExtrudeUpAndT;
             public Vector2 BakedBaseHeight;
+        }
+
+        /// <summary>
+        /// job-scheduling-design.md §8 stage 5 (the wall-job-graph stage): the wall geometry
+        /// <see cref="FillExtrusionMeshGraph.Schedule"/> builds alongside the roof — native columns owned by
+        /// <c>TileBuildGraph.LayerBuild</c> (production) or the caller directly (a test-assembly caller,
+        /// reached via <c>InternalsVisibleTo</c>), which the write step later appends after the roof
+        /// (<see cref="ScheduleWrite"/>), at indices rebased by the roof's own vertex count. Indices here are
+        /// WALL-LOCAL: the first wall vertex is 0, exactly as the retired managed <c>WriteWalls</c> loop's
+        /// <c>quadBase</c> always was — only the list it counts against moved from a local to this struct's
+        /// field.
+        /// </summary>
+        internal struct WallColumns
+        {
+            /// <summary>Stream-0 payload (footprint position + outward lighting normal) for every wall
+            /// vertex, in the same interleaved layout <see cref="ScheduleWrite"/> copies into the mesh.</summary>
+            public NativeList<PositionNormal> PositionNormal;
+
+            /// <summary>Stream-1 payload (baked extrude-up + t, + the data-driven base/height bake) for
+            /// every wall vertex.</summary>
+            public NativeList<ExtrudeAndBake> Extrude;
+
+            /// <summary>Stream-2 payload (the along-edge tangent) for every wall vertex.</summary>
+            public NativeList<Vector4>        Tangent;
+
+            /// <summary>Stream-3 payload (the feature's linear colour) for every wall vertex.</summary>
+            public NativeList<Vector4>        Color;
+
+            /// <summary>Wall-local triangle indices into the four lists above — see the type doc.</summary>
+            public NativeList<int>            Indices;
+
+            /// <summary>True once minted by <see cref="Allocate"/>; false for a never-allocated
+            /// (<c>default</c>) instance or after <see cref="Dispose"/>. Derived from <see cref="PositionNormal"/>
+            /// rather than stored (F1, review): a stored <c>bool</c> lives on the STRUCT VALUE, so a copy —
+            /// e.g. <c>FillExtrusionGraphOutput.Walls</c>, itself copied again into a local at every call site
+            /// that reads it (<c>ext.Walls</c> in a test-assembly caller, in
+            /// <c>TileBuildGraph.CompleteMeasureAndScheduleWrite</c>, in the parity tests) — would clear only
+            /// ITS OWN flag on dispose, leaving every other copy still reading <c>true</c> — able to decrement
+            /// <see cref="DebugLiveCount"/> a second time if it were ever disposed too. A derived property
+            /// reads the shared native handle instead, so every copy agrees.</summary>
+            internal bool IsCreated => PositionNormal.IsCreated;
+
+            internal int VertexCount => PositionNormal.Length;
+            internal int IndexCount  => Indices.Length;
+
+            private static long _liveCount;
+            private static long _totalCreated;
+
+            /// <summary>Net live <see cref="WallColumns"/> allocated by <see cref="FillExtrusionMeshGraph.Schedule"/>
+            /// but not yet freed by <see cref="Dispose"/> — the <c>FillGraphOutput</c> allocate-and-count
+            /// idiom.</summary>
+            internal static long DebugLiveCount => Interlocked.Read(ref _liveCount);
+
+            /// <summary>Monotonic count ever allocated — the non-vacuity witness a "back to zero" live count
+            /// alone cannot provide.</summary>
+            internal static long DebugTotalCreated => Interlocked.Read(ref _totalCreated);
+
+            internal static WallColumns Allocate()
+            {
+                Interlocked.Increment(ref _liveCount);
+                Interlocked.Increment(ref _totalCreated);
+                return new WallColumns
+                {
+                    PositionNormal = new NativeList<PositionNormal>(Allocator.Persistent),
+                    Extrude        = new NativeList<ExtrudeAndBake>(Allocator.Persistent),
+                    Tangent        = new NativeList<Vector4>(Allocator.Persistent),
+                    Color          = new NativeList<Vector4>(Allocator.Persistent),
+                    Indices        = new NativeList<int>(Allocator.Persistent),
+                };
+            }
+
+            /// <summary>Idempotent — a second call on an already-disposed (or never-created, i.e.
+            /// <c>default</c>) instance is a no-op. <c>internal</c>, matching the type: every call site is a
+            /// direct <c>x.Dispose()</c> in-assembly (<c>FillExtrusionGraphOutput.Dispose</c>,
+            /// <c>TileBuildGraph</c>'s catch/teardown, the parity tests) — no <c>using</c>-declaration or
+            /// <see cref="System.IDisposable"/>-typed reference needs the wider access <c>public</c> would
+            /// buy.</summary>
+            internal void Dispose()
+            {
+                if (!IsCreated) return;
+                PositionNormal.Dispose();
+                Extrude.Dispose();
+                Tangent.Dispose();
+                Color.Dispose();
+                Indices.Dispose();
+                Interlocked.Decrement(ref _liveCount);
+            }
         }
 
         // Position(f3)+Normal(f3) on stream 0; Tangent(f4) on stream 2; Color(f4) on stream 3;
@@ -121,166 +219,230 @@ namespace MapRenderer.Unity.Rendering.Meshing
             new VertexAttributeDescriptor(VertexAttribute.TexCoord4, VertexAttributeFormat.Float32, 2, stream: 1),
         };
 
-        // Roof tangent: constant +X (Mercator east) — same convention StyledFillTileBuilder's FlatTangent
-        // uses; the globe roof path overrides per-vertex with the projection's own east (mirrors WriteGlobeSubdivided).
-        private static readonly Vector4 FlatRoofTangent = new Vector4(1f, 0f, 0f, 1f);
-
         /// <summary>
-        /// Build the mesh for all fill-extrusion features of one style layer (roof + walls) and write it
-        /// directly into <paramref name="md"/>. Mirrors <see cref="StyledFillTileBuilder.WriteMeshData"/>'s
-        /// contract (same borrowed-geometry rules, same MeshData/out-param shape) minus fill-sort-key (no
-        /// fill-extrusion equivalent) and fill-pattern (spec has none for this layer).
+        /// job-scheduling-design.md §8 stage 4: the graph arm's prologue — everything the retired synchronous
+        /// <c>WriteMeshData</c> (vestige sweep: moved to a test-assembly caller, reached via
+        /// <c>InternalsVisibleTo</c>, zero production callers) did BEFORE handing off to the
+        /// roof/wall write, lifted out so a graph-arm processor can run it on the seam and hand the result
+        /// to the pump. Mirrors <see cref="StyledFillTileBuilder.BuildLayerInput"/>'s
+        /// shape exactly: bakes each surviving polygon feature's linear colour (<paramref name="featureColors"/>)
+        /// and data-driven base/height (<paramref name="featureBake"/>), and builds the ring visit order —
+        /// colour, bake, ring visit order, nothing else. The wall geometry moved out of this method
+        /// (job-scheduling-design.md §8 stage 5, the wall-job stage): it is built by
+        /// <see cref="FillExtrusionMeshGraph.Schedule"/> instead, from the SAME borrowed <paramref name="geometry"/>
+        /// this method still selects rings over — see that type's own doc.
+        ///
+        /// <para>Returns <c>default</c> (an uncreated <see cref="FillMeshPipeline.LayerInput"/>, with every
+        /// out-param also left uncreated) when there is no polygon geometry to build — the caller reads
+        /// <c>Input.RingVisitOrder.IsCreated</c> to tell "nothing to build" from a real request. Every
+        /// returned container is created iff the return value is (one fate) — a mid-method throw disposes
+        /// whatever this call had already allocated.</para>
         /// </summary>
-        /// <param name="md">Caller-allocated <c>Mesh.MeshData</c> (count-1 slot) to write into.</param>
-        /// <param name="selectedFeatures">This layer's already-selected, already-filtered features.</param>
-        /// <param name="geometry">The tile's shared geometry buffers — BORROWED; never disposed here.</param>
-        /// <param name="paint">The layer's parsed fill-extrusion paint properties.</param>
-        /// <param name="zoom">Current display zoom, for per-feature paint evaluation.</param>
-        /// <param name="tileOriginRender">The RTC render-space bake origin (docs §5).</param>
-        /// <param name="vertexCount">Out: total vertices written (0 ⇒ <paramref name="md"/> left untouched).</param>
-        /// <param name="bounds">Out: the worker-computed tight AABB.</param>
-        /// <param name="projection">The build projection; <c>null</c> ⇒ Web Mercator.</param>
-        /// <param name="clip">How much of the tile buffer to keep before triangulating; <c>default</c> ⇒ disabled.</param>
-        /// <param name="scratch">Unused by this builder today (no pooled scratch path yet) — accepted only
-        /// to match <see cref="Style.ITileMeshRenderLayer.WriteInto"/>'s call shape.</param>
-        public static void WriteMeshData(
-            Mesh.MeshData                      md,
+        /// <param name="featureColors">Per-feature linear colour, Persistent-allocated and owned by the
+        /// caller from here on.</param>
+        /// <param name="featureBake">Per-feature data-driven base/height bake (x=base, y=height),
+        /// Persistent-allocated and owned by the caller from here on.</param>
+        internal static FillMeshPipeline.LayerInput BuildLayerInput(
             IReadOnlyList<SelectedTileFeature> selectedFeatures,
             TileGeometryBuffers                geometry,
-            FillExtrusion.PaintProperties       paint,
-            double                              zoom,
-            double3                              tileOriginRender,
-            out int                              vertexCount,
-            out Bounds                           bounds,
-            IProjection                          projection = null,
-            TileBufferClip                       clip       = default,
-            TileBuildScratch                     scratch    = null)
+            FillExtrusion.PaintProperties      paint,
+            double                             zoom,
+            double3                            tileOriginRender,
+            out NativeArray<Vector4>           featureColors,
+            out NativeArray<Vector2>           featureBake,
+            IProjection                        projection = null,
+            TileBufferClip                     clip       = default,
+            TileBuildBuffers                   buffers    = null)
         {
-            vertexCount = 0;
-            bounds      = default;
+            featureColors = default;
+            featureBake   = default;
 
             if (selectedFeatures == null || selectedFeatures.Count == 0 || !geometry.IsCreated)
-                return;
+                return default;
 
             IProjection proj = projection ?? DefaultProjection;
 
             // ── Per-feature color + data-driven base/height bake + rank (mirrors StyledFillTileBuilder) ──
-            using var featureColors = new NativeArray<Vector4>(geometry.FeatureCount, Allocator.Persistent);
-            using var featureBake   = new NativeArray<Vector2>(geometry.FeatureCount, Allocator.Persistent); // x=base, y=height
-            using var rankByOrdinal = new NativeArray<int>(geometry.FeatureCount, Allocator.Persistent);
-            NativeArray<Vector4> featureColorsW = featureColors.GetSubArray(0, featureColors.Length);
-            NativeArray<Vector2> featureBakeW   = featureBake.GetSubArray(0, featureBake.Length);
-            NativeArray<int>     rankByOrdinalW = rankByOrdinal.GetSubArray(0, rankByOrdinal.Length);
-            for (int i = 0; i < rankByOrdinalW.Length; i++) rankByOrdinalW[i] = -1; // -1 ⇒ not drawn
-
-            int rank = 0;
-            for (int si = 0; si < selectedFeatures.Count; si++)
-            {
-                SelectedTileFeature selected = selectedFeatures[si];
-                IFeature feature = selected.Feature;
-                if (feature.GeometryType != TileGeometryType.Polygon)
-                    continue;
-
-                Color featureColor = Color.white;
-                if (paint.Color.TryEvaluate(zoom, feature, out var color))
-                    featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
-                Color lin = featureColor.linear; // sRGB→linear off main thread, same as StyledFillTileBuilder
-
-                float featureAlpha = lin.a;
-                if (paint.Opacity.DependsOnFeature && paint.Opacity.TryEvaluate(zoom, feature, out float opacity))
-                    featureAlpha *= opacity;
-                featureColorsW[selected.Ordinal] = new Vector4(lin.r, lin.g, lin.b, featureAlpha);
-
-                // Data-driven base/height: bake the EVALUATED value; constant/zoom stays at 0 here (the
-                // uniform carries it — see BindFillExtrusionPaintToApplier and ExtrudeAndBake's doc).
-                float bakedBase = 0f, bakedHeight = 0f;
-                if (paint.Base.DependsOnFeature && paint.Base.TryEvaluate(zoom, feature, out float b))
-                    bakedBase = b;
-                if (paint.Height.DependsOnFeature && paint.Height.TryEvaluate(zoom, feature, out float h))
-                    bakedHeight = h;
-                featureBakeW[selected.Ordinal] = new Vector2(bakedBase, bakedHeight);
-
-                rankByOrdinalW[selected.Ordinal] = rank++;
-            }
-
-            if (rank == 0)
-                return; // no polygon geometry — md left untouched
-
-            using var ringVisitOrder = BuildRingVisitOrder(geometry, rankByOrdinal, rank);
-
-            // ── Roof: the existing fill pipeline, UNCHANGED. ──────────────────────────────────────
-            TileMeshBuffers roofBuffers = FillMeshPipeline.Schedule(new FillMeshPipeline.LayerInput
-            {
-                Geometry       = geometry,
-                RingVisitOrder = ringVisitOrder,
-                OriginRender   = tileOriginRender,
-                Projection     = proj,
-                Clip           = clip,
-            });
-
-            using var outPosNormal = new NativeList<PositionNormal>(Allocator.Persistent);
-            using var outExtrude   = new NativeList<ExtrudeAndBake>(Allocator.Persistent);
-            using var outTangent   = new NativeList<Vector4>(Allocator.Persistent);
-            using var outColor     = new NativeList<Vector4>(Allocator.Persistent);
-            using var outIndices   = new NativeList<int>(Allocator.Persistent);
-
+            NativeArray<Vector4> colors = new(geometry.FeatureCount, Allocator.Persistent);
+            NativeArray<Vector2> bake   = new(geometry.FeatureCount, Allocator.Persistent); // x=base, y=height
+            NativeArray<int>     order  = default;
             try
             {
-                if (roofBuffers.IsCreated)
+                using var rankByOrdinal = new NativeArray<int>(geometry.FeatureCount, Allocator.Persistent);
+                NativeArray<int> rankByOrdinalW = rankByOrdinal.GetSubArray(0, rankByOrdinal.Length);
+                for (int i = 0; i < rankByOrdinalW.Length; i++) rankByOrdinalW[i] = -1; // -1 ⇒ not drawn
+
+                int rank = 0;
+                for (int si = 0; si < selectedFeatures.Count; si++)
                 {
-                    bool globe = !double.IsInfinity(proj.MaxRefineAngleRad);
-                    if (globe)
-                        WriteGlobeRoof(in roofBuffers, proj, geometry.Tile, geometry.Extent, tileOriginRender, featureColors, featureBake,
-                            outPosNormal, outExtrude, outTangent, outColor, outIndices);
-                    else
-                        WriteFlatRoof(in roofBuffers, geometry.Tile, geometry.Extent, featureColors, featureBake,
-                            outPosNormal, outExtrude, outTangent, outColor, outIndices);
+                    SelectedTileFeature selected = selectedFeatures[si];
+                    IFeature feature = selected.Feature;
+                    if (feature.GeometryType != TileGeometryType.Polygon)
+                        continue;
+
+                    Color featureColor = Color.white;
+                    if (paint.Color.TryEvaluate(zoom, feature, out var color))
+                        featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
+                    Color lin = featureColor.linear; // sRGB→linear off main thread, same as StyledFillTileBuilder
+
+                    float featureAlpha = lin.a;
+                    if (paint.Opacity.DependsOnFeature && paint.Opacity.TryEvaluate(zoom, feature, out float opacity))
+                        featureAlpha *= opacity;
+                    colors[selected.Ordinal] = new Vector4(lin.r, lin.g, lin.b, featureAlpha);
+
+                    // Data-driven base/height: bake the EVALUATED value; constant/zoom stays at 0 here (the
+                    // uniform carries it — see BindFillExtrusionPaintToApplier and ExtrudeAndBake's doc).
+                    float bakedBase = 0f, bakedHeight = 0f;
+                    if (paint.Base.DependsOnFeature && paint.Base.TryEvaluate(zoom, feature, out float b))
+                        bakedBase = b;
+                    if (paint.Height.DependsOnFeature && paint.Height.TryEvaluate(zoom, feature, out float h))
+                        bakedHeight = h;
+                    bake[selected.Ordinal] = new Vector2(bakedBase, bakedHeight);
+
+                    rankByOrdinalW[selected.Ordinal] = rank++;
                 }
 
-                WriteWalls(geometry, ringVisitOrder, proj, tileOriginRender, featureColors, featureBake,
-                    outPosNormal, outExtrude, outTangent, outColor, outIndices);
-
-                int n  = outPosNormal.Length;
-                int ni = outIndices.Length;
-                if (n == 0 || ni == 0)
-                    return;
-
-                md.SetVertexBufferParams(n, VertexDescriptors);
-                NativeArray<PositionNormal>  s0 = md.GetVertexData<PositionNormal>(0);
-                NativeArray<ExtrudeAndBake>  s1 = md.GetVertexData<ExtrudeAndBake>(1);
-                NativeArray<Vector4>         s2 = md.GetVertexData<Vector4>(2);
-                NativeArray<Vector4>         s3 = md.GetVertexData<Vector4>(3);
-                md.SetIndexBufferParams(ni, IndexFormat.UInt32);
-                NativeArray<int> indices = md.GetIndexData<int>();
-
-                float3 bMin = new float3(float.MaxValue);
-                float3 bMax = new float3(float.MinValue);
-                for (int i = 0; i < n; i++)
+                if (rank == 0)
                 {
-                    PositionNormal pn = outPosNormal[i];
-                    s0[i] = pn;
-                    s1[i] = outExtrude[i];
-                    s2[i] = outTangent[i];
-                    s3[i] = outColor[i];
-
-                    float3 p = new float3(pn.Position.x, pn.Position.y, pn.Position.z);
-                    bMin = math.min(bMin, p);
-                    bMax = math.max(bMax, p);
+                    colors.Dispose();
+                    bake.Dispose();
+                    featureColors = default;
+                    featureBake   = default;
+                    return default; // no polygon geometry
                 }
-                for (int i = 0; i < ni; i++) indices[i] = outIndices[i];
 
-                md.subMeshCount = 1;
-                md.SetSubMesh(0, new SubMeshDescriptor(0, ni, MeshTopology.Triangles), NoValidate);
+                order = BuildRingVisitOrder(geometry, rankByOrdinal, rank);
 
-                vertexCount = n;
-                float3 c3 = (bMin + bMax) * 0.5f;
-                float3 sz = bMax - bMin;
-                bounds = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
+                featureColors = colors;
+                featureBake   = bake;
+                return new FillMeshPipeline.LayerInput
+                {
+                    Geometry       = geometry,
+                    RingVisitOrder = order,
+                    OriginRender   = tileOriginRender,
+                    Projection     = proj,
+                    Clip           = clip,
+                };
             }
-            finally
+            catch
             {
-                roofBuffers.Dispose();
+                colors.Dispose();
+                bake.Dispose();
+                order.Dispose();
+                throw;
             }
+        }
+
+        /// <summary>
+        /// job-scheduling-design.md §8 stage 4 Group B: the sizing + <see cref="FillExtrusionStreamWriteJob"/>
+        /// schedule half of <see cref="ScheduleWrite"/>, split out so a test-assembly caller (vestige sweep:
+        /// the verbatim lift of the retired synchronous <c>WriteMeshData</c>, zero production callers,
+        /// reached via <c>InternalsVisibleTo</c>) can run it over its OWN caller-supplied
+        /// <paramref name="md"/> instead of a freshly-minted
+        /// <see cref="Mesh.MeshDataArray"/> — one write job, two callers (that test-assembly caller
+        /// and <see cref="ScheduleWrite"/>), no <c>MeshData</c>-to-<c>MeshData</c> copy. Sizes
+        /// <paramref name="md"/> to the roof's completed measure PLUS <paramref name="walls"/>'s own
+        /// vertex/index count and schedules one <see cref="FillExtrusionStreamWriteJob"/> that writes the
+        /// roof at <c>[0, Vr)</c> then the walls at <c>[Vr, Vr+Vw)</c>, wall indices rebased by <c>+Vr</c>.
+        /// Returns a default (uncreated) <see cref="NativeArray{T}"/> bounds and default handle when there is
+        /// nothing to write — the caller reads <c>Bounds.IsCreated</c> to tell the two apart. Otherwise
+        /// returns UNCOMPLETED — the caller completes the handle before reading bounds, and disposes the
+        /// bounds array itself.
+        ///
+        /// <para><b>Main-thread only</b>: scheduling <see cref="FillExtrusionStreamWriteJob"/> is a Unity
+        /// job-system operation.</para>
+        /// </summary>
+        /// <param name="md">The <c>Mesh.MeshData</c> slot to size and write into — caller-owned.</param>
+        /// <param name="roof">A layer's completed measure-graph output — the empty check below covers BOTH
+        /// the roof and <paramref name="walls"/> (DIV-A5): a faulted or empty roof still lets a hole-less
+        /// footprint's walls alone produce a mesh, matching the managed roof writer's own early-return (an OR
+        /// over BOTH counts, not vertex count alone).
+        /// <para><b>Named, unclosed sub-case (review D2):</b> that OR does NOT fully mirror the managed arm
+        /// for <c>Vr &gt; 0, Ir == 0</c> with non-empty walls — surviving ring vertices whose earcut produces
+        /// zero triangles. Recorded, not closed: see job-scheduling-design.md §8 stage 4's own note; closing
+        /// it needs an explicit roof-vertex-count field on the job, real work for an apparently unreachable
+        /// case.</para></param>
+        /// <param name="featureColors">Per-feature linear colour, indexed by the roof's own
+        /// <c>VertexFeatureIdx</c>.</param>
+        /// <param name="featureBake">Per-feature data-driven base/height bake, indexed the same way.</param>
+        /// <param name="walls">This layer's wall geometry, fully computed by
+        /// <see cref="FillExtrusionMeshGraph.Schedule"/> — copied verbatim into the mesh, never recomputed
+        /// here.</param>
+        /// <param name="projection">The layer's build projection — decides the roof's globe/flat arm.</param>
+        /// <param name="tile">The layer's tile address — feeds the per-vertex sec φ bake on the flat arm.</param>
+        /// <param name="extent">The layer's tile extent — feeds the same sec φ bake.</param>
+        /// <remarks><c>internal</c>, not <c>private</c> (vestige sweep): the production write node,
+        /// <see cref="ScheduleWrite"/>, plus a test-assembly caller reached
+        /// through <c>MapRenderer.Unity</c>'s own <c>InternalsVisibleTo("MapRenderer.Tests.Shared")</c>
+        /// grant.</remarks>
+        internal static (JobHandle Handle, NativeArray<float3x2> Bounds) ScheduleStreamWrite(
+            Mesh.MeshData md, FillGraphOutput roof, NativeArray<Vector4> featureColors, NativeArray<Vector2> featureBake,
+            WallColumns walls, IProjection projection, TileId tile, double extent)
+        {
+            int vr = roof.IsCreated ? roof.TileVertices.Length : 0;
+            int ir = roof.IsCreated ? roof.TriangleIndices.Length : 0;
+            // IsCreated-guarded (R5): FillExtrusionMeshGraph.Schedule's empty guard (RingVisitOrder.Length ==
+            // 0, a check BuildLayerInput's old inline WriteWalls path never applied) can return an UNCREATED
+            // Walls — neither caller (production's ScheduleWrite nor a test-assembly caller)
+            // has an IsCreated skip of its own before reaching this shared site,
+            // so an unguarded walls.VertexCount/IndexCount would throw on NativeList.Length against a default list.
+            int vw = walls.IsCreated ? walls.VertexCount : 0;
+            int iw = walls.IsCreated ? walls.IndexCount : 0;
+
+            if (vr + vw == 0 || ir + iw == 0)
+                return default;
+
+            md.SetVertexBufferParams(vr + vw, VertexDescriptors);
+            md.SetIndexBufferParams(ir + iw, IndexFormat.UInt32);
+            md.subMeshCount = 1;
+            md.SetSubMesh(0, new SubMeshDescriptor(0, ir + iw, MeshTopology.Triangles), NoValidate);
+
+            var bounds = new NativeArray<float3x2>(1, Allocator.Persistent);
+            bool globe = !double.IsInfinity(projection.MaxRefineAngleRad);
+
+            JobHandle handle = new FillExtrusionStreamWriteJob
+            {
+                WorldPositions = roof.WorldPositions, VertexUp = roof.VertexUp, VertexEast = roof.VertexEast,
+                TileVertices = roof.TileVertices, VertexFeatureIdx = roof.VertexFeatureIdx,
+                TriangleIndices = roof.TriangleIndices,
+                FeatureColors = featureColors, FeatureBake = featureBake,
+                WallPositionNormal = walls.PositionNormal, WallExtrude = walls.Extrude, WallTangent = walls.Tangent,
+                WallColor = walls.Color, WallIndices = walls.Indices,
+                Tile = tile, Extent = extent, Globe = globe,
+                Md = md, OutBounds = bounds,
+            }.Schedule();
+
+            return (handle, bounds);
+        }
+
+        /// <summary>
+        /// job-scheduling-design.md §8 stage 4: the write graph's node for one non-empty extrusion layer —
+        /// the extrusion-specific mirror of <see cref="StyledFillTileBuilder.ScheduleWrite"/>. Allocates one
+        /// exact-size <see cref="Mesh.MeshDataArray"/> and hands it to <see cref="ScheduleStreamWrite"/>.
+        /// Returns UNCOMPLETED — the caller polls/completes <see cref="MeshWriteOutput.Handle"/> before
+        /// taking the payload.
+        /// </summary>
+        internal static MeshWriteOutput ScheduleWrite(
+            FillGraphOutput roof, NativeArray<Vector4> featureColors, NativeArray<Vector2> featureBake,
+            WallColumns walls, IProjection projection, TileId tile, double extent)
+        {
+            int vr = roof.IsCreated ? roof.TileVertices.Length : 0;
+            int vw = walls.VertexCount;
+
+            Mesh.MeshDataArray mda = MeshDataPayload.AllocateTracked(1);
+            (JobHandle handle, NativeArray<float3x2> bounds) =
+                ScheduleStreamWrite(mda[0], roof, featureColors, featureBake, walls, projection, tile, extent);
+
+            if (!bounds.IsCreated)
+            {
+                mda.Dispose();
+                return default;
+            }
+
+            return new MeshWriteOutput
+            {
+                Mda = mda, Bounds = bounds, VertexCount = vr + vw, Handle = handle, IsCreated = true,
+            };
         }
 
         /// <summary>
@@ -319,175 +481,6 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// tile can span enough latitude that a per-tile constant would be visibly wrong; see T2).</summary>
         private static double MetresToWorldFactor(bool globe, double latitudeDegrees)
             => globe ? 1.0 : 1.0 / math.cos(latitudeDegrees * math.PI_DBL / 180.0);
-
-        // ── Roof: flat (Mercator) path ─────────────────────────────────────────────────────────────
-        private static void WriteFlatRoof(
-            in TileMeshBuffers buffers, TileId tile, double extent,
-            NativeArray<Vector4> featureColors, NativeArray<Vector2> featureBake,
-            NativeList<PositionNormal> outPosNormal, NativeList<ExtrudeAndBake> outExtrude,
-            NativeList<Vector4> outTangent, NativeList<Vector4> outColor, NativeList<int> outIndices)
-        {
-            int totalVerts   = buffers.VertexCount[0];
-            int totalIndices = buffers.TotalIndexCount;
-            if (totalVerts == 0 || totalIndices == 0) return;
-
-            int baseIndex = outPosNormal.Length;
-            for (int i = 0; i < totalVerts; i++)
-            {
-                float3 v  = (float3)buffers.WorldPositions[i];
-                float3 up = (float3)buffers.VertexUp[i]; // unit — StyledFillTileBuilder's normal convention
-                double2 tv = buffers.TileVertices[i];
-                double lat = TileToGeoJob.GeoAt(tile, extent, tv).Latitude;
-                double f   = MetresToWorldFactor(globe: false, lat);
-
-                outPosNormal.Add(new PositionNormal { Position = new Vector3(v.x, v.y, v.z), Normal = new Vector3(up.x, up.y, up.z) });
-                outExtrude.Add(new ExtrudeAndBake
-                {
-                    ExtrudeUpAndT   = new Vector4((float)(up.x * f), (float)(up.y * f), (float)(up.z * f), 1f), // t=1 roof
-                    BakedBaseHeight = featureBake[buffers.VertexFeatureIdx[i]],
-                });
-                outTangent.Add(FlatRoofTangent);
-                outColor.Add(featureColors[buffers.VertexFeatureIdx[i]]);
-            }
-
-            // Reverse triangle winding at this GPU-index boundary — same convention as StyledFillTileBuilder
-            // (canonical earcut IR is CCW-in-tile-space; swap 2nd/3rd index for Unity-front under Cull Back).
-            for (int i = 0; i + 2 < totalIndices; i += 3)
-            {
-                outIndices.Add(baseIndex + buffers.TriangleIndices[i + 0]);
-                outIndices.Add(baseIndex + buffers.TriangleIndices[i + 2]);
-                outIndices.Add(baseIndex + buffers.TriangleIndices[i + 1]);
-            }
-        }
-
-        // ── Roof: globe (curved) path — mirrors StyledFillTileBuilder.WriteGlobeSubdivided ────────
-        private static void WriteGlobeRoof(
-            in TileMeshBuffers buffers, IProjection proj, TileId tile, double extent, double3 originRender,
-            NativeArray<Vector4> featureColors, NativeArray<Vector2> featureBake,
-            NativeList<PositionNormal> outPosNormal, NativeList<ExtrudeAndBake> outExtrude,
-            NativeList<Vector4> outTangent, NativeList<Vector4> outColor, NativeList<int> outIndices)
-        {
-            int srcVerts   = buffers.VertexCount[0];
-            int srcIndices = buffers.TotalIndexCount;
-            if (srcVerts == 0 || srcIndices == 0) return;
-
-            using var subV  = new NativeList<GlobeFillVertex>(srcVerts * 4, Allocator.Persistent);
-            using var subIx = new NativeList<int>(srcIndices * 4, Allocator.Persistent);
-
-            GlobeFillSubdivideDispatch.Run(
-                proj, buffers.TileVertices, buffers.TriangleIndices, buffers.VertexFeatureIdx,
-                srcVerts, srcIndices, tile, extent, originRender,
-                GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
-                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices, subV, subIx);
-
-            int n = subV.Length, ni = subIx.Length;
-            if (n == 0 || ni == 0) return;
-
-            int baseIndex = outPosNormal.Length;
-            for (int i = 0; i < n; i++)
-            {
-                GlobeFillVertex fv = subV[i];
-                float3 v    = (float3)fv.World;
-                float3 up   = (float3)fv.Up; // unit
-                float3 east = (float3)fv.East;
-                // Globe factor = 1.0 (OQ1) — extrudeUp is the plain surface up, un-scaled.
-                outPosNormal.Add(new PositionNormal { Position = new Vector3(v.x, v.y, v.z), Normal = new Vector3(up.x, up.y, up.z) });
-                outExtrude.Add(new ExtrudeAndBake
-                {
-                    ExtrudeUpAndT   = new Vector4(up.x, up.y, up.z, 1f), // t=1 roof
-                    BakedBaseHeight = featureBake[fv.Feature],
-                });
-                outTangent.Add(new Vector4(east.x, east.y, east.z, 1f)); // matches the flat-fill globe TBN handedness
-                outColor.Add(featureColors[fv.Feature]);
-            }
-
-            for (int i = 0; i + 2 < ni; i += 3)
-            {
-                outIndices.Add(baseIndex + subIx[i + 0]);
-                outIndices.Add(baseIndex + subIx[i + 2]);
-                outIndices.Add(baseIndex + subIx[i + 1]);
-            }
-        }
-
-        // ── Walls: one quad per boundary edge, over the RAW (pre-earcut) ring vertices ─────────────
-        //
-        // Reads geometry.Vertices/RingOffsets/RingFeatureIdx directly off the BORROWED shared buffer — the
-        // same rings ringVisitOrder names for the roof, but walked in their OWN stored order (never earcut's
-        // merged/bridged order, which duplicates and reorders boundary vertices). Rings are implicitly
-        // closed (MvtDecodeJob: "first vertex not repeated") — edges wrap via (i+1)%len, matching
-        // RingAssemblyJob's own area/shoelace convention.
-        private static void WriteWalls(
-            TileGeometryBuffers geometry, NativeArray<int> ringVisitOrder, IProjection proj, double3 originRender,
-            NativeArray<Vector4> featureColors, NativeArray<Vector2> featureBake,
-            NativeList<PositionNormal> outPosNormal, NativeList<ExtrudeAndBake> outExtrude,
-            NativeList<Vector4> outTangent, NativeList<Vector4> outColor, NativeList<int> outIndices)
-        {
-            bool globe = !double.IsInfinity(proj.MaxRefineAngleRad);
-            TileId tile = geometry.Tile;
-            double extent = geometry.Extent;
-
-            for (int k = 0; k < ringVisitOrder.Length; k++)
-            {
-                int ri = ringVisitOrder[k];
-                int start = geometry.RingOffsets[ri];
-                int len   = geometry.RingOffsets[ri + 1] - start;
-                if (len < 2) continue; // degenerate ring — no edges
-
-                Vector4 color = featureColors[geometry.RingFeatureIdx[ri]];
-                Vector2 bake  = featureBake[geometry.RingFeatureIdx[ri]];
-
-                for (int i = 0; i < len; i++)
-                {
-                    // A = this ring vertex, B = the next (edges wrap via (i+1)%len). The A/B order does not
-                    // affect front-face correctness: swapping it negates BOTH the geometric face normal and
-                    // the 'outward' lighting normal below, leaving their alignment (and the render winding)
-                    // invariant — see the class doc's "Wall winding" note.
-                    int idxA = i;
-                    int idxB = (i + 1) % len;
-
-                    double2 tileA = geometry.Vertices[start + idxA];
-                    double2 tileB = geometry.Vertices[start + idxB];
-
-                    GeoCoordinate geoA = TileToGeoJob.GeoAt(tile, extent, tileA);
-                    GeoCoordinate geoB = TileToGeoJob.GeoAt(tile, extent, tileB);
-                    ProjectedPoint ppA = proj.ProjectPoint(in geoA);
-                    ProjectedPoint ppB = proj.ProjectPoint(in geoB);
-
-                    float3 posA = (float3)(ppA.World - originRender);
-                    float3 posB = (float3)(ppB.World - originRender);
-                    float3 upA  = math.normalize((float3)ppA.Up);
-                    float3 upB  = math.normalize((float3)ppB.Up);
-
-                    double factorA = MetresToWorldFactor(globe, geoA.Latitude);
-                    double factorB = MetresToWorldFactor(globe, geoB.Latitude);
-                    float3 extrudeUpA = upA * (float)factorA;
-                    float3 extrudeUpB = upB * (float)factorB;
-
-                    // Outward-horizontal lighting normal + along-edge tangent. cross(edgeDir, up) (NOT
-                    // cross(up, edgeDir)) points AWAY from the interior — verified against the fixture
-                    // centroid in StyledFillExtrusionMeshTests, not derived from handedness (§7.1's lesson).
-                    float3 upAvg   = math.normalize(upA + upB);
-                    float3 edgeDir = math.normalize(posB - posA);
-                    float3 outward = math.normalize(math.cross(edgeDir, upAvg));
-                    Vector3 outwardV3 = new Vector3(outward.x, outward.y, outward.z);
-                    Vector4 tangentV4 = new Vector4(edgeDir.x, edgeDir.y, edgeDir.z, 1f);
-
-                    // 4 verts: floorA(t=0), floorB(t=0), roofB(t=1), roofA(t=1). Floor/roof at the SAME
-                    // point share the SAME computed Position (T1: height-agnostic footprint) — differ only
-                    // by t (+ identical extrudeUp).
-                    int quadBase = outPosNormal.Length;
-                    AddWallVertex(posA, outwardV3, extrudeUpA, 0f, bake, tangentV4, color, outPosNormal, outExtrude, outTangent, outColor);
-                    AddWallVertex(posB, outwardV3, extrudeUpB, 0f, bake, tangentV4, color, outPosNormal, outExtrude, outTangent, outColor);
-                    AddWallVertex(posB, outwardV3, extrudeUpB, 1f, bake, tangentV4, color, outPosNormal, outExtrude, outTangent, outColor);
-                    AddWallVertex(posA, outwardV3, extrudeUpA, 1f, bake, tangentV4, color, outPosNormal, outExtrude, outTangent, outColor);
-
-                    // quadBase+0=floorA, +1=floorB, +2=roofB, +3=roofA — two triangles whose winding puts the
-                    // render front face along `outward` (pinned by StyledFillExtrusionMeshTests' T6).
-                    outIndices.Add(quadBase + 0); outIndices.Add(quadBase + 1); outIndices.Add(quadBase + 2);
-                    outIndices.Add(quadBase + 0); outIndices.Add(quadBase + 2); outIndices.Add(quadBase + 3);
-                }
-            }
-        }
 
         private static void AddWallVertex(
             float3 position, Vector3 normal, float3 extrudeUp, float t, Vector2 bake, Vector4 tangent, Vector4 color,

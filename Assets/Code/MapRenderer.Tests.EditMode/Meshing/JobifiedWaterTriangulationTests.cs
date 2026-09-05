@@ -1,5 +1,6 @@
 // Unity EditMode only — uses NativeArray, Burst jobs (FillMeshPipeline). NOT included in
-// Tools/core-tests/core-tests.csproj (see WaterTriangulationTests.cs for the engine-free twin).
+// Tools/core-tests/core-tests.csproj (see WaterTriangulationTests.cs for the managed twin — also Unity
+// EditMode only, since it now depends on MapRenderer.Jobs.Mvt).
 
 using System.Collections.Generic;
 using System.IO;
@@ -10,7 +11,8 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Expressions;
@@ -19,12 +21,12 @@ namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
     /// mesh-triangulation-robustness Stage 3 acceptance tooth (plan Edit 4): drives the REAL jobified
-    /// fill path — <see cref="FillMeshPipeline.Schedule"/>, the Burst <see cref="EarcutJob"/> — over the
+    /// fill path — <see cref="FillMeshGraph.Schedule"/>, the Burst <see cref="EarcutJob"/> — over the
     /// committed corpus water tile, and validates the output has no folds and conserves area. This is the
     /// jobified analogue of <c>WaterTriangulationTests</c> (which only exercises the managed twin via
-    /// <c>Earcut.Triangulate</c>, engine-free); it is the tooth that actually proves the VISIBLE render
+    /// <c>Earcut.Triangulate</c>); it is the tooth that actually proves the VISIBLE render
     /// path is fixed, since production fill meshes are built exclusively through
-    /// <c>StyledFillTileBuilder</c> → <c>FillMeshPipeline</c> → <see cref="EarcutJob"/> (the managed
+    /// <c>StyledFillTileBuilder</c> → <c>FillMeshGraph</c> → <see cref="EarcutBatchJob"/> (the managed
     /// <c>Earcut</c> is a differential oracle only, never in the render path).
     /// </summary>
     public class JobifiedWaterTriangulationTests
@@ -70,14 +72,16 @@ namespace MapRenderer.Tests.Meshing
                 Geometry       = geometry,
                 RingVisitOrder = visitOrder,
                 OriginRender   = new double3(bMin.x, 0.0, bMin.y),
+                Projection     = new WebMercatorProjection(), // was implicit (null ⇒ Mercator); now explicit
             };
 
-            TileMeshBuffers buffers = FillMeshPipeline.Schedule(pipelineInput);
+            FillGraphOutput buffers = FillMeshGraph.Schedule(pipelineInput);
+            buffers.Handle.Complete();
             try
             {
                 Assert.IsTrue(buffers.IsCreated, "jobified pipeline produced no buffers for a tile with water polygons");
 
-                int indexCount = buffers.TotalIndexCount;
+                int indexCount = buffers.TriangleIndices.Length;
                 var tris = new List<(double2 a, double2 b, double2 c)>(indexCount / 3);
                 for (int i = 0; i + 2 < indexCount; i += 3)
                 {
@@ -88,7 +92,7 @@ namespace MapRenderer.Tests.Meshing
                 }
 
                 var rep = MeshCoverageValidator.ValidateTriangulation(
-                    groundTruthPolys, tris, buffers.TotalForceClipCount, (int)extent);
+                    groundTruthPolys, tris, buffers.Counts[0].ForceClipCount, (int)extent);
 
                 Assert.IsTrue(rep.Passes(areaEps: 0.01, mismatchEps: 1.0),
                     "jobified (Burst EarcutJob) water z8/135/80 triangulation is broken: " +

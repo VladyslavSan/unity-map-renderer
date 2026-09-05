@@ -4,7 +4,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geometry
 {
     /// <summary>
-    /// Groups a feature's decoded MVT rings (as produced by MapRenderer.Jobs.MvtDecodeJob) into polygons with explicit
+    /// Groups a feature's decoded MVT rings (as produced by MvtDecodeJob) into polygons with explicit
     /// outer + hole lists. Classification uses the signed-area sign relative to the first ring of
     /// this feature, per the MVT spec ordering guarantee: exterior rings come first, holes follow.
     ///

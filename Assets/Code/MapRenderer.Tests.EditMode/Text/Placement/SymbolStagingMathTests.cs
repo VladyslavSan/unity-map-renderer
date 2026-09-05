@@ -277,12 +277,12 @@ namespace MapRenderer.Tests.Text.Placement
             long fid = SymbolStagingMath.LineFadeId(9, 0, 3, 0);
             var fadeIds    = new[] { fid, SymbolStagingMath.LineFadeId(9, 0, 3, -1) };
             var wasPlaced  = new byte[] { 0, 0 };
-            var pathScratch = new float2[2];
-            var cumScratch  = new float[2];
+            var pathPoints = new float2[2];
+            var cumulativeLengths  = new float[2];
             var p = Pools.New();
 
             int staged = SymbolStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath, glyphs, anchors,
-                fadeIds, wasPlaced, pathScratch, cumScratch, bearingRadians: 0f, view: default, ordinal: 0,
+                fadeIds, wasPlaced, pathPoints, cumulativeLengths, bearingRadians: 0f, view: default, ordinal: 0,
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);

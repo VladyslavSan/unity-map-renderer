@@ -8,14 +8,15 @@ using Unity.Collections;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.GeoJson;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests.Jobs
 {
     /// <summary>
-    /// IR stage B2: the teeth on Waist 1's producer seam as seen from <c>FillMeshPipeline.Schedule</c>.
+    /// IR stage B2: the teeth on Waist 1's producer seam as seen from <c>FillMeshGraph.Schedule</c>.
     ///
     /// <para>The fixture is one GeoJSON polygon <b>with a hole</b>, authored by inverting a chosen tile's own
     /// <c>ToLonLat</c> so both rings land on exact tile-local integers well inside the tile, and sliced by the
@@ -54,8 +55,8 @@ namespace MapRenderer.Tests.Jobs
             TileSlice slice = SliceFixture(ExtentHigh);
             AssertFixtureShape(slice, ExtentHigh);
 
-            TileMeshBuffers geoJson = RunGeoJson(ExtentHigh, TileBufferClip.Disabled, slice);
-            TileMeshBuffers mvt     = RunMvt(slice, TileBufferClip.Disabled);
+            FillGraphOutput geoJson = RunGeoJson(ExtentHigh, TileBufferClip.Disabled, slice);
+            FillGraphOutput mvt     = RunMvt(slice, TileBufferClip.Disabled);
 
             try
             {
@@ -65,20 +66,20 @@ namespace MapRenderer.Tests.Jobs
                     "the fixture must not sit at the extent every other fill fixture uses");
                 Assert.IsTrue(geoJson.IsCreated, "the GeoJSON arm produced no buffers");
                 Assert.IsTrue(mvt.IsCreated, "the MVT arm produced no buffers");
-                Assert.Greater(geoJson.VertexCount[0], 0, "the GeoJSON arm produced no vertices");
-                Assert.GreaterOrEqual(geoJson.TotalIndexCount, 3, "the GeoJSON arm produced no triangles");
-                Assert.AreEqual(1, geoJson.PolygonCount[0], "precondition: exactly one polygon");
-                Assert.AreEqual(1, geoJson.HoleCount[0],
+                Assert.Greater(geoJson.TileVertices.Length, 0, "the GeoJSON arm produced no vertices");
+                Assert.GreaterOrEqual(geoJson.TriangleIndices.Length, 3, "the GeoJSON arm produced no triangles");
+                Assert.AreEqual(1, geoJson.Counts[0].PolygonCount, "precondition: exactly one polygon");
+                Assert.AreEqual(1, geoJson.Counts[0].HoleCount,
                     "precondition: the hole path in RingAssemblyJob + EarcutJob really ran");
-                Assert.AreEqual(2, geoJson.RingCount[0], "precondition: exterior + hole reached assembly");
+                Assert.AreEqual(2, geoJson.Counts[0].RingCount, "precondition: exterior + hole reached assembly");
 
-                Assert.AreEqual(geoJson.VertexCount[0], mvt.VertexCount[0], "vertex counts must match");
-                Assert.AreEqual(geoJson.PolygonCount[0], mvt.PolygonCount[0], "polygon counts must match");
-                Assert.AreEqual(geoJson.RingCount[0], mvt.RingCount[0], "ring counts must match");
-                Assert.AreEqual(geoJson.HoleCount[0], mvt.HoleCount[0], "hole counts must match");
-                Assert.AreEqual(geoJson.TotalIndexCount, mvt.TotalIndexCount, "index counts must match");
+                Assert.AreEqual(geoJson.TileVertices.Length, mvt.TileVertices.Length, "vertex counts must match");
+                Assert.AreEqual(geoJson.Counts[0].PolygonCount, mvt.Counts[0].PolygonCount, "polygon counts must match");
+                Assert.AreEqual(geoJson.Counts[0].RingCount, mvt.Counts[0].RingCount, "ring counts must match");
+                Assert.AreEqual(geoJson.Counts[0].HoleCount, mvt.Counts[0].HoleCount, "hole counts must match");
+                Assert.AreEqual(geoJson.TriangleIndices.Length, mvt.TriangleIndices.Length, "index counts must match");
 
-                for (int i = 0; i < geoJson.VertexCount[0]; i++)
+                for (int i = 0; i < geoJson.TileVertices.Length; i++)
                 {
                     Assert.AreEqual(geoJson.TileVertices[i], mvt.TileVertices[i], $"TileVertices[{i}]");
                     Assert.AreEqual(geoJson.WorldPositions[i].x, mvt.WorldPositions[i].x, $"WorldPositions[{i}].x");
@@ -86,7 +87,7 @@ namespace MapRenderer.Tests.Jobs
                     Assert.AreEqual(geoJson.WorldPositions[i].z, mvt.WorldPositions[i].z, $"WorldPositions[{i}].z");
                 }
 
-                for (int i = 0; i < geoJson.TotalIndexCount; i++)
+                for (int i = 0; i < geoJson.TriangleIndices.Length; i++)
                     Assert.AreEqual(geoJson.TriangleIndices[i], mvt.TriangleIndices[i], $"TriangleIndices[{i}]");
             }
             finally
@@ -120,24 +121,24 @@ namespace MapRenderer.Tests.Jobs
             Assert.Greater(MaxTileLocalX(slice), wrongMax.x,
                 "the fixture must reach past the wrong window's edge, or no window could discriminate");
 
-            TileMeshBuffers unclipped = RunGeoJson(ExtentHigh, TileBufferClip.Disabled, slice);
-            TileMeshBuffers clipped   = RunGeoJson(ExtentHigh, clip, slice);
+            FillGraphOutput unclipped = RunGeoJson(ExtentHigh, TileBufferClip.Disabled, slice);
+            FillGraphOutput clipped   = RunGeoJson(ExtentHigh, clip, slice);
 
             try
             {
                 Assert.IsTrue(unclipped.IsCreated, "the unclipped arm produced no buffers");
                 Assert.IsTrue(clipped.IsCreated, "the clipped arm produced no buffers");
-                Assert.Greater(unclipped.VertexCount[0], 0, "precondition: there is geometry to compare");
-                Assert.AreEqual(1, unclipped.HoleCount[0], "precondition: the hole survived the unclipped arm");
+                Assert.Greater(unclipped.TileVertices.Length, 0, "precondition: there is geometry to compare");
+                Assert.AreEqual(1, unclipped.Counts[0].HoleCount, "precondition: the hole survived the unclipped arm");
 
-                Assert.AreEqual(unclipped.VertexCount[0], clipped.VertexCount[0],
+                Assert.AreEqual(unclipped.TileVertices.Length, clipped.TileVertices.Length,
                     "clipping at the buffer's own extent is a no-op for a fixture wholly inside the window");
-                Assert.AreEqual(unclipped.TotalIndexCount, clipped.TotalIndexCount, "index counts must match");
-                Assert.AreEqual(unclipped.HoleCount[0], clipped.HoleCount[0], "hole counts must match");
+                Assert.AreEqual(unclipped.TriangleIndices.Length, clipped.TriangleIndices.Length, "index counts must match");
+                Assert.AreEqual(unclipped.Counts[0].HoleCount, clipped.Counts[0].HoleCount, "hole counts must match");
 
-                for (int i = 0; i < unclipped.VertexCount[0]; i++)
+                for (int i = 0; i < unclipped.TileVertices.Length; i++)
                     Assert.AreEqual(unclipped.TileVertices[i], clipped.TileVertices[i], $"TileVertices[{i}]");
-                for (int i = 0; i < unclipped.TotalIndexCount; i++)
+                for (int i = 0; i < unclipped.TriangleIndices.Length; i++)
                     Assert.AreEqual(unclipped.TriangleIndices[i], clipped.TriangleIndices[i],
                         $"TriangleIndices[{i}]");
             }
@@ -162,8 +163,8 @@ namespace MapRenderer.Tests.Jobs
             AssertFixtureShape(lowSlice, ExtentLow);
             AssertFixtureShape(highSlice, ExtentHigh);
 
-            TileMeshBuffers low  = RunGeoJson(ExtentLow,  TileBufferClip.Disabled, lowSlice);
-            TileMeshBuffers high = RunGeoJson(ExtentHigh, TileBufferClip.Disabled, highSlice);
+            FillGraphOutput low  = RunGeoJson(ExtentLow,  TileBufferClip.Disabled, lowSlice);
+            FillGraphOutput high = RunGeoJson(ExtentHigh, TileBufferClip.Disabled, highSlice);
 
             try
             {
@@ -175,15 +176,15 @@ namespace MapRenderer.Tests.Jobs
 
                 // Non-vacuity: the comparison is element-to-element and not vacuously empty, and the
                 // tolerance cannot pass a whole-tile-scale error.
-                Assert.Greater(low.VertexCount[0], 0, "precondition: the 4096 arm produced vertices");
-                Assert.AreEqual(low.VertexCount[0], high.VertexCount[0],
+                Assert.Greater(low.TileVertices.Length, 0, "precondition: the 4096 arm produced vertices");
+                Assert.AreEqual(low.TileVertices.Length, high.TileVertices.Length,
                     "both extents must triangulate to the same vertex count, or the comparison is not " +
                     "element-to-element (move the fixture corners, never loosen the tolerance)");
-                Assert.AreEqual(low.TotalIndexCount, high.TotalIndexCount, "index counts must match");
+                Assert.AreEqual(low.TriangleIndices.Length, high.TriangleIndices.Length, "index counts must match");
                 Assert.Less(tolerance * 100.0, tileEdgeWorld,
                     "the tolerance must be at least 100x smaller than a tile edge, or it could pass by being loose");
 
-                for (int i = 0; i < low.VertexCount[0]; i++)
+                for (int i = 0; i < low.TileVertices.Length; i++)
                 {
                     Assert.AreEqual(low.WorldPositions[i].x, high.WorldPositions[i].x, tolerance,
                         $"WorldPositions[{i}].x disagrees between extents 4096 and 8192");
@@ -274,7 +275,7 @@ namespace MapRenderer.Tests.Jobs
         /// <summary>The GeoJSON arm, driven through the <b>production</b> decoder — parse → project → slice →
         /// materialize → layer, exactly as a live tile takes it. The decoded tile OWNS the buffer, so it is
         /// disposed here and never by <see cref="Run"/>.</summary>
-        private static TileMeshBuffers RunGeoJson(double extent, TileBufferClip clip, TileSlice expected)
+        private static FillGraphOutput RunGeoJson(double extent, TileBufferClip clip, TileSlice expected)
         {
             var decoder = new GeoJsonTileDecoder(
                 GeoJsonProjectedDataset.Project(GeoJsonParser.Parse(FixtureJson())),
@@ -297,7 +298,7 @@ namespace MapRenderer.Tests.Jobs
         /// <summary>The MVT arm: the slice's own tile-local integers re-encoded as a command stream, so the
         /// two arms differ only in which producer put identical numbers into the buffer. This one mints the
         /// buffer, so this one frees it.</summary>
-        private static TileMeshBuffers RunMvt(TileSlice slice, TileBufferClip clip)
+        private static FillGraphOutput RunMvt(TileSlice slice, TileBufferClip clip)
         {
             TileGeometryBuffers geometry = MvtArm(slice);
             try     { return Run(geometry, clip); }
@@ -307,19 +308,22 @@ namespace MapRenderer.Tests.Jobs
         /// <summary>IR B7: visit every ring in decode order, schedule, and free what this harness owns.
         /// <c>Schedule</c> BORROWS the buffer — it derives its own — so the caller keeps ownership and this
         /// never disposes it.</summary>
-        private static TileMeshBuffers Run(TileGeometryBuffers geometry, TileBufferClip clip)
+        private static FillGraphOutput Run(TileGeometryBuffers geometry, TileBufferClip clip)
         {
             var (boundsMin, _) = FixtureTile.MercatorBounds();
             NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
             try
             {
-                return FillMeshPipeline.Schedule(new FillMeshPipeline.LayerInput
+                FillGraphOutput output = FillMeshGraph.Schedule(new FillMeshPipeline.LayerInput
                 {
                     Geometry       = geometry,
                     RingVisitOrder = visitOrder,
                     OriginRender   = new double3(boundsMin.x, 0.0, boundsMin.y),
+                    Projection     = new WebMercatorProjection(), // was implicit (null ⇒ Mercator); now explicit
                     Clip           = clip,
                 });
+                output.Handle.Complete();
+                return output;
             }
             finally
             {

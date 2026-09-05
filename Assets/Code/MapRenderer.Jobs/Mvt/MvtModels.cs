@@ -6,6 +6,7 @@ using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Expressions;
 using MapRenderer.Jobs.Tiles;
 
+using MapRenderer.Jobs.Geometry;
 namespace MapRenderer.Jobs.Mvt
 {
     /// <summary>

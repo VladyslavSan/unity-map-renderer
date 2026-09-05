@@ -1,21 +1,22 @@
 // Epic A / A2 acceptance — plan §F teeth 3 (globe curvature — the projection payoff, DECISION 3) and 8
-// (synthetic ring encoding). Drives the REAL processor path (AllocateForKick → ProcessOnWorker → Complete →
-// Upload), not StyledFillTileBuilder directly (HIGH d) — this proves TileBackgroundLayerProcessor actually
-// forwards ctx.Tile/TileOriginRender/Projection and settles+uploads.
+// (synthetic ring encoding). Drives the REAL graph-arm path (BackgroundQuad → TileBuildGraph → Upload,
+// job-scheduling-design.md §8 stage 3), not StyledFillTileBuilder directly (HIGH d) — this proves
+// BackgroundQuad/TileBuildGraph actually forward ctx.Tile/TileOriginRender/Projection and settle+upload.
 
 using System.Collections.Generic;
 using System.Linq;
 using NUnit.Framework;
 using UnityEngine;
+using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Jobs.Geometry;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
-using Background = MapRenderer.Core.Style.Background;
 using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
                                                         // 'Color' ambiguous with UnityEngine's
 
@@ -32,31 +33,38 @@ namespace MapRenderer.Tests.Tiles
         // tile; this quad IS the full tile, so it needs a less extreme zoom to fit the depth budget.
         private static readonly TileId CoarseTile = new TileId { Z = 3, X = 4, Y = 3 };
 
-        private static BackgroundRenderLayer NewBackgroundLayer()
-        {
-            var style   = StyleParser.Parse(@"{ ""version"": 8, ""layers"": [
-                { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": ""#ffffff"" } } ] }");
-            var bgLayer = (Background.StyleLayer)style.Layers[0];
-            return BackgroundRenderLayer.Create(bgLayer, MapMaterialSetTestUtil.Load(), initialZoom: 0.0, drawIndex: 0);
-        }
-
-        /// <summary>Drives the real processor path for <paramref name="projection"/> and returns the
-        /// uploaded mesh (caller destroys it) plus the origin used to bake it (positions are ORIGIN-RELATIVE
-        /// — MED 5 — so a caller reconstructing absolute positions must add this back).</summary>
+        /// <summary>Drives the real graph-arm path — <see cref="BackgroundQuad"/> +
+        /// <see cref="TileBuildGraph"/>, exactly as <c>TileManager.KickSourcelessBackground</c> does since
+        /// job-scheduling-design.md §8 stage 3 — and returns the uploaded mesh (caller destroys it) plus the
+        /// origin used to bake it (positions are ORIGIN-RELATIVE — MED 5 — so a caller reconstructing
+        /// absolute positions must add this back).</summary>
         private static (Mesh mesh, double3 origin) BuildViaProcessor(IProjection projection)
         {
             double3 origin = TileRenderOrigin.Project(CoarseTile, projection);
             var context = new TileLayerProcessContext
             {
                 Tile = CoarseTile, Zoom = CoarseTile.Z, TileOriginRender = origin, Projection = projection,
+                // NIT 7: mirrors production's actual default (MapView.cs sets BufferClip from
+                // MapViewConfig.FillTileBufferClip, whose default 0.0 decodes to KeepTileUnits(0.0) — an
+                // ENABLED clip with zero margin) rather than bare `default` (Disabled), which would drive
+                // RingSelectJob instead of the RingClipJob production actually takes.
+                BufferClip = TileBufferClip.KeepTileUnits(0.0),
             };
 
-            using var layer = NewBackgroundLayer();
-            TileBackgroundLayerProcessor processor = TileBackgroundLayerProcessor.AllocateForKick(layer, materialIndex: 0);
-            processor.ProcessOnWorker(null, in context); // source-less: no decoded tile at all
-            IRenderLayerPayload payload = processor.Complete();
-            Mesh mesh = payload.Upload();
-            payload.Dispose(); // no-op after Upload — belt-and-braces, mirrors production consume
+            TileGeometryBuffers quad = BackgroundQuad.MintFullExtentGeometry(CoarseTile);
+            FillMeshPipeline.LayerInput input = BackgroundQuad.BuildLayerInput(
+                in context, in quad, out NativeArray<int> visitOrder, out NativeArray<Vector4> featureColors);
+            // BuildLayerInput's out visitOrder is folded into input.RingVisitOrder already — mirrors
+            // KickSourcelessBackground's own use of this method.
+
+            var build = FillLayerBuild.Rent(input, featureColors, materialIndex: 0, payloadName: "bg");
+            TileBuildGraph graph = TileBuildGraph.ScheduleMeasure(new ILayerMeshBuild[] { build }, quad);
+            graph.Complete();
+            graph.CompleteMeasureAndScheduleWrite(out _);
+            MeshDataPayload[] payloads = graph.CompleteWriteAndTakePayloads();
+            Mesh mesh = payloads[0].Upload();
+            payloads[0].Dispose(); // no-op after Upload — belt-and-braces, mirrors production consume
+            graph.Dispose();
             return (mesh, origin);
         }
 
@@ -75,7 +83,7 @@ namespace MapRenderer.Tests.Tiles
         [Test]
         public void SyntheticRing_MaterializesIdenticallyToTheRetiredCommandStream()
         {
-            double extent = TileBackgroundLayerProcessor.Extent;
+            double extent = BackgroundQuad.Extent;
             Assert.AreEqual(FullExtentRingCommandStream.Extent, extent,
                 "precondition: the retired stream was authored at the extent the processor still uses");
 
@@ -95,8 +103,8 @@ namespace MapRenderer.Tests.Tiles
             // it decoded. A test-owned copy of the corners would compare the fixture with itself.
             TileGeometryBuffers current = new PathGeometryMaterializer(
                 CoarseTile, extent,
-                TileBackgroundLayerProcessor.FullExtentRingKinds,
-                TileBackgroundLayerProcessor.FullExtentRingPaths).Materialize();
+                BackgroundQuad.FullExtentRingKinds,
+                BackgroundQuad.FullExtentRingPaths).Materialize();
 
             try
             {
@@ -227,13 +235,13 @@ namespace MapRenderer.Tests.Tiles
                 // (b) all 4 projected tile corners for CoarseTile are present among the vertices.
                 double2[] cornersTileLocal =
                 {
-                    new double2(0, 0), new double2(TileBackgroundLayerProcessor.Extent, 0),
-                    new double2(TileBackgroundLayerProcessor.Extent, TileBackgroundLayerProcessor.Extent),
-                    new double2(0, TileBackgroundLayerProcessor.Extent),
+                    new double2(0, 0), new double2(BackgroundQuad.Extent, 0),
+                    new double2(BackgroundQuad.Extent, BackgroundQuad.Extent),
+                    new double2(0, BackgroundQuad.Extent),
                 };
                 foreach (double2 tc in cornersTileLocal)
                 {
-                    double2 lonLat = CoarseTile.ToLonLat(tc.x, tc.y, TileBackgroundLayerProcessor.Extent);
+                    double2 lonLat = CoarseTile.ToLonLat(tc.x, tc.y, BackgroundQuad.Extent);
                     double3 expectedAbs = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
                     bool found = absolute.Any(a => math.distance(a, expectedAbs) < SphericalProjection.Radius * 1e-4);
                     Assert.IsTrue(found, $"projected tile corner {tc} (lon/lat {lonLat}) must be present among the " +

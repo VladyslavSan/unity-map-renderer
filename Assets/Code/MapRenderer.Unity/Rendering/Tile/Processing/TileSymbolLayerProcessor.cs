@@ -2,7 +2,6 @@ using System.Collections.Generic;
 using System.Threading;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
-using MapRenderer.Jobs;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 using MapRenderer.Jobs.Tiles;
