@@ -52,10 +52,30 @@ frames. Burst AOT is the discriminator, not isolation. See *Burst is what buys w
 ## Building and running the web player
 
 ```bash
-Tools/build.sh web        # -> Builds/Web/UnityMapRenderer/   (~9 min, Editor closed)
-Tools/serve-web.sh        # -> http://localhost:8080
+Tools/build.sh web         # -> Builds/Web/UnityMapRenderer/               (~9 min, Editor closed)
+Tools/serve-web.sh         # -> http://localhost:8080
+
+Tools/build.sh web --dev   # -> Builds/Web-Development/UnityMapRenderer/  (the profileable player)
+Tools/serve-web.sh --dev   # -> http://localhost:8080
+
+Tools/build.sh web --dev --profiler   # ...and it auto-connects to the Profiler at startup
+Tools/build.sh web --dev --clean --serve   # rebuild from scratch, then serve THAT variant
 ```
 
+`--dev` compiles the `MapRenderer.*` counters into the player; `--profiler` is the separate question of
+whether that player also goes looking for an Editor at every launch, and it is off unless asked for. Each
+development build prints a `ConnectProfiler=` line reporting which it actually built.
+
+`--serve` hands the finished build to `serve-web.sh` with the same `--dev`-ness it was built with, which
+is the mismatch this page's next paragraph exists to warn about — using it means the two cannot disagree.
+Where each variant lands is no longer written down in more than one place: `BuildScript` decides,
+`Tools/lib.sh` mirrors it for the shell, and `build.sh` compares its own answer against the `BUILD OK`
+path in the log and warns if they have drifted apart.
+
+**`--dev` has to be passed to BOTH.** The two variants build to separate directories, so
+`build.sh web --dev` followed by a bare `serve-web.sh` serves whatever release player was last built —
+and the only symptom is `RuntimeDiagnostics` reporting `devBuild=False` in a session you believe is a
+development build. Each invocation now prints which variant it is serving, so check that line first.
 Which scene ships is Build Settings' job, as on every other target: the enabled entries in
 `EditorBuildSettings` (currently `OpenStreetMapLiberty`, the scene carrying the attribution overlay).
 
@@ -66,6 +86,12 @@ plain `http://` it never asks — the header has to be sent regardless. The scri
 **load-bearing**: this build has threads on, so its wasm imports `env.memory` with `shared=YES`, and that
 `SharedArrayBuffer`-backed memory throws at construction unless the page is cross-origin-isolated. A server
 that omits them does not serve a slower player — it serves one that never starts.
+
+It writes response bodies to the socket itself rather than through `shutil`, because macOS fails a large
+write to loopback with `ENOBUFS` *part way through* and `sendall` reports no progress when it raises — the
+body is silently truncated and the browser blames the wasm. `Tools/serve-web-selftest.py` covers that loop
+against an injected `ENOBUFS`; it runs in ~0.2 s, is not part of `run-tests.sh`, and is RED-verified
+against three defects (a non-advancing buffer, unhandled `ENOBUFS`, and a retry that duplicates bytes).
 
 ### The three settings that decide whether a web player starts
 

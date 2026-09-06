@@ -22,12 +22,12 @@
 set -uo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "not inside a git repo" >&2; exit 2; }
+. "$ROOT/Tools/lib.sh"   # PRODUCT + build_artifact: where BuildScript actually writes
 TARGET="${1:-all}"
 VERSION="${2:-$(awk '/^  bundleVersion:/ {print $2; exit}' "$ROOT/ProjectSettings/ProjectSettings.asset" 2>/dev/null)}"
 [ -n "${VERSION:-}" ] || VERSION="0.0.0"
 
-PRODUCT="UnityMapRenderer"
-BUILDS="$ROOT/Builds"
+BUILDS="$ROOT/$OUTPUT_ROOT"
 DIST="$BUILDS/dist"
 mkdir -p "$DIST"
 
@@ -54,7 +54,7 @@ assert_clean() { # $1 = label, rest = listing lines on stdin
 }
 
 package_android() {
-  local apk="$BUILDS/Android/$PRODUCT.apk"
+  local apk="$ROOT/$(build_artifact android)"
   [ -f "$apk" ] || { echo "android: no APK at $apk — build it first (Tools/build.sh android)" >&2; return 1; }
   local out="$DIST/$PRODUCT-android-$VERSION.apk"
   cp -f "$apk" "$out" || return 1
@@ -63,7 +63,7 @@ package_android() {
 }
 
 package_linux() {
-  local dir="$BUILDS/Linux"
+  local dir="$ROOT/$(build_dir linux)"
   [ -d "$dir" ] || { echo "linux: no build at $dir — build it first (Tools/build.sh linux)" >&2; return 1; }
   local out="$DIST/$PRODUCT-linux-$VERSION.tar.gz"
   local stage="$DIST/.stage-linux/$PRODUCT-linux-$VERSION"
@@ -81,7 +81,7 @@ package_linux() {
 }
 
 package_macos() {
-  local app="$BUILDS/macOS/$PRODUCT.app"
+  local app="$ROOT/$(build_artifact macos)"
   [ -d "$app" ] || { echo "macos: no .app at $app — build it first (Tools/build.sh macos)" >&2; return 1; }
   local out="$DIST/$PRODUCT-macos-$VERSION.zip"
   # Archive ONLY the .app bundle (the _DoNotShip/_BackUp dirs are siblings in Builds/macOS, never inside
@@ -90,7 +90,7 @@ package_macos() {
   if command -v ditto >/dev/null 2>&1; then
     ditto -c -k --keepParent "$app" "$out" || return 1
   else
-    ( cd "$BUILDS/macOS" && zip -qry "$out" "$PRODUCT.app" ) || return 1  # non-mac fallback
+    ( cd "$ROOT/$(build_dir macos)" && zip -qry "$out" "$PRODUCT.app" ) || return 1  # non-mac fallback
   fi
   if command -v unzip >/dev/null 2>&1; then
     unzip -Z1 "$out" | assert_clean "$out" || { rm -f "$out"; return 1; }

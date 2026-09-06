@@ -18,7 +18,7 @@ usage() {
 Headless Unity player builds for unity-map-renderer, driven by the `unity` CLI.
 
 USAGE
-  Tools/build.sh <target> [--dev] [extra `unity build` flags...]
+  Tools/build.sh <target> [--dev] [options...] [extra `unity build` flags...]
 
 TARGET — the PLATFORM only; --dev selects the variant
   android    Builds/Android/UnityMapRenderer.apk      debug-signed APK, sideload/preview
@@ -32,16 +32,38 @@ TARGET — the PLATFORM only; --dev selects the variant
 OPTIONS
   --dev      Build the DEVELOPMENT player, into Builds/<platform>-Development/ — a separate
              directory, so it can never overwrite the release artifact. ENABLE_PROFILER is defined,
-             so the MapRenderer.* Profiler counters exist and are readable outside the Editor, and
-             the player auto-connects to the Profiler. IL2CPP/Release like the shipping build: a
-             Mono build's, or an IL2CPP/Debug build's, managed timings would not describe what
-             ships. Available on every target.
+             so the MapRenderer.* Profiler counters exist and are readable outside the Editor.
+             IL2CPP/Release like the shipping build: a Mono build's, or an IL2CPP/Debug build's,
+             managed timings would not describe what ships. Available on every target. Does NOT
+             auto-connect to the Profiler on its own — see --profiler.
+  --profiler Also make that player AUTO-CONNECT to the Profiler at startup. Separate from --dev
+             on purpose: --dev is what compiles the counters IN, this is what makes the player go
+             hunting for an Editor every launch, including the runs with nothing attached. Requires
+             --dev. Every development build prints a ConnectProfiler= line saying which it built.
+  --clean    Delete this variant's output directory before building, so nothing survives to be mistaken
+             for the new player. Bounded to a path computed under Builds/ by Tools/lib.sh.
+  --run      Open what was just built: `open` the .app on macOS, or hand a web build to
+  --serve     Tools/serve-web.sh with the SAME --dev-ness it was built with (the mismatch that makes a
+             development player report devBuild=False). Serving blocks. The two spellings are one flag.
+  --deep-profile
+             Sample every managed call. Requires --dev. Heavy, and it distorts what it measures — good
+             for call-tree SHAPE, not for timings.
+  --debug    Let a managed debugger attach. Requires --dev. Not needed to read the Profiler counters,
+             which is why development builds do not do this by default.
+  --graphics-jobs=on|off
+             Override the graphics jobs Player Setting for this build only; the committed value is put
+             back afterwards. Applies to release builds too — unlike the flags above, this one is a
+             rendering setting rather than development machinery. OMIT IT to keep the committed value:
+             "on" and "leave it alone" are different builds, so there is no bare --graphics-jobs.
   -h, --help This text. For the underlying CLI's own flags, see `unity build --help`.
 
 EXAMPLES
-  Tools/build.sh macos --dev              # the profiling player
+  Tools/build.sh macos --dev              # counters compiled in, no auto-connect
+  Tools/build.sh macos --dev --profiler   # ...and it attaches to the Profiler by itself
   Tools/build.sh desktop --dev            # macOS + Linux, both development
   Tools/build.sh macos --dev --allow-install
+  Tools/build.sh web --dev --clean --serve   # rebuild from scratch, then serve the SAME variant
+  Tools/build.sh macos --graphics-jobs=off   # A/B a rendering setting without committing it
 
 WEB
   The player CANNOT be opened from the filesystem or served by a plain static server: Unity compresses
@@ -110,12 +132,14 @@ for arg in "$@"; do
 done
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "not inside a git repo" >&2; exit 2; }
+. "$ROOT/Tools/lib.sh"   # build_dir/build_artifact + this_project_editor_open, shared with run-tests.sh
 TARGET="${1:-}"
 
 if [ -z "$TARGET" ]; then
   # Brief on a mistake, full on request: an argument slip should not cost a screenful.
   echo "usage: Tools/build.sh <android|macos|linux|web|release|desktop|all> [--dev] [unity build flags...]" >&2
   echo "  --dev = the profileable DEVELOPMENT player, into Builds/<platform>-Development/" >&2
+  echo "  --profiler = that player also auto-connects to the Profiler (needs --dev)" >&2
   echo "  run 'Tools/build.sh --help' for the full interface" >&2
   exit 2
 fi
@@ -123,13 +147,48 @@ shift
 
 # --dev is OURS (it picks the BuildScript entry point); everything else is `unity build` passthrough.
 DEV=0
+PROFILER=0
+CLEAN=0
+RUN=0
+DEEP=0
+DEBUG=0
+GFXJOBS=""
 ARGS=()
 for arg in "$@"; do
   case "$arg" in
     --dev) DEV=1 ;;
+    --profiler) PROFILER=1 ;;
+    --clean) CLEAN=1 ;;
+    --run|--serve) RUN=1 ;;
+    --deep-profile) DEEP=1 ;;
+    --debug) DEBUG=1 ;;
+    # Tri-state on purpose: unset leaves the project's committed value alone. There is no bare
+    # --graphics-jobs, because "on" and "don't touch it" are different builds and a bare flag hides that.
+    --graphics-jobs=on|--graphics-jobs=off) GFXJOBS="${arg#*=}" ;;
+    --graphics-jobs*) echo "use --graphics-jobs=on or --graphics-jobs=off (unset = keep the committed value)" >&2; exit 2 ;;
     *) ARGS+=("$arg") ;;
   esac
 done
+
+# A release player has no profiler support compiled in at all, so --profiler alone cannot do what it
+# says. Refusing beats building the wrong thing and reporting success.
+# Each of these acts on machinery only a development player has. Refusing beats building a release
+# player that cannot do what was asked and reporting success.
+require_dev() {   # $1 = whether the flag was given, $2 = its name
+  [ "$1" -eq 1 ] && [ "$DEV" -eq 0 ] || return 0
+  echo "$2 needs --dev: a release player is built without development support, so there is nothing" >&2
+  echo "for it to act on." >&2
+  exit 2
+}
+require_dev "$PROFILER" --profiler
+require_dev "$DEEP"     --deep-profile
+require_dev "$DEBUG"    --debug
+export UMR_CONNECT_PROFILER=$([ "$PROFILER" -eq 1 ] && echo on || echo off)
+export UMR_DEEP_PROFILE=$([ "$DEEP" -eq 1 ]     && echo on || echo off)
+export UMR_ALLOW_DEBUGGING=$([ "$DEBUG" -eq 1 ] && echo on || echo off)
+# Deliberately exported EMPTY when not asked for: BuildScript reads unset/empty as "keep the committed
+# value" and only then leaves ProjectSettings.asset untouched.
+export UMR_GRAPHICS_JOBS="$GFXJOBS"
 set -- ${ARGS+"${ARGS[@]}"}   # ${ARGS+...} so an empty array is safe under `set -u`
 
 # The CLI's own install dir is not on PATH by default.
@@ -141,16 +200,8 @@ if ! command -v unity >/dev/null 2>&1; then
 fi
 
 # Batch mode can't share the project with an open Editor — but only THIS project's Editor matters.
-# (Verbatim from run-tests.sh: exact -projectPath equality, stale-lock clearing.)
-this_project_editor_open() {
-  local pid pp
-  for pid in $(pgrep -x Unity 2>/dev/null); do
-    pp="$(ps -ww -o command= -p "$pid" 2>/dev/null \
-          | awk '{for(i=1;i<NF;i++) if(tolower($i)=="-projectpath"){print $(i+1);exit}}')"
-    [ "$pp" = "$ROOT" ] && return 0
-  done
-  return 1
-}
+# this_project_editor_open lives in lib.sh; run-tests.sh needs the identical check and the two copies
+# used to be maintained by hand.
 if this_project_editor_open; then
   echo "The Unity Editor for THIS project is open — close it before running batch builds." >&2
   echo "(A Unity editing a different clone is fine.)" >&2
@@ -213,6 +264,19 @@ report_web_burst() {
   fi
 }
 
+# Report what the player was actually built with, against what was asked for. Same reason
+# report_web_burst exists: a request is not a result, and a player that quietly ignored the flag would
+# otherwise be read as evidence about profiler behaviour it cannot support.
+report_profiler() {
+  local log="$1" want="$2" got
+  got="$(grep -aoE 'ConnectProfiler=(True|False)' "$log" 2>/dev/null | tail -1 | cut -d= -f2)"
+  echo "    profiler auto-connect: requested=$want built=${got:-unknown}" >&2
+  if [ "$got" != "$want" ]; then
+    echo "    WARNING: the player does not match the request — nothing it does is evidence about" >&2
+    echo "             profiler auto-connect. Check UMR_CONNECT_PROFILER reached the Editor." >&2
+  fi
+}
+
 build_one() {
   local name="$1"
   shift  # drop the platform name; what remains in "$@" is the caller's `unity build` passthrough
@@ -229,6 +293,16 @@ build_one() {
   # and the last run's `BUILD OK` would sit there reading as current (same hazard run-tests.sh
   # guards for with test-results.prev.xml). Its ABSENCE below is what proves nothing was produced.
   [ -f "$log" ] && mv -f "$log" "$ROOT/Logs/build-$name$variant-prev.log"
+
+  # --clean: remove this variant's output first, so nothing survives to be mistaken for the new build.
+  # Bounded to a path this script computed under Builds/ — never whatever a variable happened to hold.
+  if [ "$CLEAN" -eq 1 ]; then
+    local outdir="$ROOT/$(build_dir "$name" "$DEV")"
+    case "$outdir" in
+      "$ROOT/$OUTPUT_ROOT"/?*) echo "    cleaning $outdir" >&2; rm -rf "$outdir" ;;
+      *) echo "    refusing to clean '$outdir' — not under $ROOT/$OUTPUT_ROOT/" >&2; return 1 ;;
+    esac
+  fi
 
   echo ">>> Building $name${variant:+ (development)} (--target $btarget) ... log: $log" >&2
   # The CLI's own stdout/stderr is deliberately NOT swallowed: its failures (unknown target, editor
@@ -252,9 +326,50 @@ build_one() {
     echo "$name FAILED (exit $code) — see $log" >&2
     return 1
   fi
+  # The shell's idea of where this landed, checked against BuildScript's own report. lib.sh mirrors a
+  # scheme it cannot see; this is what makes the mirror falsifiable instead of merely plausible.
+  local reported expected
+  reported="$(grep -aoE 'BUILD OK [^ ]+' "$log" 2>/dev/null | tail -1 | cut -d' ' -f3)"
+  expected="$(build_artifact "$name" "$DEV")"
+  if [ -n "$reported" ] && [ "$reported" != "$expected" ]; then
+    echo "    WARNING: BuildScript wrote '$reported' but Tools/lib.sh expects '$expected'." >&2
+    echo "             The output scheme changed on one side only — --clean, --run and Tools/" >&2
+    echo "             serve-web.sh are all reading the wrong path until lib.sh is updated." >&2
+  fi
+
   [ "$name" = web ] && report_web_burst "$log"
+  if [ "$DEV" -eq 1 ]; then
+    report_profiler "$log" "$([ "$PROFILER" -eq 1 ] && echo True || echo False)"
+  fi
+  # The BUILD succeeded — say so before handing off, since a successful serve blocks and would otherwise
+  # swallow the verdict. A launch that fails is still a failed run: --serve that could not serve must not
+  # exit 0 saying "All requested builds succeeded".
   echo "$name ok" >&2
+  if [ "$RUN" -eq 1 ] && ! launch "$name"; then
+    echo "    $name built, but --run/--serve could not start it" >&2
+    return 1
+  fi
   return 0
+}
+
+# --run/--serve: open what was just built. Only the two targets this host can actually start; the others
+# say so rather than silently doing nothing after a build that asked to be run.
+launch() {
+  local name="$1" path
+  path="$ROOT/$(build_artifact "$name" "$DEV")"
+  case "$name" in
+    macos) echo "    launching $path" >&2; open "$path" ;;
+    web)   # Hand off with the SAME variant that was just built — the mismatch this whole flag exists to
+           # remove. serve-web.sh blocks, so this is the end of the run by design.
+           if [ "$DEV" -eq 1 ]; then
+             echo "    handing off to Tools/serve-web.sh --dev (blocks; Ctrl-C to stop)" >&2
+             "$ROOT/Tools/serve-web.sh" --dev
+           else
+             echo "    handing off to Tools/serve-web.sh (blocks; Ctrl-C to stop)" >&2
+             "$ROOT/Tools/serve-web.sh"
+           fi ;;
+    *)     echo "    --run does nothing for '$name' — this host has no way to start that player" >&2 ;;
+  esac
 }
 
 FAILED=0

@@ -34,6 +34,7 @@
 set -uo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "not inside a git repo" >&2; exit 2; }
+. "$ROOT/Tools/lib.sh"   # this_project_editor_open, shared with build.sh
 VERSION="$(awk '/^m_EditorVersion:/ {print $2}' "$ROOT/ProjectSettings/ProjectVersion.txt" 2>/dev/null)"
 PLATFORM="${1:-EditMode}"
 FILTER="${2:-}"
@@ -54,22 +55,8 @@ esac
 
 if [ -z "$VERSION" ]; then echo "could not read m_EditorVersion from ProjectSettings/ProjectVersion.txt" >&2; exit 2; fi
 if [ ! -x "$UNITY" ]; then echo "Unity editor for version $VERSION not found at: $UNITY" >&2; exit 2; fi
-
-# Batch mode can't share the project with an open Editor — but only THIS project's Editor matters.
-# Refuse iff a LIVE Unity process has this exact project open (-projectPath == $ROOT); a Unity editing
-# a *different* clone (e.g. unity-map-renderer-test) is fine and must not block us. Exact-equality is
-# deliberate: a substring match would wrongly fire on a sibling like "${ROOT}-test". The lowercase
-# compare handles the Editor's `-projectpath` vs batch mode's `-projectPath`. A lockfile with no such
-# process is STALE (a prior batch run was killed and left it behind); clear it rather than refuse forever.
-this_project_editor_open() {
-  local pid pp
-  for pid in $(pgrep -x Unity 2>/dev/null); do
-    pp="$(ps -ww -o command= -p "$pid" 2>/dev/null \
-          | awk '{for(i=1;i<NF;i++) if(tolower($i)=="-projectpath"){print $(i+1);exit}}')"
-    [ "$pp" = "$ROOT" ] && return 0
-  done
-  return 1
-}
+# this_project_editor_open lives in Tools/lib.sh — build.sh needs the identical check, and the two
+# copies were previously kept in sync by hand.
 if this_project_editor_open; then
   echo "The Unity Editor for THIS project is open — close it before running batch tests." >&2
   echo "(A Unity editing a different clone is fine.)" >&2
