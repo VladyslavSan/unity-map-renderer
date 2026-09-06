@@ -216,13 +216,19 @@ namespace MapRenderer.Tests.Meshing
         // Stream0/Stream2 in these strings are used ONLY as the reconstruction-validation reference (see the
         // file header) — the live per-vertex comparison reads Assets/Fixtures/extrusion-graphwrite-golden-
         // *.json instead. Stream1/Stream3/Indices/Bounds are still compared against these strings directly.
+        //
+        // Stream3 (colour) was re-captured 2026-09-07 (UMR-96) and is the ONLY digest here that has moved
+        // since f5e13c19. This fixture styles a CONSTANT fill-extrusion-color, which is no longer baked into
+        // the COLOR stream — it rides the _BaseColor uniform and the vertex carries the white identity. The
+        // digest therefore pins the OPPOSITE fact it used to (see its assertion below). Stream0/1/2, Indices
+        // and Bounds are untouched, which is what confines that change to the colour path.
         private const string FrozenGoldensFlat =
             "Stream0=/BSPNaJt/vKUH5jnoGe18XG++7De4CQ5CaAkGo5/8cA= Stream1=5yoGCdWnImZda9zBFM2lMZ4cZpoio+676rYaTQc6Tj4= " +
-            "Stream2=RZIb0svnW8ClUJy19C/CWEwcYrSRiGcuVrCU8pAINPM= Stream3=w0d0VuQYBwTowLrop/6grGOE+BpegmcUjOUK9LwIE6I= " +
+            "Stream2=RZIb0svnW8ClUJy19C/CWEwcYrSRiGcuVrCU8pAINPM= Stream3=mTU6yDV37mWN86QXk22ebkLiBzEWq1ZAV/SCMCedDyQ= " +
             "Indices=UDPCPGXJU3OsWoNjbMg2T3AYq8M+lCd4AJOThHpv+uk= Bounds=U2c5vKyQgtfxmbjk+DwMuZ6m8SWFVpA+FZdtEiShrRs=";
         private const string FrozenGoldensSpherical =
             "Stream0=tJUK4zwrNyoRLVMZ+hBHegLaOsgS/SBC4P9HN4cNWlg= Stream1=PmL8WSDRfMIQhUwAFA6DbTEesrJelbEBdNV8mPqbSG4= " +
-            "Stream2=fJ1cviXi13njRn06G3/8YgQWBtN9fXHB8Ix1v4wlYSI= Stream3=3HWHJwTmrOom7Zvat5N8YT6edLs2X27ePjtWE+yofVI= " +
+            "Stream2=fJ1cviXi13njRn06G3/8YgQWBtN9fXHB8Ix1v4wlYSI= Stream3=EL8YztRwmznMbgfEldRzqHhoVfQn7RZNzHAJLd94WUk= " +
             "Indices=jj1DDkisMtRSPuwxHLzATezR/ALcqfGn793kcQCqpkQ= Bounds=gokodWKrmk2WSnB0etMqXgtn1CTMRDmjLL82v96b+oE=";
 
         // Measured 2026-09-04 (wall-job stage): per-component max ULP delta between the retired managed
@@ -379,7 +385,11 @@ namespace MapRenderer.Tests.Meshing
                 // constant (the split narrows only Stream0/Stream2, below).
                 Dictionary<string, string> frozen = ParseGolden(spherical ? FrozenGoldensSpherical : FrozenGoldensFlat);
                 Assert.AreEqual(frozen["Stream1"], Sha256(s1), $"[spherical={spherical}] Stream1 (ExtrudeUpAndT+Bake) diverges — a real regression, not a re-bake candidate.");
-                Assert.AreEqual(frozen["Stream3"], Sha256(s3), $"[spherical={spherical}] Stream3 (colour) diverges — a real regression, not a re-bake candidate.");
+                // NOT "never a re-bake candidate" — that claim was written when a constant colour WAS baked
+                // into this stream, and UMR-96 retired that. The digest now encodes a white vertex, so what a
+                // divergence means has flipped: reading a STYLED colour here means the constant-colour bake
+                // came back and the layer renders colour-squared. Any OTHER divergence is still a regression.
+                Assert.AreEqual(frozen["Stream3"], Sha256(s3), $"[spherical={spherical}] Stream3 (colour) diverges. This fixture's fill-extrusion-color is CONSTANT, so the stream must carry the WHITE identity and the colour must ride _BaseColor; a styled colour here means the vertex bake was re-introduced (colour-squared). Re-bake ONLY on a deliberate, stated change to which carrier holds a constant colour.");
                 Assert.AreEqual(frozen["Indices"], Sha256(idxBytes), $"[spherical={spherical}] Indices diverge — a real regression, not a re-bake candidate.");
                 Assert.AreEqual(frozen["Bounds"], Sha256(boundsBytes), $"[spherical={spherical}] Bounds diverge — a real regression, not a re-bake candidate.");
 

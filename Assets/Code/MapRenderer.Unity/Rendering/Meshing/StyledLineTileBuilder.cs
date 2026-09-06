@@ -62,8 +62,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
     ///   Stream 3 — Color (Float32x4) + TexCoord2/widthScale (Float32x1) interleaved via <see cref="LineWidthColor"/>. 20B stride.
     ///   Index buffer — UInt32.
     ///
-    /// Color (D1): per-feature sRGB color baked via <see cref="StyleProperty{T}"/>; converted to linear via
-    /// <c>Color.linear</c> off the main thread. <c>_BaseColor=white</c> on the Material (identity multiply).
+    /// Color (D1): a DATA-DRIVEN line-color is baked per feature via <see cref="StyleProperty{T}"/>, converted
+    /// to linear via <c>Color.linear</c> off the main thread, over a white <c>_BaseColor</c>. A constant or
+    /// zoom-only line-color is NOT baked — it rides <c>_BaseColor</c>, bound by
+    /// <see cref="Materials.MaterialFactory.BindLinePaintToApplier"/> for exactly the complementary case, over a
+    /// white vertex. Exactly one of the two carries the color, both rgb AND alpha; the fragment multiplies them,
+    /// so baking a constant color as well renders it squared.
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
@@ -193,8 +197,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         continue;
 
                     // Bake per-feature vertex color from the data-driven paint expression (sRGB→linear here,
-                    // off-main-thread). _BaseColor=white on the material → identity multiply.
-                    if (paint.Color.TryEvaluate(zoom, feature, out CoreColor c))
+                    // off-main-thread) — DATA-DRIVEN ONLY. BindLinePaintToApplier binds _BaseColor for exactly
+                    // !DependsOnFeature, and the fragment computes `_BaseColor.rgb * vColor.rgb` (alpha likewise),
+                    // so baking a constant color here too would render it squared. Ungated, the vertex stays
+                    // WhiteColor and the uniform carries the whole color.
+                    if (paint.Color.DependsOnFeature &&
+                        paint.Color.TryEvaluate(zoom, feature, out CoreColor c))
                     {
                         var unityColor = new UnityEngine.Color((float)c.R, (float)c.G, (float)c.B, (float)c.A);
                         var linear     = unityColor.linear;

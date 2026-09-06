@@ -118,8 +118,12 @@ namespace MapRenderer.Tests.Meshing
                 }
                 Assert.AreEqual(golden.GetString("indicesDigest"), Sha256(idxBytes),
                     $"[{tag}/{label}] Indices diverge from the captured oracle — a real regression, not a re-bake candidate.");
+                // Re-captured 2026-09-07 (UMR-96): these tiles style a CONSTANT line-color, which is no
+                // longer baked here — it rides _BaseColor and the vertex carries white. Unlike the Indices
+                // digest above, this one is therefore NOT "never a re-bake candidate": it is a live oracle
+                // for the opposite fact, and reading a styled colour means the bake came back.
                 Assert.AreEqual(golden.GetString("stream3Digest"), Sha256(stream3Bytes),
-                    $"[{tag}/{label}] Stream3 (colour+widthScale) diverges from the captured oracle.");
+                    $"[{tag}/{label}] Stream3 (colour+widthScale) diverges from the captured oracle. This layer's line-color is CONSTANT, so the colour components must be the WHITE identity; a styled colour here means the constant-colour vertex bake was re-introduced and the layer renders colour-squared.");
 
                 // ── Step 2b: Stream0/1/2, per-vertex, per-COMPONENT-CLASS, each bound on its own mechanism.
                 // No single ceiling: the five classes below are not one phenomenon with a spread — each has

@@ -98,7 +98,7 @@ void LineUnlitPassFragment(
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
 
     // [MAP DELTA] Flat albedo — no lighting, no BaseMap sample (see this pass's header). Alpha is the SAME
-    // LineCoverage(...) × _Opacity × per-feature alpha formula the Lit twin's fragment uses — this IS the
+    // LineCoverage(...) × _Opacity × vColor.a × _BaseColor.a formula the Lit twin's fragment uses — this IS the
     // line's antialiasing (straddle AA, gap-hole cut, opt-in blur, dash coverage), preserved verbatim
     // because it is computed by the reused Line_VertexExtrude.hlsl, not reimplemented here.
     half3 albedo = _BaseColor.rgb * input.vColor.rgb;
@@ -109,7 +109,7 @@ void LineUnlitPassFragment(
     // path, so this multiply is compiled out.
     coverage *= input.uv.w;
 #endif
-    half alpha = (half)(coverage * _Opacity * input.vColor.a);
+    half alpha = (half)(coverage * _Opacity * input.vColor.a * _BaseColor.a);
 
     albedo = AlphaModulate(albedo, alpha);
 

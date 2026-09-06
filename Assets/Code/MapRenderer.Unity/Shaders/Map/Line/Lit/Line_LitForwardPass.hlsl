@@ -22,8 +22,10 @@
 //   • Vertex      → position from Line_VertexExtrude (shared world-space ribbon extrusion); constant
 //                   +Y lighting normal + placeholder tangent; uv = (dashU, side, innerFrac).
 //   • Fragment    → albedo *= vColor; alpha replaced by the fwidth ribbon coverage:
-//                   LineCoverage(uv.y, uv.z, uv.x) * _Opacity * vColor.a (S05/S14 — makes _Opacity
-//                   functional, carries gap/dash AA). SurfaceData still comes from the stock
+//                   LineCoverage(uv.y, uv.z, uv.x) * _Opacity * vColor.a * _BaseColor.a (S05/S14 — makes
+//                   _Opacity functional, carries gap/dash AA). Both COLOR sources participate in alpha
+//                   exactly as they do in rgb: a constant line-color's alpha rides _BaseColor.a, a
+//                   data-driven one's rides vColor.a, and the other side is 1. SurfaceData still comes from the stock
 //                   InitializeStandardLitSurfaceData(uv.xy, …) — never hand-assembled.
 //
 // Include order (set by Line.shader): Line_LitInput.hlsl → Line_VertexExtrude.hlsl → this file.
@@ -312,14 +314,16 @@ void LinePassFragment(
     half4 color = UniversalFragmentPBR(inputData, surfaceData);
     color.rgb = MixFog(color.rgb, inputData.fogCoord);
 
-    // LINE DELTA: replace surface alpha with the fwidth ribbon coverage × _Opacity × per-feature alpha (S05).
+    // LINE DELTA: replace surface alpha with the fwidth ribbon coverage × _Opacity × vColor.a × _BaseColor.a
+    // (S05). Replacing — not multiplying — is why _BaseColor.a has to be re-applied here: the surface alpha
+    // Line_LitInput computed from it is discarded.
     float coverage = LineCoverage(input.uv.y, input.uv.z, input.uv.x);
 #if defined(_HAIRLINE_SOLID_CORE)
     // Energy compensation for the vertex-stage band clamp (see Line_VertexExtrude). 1.0 on every other
     // path, so this multiply is compiled out.
     coverage *= input.uv.w;
 #endif
-    color.a = coverage * _Opacity * input.vColor.a;
+    color.a = coverage * _Opacity * input.vColor.a * _BaseColor.a;
 
     outColor = color;
 

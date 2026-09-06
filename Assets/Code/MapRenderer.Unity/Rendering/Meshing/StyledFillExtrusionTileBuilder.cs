@@ -280,8 +280,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     if (feature.GeometryType != TileGeometryType.Polygon)
                         continue;
 
+                    // DATA-DRIVEN ONLY: BindFillExtrusionPaintToApplier binds _BaseColor for exactly
+                    // !DependsOnFeature, and the fragment multiplies uniform × vertex in both rgb and alpha —
+                    // baking a constant color here as well would render color AND alpha squared. Ungated, the
+                    // vertex stays white and the uniform carries the whole color.
                     Color featureColor = Color.white;
-                    if (paint.Color.TryEvaluate(zoom, feature, out var color))
+                    if (paint.Color.DependsOnFeature && paint.Color.TryEvaluate(zoom, feature, out var color))
                         featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
                     Color lin = featureColor.linear; // sRGB→linear off main thread, same as StyledFillTileBuilder
 

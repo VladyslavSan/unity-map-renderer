@@ -27,7 +27,8 @@ namespace MapRenderer.Tests.Meshing
     ///   - A match expression on a per-feature property produces ≥2 DISTINCT linearized colors
     ///     baked into Stream3 <see cref="StyledLineTileBuilder.LineWidthColor.Color"/> values.
     ///   - A constant-input expression (match on a non-existent key → default) produces exactly
-    ///     1 distinct color across all features.
+    ///     1 distinct color across all features, and that colour is the WHITE identity — a constant
+    ///     line-color rides the _BaseColor uniform instead of being baked.
     ///
     /// No GPU needed. Tests CPU mesh-data build only.
     /// Uses the "geolines" LineString layer from the fixture (6 features with real MVT geometry).
@@ -219,6 +220,17 @@ namespace MapRenderer.Tests.Meshing
                     $"A constant-color expression must produce exactly 1 distinct baked color " +
                     $"across all vertices (got {distinctColors.Count} distinct). " +
                     "If more than 1, the data-driven path is incorrectly varying a constant.");
+
+                // That single colour must be WHITE. A constant line-color is NOT baked — it rides the
+                // _BaseColor uniform (BindLinePaintToApplier binds it for exactly !DependsOnFeature) and the
+                // fragment multiplies the two, so baking it as well renders the colour squared. Without this
+                // half the count assertion above passes whether the constant is baked or not, and measures
+                // nothing about which carrier holds it.
+                var only = new List<(int r, int g, int b)>(distinctColors)[0];
+                Assert.AreEqual((255, 255, 255), only,
+                    $"The one baked colour for a CONSTANT line-color must be the white identity, not the " +
+                    $"evaluated rgba(100,150,200) — the uniform carries it. Reading the styled colour here " +
+                    $"means the vertex bake still runs for a constant and the layer renders colour-squared.");
             }
             finally
             {
