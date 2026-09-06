@@ -32,15 +32,25 @@ namespace MapRenderer.Jobs.Fill
             HoleCountArr      = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory),
         };
 
+        /// <summary>Schedules a <c>Dispose(handle)</c> for every field, fanned out on <paramref name="deps"/> and
+        /// combined once via the array overload — same shape, and same <c>Allocator.Temp</c> reasoning, as
+        /// <see cref="FillTriangulationBuffers.DisposeAfter"/>. No <see cref="FillGraphOutput.RecordBufferDisposeNode"/>
+        /// call here: unlike that type's scratch, these six fields are not counted by the balance
+        /// check (see <see cref="Allocate"/>'s own doc).</summary>
         internal JobHandle DisposeAfter(JobHandle deps)
         {
-            JobHandle h = PolyOuterRingIdx.Dispose(deps);
-            h = JobHandle.CombineDependencies(h, PolyHoleListStart.Dispose(deps));
-            h = JobHandle.CombineDependencies(h, PolyHoleCount.Dispose(deps));
-            h = JobHandle.CombineDependencies(h, HoleRingIdxs.Dispose(deps));
-            h = JobHandle.CombineDependencies(h, PolyCountArr.Dispose(deps));
-            h = JobHandle.CombineDependencies(h, HoleCountArr.Dispose(deps));
-            return h;
+            var handles = new NativeArray<JobHandle>(6, Allocator.Temp);
+            try
+            {
+                handles[0] = PolyOuterRingIdx.Dispose(deps);
+                handles[1] = PolyHoleListStart.Dispose(deps);
+                handles[2] = PolyHoleCount.Dispose(deps);
+                handles[3] = HoleRingIdxs.Dispose(deps);
+                handles[4] = PolyCountArr.Dispose(deps);
+                handles[5] = HoleCountArr.Dispose(deps);
+                return JobHandle.CombineDependencies(handles);
+            }
+            finally { handles.Dispose(); }
         }
     }
 }

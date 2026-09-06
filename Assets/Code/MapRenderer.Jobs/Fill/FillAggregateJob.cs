@@ -37,8 +37,8 @@ namespace MapRenderer.Jobs.Fill
     {
         // ── Input ──────────────────────────────────────────────────────────────────────────────
         /// <summary>Reads <c>PerPolyMergedVertexCount</c>/<c>PerPolyIndexCount</c>/<c>PerPolyForceClip</c>/
-        /// <c>PerPolyFeatureIndex</c>/<c>WorkOffsets</c>/<c>IndexOffsets</c>/<c>FlatVx</c>/
-        /// <c>FlatVy</c>/<c>FlatIndexArrays</c> of the nine columns it needs.</summary>
+        /// <c>PerPolyFeatureIndex</c>/<c>WorkOffsets</c>/<c>IndexOffsets</c>/<c>FlatWorkVerts</c>/
+        /// <c>FlatIndexArrays</c> of the eight columns it needs.</summary>
         public FillTriangulationBuffers Buffers;
 
         /// <summary>Set (never cleared) on capacity overrun — job-scheduling-design.md §8 stage 6, C.1: moved
@@ -84,9 +84,8 @@ namespace MapRenderer.Jobs.Fill
             NativeList<int> perPolyFeatureIndex = Buffers.PerPolyFeatureIndex;
             NativeList<int> workOffsets   = Buffers.WorkOffsets;
             NativeList<int> indexOffsets       = Buffers.IndexOffsets;
-            NativeList<double> flatVx = Buffers.FlatVx;
-            NativeList<double> flatVy = Buffers.FlatVy;
-            NativeList<int>    flatIndexArrays = Buffers.FlatIndexArrays;
+            NativeList<double2> flatWorkVerts = Buffers.FlatWorkVerts;
+            NativeList<int>     flatIndexArrays = Buffers.FlatIndexArrays;
 
             // Bound by PerPolyMergedVertexCount's OWN length, never PolyCountArr[0] — a borrowed input
             // FillSizingJob's own early returns (MaxPolygons/MaxHoles capacity overrun) never touch. Those
@@ -130,7 +129,7 @@ namespace MapRenderer.Jobs.Fill
 
                 for (int i = 0; i < mergedVC; i++)
                 {
-                    TileVertices[globalVertBase + i]     = new double2(flatVx[sOff + i], flatVy[sOff + i]);
+                    TileVertices[globalVertBase + i]     = flatWorkVerts[sOff + i];
                     VertexFeatureIdx[globalVertBase + i] = featIdx;
                 }
 

@@ -49,10 +49,11 @@ parity oracle call.
 | `MvtNativeFeatureMatcher` | `Mvt/` | Owns the rebound binding + the per-feature result/error/kind columns; runs the batched job once per selection — the parity/selection seam. |
 | `NativeFilterRebind` | `Mvt/` | Rebinds a program's key names + literal strings to a specific tile-layer's ids. |
 
-**Why the split across two folders:** the job, matcher and rebind name `MvtValueNative` — a
-format-specific column type a general production type may not reference in its signatures — so they live in
-the `Mvt/` decoder folder. Everything format-agnostic (the compiler, program, opcodes, value) lives here in
-`Expressions/`.
+**Why the split across two folders:** the job, matcher and rebind each name an MVT-specific type in a member
+signature (`NativeFilterEvaluationJob`'s `MvtValueNative` column, `MvtNativeFeatureMatcher`'s `MvtLayer`,
+`NativeFilterRebind`'s `MvtLayerPropertyResolver`) — a general production type outside a decoder folder may
+not do that — so they live in the `Mvt/` decoder folder. Everything format-agnostic (the compiler, program,
+opcodes, value) lives here in `Expressions/`.
 
 ## The opcode set (`NativeOperation`)
 

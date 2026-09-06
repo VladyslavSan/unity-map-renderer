@@ -155,8 +155,7 @@ namespace MapRenderer.Jobs.Fill
             Buffers.FlatPolyVerts.Resize(vertexOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
             Buffers.FlatSortedHoleCounts.Resize(holeCountOffsets[polyCount], NativeArrayOptions.ClearMemory);
             Buffers.FlatIndexArrays.Resize(indexOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
-            Buffers.FlatVx.Resize(workOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
-            Buffers.FlatVy.Resize(workOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
+            Buffers.FlatWorkVerts.Resize(workOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
             Buffers.FlatPreviousIndex.Resize(workOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
             Buffers.FlatNextIndex.Resize(workOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
             Buffers.FlatIsBridge.Resize(workOffsets[polyCount], NativeArrayOptions.UninitializedMemory);

@@ -15,7 +15,7 @@ every target this project ships, so the geometry work belongs in a job graph rat
 seam. `docs/job-scheduling-design.md` is the design SSOT and explains the *why*; this file explains the
 *shape*.
 
-## The chain
+## Pipeline
 
 Every arrow is a container hand-off carried by a `JobHandle` dependency. A missing edge is a bug the Editor's
 job safety system throws on at schedule time — which is why the parity suites schedule the real graph.
@@ -86,21 +86,21 @@ arm — the subdivide job projects internally and never reads world positions.
 - **Errors are a flag, not a throw.** Burst cannot throw, so a capacity overrun sets `Error` and the write
   step skips the layer. The flag must be read before anything is allocated.
 
-## Files
+## Components
 
-| file | role |
-|---|---|
-| `FillMeshGraph.cs` | the graph builder — schedules every node, owns the dispose nodes, returns the output |
-| `FillGraphOutput.cs` | the output columns + terminal handle, and their disposal |
-| `FillGraphCounts.cs` | diagnostic counts and the error codes |
-| `RingClipJob` / `RingSelectJob` | produce the ring set the rest of the chain walks |
-| `RingAssemblyJob.cs` | signed-area polygon classification with hole containment |
-| `FillSizingJob.cs` | offset tables; the capacity guard |
-| `FillGatherJob.cs` | the hole sort and the flat-column copy |
-| `EarcutJob.cs` / `EarcutBatchJob.cs` | the triangulator, and the batching wrapper (`IJobParallelForDefer`, one polygon per `Execute`) |
-| `FillAggregateJob.cs` | concatenation and index rebase |
-| `GlobeFillSubdivider.cs` | the curved arm's subdivision (`GlobeFillSubdivideDispatch`) |
-| `GlobeFillScatterJob.cs` | scatters a subdivided run into the six output columns |
-| `FillTriangulationBuffers.cs` | the flat working columns the sizing/gather/earcut stages share |
-| `PolygonDescriptors.cs` | the polygon descriptor columns assembly produces |
-| `FillMeshPipeline.cs` | the older synchronous entry point, kept as the parity oracle. **No longer on a production fill path**: since source tiles moved onto the graph, fill reaches `FillMeshGraph` instead, and the only live caller left is the fill-extrusion roof — which leaves too once the roof moves. It survives for the parity teeth, and is retired in the same stage that removes its last caller. |
+| Type | Folder | Role |
+|---|---|---|
+| `FillMeshGraph` | `Fill/` | the graph builder — schedules every node, owns the dispose nodes, returns the output |
+| `FillGraphOutput` | `Fill/` | the output columns + terminal handle, and their disposal |
+| `FillGraphCounts` | `Fill/` | diagnostic counts and the error codes |
+| `RingClipJob` / `RingSelectJob` | `Geometry/` | produce the ring set the rest of the chain walks (borrowed, not owned by Fill) |
+| `RingAssemblyJob` | `Fill/` | signed-area polygon classification with hole containment |
+| `FillSizingJob` | `Fill/` | offset tables; the capacity guard |
+| `FillGatherJob` | `Fill/` | the hole sort and the flat-column copy |
+| `EarcutJob` / `EarcutBatchJob` | `Fill/` | the triangulator, and the batching wrapper (`IJobParallelForDefer`, one polygon per `Execute`) |
+| `FillAggregateJob` | `Fill/` | concatenation and index rebase |
+| `GlobeFillSubdivider` | `Fill/` | the curved arm's subdivision (`GlobeFillSubdivideDispatch`) |
+| `GlobeFillScatterJob` | `Fill/` | scatters a subdivided run into the six output columns |
+| `FillTriangulationBuffers` | `Fill/` | the flat working columns the sizing/gather/earcut stages share |
+| `PolygonDescriptors` | `Fill/` | the polygon descriptor columns assembly produces |
+| `FillMeshPipeline` | `Fill/` | **`Schedule`, the old synchronous entry point, is fully retired** — deleted, not just uncalled, and fenced against a caller reappearing (`FillMeshPipelineRetirementFenceTests`). The fill-extrusion roof already reached `FillMeshGraph.Schedule` (via `FillExtrusionMeshGraph`), same as every other caller. What survives here is what `FillMeshGraph` and its callers still share: `LayerInput` (the input descriptor), `HoleRingComparer` (the hole-sort order `FillGatherJob` uses), and the decode-sizing pair `PrecountRingsAndVertices`/`EnsureCapacity` (called from `MvtGeometryMaterializer`). A rename that drops the now-inaccurate "pipeline" name is a deferred follow-up with no behaviour change. |

@@ -62,8 +62,10 @@ Which scene ships is Build Settings' job, as on every other target: the enabled 
 **`Tools/serve-web.sh` is not a convenience.** A plain static server cannot serve this build: Unity
 compresses with Brotli and the loader has no JS fallback decoder (`webGLDecompressionFallback: 0`), so the
 *server* must declare `Content-Encoding: br`. Safari compounds it by only advertising `br` over HTTPS, so on
-plain `http://` it never asks — the header has to be sent regardless. The script also sends COOP/COEP, which
-this build does not need but will the moment threads matter.
+plain `http://` it never asks — the header has to be sent regardless. The script also sends COOP/COEP, and those are
+**load-bearing**: this build has threads on, so its wasm imports `env.memory` with `shared=YES`, and that
+`SharedArrayBuffer`-backed memory throws at construction unless the page is cross-origin-isolated. A server
+that omits them does not serve a slower player — it serves one that never starts.
 
 ### The three settings that decide whether a web player starts
 

@@ -63,8 +63,7 @@ namespace MapRenderer.Tests.Jobs
                 Assert.AreEqual(0, buffers.FlatPolyVerts.Length);
                 Assert.AreEqual(0, buffers.FlatSortedHoleCounts.Length);
                 Assert.AreEqual(0, buffers.FlatIndexArrays.Length);
-                Assert.AreEqual(0, buffers.FlatVx.Length);
-                Assert.AreEqual(0, buffers.FlatVy.Length);
+                Assert.AreEqual(0, buffers.FlatWorkVerts.Length);
                 Assert.AreEqual(0, buffers.FlatPreviousIndex.Length);
                 Assert.AreEqual(0, buffers.FlatNextIndex.Length);
                 Assert.AreEqual(0, buffers.FlatIsBridge.Length);
@@ -241,8 +240,7 @@ namespace MapRenderer.Tests.Jobs
                 Assert.AreEqual(0, buffers.FlatPolyVerts.Length);
                 Assert.AreEqual(0, buffers.FlatSortedHoleCounts.Length);
                 Assert.AreEqual(0, buffers.FlatIndexArrays.Length);
-                Assert.AreEqual(0, buffers.FlatVx.Length);
-                Assert.AreEqual(0, buffers.FlatVy.Length);
+                Assert.AreEqual(0, buffers.FlatWorkVerts.Length);
                 Assert.AreEqual(0, buffers.FlatPreviousIndex.Length);
                 Assert.AreEqual(0, buffers.FlatNextIndex.Length);
                 Assert.AreEqual(0, buffers.FlatIsBridge.Length);

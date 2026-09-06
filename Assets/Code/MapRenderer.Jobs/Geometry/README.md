@@ -35,17 +35,20 @@ output). The public fields read the same either way, but a list-backed buffer's 
 backing lists — and disposing a view is invalid. That is the entire reason the modes are distinguished, and
 `Dispose` frees the right thing in each case. If you add a mode, that discriminator is what you must keep.
 
-## Files
+## Components
 
-| file | role |
-|---|---|
-| `TileGeometryBuffers.cs` | the buffer itself — columns, provenance, both backing modes, disposal |
-| `FillGraphOutput.cs` | the mesh-side columns a build produces (job-scheduling-design.md §8 stage 4 Group B: `TileMeshBuffers.cs`, the synchronous pipeline's twin, is retired) |
-| `ITileGeometryMaterializer.cs` | the mint-and-transfer interface |
-| `MvtGeometryMaterializer.cs` | materializes from a decoded MVT tile |
-| `PathGeometryMaterializer.cs` | materializes synthetic geometry (the background quad's full-extent ring) |
-| `RingSelectJob.cs` | narrows a tile's rings to one layer's visit order |
-| `RingClipJob.cs` | the same, clipped to the tile's buffer window — production's default path |
+| Type | Folder | Role |
+|---|---|---|
+| `TileGeometryBuffers` | `Geometry/` | the buffer itself — columns, provenance, both backing modes, disposal |
+| `ITileGeometryMaterializer` | `Geometry/` | the mint-and-transfer interface |
+| `MvtGeometryMaterializer` | `Mvt/` | materializes from a decoded MVT tile |
+| `PathGeometryMaterializer` | `Geometry/` | materializes synthetic geometry (the background quad's full-extent ring) |
+| `RingSelectJob` | `Geometry/` | narrows a tile's rings to one layer's visit order |
+| `RingClipJob` | `Geometry/` | the same, clipped to the tile's buffer window — production's default path |
+
+`FillGraphOutput` — the mesh-side columns a build produces — now lives in `Fill/`, not here (it moved when
+the fill mesher's namespace split out); `TileMeshBuffers`, its synchronous-pipeline twin
+(job-scheduling-design.md §8 stage 4 Group B), is retired.
 
 ## A trap worth knowing
 

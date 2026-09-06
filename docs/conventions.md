@@ -278,6 +278,44 @@ or a class reference cannot become an `IJob` at all until it is rewritten. Honor
 This rule sits *above* the allocation ladder below, and does not replace its top rung: the best data-plane
 code still allocates **nothing** per iteration, native or otherwise. See `ARCHITECTURE.md` §2.
 
+### Column layout: one struct per element vs. one column per field
+
+Once a field is native (the rule above), a second question follows: does *this* field get its own
+`NativeArray`/`NativeList` column, or does it share a struct with the fields it sits next to? The answer is
+an **access-pattern discriminator**, not a blanket preference for array-of-structs or struct-of-arrays:
+
+- **Fields describing one element, read together at the same index → one struct (one column).** If every
+  site that touches field A at index `i` also touches field B at index `i` in the same expression or the
+  next line, splitting them buys nothing — it costs two cache lines per element instead of one, and doubles
+  the index arithmetic for no vectorisation anyone performs.
+- **A field streamed alone over a whole range → its own column.** If some pass reads or writes just that
+  field across a range while never touching its neighbours, keep it split — merging it into a struct drags
+  the unrelated fields through cache on every element and blocks Burst from vectorising the lone field.
+- **The test:** *"what does one iteration touch?"* Walk the loop bodies, not the field list. A field with no
+  loop that reads it alone is a merge candidate; a field with a loop that touches only it is not.
+
+**Worked example, both directions, from `EarcutJob.cs`.** Its working buffer used to declare `Vx`/`Vy` as
+two `NativeArray<double>` columns. Every access in the file touches both at the same index, usually in the
+same expression (`Vx[t] = P[s].x; Vy[t] = P[s].y;`) or reads them from an already-interleaved
+`NativeArray<double2>` input one line apart — no pass ever streams `Vx` alone. Worse, the split
+*de-interleaved* an already-`double2` source array and read it back pairwise on every use. Merged into one
+`NativeArray<double2> Verts`, the copy sites collapse to `Verts[t] = P[s];` and `Area2` takes `double2`
+parameters instead of six loose doubles. Contrast the same file's `Next`, which correctly stays its own
+column: `scan = Next[scan]` streams it alone on every ring walk, so merging position into it would drag the
+vertex array through cache on every hop of a loop that never reads it.
+
+**Co-access is necessary but not sufficient.** If a column's only same-index partner is itself streamed
+alone somewhere, merging into it taxes that stream for the newcomer's benefit — so the newcomer stays split
+despite reading together everywhere. In `EarcutJob.cs`, `IsEar` and `IsBridgeCopy` are read at the same
+index as `Removed` on every touch, yet stay their own columns because `Removed` is walked alone by three
+`Next`-only ring scans (`EarcutJob.cs:297`, `:629` in `CountRing`, `:391-403`).
+
+**Not yet enforced across the codebase — this is a rule new and touched code is held to.** No prior
+guidance on this existed before Vx/Vy was merged; older split-for-no-reason columns elsewhere have not been
+swept.
+
+*(Established during the `Vx`/`Vy` merge — see `EarcutJob.cs` and `FillTriangulationBuffers.FlatWorkVerts`.)*
+
 ### Hot-path allocations: none, then native, then pooled
 
 A **hot path** is anything that runs per feature / per vertex / per glyph / per tile-build / per frame — the
@@ -471,9 +509,9 @@ joins that family — `FillTriangulationBuffers`, not `EarcutScratch`.
 gather, earcut, aggregate); naming it for the third of them was not merely vague but wrong, and it would have
 misled every later reader about what may touch it.
 
-**A qualifier that distinguishes is worth keeping.** `FlatVx` earns `Flat` — the column is flattened across
-every polygon of the layer and indexed by an offset table. `FlatScratchVx` adds nothing with `Scratch`. Ask of
-each word: if I deleted it, would the name become ambiguous? If not, it is filler.
+**A qualifier that distinguishes is worth keeping.** `FlatWorkVerts` earns `Flat` — the column is flattened
+across every polygon of the layer and indexed by an offset table. `FlatScratchWorkVerts` adds nothing with
+`Scratch`. Ask of each word: if I deleted it, would the name become ambiguous? If not, it is filler.
 
 **This rule is NOT yet enforced across the codebase — read it as what new and touched code is held to.**
 As of 2026-09-03 the fill-graph path has been swept, and `Scratch` alone still appears about 160 times

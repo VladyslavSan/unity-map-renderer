@@ -46,16 +46,22 @@ namespace MapRenderer.Jobs.Lines
         };
 
         /// <summary>Schedules a <c>Dispose(handle)</c> node for every column, mirroring
-        /// <see cref="FillTriangulationBuffers.DisposeAfter"/>'s own per-column recording.</summary>
+        /// <see cref="FillTriangulationBuffers.DisposeAfter"/>'s own per-column recording, fan-out-then-combine
+        /// shape, and <c>Allocator.Temp</c> reasoning for the handle array.</summary>
         internal JobHandle DisposeAfter(JobHandle deps)
         {
-            JobHandle h = DisposeField(RingVertexOffsets, deps);
-            h = JobHandle.CombineDependencies(h, DisposeField(RingIndexOffsets, deps));
-            h = JobHandle.CombineDependencies(h, DisposeField(FlatVertices, deps));
-            h = JobHandle.CombineDependencies(h, DisposeField(FlatIndices, deps));
-            h = JobHandle.CombineDependencies(h, DisposeField(PerRingVertexCount, deps));
-            h = JobHandle.CombineDependencies(h, DisposeField(PerRingIndexCount, deps));
-            return h;
+            var handles = new NativeArray<JobHandle>(6, Allocator.Temp);
+            try
+            {
+                handles[0] = DisposeField(RingVertexOffsets, deps);
+                handles[1] = DisposeField(RingIndexOffsets, deps);
+                handles[2] = DisposeField(FlatVertices, deps);
+                handles[3] = DisposeField(FlatIndices, deps);
+                handles[4] = DisposeField(PerRingVertexCount, deps);
+                handles[5] = DisposeField(PerRingIndexCount, deps);
+                return JobHandle.CombineDependencies(handles);
+            }
+            finally { handles.Dispose(); }
         }
 
         private static NativeList<T> NewList<T>() where T : unmanaged

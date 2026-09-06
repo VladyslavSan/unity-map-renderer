@@ -12,7 +12,7 @@ namespace MapRenderer.Jobs.Fill
     /// same bridge/hole logic, same cure → split → clean-drop failure cascade (mesh-triangulation-
     /// robustness Stage 3 — mirrors the Stage 2 managed fix). Produces bit-identical output to the
     /// managed reference (integer tile-space coords are exact; pinned by
-    /// <c>JobifiedPipelineTests.MatchManagedPath</c>).
+    /// <c>JobifiedPipelineTests.JobifiedPipeline_VertexAndIndexContentHash_MatchManagedPath</c>).
     ///
     /// Input: vertices for ONE polygon (outer + bridged holes packed contiguously), ring metadata
     /// from <see cref="RingAssemblyJob"/> output.
@@ -36,7 +36,7 @@ namespace MapRenderer.Jobs.Fill
     /// of its OWN nested splits, before <c>c</c> starts) via a LIFO stack, the halves are pushed
     /// <c>c</c> then <c>a</c>, so <c>a</c> pops next.
     ///
-    /// <b>Working-buffer capacity (mesh-triangulation-robustness Stage 3).</b> <see cref="Vx"/>/<see cref="Vy"/>/
+    /// <b>Working-buffer capacity (mesh-triangulation-robustness Stage 3).</b> <see cref="Verts"/>/
     /// <see cref="Prev"/>/<see cref="Next"/>/<see cref="Removed"/>/<see cref="IsBridgeCopy"/>/<see cref="IsEar"/>
     /// are fixed-size <c>NativeArray</c>s pre-sized by <c>FillMeshPipeline</c> to the deterministic
     /// merged-ring size PLUS a bounded split headroom (<see cref="MaxSplits"/> mirrors managed's cap
@@ -96,14 +96,13 @@ namespace MapRenderer.Jobs.Fill
         /// <summary>[0] = the ACTUAL final merged-ring vertex count this polygon used (base bridged
         /// count plus any split-added vertices) — may be less than the scratch arrays' capacity when
         /// the split headroom goes unused. The coordinator MUST read this (not assume capacity) to know
-        /// how many of <see cref="Vx"/>/<see cref="Vy"/> are meaningful; the tail beyond this count is
+        /// how many of <see cref="Verts"/> are meaningful; the tail beyond this count is
         /// unwritten scratch, not part of the triangulation.</summary>
         public NativeArray<int> OutMergedVertexCount;
 
         // ── Working buffers (pre-allocated by the coordinator, size = capacity + split headroom) ────
         // Using NativeArrays for all internal buffers so the job has no GC allocations.
-        public NativeArray<double> Vx;
-        public NativeArray<double> Vy;
+        public NativeArray<double2> Verts;
         public NativeArray<int>    Prev;
         public NativeArray<int>    Next;
         public NativeArray<bool>   IsBridgeCopy;
@@ -137,7 +136,7 @@ namespace MapRenderer.Jobs.Fill
             // The deterministic merged-ring size on clean input is outer + Σ(hole + 2 bridge verts) — the
             // coordinator pre-sizes the scratch NativeArrays to THAT plus a split headroom, and `total`
             // only ever grows past the base via SplitPolygon, bounded by the array's real Length (the
-            // Vx.Length check in TrySplit — the single source of the capacity bound here).
+            // Verts.Length check in TrySplit — the single source of the capacity bound here).
             int total = 0;
 
             // ── Insert outer ring, normalised to CCW-on-screen (area2 < 0 in Y-down). ────────
@@ -146,8 +145,7 @@ namespace MapRenderer.Jobs.Fill
             for (int i = 0; i < outerCount; i++)
             {
                 int src = reverseOuter ? (outerCount - 1 - i) : i;
-                Vx[total] = PolyVertices[src].x;
-                Vy[total] = PolyVertices[src].y;
+                Verts[total] = PolyVertices[src];
                 Prev[total] = total - 1;
                 Next[total] = total + 1;
                 IsBridgeCopy[total] = false;
@@ -172,8 +170,7 @@ namespace MapRenderer.Jobs.Fill
                 for (int i = 0; i < holeCount; i++)
                 {
                     int src = reverseHole ? (holeCount - 1 - i) : i;
-                    Vx[total] = PolyVertices[holeVertexStart + src].x;
-                    Vy[total] = PolyVertices[holeVertexStart + src].y;
+                    Verts[total] = PolyVertices[holeVertexStart + src];
                     Prev[total] = total - 1;
                     Next[total] = total + 1;
                     IsBridgeCopy[total] = false;
@@ -204,7 +201,7 @@ namespace MapRenderer.Jobs.Fill
                     {
                         if (BridgeValid(holeLM, scan, mergedRingStart, mergedRingCount, holeStart, holeCount))
                         {
-                            double bdx = Vx[scan] - Vx[holeLM], bdy = Vy[scan] - Vy[holeLM];
+                            double bdx = Verts[scan].x - Verts[holeLM].x, bdy = Verts[scan].y - Verts[holeLM].y;
                             double bd  = bdx * bdx + bdy * bdy;
                             if (bd < bestDist) { bestDist = bd; bestCand = scan; }
                         }
@@ -217,8 +214,8 @@ namespace MapRenderer.Jobs.Fill
                 int copyOuter  = total + 1;
                 total += 2;
 
-                Vx[copyHoleLM] = Vx[holeLM];      Vy[copyHoleLM] = Vy[holeLM];
-                Vx[copyOuter]  = Vx[outerBridge];  Vy[copyOuter]  = Vy[outerBridge];
+                Verts[copyHoleLM] = Verts[holeLM];
+                Verts[copyOuter]  = Verts[outerBridge];
                 IsBridgeCopy[copyHoleLM] = true;
                 IsBridgeCopy[copyOuter]  = true;
                 Removed[copyHoleLM]      = false;
@@ -411,7 +408,7 @@ namespace MapRenderer.Jobs.Fill
                     if (t1 > t2) { int tmp = t1; t1 = t2; t2 = tmp; }
                     if (t0 > t1) { int tmp = t0; t0 = t1; t1 = tmp; }
 
-                    if (Area2(Vx[t0], Vy[t0], Vx[t1], Vy[t1], Vx[t2], Vy[t2]) > 0.0)
+                    if (Area2(Verts[t0], Verts[t1], Verts[t2]) > 0.0)
                     {
                         int tmp = t1; t1 = t2; t2 = tmp;
                     }
@@ -445,7 +442,7 @@ namespace MapRenderer.Jobs.Fill
                 int b  = Next[pn];
 
                 if (a != b && a != p && pn != p && !Removed[a] && !Removed[pn] && !Removed[b] &&
-                    !(Vx[a] == Vx[b] && Vy[a] == Vy[b]) &&
+                    !(Verts[a].x == Verts[b].x && Verts[a].y == Verts[b].y) &&
                     Intersects(a, p, pn, b) &&
                     LocallyInside(a, b) &&
                     LocallyInside(b, a))
@@ -481,7 +478,7 @@ namespace MapRenderer.Jobs.Fill
         /// hand the two halves off via <paramref name="stack"/> (managed recurses the ear loop on both
         /// halves here — Burst has no real recursion, see class doc). O(n²) candidate pairs on the STUCK
         /// ring only (a failure-path escape, never the success path). Refuses the split — WITHOUT writing
-        /// anything — if the pre-sized scratch headroom (<see cref="Vx"/>'s Length) is exhausted; the
+        /// anything — if the pre-sized scratch headroom (<see cref="Verts"/>'s Length) is exhausted; the
         /// caller then falls through to the clean-drop path (Stage 3's Burst-only tighter bound under
         /// managed's <see cref="MaxSplits"/> cap — see class doc).
         /// </summary>
@@ -505,7 +502,7 @@ namespace MapRenderer.Jobs.Fill
                             // Burst-only capacity guard: SplitPolygon needs 2 fresh scratch slots. Managed
                             // grows its arrays unboundedly (up to MaxSplits); Burst's NativeArrays are
                             // fixed-size, so refuse — never overflow — if the pre-sized headroom is spent.
-                            if (total + 2 > Vx.Length) return false;
+                            if (total + 2 > Verts.Length) return false;
 
                             splitsUsed++;
                             int c = SplitPolygon(a, b, ref total);
@@ -539,15 +536,15 @@ namespace MapRenderer.Jobs.Fill
         /// splits into two independent cycles — [a → b → … → a] and [a2 → … → b2 → a2]. Split-added
         /// vertices are real ring vertices (IsBridgeCopy = false), unlike the zero-width bridge-seam
         /// copies, so they participate fully in point-in-triangle tests. Caller MUST have already verified
-        /// <c>total + 2 &lt;= Vx.Length</c> (see <see cref="TrySplit"/>) — this never bounds-checks itself.
+        /// <c>total + 2 &lt;= Verts.Length</c> (see <see cref="TrySplit"/>) — this never bounds-checks itself.
         /// </summary>
         private int SplitPolygon(int a, int b, ref int total)
         {
             int a2 = total++;
             int b2 = total++;
 
-            Vx[a2] = Vx[a]; Vy[a2] = Vy[a];
-            Vx[b2] = Vx[b]; Vy[b2] = Vy[b];
+            Verts[a2] = Verts[a];
+            Verts[b2] = Verts[b];
             IsBridgeCopy[a2] = false;
             IsBridgeCopy[b2] = false;
             Removed[a2] = false;
@@ -599,8 +596,8 @@ namespace MapRenderer.Jobs.Fill
 
         private bool MiddleInside(int a, int b, int ringGuardBound)
         {
-            double mx = (Vx[a] + Vx[b]) * 0.5;
-            double my = (Vy[a] + Vy[b]) * 0.5;
+            double mx = (Verts[a].x + Verts[b].x) * 0.5;
+            double my = (Verts[a].y + Verts[b].y) * 0.5;
             bool inside = false;
             int p = a;
             int guard = 0;
@@ -609,7 +606,7 @@ namespace MapRenderer.Jobs.Fill
                 if (!Removed[p])
                 {
                     int q = Next[p];
-                    double px = Vx[p], py = Vy[p], qx = Vx[q], qy = Vy[q];
+                    double px = Verts[p].x, py = Verts[p].y, qx = Verts[q].x, qy = Verts[q].y;
                     if ((py > my) != (qy > my))
                     {
                         double ix = px + (my - py) / (qy - py) * (qx - px);
@@ -653,20 +650,20 @@ namespace MapRenderer.Jobs.Fill
         private int HoleLeftmostIndex(int holeStart, int holeCount)
         {
             int    idx  = holeStart;
-            double minX = Vx[holeStart];
+            double minX = Verts[holeStart].x;
             for (int i = 1; i < holeCount; i++)
             {
                 int j = holeStart + i;
-                if (Vx[j] < minX || (Vx[j] == minX && Vy[j] < Vy[idx]))
-                { minX = Vx[j]; idx = j; }
+                if (Verts[j].x < minX || (Verts[j].x == minX && Verts[j].y < Verts[idx].y))
+                { minX = Verts[j].x; idx = j; }
             }
             return idx;
         }
 
         private int FindBridgeVertex(int holeLM, int mergedRingStart, int mergedRingCount)
         {
-            double hx = Vx[holeLM];
-            double hy = Vy[holeLM];
+            double hx = Verts[holeLM].x;
+            double hy = Verts[holeLM].y;
 
             int    bestVert       = -1;
             double bestIntersectX = double.NegativeInfinity;
@@ -675,8 +672,8 @@ namespace MapRenderer.Jobs.Fill
             for (int iter = 0; iter < mergedRingCount * 2; iter++)
             {
                 int nc = Next[cur];
-                double ax = Vx[cur], ay = Vy[cur];
-                double bx = Vx[nc],  by = Vy[nc];
+                double ax = Verts[cur].x, ay = Verts[cur].y;
+                double bx = Verts[nc].x,  by = Verts[nc].y;
 
                 bool straddles = (ay > hy) != (by > hy);
                 if (straddles)
@@ -697,8 +694,8 @@ namespace MapRenderer.Jobs.Fill
             if (bestVert >= 0)
             {
                 double mx    = bestIntersectX;
-                double candX = Vx[bestVert];
-                double candY = Vy[bestVert];
+                double candX = Verts[bestVert].x;
+                double candY = Verts[bestVert].y;
                 double sHMP  = (mx - hx) * (candY - hy);
 
                 if (math.abs(sHMP) < 1e-10)
@@ -706,7 +703,7 @@ namespace MapRenderer.Jobs.Fill
                     cur = mergedRingStart;
                     for (int iter = 0; iter < mergedRingCount * 2; iter++)
                     {
-                        double qx = Vx[cur], qy = Vy[cur];
+                        double qx = Verts[cur].x, qy = Verts[cur].y;
                         if (cur != holeLM && math.abs(qy - hy) < 1e-10 && qx > candX && qx < hx)
                         { bestVert = cur; candX = qx; }
                         cur = Next[cur];
@@ -721,7 +718,7 @@ namespace MapRenderer.Jobs.Fill
                     cur = mergedRingStart;
                     for (int iter = 0; iter < mergedRingCount * 2; iter++)
                     {
-                        double qx = Vx[cur], qy = Vy[cur];
+                        double qx = Verts[cur].x, qy = Verts[cur].y;
                         if (qx > mx && qx < hx && cur != holeLM)
                         {
                             double sHMQ = (mx - hx) * (qy - hy);
@@ -764,7 +761,7 @@ namespace MapRenderer.Jobs.Fill
                 cur = mergedRingStart;
                 for (int iter = 0; iter < mergedRingCount; iter++)
                 {
-                    double dx = Vx[cur] - hx, dy = Vy[cur] - hy;
+                    double dx = Verts[cur].x - hx, dy = Verts[cur].y - hy;
                     double d  = dx * dx + dy * dy;
                     if (d < bestDist) { bestDist = d; bestVert = cur; }
                     cur = Next[cur];
@@ -792,23 +789,21 @@ namespace MapRenderer.Jobs.Fill
             int p = Prev[v], n = Next[v];
             if (Removed[p] || Removed[n]) return false;
 
-            double ax = Vx[p], ay = Vy[p];
-            double bx = Vx[v], by = Vy[v];
-            double cx = Vx[n], cy = Vy[n];
+            double2 a = Verts[p], b = Verts[v], c = Verts[n];
 
-            double triArea2 = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
+            double triArea2 = Area2(a, b, c);
             if (triArea2 > 1e-10) return false; // reflex vertex
 
             for (int i = 0; i < total; i++)
             {
                 if (Removed[i] || i == p || i == v || i == n) continue;
                 if (IsBridgeCopy[i]) continue;
-                double vxi = Vx[i], vyi = Vy[i];
-                if ((vxi == ax && vyi == ay) ||
-                    (vxi == bx && vyi == by) ||
-                    (vxi == cx && vyi == cy))
+                double vxi = Verts[i].x, vyi = Verts[i].y;
+                if ((vxi == a.x && vyi == a.y) ||
+                    (vxi == b.x && vyi == b.y) ||
+                    (vxi == c.x && vyi == c.y))
                     continue;
-                if (PointInTriangle(ax, ay, bx, by, cx, cy, vxi, vyi))
+                if (PointInTriangle(a.x, a.y, b.x, b.y, c.x, c.y, vxi, vyi))
                     return false;
             }
             return true;
@@ -818,22 +813,18 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>Twice the signed area of triangle (p, q, r). See managed Earcut.Area2 doc for the
         /// sign-convention note (this is also mapbox earcut's `area(p, q, r)`).</summary>
-        private static double Area2(double px, double py, double qx, double qy, double rx, double ry)
-            => (qx - px) * (ry - py) - (rx - px) * (qy - py);
+        private static double Area2(double2 p, double2 q, double2 r)
+            => (q.x - p.x) * (r.y - p.y) - (r.x - p.x) * (q.y - p.y);
 
         /// <summary>mapbox earcut's `locallyInside(a, b)` — see managed Earcut.LocallyInside doc for the
         /// derivation and the y-down sign-convention note.</summary>
         private bool LocallyInside(int a, int b)
         {
             int ap = Prev[a], an = Next[a];
-            double ax = Vx[a], ay = Vy[a];
-            double apx = Vx[ap], apy = Vy[ap];
-            double anx = Vx[an], any = Vy[an];
-            double bx = Vx[b], by = Vy[b];
 
-            bool aConvex = Area2(apx, apy, ax, ay, anx, any) <= 0.0;
-            bool insidePrevEdge = Area2(apx, apy, ax, ay, bx, by) <= 0.0;
-            bool insideNextEdge = Area2(ax, ay, anx, any, bx, by) <= 0.0;
+            bool aConvex = Area2(Verts[ap], Verts[a], Verts[an]) <= 0.0;
+            bool insidePrevEdge = Area2(Verts[ap], Verts[a], Verts[b]) <= 0.0;
+            bool insideNextEdge = Area2(Verts[a], Verts[an], Verts[b]) <= 0.0;
             return aConvex ? (insidePrevEdge && insideNextEdge)
                            : (insidePrevEdge || insideNextEdge);
         }
@@ -844,8 +835,8 @@ namespace MapRenderer.Jobs.Fill
         {
             int mp = Prev[m], mn = Next[m];
             int pp = Prev[p], pn = Next[p];
-            return Area2(Vx[mp], Vy[mp], Vx[m], Vy[m], Vx[pp], Vy[pp]) < 0.0 &&
-                   Area2(Vx[pn], Vy[pn], Vx[m], Vy[m], Vx[mn], Vy[mn]) < 0.0;
+            return Area2(Verts[mp], Verts[m], Verts[pp]) < 0.0 &&
+                   Area2(Verts[pn], Verts[m], Verts[mn]) < 0.0;
         }
 
         private bool PointInTriangle(
@@ -867,10 +858,10 @@ namespace MapRenderer.Jobs.Fill
         /// indices. Used by <see cref="CureLocalIntersections"/> and <see cref="IsValidDiagonal"/>.</summary>
         private bool Intersects(int p1, int q1, int p2, int q2)
         {
-            double o1 = Area2(Vx[p1], Vy[p1], Vx[q1], Vy[q1], Vx[p2], Vy[p2]);
-            double o2 = Area2(Vx[p1], Vy[p1], Vx[q1], Vy[q1], Vx[q2], Vy[q2]);
-            double o3 = Area2(Vx[p2], Vy[p2], Vx[q2], Vy[q2], Vx[p1], Vy[p1]);
-            double o4 = Area2(Vx[p2], Vy[p2], Vx[q2], Vy[q2], Vx[q1], Vy[q1]);
+            double o1 = Area2(Verts[p1], Verts[q1], Verts[p2]);
+            double o2 = Area2(Verts[p1], Verts[q1], Verts[q2]);
+            double o3 = Area2(Verts[p2], Verts[q2], Verts[p1]);
+            double o4 = Area2(Verts[p2], Verts[q2], Verts[q1]);
 
             bool s1 = o1 > 0.0, s1n = o1 < 0.0;
             bool s2 = o2 > 0.0, s2n = o2 < 0.0;
@@ -890,7 +881,7 @@ namespace MapRenderer.Jobs.Fill
         /// <summary>Given p, q, r already collinear, is q within the bounding box of segment p-r?</summary>
         private bool OnSegment(int p, int q, int r)
         {
-            double px = Vx[p], py = Vy[p], qx = Vx[q], qy = Vy[q], rx = Vx[r], ry = Vy[r];
+            double px = Verts[p].x, py = Verts[p].y, qx = Verts[q].x, qy = Verts[q].y, rx = Verts[r].x, ry = Verts[r].y;
             return qx <= math.max(px, rx) && qx >= math.min(px, rx) &&
                    qy <= math.max(py, ry) && qy >= math.min(py, ry);
         }
@@ -919,14 +910,14 @@ namespace MapRenderer.Jobs.Fill
         /// existing edge.</summary>
         private bool BridgeCrossesRing(int holeLM, int cand, int ringStart, int ringCount)
         {
-            double ax = Vx[holeLM], ay = Vy[holeLM], bx = Vx[cand], by = Vy[cand];
+            double ax = Verts[holeLM].x, ay = Verts[holeLM].y, bx = Verts[cand].x, by = Verts[cand].y;
             int c = ringStart;
             for (int i = 0; i < ringCount; i++)
             {
                 int nc = Next[c];
                 if (c != cand && nc != cand && c != holeLM && nc != holeLM)
                 {
-                    if (ProperlyCross(ax, ay, bx, by, Vx[c], Vy[c], Vx[nc], Vy[nc]))
+                    if (ProperlyCross(ax, ay, bx, by, Verts[c].x, Verts[c].y, Verts[nc].x, Verts[nc].y))
                         return true;
                 }
                 c = nc;

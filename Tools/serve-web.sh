@@ -10,9 +10,10 @@
 # Accept-Encoding over HTTPS, so on plain http it never asks for it — declaring the header regardless is
 # what makes it work here.
 #
-# It also sends COOP/COEP/CORP. Those are NOT needed by the current build (threads are off — see
-# BuildScript.RunWeb), but they are harmless, and they are required the moment threads come back, so the
-# serving recipe does not have to change with it.
+# It also sends COOP/COEP/CORP, and those are LOAD-BEARING — do not strip them as dead weight.
+# BuildScript.RunWeb turns web threads ON, so the player's wasm imports `env.memory` with shared=YES. That
+# memory is SharedArrayBuffer-backed and its constructor throws unless the page is cross-origin-isolated,
+# so a server that omits these headers does not serve a slower player — it serves one that never starts.
 #
 # Exit codes: 0 = served (blocks), 2 = setup error (no build found).
 set -uo pipefail

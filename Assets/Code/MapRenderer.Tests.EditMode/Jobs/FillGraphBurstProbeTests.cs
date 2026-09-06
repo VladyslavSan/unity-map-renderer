@@ -166,6 +166,11 @@ namespace MapRenderer.Tests.Jobs
 
         // ── (1) EarcutBatchJob — unknown (i): GetSubArray + nested EarcutJob.Execute() inside a job ────────
 
+        /// <summary>A dispatch parity oracle, not a kernel oracle: both arms below call <c>EarcutJob</c>
+        /// itself, so a defect inside <c>EarcutJob</c> reproduces identically on both sides and this test
+        /// cannot see it (RED-verified: a transposed vertex here stayed green). For kernel correctness
+        /// against the managed reference, see
+        /// <c>JobifiedPipelineTests.JobifiedPipeline_VertexAndIndexContentHash_MatchManagedPath</c>.</summary>
         [Test]
         public void EarcutBatchJob_MatchesPerPolygonEarcutJobRun()
         {
@@ -193,8 +198,7 @@ namespace MapRenderer.Tests.Jobs
                 var refIndexCounts   = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 var refForce    = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 var refMergedVC = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                var refVx = new NativeArray<double>(s.Buffers.WorkOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-                var refVy = new NativeArray<double>(s.Buffers.WorkOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                var refV = new NativeArray<double2>(s.Buffers.WorkOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 var refPrev = new NativeArray<int>(s.Buffers.WorkOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 var refNext = new NativeArray<int>(s.Buffers.WorkOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 var refBridge = new NativeArray<bool>(s.Buffers.WorkOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -218,7 +222,7 @@ namespace MapRenderer.Tests.Jobs
                         OutIndexCount        = refIndexCounts.GetSubArray(pi, 1),
                         OutForceClipCount    = refForce.GetSubArray(pi, 1),
                         OutMergedVertexCount = refMergedVC.GetSubArray(pi, 1),
-                        Vx = refVx.GetSubArray(sOff, sLen), Vy = refVy.GetSubArray(sOff, sLen),
+                        Verts = refV.GetSubArray(sOff, sLen),
                         Prev = refPrev.GetSubArray(sOff, sLen), Next = refNext.GetSubArray(sOff, sLen),
                         IsBridgeCopy = refBridge.GetSubArray(sOff, sLen), Removed = refRemoved.GetSubArray(sOff, sLen),
                         IsEar = refIsEar.GetSubArray(sOff, sLen),
@@ -231,8 +235,7 @@ namespace MapRenderer.Tests.Jobs
                 var batchIndexCounts   = new NativeList<int>(Allocator.Persistent); batchIndexCounts.Resize(polyCount, NativeArrayOptions.ClearMemory);
                 var batchForce    = new NativeList<int>(Allocator.Persistent); batchForce.Resize(polyCount, NativeArrayOptions.ClearMemory);
                 var batchMergedVC = new NativeList<int>(Allocator.Persistent); batchMergedVC.Resize(polyCount, NativeArrayOptions.UninitializedMemory);
-                var batchVx = new NativeList<double>(Allocator.Persistent); batchVx.Resize(s.Buffers.WorkOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
-                var batchVy = new NativeList<double>(Allocator.Persistent); batchVy.Resize(s.Buffers.WorkOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
+                var batchV = new NativeList<double2>(Allocator.Persistent); batchV.Resize(s.Buffers.WorkOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
                 var batchPrev = new NativeList<int>(Allocator.Persistent); batchPrev.Resize(s.Buffers.WorkOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
                 var batchNext = new NativeList<int>(Allocator.Persistent); batchNext.Resize(s.Buffers.WorkOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
                 var batchBridge = new NativeList<bool>(Allocator.Persistent); batchBridge.Resize(s.Buffers.WorkOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
@@ -255,7 +258,7 @@ namespace MapRenderer.Tests.Jobs
                     FlatPolyVerts = s.Buffers.FlatPolyVerts, FlatSortedHoleCounts = s.Buffers.FlatSortedHoleCounts,
                     PerPolyOuterCount = s.Buffers.PerPolyOuterCount, PerPolyFeatureIndex = s.Buffers.PerPolyFeatureIndex,
                     FlatIndexArrays = batchIdx,
-                    FlatVx = batchVx, FlatVy = batchVy,
+                    FlatWorkVerts = batchV,
                     FlatPreviousIndex = batchPrev, FlatNextIndex = batchNext,
                     FlatIsBridge = batchBridge, FlatRemoved = batchRemoved, FlatIsEar = batchIsEar,
                     PerPolyIndexCount = batchIndexCounts, PerPolyForceClip = batchForce, PerPolyMergedVertexCount = batchMergedVC,
@@ -287,10 +290,10 @@ namespace MapRenderer.Tests.Jobs
                 }
 
                 refIdx.Dispose(); refIndexCounts.Dispose(); refForce.Dispose(); refMergedVC.Dispose();
-                refVx.Dispose(); refVy.Dispose(); refPrev.Dispose(); refNext.Dispose();
+                refV.Dispose(); refPrev.Dispose(); refNext.Dispose();
                 refBridge.Dispose(); refRemoved.Dispose(); refIsEar.Dispose();
                 batchIdx.Dispose(); batchIndexCounts.Dispose(); batchForce.Dispose(); batchMergedVC.Dispose();
-                batchVx.Dispose(); batchVy.Dispose(); batchPrev.Dispose(); batchNext.Dispose();
+                batchV.Dispose(); batchPrev.Dispose(); batchNext.Dispose();
                 batchBridge.Dispose(); batchRemoved.Dispose(); batchIsEar.Dispose();
             }
             finally

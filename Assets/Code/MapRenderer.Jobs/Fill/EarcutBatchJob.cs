@@ -72,8 +72,7 @@ namespace MapRenderer.Jobs.Fill
             NativeArray<double2> flatPolyVerts            = Buffers.FlatPolyVerts.AsArray();
             NativeArray<int>     flatSortedHoleCounts     = Buffers.FlatSortedHoleCounts.AsArray();
             NativeArray<int>     flatIndexArrays          = Buffers.FlatIndexArrays.AsArray();
-            NativeArray<double>  flatVx                   = Buffers.FlatVx.AsArray();
-            NativeArray<double>  flatVy                   = Buffers.FlatVy.AsArray();
+            NativeArray<double2> flatWorkVerts            = Buffers.FlatWorkVerts.AsArray();
             NativeArray<int>     flatPreviousIndex        = Buffers.FlatPreviousIndex.AsArray();
             NativeArray<int>     flatNextIndex            = Buffers.FlatNextIndex.AsArray();
             NativeArray<bool>    flatIsBridge             = Buffers.FlatIsBridge.AsArray();
@@ -98,8 +97,7 @@ namespace MapRenderer.Jobs.Fill
                 OutIndexCount        = perPolyIndexCount.GetSubArray(pi, 1),
                 OutForceClipCount    = perPolyForceClip.GetSubArray(pi, 1),
                 OutMergedVertexCount = perPolyMergedVertexCount.GetSubArray(pi, 1),
-                Vx                   = flatVx.GetSubArray(sOff, sLen),
-                Vy                   = flatVy.GetSubArray(sOff, sLen),
+                Verts                = flatWorkVerts.GetSubArray(sOff, sLen),
                 Prev                 = flatPreviousIndex.GetSubArray(sOff, sLen),
                 Next                 = flatNextIndex.GetSubArray(sOff, sLen),
                 IsBridgeCopy         = flatIsBridge.GetSubArray(sOff, sLen),
