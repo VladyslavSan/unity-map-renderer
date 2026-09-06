@@ -3,8 +3,8 @@
 // failure falls back to managed IL SILENTLY (FillGraphBurstProbeTests), so the runner alone doesn't decide it.
 // In this project's practice ./Tools/run-tests.sh (batch mode, confirmed via its log) is the Burst-compiled
 // path; the interactive Editor Test Runner is not verified that way. This differential validates that the
-// Burst SymbolStageJob and the managed SymbolStagingMath reference make the SAME placement DECISIONS. Unlike
-// SymbolCollisionJob (integer/branch logic → bit-identical), staging has float trig (sincos/atan2 per glyph),
+// Burst StageJob and the managed SymbolStagingMath reference make the SAME placement DECISIONS. Unlike
+// CollisionJob (integer/branch logic → bit-identical), staging has float trig (sincos/atan2 per glyph),
 // so Burst may differ ~1 ULP from Mono.
 // The hazard is a 1-ULP flip at a text-max-angle / span-fit boundary changing WHICH anchors stage — that shows up
 // as a different staged/box/quad COUNT (asserted EXACT) or candidate integer field, not as sub-ULP geometry noise
@@ -20,7 +20,7 @@ using MapRenderer.Jobs.Symbols;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Lever C step 3b: the Burst <see cref="SymbolStageJob"/> must make the same placement decisions as the managed
+    /// Lever C step 3b: the Burst <see cref="StageJob"/> must make the same placement decisions as the managed
     /// <see cref="SymbolStagingMath"/> reference it wraps — the differential the codebase requires for a Burst numeric
     /// port (cf. <see cref="SymbolCollisionJobTests"/>).
     /// </summary>
@@ -46,7 +46,7 @@ namespace MapRenderer.Tests.Text.Placement
             int bc = 0, qc = 0, ec = 0;
             int staged = SymbolStagingMath.StageCurved(in s, screen, depth, valid, world, worldUps, glyphs, anchors, fadeIds, wasPlaced,
                 // W3: `view` reaches BOTH arms identically (Native assigns the same value to
-                // SymbolStageJob.View), so the differential compares the same transform on each side. The
+                // StageJob.View), so the differential compares the same transform on each side. The
                 // bend cases below pass `default`, which keeps them byte-identical to their pre-W3 form;
                 // BurstStage_MatchesManaged_MapPitchedCurved passes a real one and is what covers W3's
                 // projected-corner arithmetic (F-W3-5, discharged).
@@ -55,7 +55,7 @@ namespace MapRenderer.Tests.Text.Placement
             return new Result { Staged = staged, BoxCount = bc, QuadCount = qc, Boxes = boxes, Quads = quads, Candidates = cands };
         }
 
-        // The Burst path: SymbolStageJob over a one-record curved batch mirror.
+        // The Burst path: StageJob over a one-record curved batch mirror.
         private static Result Native(in CurvedStageInput s, float2[] screen, float[] depth, byte[] valid,
             double3[] world, float3[] worldUps, CurvedGlyph[] glyphs, LineAnchor[] anchors, long[] fadeIds, byte[] wasPlaced, float bearing,
             SymbolViewTransform view = default, float metresPerLogicalPixel = 0f)
@@ -76,7 +76,7 @@ namespace MapRenderer.Tests.Text.Placement
             var pointOffset = One(0); var nScreen = From(screen); var nDepth = From(depth); var nValid = From(valid);
             var nWorld = From(world); // Stage AC (curved-world): the gathered world polyline, index-aligned with Screen
             var nWorldUps = From(worldUps); // P2: index-parallel unit surface normals
-            // R2: AnchorWasPlaced is now JOB-OWNED scratch — SymbolStageJob.Execute fills it from AnchorFadeIds +
+            // R2: AnchorWasPlaced is now JOB-OWNED scratch — StageJob.Execute fills it from AnchorFadeIds +
             // Placed. Allocated ZERO-FILLED (NativeArrayOptions.ClearMemory is the default), which is the property
             // doing the work here: a MISSING fill loop reads as not-placed and fails the differential rather than
             // matching by luck. Placed is the native incumbency set the job resolves against, built from the
@@ -93,7 +93,7 @@ namespace MapRenderer.Tests.Text.Placement
             var oCands = new NativeArray<SymbolCandidate>(anchors.Length + 1, alloc); var oEmit = new NativeArray<CandidateEmit>(anchors.Length + 1, alloc);
             var counts = new NativeArray<int>(4, alloc);
 
-            new SymbolStageJob
+            new StageJob
             {
                 Kinds = kinds, Detail = detail, WorldCount = worldCount, Count = 1,
                 Points = points, PointQuadStart = pqs, PointQuadCount = pqc,
@@ -104,8 +104,8 @@ namespace MapRenderer.Tests.Text.Placement
                 WorldUpsRender = nWorldUps,
                 AnchorWasPlaced = awp, Placed = placed.AsReadOnly(), DroppedHalves = droppedHalves.AsReadOnly(),
                 Bearing = bearing, Viewport = new double2(1920, 1080), View = view,
-                // ASYMMETRY the two arms must bridge explicitly: SymbolStageJob.Execute PATCHES
-                // s.MetresPerLogicalPixel from this per-frame field (SymbolStageJob.cs:178), so the value
+                // ASYMMETRY the two arms must bridge explicitly: StageJob.Execute PATCHES
+                // s.MetresPerLogicalPixel from this per-frame field (StageJob.cs:178), so the value
                 // stored on the CurvedStageInput is IGNORED here while the managed arm reads it straight off
                 // `s`. Setting it only on `s` gives the managed arm a live ruler and the Burst arm a zero
                 // one, so they silently take different branches and the differential fails on geometry
@@ -154,7 +154,7 @@ namespace MapRenderer.Tests.Text.Placement
             var anchors = new[] { new LineAnchor(0, 1f) }; // anchor at the joint (arc 60)
             var fadeIds = new[] { 111L, 222L };            // anchor + centred fallback
             // R2: derive wasPlaced from a NativeHashSet<long> of incumbent fade ids — the SAME lookup shape
-            // SymbolStageJob resolves incumbency through in production (both arms resolve off one set). A
+            // StageJob resolves incumbency through in production (both arms resolve off one set). A
             // hand-typed byte[] literal could hand duplicate fade ids inconsistent bytes, an input production can
             // never produce; deriving both arms' input from one set keeps this oracle testing the staging math
             // (well, the plumbing — see the anchorIncumbent comment above), not an impossible input.
@@ -240,7 +240,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// ruler, and a usable view transform handed identically to each side.
         ///
         /// <para><b>What is actually at stake.</b> The Burst path itself is already exercised — the rendered
-        /// W3 teeth read boxes produced by <c>SymbolStageJob</c>, which is
+        /// W3 teeth read boxes produced by <c>StageJob</c>, which is
         /// <c>[BurstCompile(CompileSynchronously = true)]</c> and invoked through <c>.Run()</c>, checked
         /// against an independent oracle. What was missing is managed-vs-Burst EQUALITY over the new
         /// arithmetic: a <c>double3</c> corner accumulation, a Gram-Schmidt <c>normalize</c>, a

@@ -131,7 +131,7 @@ that mechanism, do not refine it.
 Each is real, independent of the width question, and much smaller than the width work implied.
 
 1. **The corner miter is baked in world space.** `LineTessellator.ComputeMiterNormals` (and its
-   `LineRibbonJob` twin) bake `normalize(n₁+n₂)` scaled by `1/cos(θ_world/2)`. The premise is *not* that a
+   `RibbonJob` twin) bake `normalize(n₁+n₂)` scaled by `1/cos(θ_world/2)`. The premise is *not* that a
    styled width is a screen quantity — §1 denies that. It is that a **miter factor is a property of the
    corner as it appears**, and the ground→screen map is anisotropic, so the world half-angle is not the
    screen one; a band of constant world width still needs its corner mitred by the angle the viewer sees.
@@ -144,7 +144,7 @@ Each is real, independent of the width question, and much smaller than the width
    clamp rule.~~ **RESOLVED, in two parts.** First, the concave vertex of a bevel/round join now emits
    `min(1/cos(θ/2), miterLimit)` — the same bisector-direction, miter-factor magnitude the miter join
    already emits at that corner, saturated at `miterLimit` instead of falling back to bevel (see
-   `LineTessellator.ComputeInnerNormal`, `LineRibbonJob.ComputeInnerNormal`; pinned by
+   `LineTessellator.ComputeInnerNormal`, `RibbonJob.ComputeInnerNormal`; pinned by
    `LineTessellatorTests.InnerJoin_*` and `LineRibbonJobTests.InnerJoin_*`). Second — found while
    re-deriving the first part — that magnitude vertex was being emitted on the **wrong side of the
    corner**: `LineTessellator.cs:144`'s comment claimed `t1×t2 > 0 ⇒ left turn, outer side = left`, but a

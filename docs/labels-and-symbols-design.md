@@ -612,7 +612,7 @@ occluder ⇒ no-op.
 `SymbolFeatureExtractor.ProjectPath` (`:164-173`) projects only the original MVT vertices, so a long segment
 renders as a straight screen chord instead of the projected curve. **Fix:** subdivide per
 `IProjection.MaxRefineAngleRad` (Mercator = ∞ ⇒ no split), as the mesh line path does
-(`LineSubdivideJob`, job-scheduling-design.md §8 stage 5 Group B — this note's own engine-free `Core` helper,
+(`SubdivideJob`, job-scheduling-design.md §8 stage 5 Group B — this note's own engine-free `Core` helper,
 `LineCurvatureSubdivision`, is exactly the ported form it already recommends). **Hazard:**
 `LineAnchor.Segment` (`:20`) indexes the path vertex array — computed against the tile-local path
 (`LineAnchorPlacement.Compute`, `SymbolFeatureExtractor.cs:106`) but resolved against the render path
@@ -689,7 +689,7 @@ tile-coverage cull in `CurrentBatch`, §1.5), `SymbolTileLabelStore` (active/cac
 `Placement/LabelViewDistance`. `MapRenderer.Core/Geo/`: `IProjection`
 (`Project`, `TryGetHorizonOccluder`, `MaxRefineAngleRad`), `SphericalProjection` (`ProjectPoint` `:51-55`,
 occluder `:81-86`), `WebMercator`, `CameraPoseMath`, `SceneFrame`, `FloatingOrigin`. Mesh-path prior art:
-`LineSubdivideJob` (job-scheduling-design.md §8 stage 5 Group B — this note's own engine-free
+`SubdivideJob` (job-scheduling-design.md §8 stage 5 Group B — this note's own engine-free
 `LineCurvatureSubdivision` is the ported form the mesh path's `SubdivideCenterline` retired in favour of),
 `ProjectPointsJob<TProj>`, `FrustumTileSelector`.
 

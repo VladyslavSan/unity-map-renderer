@@ -118,9 +118,9 @@ namespace MapRenderer.Tests.Jobs
         }
 
         [Test]
-        public void LineRibbonJob_RunOnThreadPoolWorker_UsesInternalTempSafely()
+        public void RibbonJob_RunOnThreadPoolWorker_UsesInternalTempSafely()
         {
-            // LineRibbonJob allocates Allocator.Temp INTERNALLY (dedup/along/cumDist scratch), unlike the fill
+            // RibbonJob allocates Allocator.Temp INTERNALLY (dedup/along/cumDist scratch), unlike the fill
             // kernels which take caller scratch. Temp on a raw threadpool thread is the exact off-main risk —
             // this proves it works there before the live line path depends on it.
             int mainTid = Thread.CurrentThread.ManagedThreadId;
@@ -130,8 +130,8 @@ namespace MapRenderer.Tests.Jobs
             {
                 var pts   = new NativeArray<double3>(3, Allocator.Persistent);
                 var ups   = new NativeArray<double3>(3, Allocator.Persistent);
-                var outV  = new NativeArray<LineRibbonVertex>(LineRibbonJob.MaxVertexCount(3, 4), Allocator.Persistent);
-                var outI  = new NativeArray<int>(LineRibbonJob.MaxIndexCount(3, 4), Allocator.Persistent);
+                var outV  = new NativeArray<LineRibbonVertex>(RibbonJob.MaxVertexCount(3, 4), Allocator.Persistent);
+                var outI  = new NativeArray<int>(RibbonJob.MaxIndexCount(3, 4), Allocator.Persistent);
                 var vcArr = new NativeArray<int>(1, Allocator.Persistent);
                 var icArr = new NativeArray<int>(1, Allocator.Persistent);
                 try
@@ -140,7 +140,7 @@ namespace MapRenderer.Tests.Jobs
                     pts[1] = new double3(10, 0, 0);
                     pts[2] = new double3(20, 0, 5);
                     for (int i = 0; i < 3; i++) ups[i] = new double3(0, 1, 0);
-                    new LineRibbonJob
+                    new RibbonJob
                     {
                         Points = pts, Ups = ups, PointCount = 3,
                         Join = JoinType.Miter, Cap = CapType.Butt, MiterLimit = 2.0, RoundSegments = 4,
@@ -156,7 +156,7 @@ namespace MapRenderer.Tests.Jobs
             }, out int workerTid, out Exception ex);
 
             vc = result.Item1; ic = result.Item2;
-            Assert.IsNull(ex, $"LineRibbonJob.Run() THREW off a worker (Allocator.Temp off-thread?): {ex}");
+            Assert.IsNull(ex, $"RibbonJob.Run() THREW off a worker (Allocator.Temp off-thread?): {ex}");
             Assert.AreNotEqual(mainTid, workerTid, "spike must actually run off the main thread");
             Assert.Greater(vc, 0, "3-point polyline must produce line vertices off-main");
             Assert.Greater(ic, 0, "3-point polyline must produce indices off-main");

@@ -251,7 +251,7 @@ float3 Line_VertexExtrude(
     float3 lateralWS = unitDir_WS * max(miter * outerWorld, minHalfWorld);
 #else
     // The pad goes INSIDE the miter multiply. The miter factor is 1/cos(θ/2)
-    // (LineRibbonJob.ComputeMiterNormals), defined so the PERPENDICULAR distance equals the multiplied
+    // (RibbonJob.ComputeMiterNormals), defined so the PERPENDICULAR distance equals the multiplied
     // value — so miter*(outer + pad) holds the perpendicular pad at exactly 0.5 px at any corner. Padding
     // AFTER the multiply would give a perpendicular pad of pad*cos(θ/2), which SHRINKS toward zero as the
     // corner sharpens; the ramp would then have nowhere to land precisely where geometry is tightest.

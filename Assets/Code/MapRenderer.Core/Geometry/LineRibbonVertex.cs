@@ -3,7 +3,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geometry
 {
     /// <summary>
-    /// Per-vertex output of the 3D array ribbon builder (<c>LineRibbonJob</c>) — the projection-agnostic
+    /// Per-vertex output of the 3D array ribbon builder (<c>RibbonJob</c>) — the projection-agnostic
     /// successor to <see cref="LineVertex"/> (2D). The centerline is projected FIRST (to origin-relative render
     /// space + a per-point surface up); the ribbon is then built in 3D, so every field is final render-space
     /// data — no downstream reconstruction, no separate tangent frame, no winding flip.

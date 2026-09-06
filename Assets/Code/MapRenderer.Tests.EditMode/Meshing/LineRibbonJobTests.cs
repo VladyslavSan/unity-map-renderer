@@ -14,7 +14,7 @@ using MapRenderer.Tests.TestSupport;
 namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
-    /// Planar differential oracle for <see cref="LineRibbonJob"/> (3D, Burst) vs the managed 2D reference
+    /// Planar differential oracle for <see cref="RibbonJob"/> (3D, Burst) vs the managed 2D reference
     /// <see cref="LineTessellator.Triangulate"/>. Fed a FLAT centerline (points on the XZ plane, <c>up = +Y</c>),
     /// the 3D array builder must reproduce the managed ribbon: mapping flat 2D <c>(x, y) → 3D (x, 0, y)</c>,
     /// <c>Position → (x, 0, z)</c>, <c>Across → (nx, 0, nz)</c>, with <c>Position.y == 0</c> and <c>Across.y == 0</c>.
@@ -39,8 +39,8 @@ namespace MapRenderer.Tests.Meshing
             double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments,
             double roundLimit = 1.05)
         {
-            int capV = LineRibbonJob.MaxVertexCount(pts.Length, roundSegments);
-            int capI = LineRibbonJob.MaxIndexCount(pts.Length, roundSegments);
+            int capV = RibbonJob.MaxVertexCount(pts.Length, roundSegments);
+            int capI = RibbonJob.MaxIndexCount(pts.Length, roundSegments);
 
             var points = new NativeArray<double3>(pts.Length == 0 ? 1 : pts.Length, Allocator.TempJob);
             var ups    = new NativeArray<double3>(pts.Length == 0 ? 1 : pts.Length, Allocator.TempJob);
@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.Meshing
                     ups[i]    = new double3(0.0, 1.0, 0.0);            // Mercator up = +Y
                 }
 
-                new LineRibbonJob
+                new RibbonJob
                 {
                     Points         = points,
                     Ups            = ups,

@@ -10,11 +10,11 @@
 //
 // RECORDED GAP: this no longer observes the mesh path. LineCurvatureSubdivision.Subdivide's one production
 // consumer is SymbolFeatureExtractor.cs (the SYMBOL path) — the mesh path runs its own Burst node,
-// LineSubdivideJob (MapRenderer.Jobs), which shares only the STEP-COUNT policy (SegmentSteps) with
+// SubdivideJob (MapRenderer.Jobs), which shares only the STEP-COUNT policy (SegmentSteps) with
 // Subdivide; its own linear-interpolation loop is a separate re-implementation (currently identical, but
 // not the same code under test). LongArc_IsDensifiedProportionalToSpan and ShortArc_IsNotSubdivided still
 // pin the shared SegmentSteps policy both paths call. SubPoints_LieOnTheTileSpaceChord_EndpointsPreserved
-// does NOT observe LineSubdivideJob at all any more — a bad interpolation or a dropped endpoint there reds
+// does NOT observe SubdivideJob at all any more — a bad interpolation or a dropped endpoint there reds
 // nothing here.
 
 using NUnit.Framework;

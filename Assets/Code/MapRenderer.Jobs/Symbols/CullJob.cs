@@ -23,7 +23,7 @@ namespace MapRenderer.Jobs.Symbols
     /// a managed-only check.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct SymbolCullJob : IJobParallelFor
+    public struct CullJob : IJobParallelFor
     {
         // ── Input — per-record flags/fields, index-parallel to the mirror ───────────────────────────────────
         /// <summary>Per-record: 1 = the record's tile was coverage-dropped (hard-skip, no fade). Tested first.</summary>

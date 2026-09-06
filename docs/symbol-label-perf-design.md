@@ -598,8 +598,8 @@ testable**, which the async version is not by construction.
 
 **Storage decision (a′) — a per-frame view table, block storage untouched.** `SymbolTileLabelBlock` keeps its
 19 `NativeArray<T>` fields exactly as they are. Immediately before the job runs, `BuildBlockViews`
-(`LabelPlacementSystem.cs`) builds a reusable `NativeList<SymbolBlockView>` — one entry per
-`plan.Blocks[0, plan.BlockCount)` — where `SymbolBlockView` (`Assets/Code/MapRenderer.Jobs/SymbolBlockView.cs`)
+(`LabelPlacementSystem.cs`) builds a reusable `NativeList<BlockView>` — one entry per
+`plan.Blocks[0, plan.BlockCount)` — where `BlockView` (`Assets/Code/MapRenderer.Jobs/BlockView.cs`)
 holds 19 typed **non-owning `UnsafeList<T>` views**, each built via
 `new UnsafeList<T>((T*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(array), array.Length)`. Two options were
 rejected, on call-site count AND on lifetime safety:
@@ -641,7 +641,7 @@ double-buffer BOTH containers, the same way the mirror lists themselves will nee
   only ever touched referenced blocks. Safe today (the paired front/back snapshots already pin the WHOLE
   ordered set, `SymbolLabelSubsystem.cs:670-673`), but stage 2's pin accounting must cover the whole ordered
   set, not just the referenced subset, or it will under-pin relative to what stage 1 silently relied on.
-- **Per-record view copy cost.** `SymbolBlockView block = BlockViews[BlockId[r]]` copies 19 `UnsafeList<T>`
+- **Per-record view copy cost.** `BlockView block = BlockViews[BlockId[r]]` copies 19 `UnsafeList<T>`
   fields (~608 B) per winner, twice per winner (pass 1 and pass 2). Burst will likely SROA this away — but if
   the maintainer's Play-mode profile misses the §7 falsifier-1 threshold (`Symbol.Gather` moving > 2.5 ms),
   look HERE before concluding "memcpy bandwidth dominates" and re-ranking toward option (c).

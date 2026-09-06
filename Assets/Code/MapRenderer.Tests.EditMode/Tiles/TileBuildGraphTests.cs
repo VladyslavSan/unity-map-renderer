@@ -261,9 +261,9 @@ namespace MapRenderer.Tests.Tiles
                     int _ = output.TileVertices.Length;
                 });
                 // Observed 2026-09-03 (captured from a filtered run, not predicted):
-                //   "The previously scheduled job FillAggregateJob writes to the
-                //    NativeList`1[Unity.Mathematics.double2] FillAggregateJob.TileVertices. You must call
-                //    JobHandle.Complete() on the job FillAggregateJob, before you can read from the
+                //   "The previously scheduled job AggregateJob writes to the
+                //    NativeList`1[Unity.Mathematics.double2] AggregateJob.TileVertices. You must call
+                //    JobHandle.Complete() on the job AggregateJob, before you can read from the
                 //    NativeList`1[Unity.Mathematics.double2] safely."
                 // Asserted by its load-bearing PARTS, not verbatim: the exact wording is Unity's and would
                 // make this test fail on an engine upgrade that reworded it, which is not the defect this
@@ -273,7 +273,7 @@ namespace MapRenderer.Tests.Tiles
                 StringAssert.Contains("Complete()", ex.Message,
                     "the safety system must say a Complete() is missing — that is the whole claim of this " +
                     "tooth: the output is unreadable until the caller completes the handle.");
-                StringAssert.Contains("FillAggregateJob", ex.Message,
+                StringAssert.Contains("AggregateJob", ex.Message,
                     "it must name the job still writing TileVertices. If a future graph reshape makes some " +
                     "other node the last writer, this fails loudly and the recorded string above is stale — " +
                     "which is the signal to re-capture it, not to weaken the assertion.");

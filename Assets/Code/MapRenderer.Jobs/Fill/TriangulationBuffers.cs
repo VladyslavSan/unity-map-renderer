@@ -7,8 +7,8 @@ namespace MapRenderer.Jobs.Fill
     /// <summary>
     /// The buffers the fill graph's triangulation works over, from sizing through aggregation — 4
     /// prefix-sum offset tables, 9 flat working/output columns, 5 per-polygon scalar columns — as one job
-    /// field shared by <see cref="FillSizingJob"/>, <see cref="FillGatherJob{TComparer}"/>,
-    /// <see cref="EarcutBatchJob"/> and <see cref="FillAggregateJob"/>, instead of each declaring its own
+    /// field shared by <see cref="SizingJob"/>, <see cref="FillGatherJob{TComparer}"/>,
+    /// <see cref="EarcutBatchJob"/> and <see cref="AggregateJob"/>, instead of each declaring its own
     /// field list (job-scheduling-design.md §8 stage 4's R2 reshape).
     ///
     /// <para><b>Unity's job reflection walks a nested struct field for container safety</b> the same way it
@@ -18,9 +18,9 @@ namespace MapRenderer.Jobs.Fill
     /// second <c>Schedule</c> call. No precedent for this shape existed in this repo before that check.</para>
     ///
     /// <para><b>Every field is plain, not <c>[ReadOnly]</c>.</b> Which of the 18 columns a given job reads
-    /// versus writes differs per job (<see cref="FillSizingJob"/> writes all 18; <see cref="FillGatherJob{TComparer}"/>
+    /// versus writes differs per job (<see cref="SizingJob"/> writes all 18; <see cref="FillGatherJob{TComparer}"/>
     /// only touches 6 of them, 2 read-only); a single struct field cannot carry a per-column access mode, so
-    /// every job that takes <see cref="FillTriangulationBuffers"/> is conservatively "writes all 18" from the safety
+    /// every job that takes <see cref="TriangulationBuffers"/> is conservatively "writes all 18" from the safety
     /// system's view. That costs nothing here: every node in <c>FillMeshGraph.Schedule</c> that touches this
     /// scratch is already a strictly linear chain (sizing → gather → earcut → aggregate), so the dependency a
     /// conservative writer needs is the same edge the chain already has.</para>
@@ -31,12 +31,12 @@ namespace MapRenderer.Jobs.Fill
     /// <c>InvalidOperationException</c> ("has not been assigned or constructed") at <c>Schedule</c>/<c>Run</c>,
     /// even for a column the job in question never uses. Confirmed empirically
     /// (<c>FillGraphBurstProbeTests.EarcutBatchJob_MatchesPerPolygonEarcutJobRun</c>'s first run, before its
-    /// hand-built <see cref="FillTriangulationBuffers"/> value carried over every field): the same optional-container
+    /// hand-built <see cref="TriangulationBuffers"/> value carried over every field): the same optional-container
     /// hazard <see cref="RingAssemblyJob.RingCountFromOffsetsLength"/>'s doc names for a single job field
     /// applies to every field of a nested struct field too. Always build a value via <see cref="Allocate"/>,
     /// or by copying every field from one.</para>
     /// </summary>
-    internal struct FillTriangulationBuffers
+    internal struct TriangulationBuffers
     {
         public NativeList<int> VertexOffsets;
         public NativeList<int> HoleCountOffsets;
@@ -60,12 +60,12 @@ namespace MapRenderer.Jobs.Fill
         public NativeList<int> PerPolyOuterCount;
 
         /// <summary>Allocates all 18 columns at capacity 1 (every one of them is <c>Resize</c>d to its real
-        /// length by <see cref="FillSizingJob"/>). Each column's allocation is recorded individually via
+        /// length by <see cref="SizingJob"/>). Each column's allocation is recorded individually via
         /// <see cref="NewList{T}"/>, right where it happens — not a separate summary loop — so a column
         /// added or removed here changes the recorded count by construction, and the balance check in
         /// <see cref="DisposeAfter"/> stays tied to actual per-column calls rather than to two counts that
         /// could drift out of sync with the field list.</summary>
-        internal static FillTriangulationBuffers Allocate() => new FillTriangulationBuffers
+        internal static TriangulationBuffers Allocate() => new TriangulationBuffers
         {
             VertexOffsets       = NewList<int>(),
             HoleCountOffsets    = NewList<int>(),

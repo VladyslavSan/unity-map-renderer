@@ -18,15 +18,15 @@ These jobs do not all run at the same rate, and confusing the two is the easiest
         ▼
     candidates
         │
-        │  SymbolCullJob        per record: dropped → departing → coverage → zoom → horizon
+        │  CullJob              per record: dropped → departing → coverage → zoom → horizon
         ▼                       (the SAME predicate order as the managed pass, deliberately)
     survivors (sparse, with per-record keep flags)
         │
-        │  SymbolCompactJob     squeezes the sparse keep-flags into a dense run
+        │  CompactJob           squeezes the sparse keep-flags into a dense run
         ▼
     dense candidate set
         │
-        │  SymbolCollisionJob   grid-accelerated: drops symbols whose boxes overlap a higher-priority one
+        │  CollisionJob         grid-accelerated: drops symbols whose boxes overlap a higher-priority one
         ▼
     the placed set
 
@@ -37,12 +37,12 @@ These jobs do not all run at the same rate, and confusing the two is the easiest
         ▼
     screen positions + depths
         │
-        │  SymbolStageJob       the staging loop: per-symbol quads into the batch's SoA mirrors
+        │  StageJob             the staging loop: per-symbol quads into the batch's SoA mirrors
         ▼
     vertex/index streams the renderer draws
 ```
 
-`SymbolBlockView` is not a stage — it is a **blittable, non-owning view** over one placed tile block's
+`BlockView` is not a stage — it is a **blittable, non-owning view** over one placed tile block's
 arrays, so a Burst job can index them without the block itself being job-compatible. It owns nothing and
 must not outlive the block it views.
 
@@ -60,10 +60,10 @@ not an obstacle.
 | Type | Role |
 |---|---|
 | `SymbolGatherJob` | Stage 1 — gathers candidates from placed tile blocks |
-| `SymbolCullJob` | the Cull pass: the fixed predicate order, per record |
-| `SymbolCompactJob` | the Compact pass: sparse keep-flags → a dense run |
-| `SymbolCollisionJob` | grid-accelerated collision; decides the placed set |
-| `SymbolCollisionGridSizing` | computes `SymbolCollisionJob`'s grid dims and node-array upper bound on the main thread, so the caller can size the grid exactly before the job runs — a Burst job cannot grow it mid-run |
-| `SymbolProjectionJob` | per-frame, parallel: world → screen for visible symbols |
-| `SymbolStageJob` | per-frame staging: symbols → the batch's vertex/index SoA |
-| `SymbolBlockView` | a blittable non-owning view over one block's arrays |
+| `CullJob` | the Cull pass: the fixed predicate order, per record |
+| `CompactJob` | the Compact pass: sparse keep-flags → a dense run |
+| `CollisionJob` | grid-accelerated collision; decides the placed set |
+| `CollisionGridSizing` | computes `CollisionJob`'s grid dims and node-array upper bound on the main thread, so the caller can size the grid exactly before the job runs — a Burst job cannot grow it mid-run |
+| `SymbolProjectionJob` | per-frame, parallel: world → screen for visible symbols. Keeps its `Symbol` prefix (unlike its siblings above): `MapRenderer.Jobs.Projection` owns the word "projection" in this assembly, so a bare `Symbols.ProjectionJob` would misread as belonging to it. |
+| `StageJob` | per-frame staging: symbols → the batch's vertex/index SoA |
+| `BlockView` | a blittable non-owning view over one block's arrays |

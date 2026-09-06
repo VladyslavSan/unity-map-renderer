@@ -36,7 +36,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <see cref="NativeList{T}"/> (was <see cref="NativeArray{T}"/>), resolved directly inside
         /// <see cref="Execute"/> — job-scheduling-design.md §8 stage 5, the wall-job stage:
         /// <see cref="FillExtrusionMeshGraph"/> now schedules this job, and <see cref="ProjectionDispatch.Schedule"/>
-        /// requires its world/normal columns as <c>NativeList</c>s. Mirrors <c>LineRibbonBatchJob</c>'s own
+        /// requires its world/normal columns as <c>NativeList</c>s. Mirrors <c>RibbonBatchJob</c>'s own
         /// field-attribute usage — an <c>IJob</c> may hold a <c>NativeList</c> field directly, same as this
         /// job already does for its <see cref="OutPositionNormal"/> family below.</para>
         /// </summary>

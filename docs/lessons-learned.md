@@ -226,9 +226,9 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   job-safety system validates *every* `NativeContainer` field at schedule time; a field you only allocate
   inside `Execute` is `default` at schedule and throws `InvalidOperationException: The … <field> has not been
   assigned or constructed. All containers must be valid when scheduling a job.` — even under `.Run()`, even
-  with Burst. It compiles clean, so it only shows at runtime (cost a full gate cycle in S100's `LineRibbonJob`).
+  with Burst. It compiles clean, so it only shows at runtime (cost a full gate cycle in S100's `RibbonJob`).
   Keep scratch as `var x = new NativeArray<T>(…, Allocator.Temp)` locals and pass values (not the arrays) into
-  helper methods — the pattern `LineRibbonJob`/`LineRibbonJob` follow. Only INPUT/OUTPUT containers
+  helper methods — the pattern `RibbonJob`/`RibbonJob` follow. Only INPUT/OUTPUT containers
   (assigned before scheduling) belong as job fields.
 
 ### A RED injection that removes an edge may also remove the node — then it proves reachability, not the dependency

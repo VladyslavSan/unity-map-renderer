@@ -27,7 +27,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>Road-shields §10 D8: index of this candidate's FIRST <see cref="CandidateEmit"/> in the
         /// staged emit pool — mirrors <see cref="BoxStart"/>. Emits are no longer keyed by <see cref="SymbolIndex"/>:
-        /// that member keeps ONLY its survivor-identity role (<c>SymbolCollision.cs:169</c>, <c>SymbolCollisionJob.cs:34</c>).</summary>
+        /// that member keeps ONLY its survivor-identity role (<c>SymbolCollision.cs:169</c>, <c>CollisionJob.cs:34</c>).</summary>
         public int EmitStart;
 
         /// <summary>Road-shields §10 D8: number of emits in this candidate's range — 1 for an ordinary symbol,
@@ -114,7 +114,7 @@ namespace MapRenderer.Core.Text.Placement
         /// boxes CONTIGUOUSLY, one candidate at a time — never sharing a box, never skipping one — so in staging
         /// order the candidate ranges must TILE <c>[0, boxCount)</c> exactly: <c>candidates[0].BoxStart == 0</c>,
         /// each following <c>BoxStart == previous BoxStart + BoxCount</c>, all counts <c>&gt;= 0</c>, and the last
-        /// range ending at <c>boxCount</c>. <see cref="SymbolCollisionGridSizing.NodeUpperBoundByCandidates"/> and
+        /// range ending at <c>boxCount</c>. <see cref="CollisionGridSizing.NodeUpperBoundByCandidates"/> and
         /// the collision job's per-reference insert assume exactly this; a violation means a candidate range is
         /// out-of-range or overlaps another — the never-reproduced dense-scene node-pool overflow. Returns
         /// <c>true</c> with the offending candidate index (or <paramref name="candidates"/><c>.Length</c> when the

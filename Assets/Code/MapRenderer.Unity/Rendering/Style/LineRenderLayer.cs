@@ -109,11 +109,11 @@ namespace MapRenderer.Unity.Rendering.Style
             IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
             in TileLayerProcessContext context, int materialIndex, string payloadName)
         {
-            LineLayerInput input = Meshing.StyledLineTileBuilder.BuildLayerInput(
+            LayerInput input = Meshing.StyledLineTileBuilder.BuildLayerInput(
                 selected, geometry, _paint, _layout, context.Zoom, context.TileOriginRender,
                 out var colors, out var widths, context.Projection);
             // The relocated emptiness gate — see FillRenderLayer.BuildGraphRequest's own comment; line's own
-            // discriminator is FeatureSelected, not RingVisitOrder (LineLayerInput has no such field).
+            // discriminator is FeatureSelected, not RingVisitOrder (LayerInput has no such field).
             if (!input.FeatureSelected.IsCreated) return null;
             return Meshing.LineLayerBuild.Rent(input, colors, widths, materialIndex, payloadName);
         }

@@ -209,7 +209,7 @@ namespace MapRenderer.Tests
             vertexCount = 0;
             bounds      = default;
 
-            LineLayerInput input = StyledLineTileBuilder.BuildLayerInput(
+            LayerInput input = StyledLineTileBuilder.BuildLayerInput(
                 selectedFeatures, geometry, paint, layout, zoom, tileOriginRender,
                 out NativeArray<Vector4> featureColors, out NativeArray<float> featureWidths, projection);
 

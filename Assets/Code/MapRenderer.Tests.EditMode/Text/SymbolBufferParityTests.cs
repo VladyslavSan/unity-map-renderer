@@ -35,7 +35,7 @@ namespace MapRenderer.Tests.Text
     ///
     /// <para><b>Landmine #2 — symbol is the consumer that finally OBSERVES the unfiltered buffer.</b> B1
     /// measured that a short-ring filter in the shared decode stage reds NOTHING for fill (ring assembly
-    /// re-filters); B3 measured the same for line (<c>LineRibbonJob</c> returns early below 2 points). Symbol's
+    /// re-filters); B3 measured the same for line (<c>RibbonJob</c> returns early below 2 points). Symbol's
     /// point branch has <b>no length filter at all</b>, so a 1-point path is a real, rendered symbol — T2 is the
     /// instrument those two stages could not build.</para>
     /// </summary>

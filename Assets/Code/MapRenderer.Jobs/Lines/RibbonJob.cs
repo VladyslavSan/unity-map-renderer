@@ -29,7 +29,7 @@ namespace MapRenderer.Jobs.Lines
     /// (<c>up = +Y</c>) this job reproduces its ribbon to floating-point epsilon (<c>LineRibbonJobTests</c>).</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct LineRibbonJob : IJob
+    public struct RibbonJob : IJob
     {
         // ── Input ─────────────────────────────────────────────────────────────────────────────
         /// <summary>Projected centerline: origin-relative render-space points.</summary>

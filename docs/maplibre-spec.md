@@ -121,8 +121,8 @@ Parse: `Style/Line/{PaintProperties,LayoutProperties,LineDash}.cs`. Consume: `St
 
 | Property | Status | Notes |
 |---|:---:|---|
-| line-cap | ✅ | enum → `LineRibbonJob.Cap` |
-| line-join | ✅ | enum → `LineRibbonJob.Join` |
+| line-cap | ✅ | enum → `RibbonJob.Cap` |
+| line-join | ✅ | enum → `RibbonJob.Join` |
 | line-miter-limit | 🟠 | parsed but not passed to the job; builder hardcodes 2.0 |
 | line-round-limit | 🟠 | parsed but never consumed; round joins hardcode 4 segments |
 | line-color | ✅ | baked per-feature; **data-driven** ✔ |

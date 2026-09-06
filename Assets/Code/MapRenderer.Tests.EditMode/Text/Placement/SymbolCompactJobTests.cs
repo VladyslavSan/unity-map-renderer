@@ -15,7 +15,7 @@ using MapRenderer.Jobs.Symbols;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// <see cref="SymbolCompactJob"/> — the Burst port of <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s
+    /// <see cref="CompactJob"/> — the Burst port of <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s
     /// Compact pass — must produce the SAME <c>_stagePointOffset</c> / kept-point pools / <c>_forceFadeOut</c>
     /// membership / per-trigger counters, in the SAME record order, as an independent managed reference.
     /// </summary>
@@ -257,7 +257,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── The Burst arm — SymbolCompactJob.Run() over the same fixture ────────────────────────────────────
+        // ── The Burst arm — CompactJob.Run() over the same fixture ────────────────────────────────────
 
         private static (int[] offset, double3[] points, float3[] ups, HashSet<long> forceFadeOut, int[] counts)
             NativeCompact(SymbolPlacementKind[] kinds, int[] detail, PointStageInput[] pointDetails, int[] curvedAnchorFadeStart,
@@ -297,7 +297,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             try
             {
-                new SymbolCompactJob
+                new CompactJob
                 {
                     Trigger = nTrigger, Kinds = nKinds, Detail = nDetail, PointDetails = nPointDetails,
                     CurvedAnchorFadeStart = nCurvedAnchorFadeStart, CurvedAnchorCount = nCurvedAnchorCount,
@@ -367,10 +367,10 @@ namespace MapRenderer.Tests.Text.Placement
                 kinds, detail, pointDetails, curvedAnchorFadeStart, curvedAnchorCount, fadeIds,
                 worldStart, worldCount, worldPoints, worldUps, fadeOpacity);
 
-            CollectionAssert.AreEqual(managedOffset, nativeOffset, "SymbolCompactJob vs. managed reference — offsets");
-            CollectionAssert.AreEqual(managedPoints, nativePoints, "SymbolCompactJob vs. managed reference — points");
-            CollectionAssert.AreEqual(managedUps, nativeUps, "SymbolCompactJob vs. managed reference — ups");
-            CollectionAssert.AreEquivalent(managedForceFadeOut, nativeForceFadeOut, "SymbolCompactJob vs. managed reference — forceFadeOut");
+            CollectionAssert.AreEqual(managedOffset, nativeOffset, "CompactJob vs. managed reference — offsets");
+            CollectionAssert.AreEqual(managedPoints, nativePoints, "CompactJob vs. managed reference — points");
+            CollectionAssert.AreEqual(managedUps, nativeUps, "CompactJob vs. managed reference — ups");
+            CollectionAssert.AreEquivalent(managedForceFadeOut, nativeForceFadeOut, "CompactJob vs. managed reference — forceFadeOut");
             Assert.AreEqual(managedCounts[(int)GatherTrigger.Departing], nativeCounts[(int)GatherTrigger.Departing], "native Departing count");
             Assert.AreEqual(managedCounts[(int)GatherTrigger.Coverage], nativeCounts[(int)GatherTrigger.Coverage], "native Coverage count");
             Assert.AreEqual(managedCounts[(int)GatherTrigger.Zoom], nativeCounts[(int)GatherTrigger.Zoom], "native Zoom count");

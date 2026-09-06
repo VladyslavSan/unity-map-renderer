@@ -64,7 +64,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             // Everything downstream reads it off the decoded buffer instead of carrying its own copy.
             return (resp.HasData && resp.Bytes != null)
                 ? await TileDecodeDispatch.DecodeAsync(
-                    id, resp.Bytes, TileDecoders.ForEncoding(resp.Encoding), _workScheduler)
+                    id, resp.Bytes, Decoders.ForEncoding(resp.Encoding), _workScheduler)
                 : null;
         }
 

@@ -78,7 +78,7 @@ namespace MapRenderer.Jobs.Fill
         /// <summary>job-scheduling-design.md §8 stage 4 Group B: the count rule — <see cref="TileVerts"/>/
         /// <see cref="TriangleIndices"/>'s own lengths are the valid lengths, always. The only caller is
         /// <see cref="GlobeFillSubdivideDispatch.Schedule"/>, which passes <c>AsDeferredJobArray()</c> views
-        /// resolved at EXECUTE time (both arrays are <c>FillAggregateJob</c>'s outputs, unknown at schedule
+        /// resolved at EXECUTE time (both arrays are <c>AggregateJob</c>'s outputs, unknown at schedule
         /// time) — the explicit-count/deferred-count split this job used to carry (for a since-retired
         /// synchronous caller) is gone with it.</summary>
         public void Execute()
@@ -210,7 +210,7 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>The fill graph's curved-arm subdivide node (job-scheduling-design.md §3.2).
         /// <paramref name="tileVerts"/>/<paramref name="triangleIndices"/>/<paramref name="vertexFeatureIdx"/>
-        /// are the graph's own <c>FillAggregateJob</c> outputs, resolved via <c>AsDeferredJobArray()</c> at
+        /// are the graph's own <c>AggregateJob</c> outputs, resolved via <c>AsDeferredJobArray()</c> at
         /// execute time (<see cref="GlobeFillSubdivideJob{TProj}.Execute"/>'s own count rule). <c>case
         /// null</c> is dead on the production path: a null projection is flat
         /// (<c>ProjectionDispatch.cs</c>'s own default), and the curved arm is the only caller of this

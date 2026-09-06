@@ -32,7 +32,7 @@ job safety system throws on at schedule time — which is why the parity suites 
         ▼                      opposite-sign rings are holes only if CONTAINED
     assembled ── polygon descriptors (outer ring + hole list)
         │
-        │  FillSizingJob       offset tables for the flat scratch columns;
+        │  SizingJob           offset tables for the flat scratch columns;
         ▼                      sets the error flag rather than throwing
       sized
         │
@@ -44,7 +44,7 @@ job safety system throws on at schedule time — which is why the parity suites 
         ▼                      slicing the flat columns (stage 6)
   triangulated
         │
-        │  FillAggregateJob    prefix sums, then concat with index rebase
+        │  AggregateJob        prefix sums, then concat with index rebase
         ▼
    aggregated ─────────────┬─────────────────────────────┐
                            │                             │
@@ -67,7 +67,7 @@ job safety system throws on at schedule time — which is why the parity suites 
 
 **One column set, both arms.** The output does not change shape by projection — the consumer reads the same
 six columns either way and has no per-arm branch. On the flat arm `VertexEast` is the constant `(1,0,0)`,
-written by `FillAggregateJob`; on the curved arm the scatter job fills all six. This is what lets the write
+written by `AggregateJob`; on the curved arm the scatter job fills all six. This is what lets the write
 step be a single job.
 
 **Which arm** is decided by the projection's refine angle: a projection with a finite `MaxRefineAngleRad`
@@ -95,12 +95,12 @@ arm — the subdivide job projects internally and never reads world positions.
 | `FillGraphCounts` | `Fill/` | diagnostic counts and the error codes |
 | `RingClipJob` / `RingSelectJob` | `Geometry/` | produce the ring set the rest of the chain walks (borrowed, not owned by Fill) |
 | `RingAssemblyJob` | `Fill/` | signed-area polygon classification with hole containment |
-| `FillSizingJob` | `Fill/` | offset tables; the capacity guard |
+| `SizingJob` | `Fill/` | offset tables; the capacity guard |
 | `FillGatherJob` | `Fill/` | the hole sort and the flat-column copy |
 | `EarcutJob` / `EarcutBatchJob` | `Fill/` | the triangulator, and the batching wrapper (`IJobParallelForDefer`, one polygon per `Execute`) |
-| `FillAggregateJob` | `Fill/` | concatenation and index rebase |
+| `AggregateJob` | `Fill/` | concatenation and index rebase |
 | `GlobeFillSubdivider` | `Fill/` | the curved arm's subdivision (`GlobeFillSubdivideDispatch`) |
 | `GlobeFillScatterJob` | `Fill/` | scatters a subdivided run into the six output columns |
-| `FillTriangulationBuffers` | `Fill/` | the flat working columns the sizing/gather/earcut stages share |
+| `TriangulationBuffers` | `Fill/` | the flat working columns the sizing/gather/earcut stages share |
 | `PolygonDescriptors` | `Fill/` | the polygon descriptor columns assembly produces |
-| `FillMeshPipeline` | `Fill/` | **`Schedule`, the old synchronous entry point, is fully retired** — deleted, not just uncalled, and fenced against a caller reappearing (`FillMeshPipelineRetirementFenceTests`). The fill-extrusion roof already reached `FillMeshGraph.Schedule` (via `FillExtrusionMeshGraph`), same as every other caller. What survives here is what `FillMeshGraph` and its callers still share: `LayerInput` (the input descriptor), `HoleRingComparer` (the hole-sort order `FillGatherJob` uses), and the decode-sizing pair `PrecountRingsAndVertices`/`EnsureCapacity` (called from `MvtGeometryMaterializer`). A rename that drops the now-inaccurate "pipeline" name is a deferred follow-up with no behaviour change. |
+| `FillMeshPipeline` | `Fill/` | **`Schedule`, the old synchronous entry point, is fully retired** — deleted, not just uncalled, and fenced against a caller reappearing (`FillMeshPipelineRetirementFenceTests`). The fill-extrusion roof already reached `FillMeshGraph.Schedule` (via `FillExtrusionMeshGraph`), same as every other caller. What survives here is what `FillMeshGraph` and its callers still share: `LayerInput` (the input descriptor), `HoleRingComparer` (the hole-sort order `FillGatherJob` uses), and the decode-sizing pair `PrecountRingsAndVertices`/`EnsureCapacity` (called from `MvtGeometryMaterializer`). |

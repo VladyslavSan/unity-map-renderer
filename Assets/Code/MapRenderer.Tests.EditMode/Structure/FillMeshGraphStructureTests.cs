@@ -55,7 +55,7 @@ namespace MapRenderer.Tests.Structure
 
         private static readonly string[] RequiredTokens =
         {
-            "FillSizingJob", "FillGatherJob", "EarcutBatchJob", "FillAggregateJob",
+            "SizingJob", "FillGatherJob", "EarcutBatchJob", "AggregateJob",
             "RingAssemblyJob", "JobHandle",
             // job-scheduling-design.md §8 stage 4: the curved-arm sub-chain — its two nodes, and the
             // predicate (exactly WriteGeometry's) that decides which arm a layer takes.
@@ -99,7 +99,7 @@ namespace MapRenderer.Tests.Structure
         // two directories §3.2 names as where graph builders and stream-write jobs live — not one hand-listed
         // file, so adding a job anywhere under either directory is covered by construction. Stage 6 sanctions
         // EXACTLY ONE occurrence of NativeDisableParallelForRestriction in EACH of two files (job-scheduling-
-        // design.md §8 stage 6, A0.3/C.5/A.2/E.4): EarcutBatchJob.cs and LineRibbonBatchJob.cs, each a
+        // design.md §8 stage 6, A0.3/C.5/A.2/E.4): EarcutBatchJob.cs and RibbonBatchJob.cs, each a
         // field-level attribute on its single Buffers field. No other file, and no other count.
         // NativeDisableContainerSafetyRestriction stays forbidden with NO exceptions, anywhere, always.
         //
@@ -141,7 +141,7 @@ namespace MapRenderer.Tests.Structure
             },
             new AttributeFenceException
             {
-                FileName = "LineRibbonBatchJob.cs", Token = "NativeDisableParallelForRestriction", ExpectedCount = 1,
+                FileName = "RibbonBatchJob.cs", Token = "NativeDisableParallelForRestriction", ExpectedCount = 1,
             },
         };
 
@@ -207,18 +207,18 @@ namespace MapRenderer.Tests.Structure
 
         // ── The sizing-owned-buffers consumer fence: no fence can check WHICH value bounds a loop (that is
         // dataflow, not lexical) — the failure that actually recurred three times was a borrowed loop bound
-        // (FillAggregateJob, LineRibbonAggregateJob, then FillGatherJob); a STALE CONSUMER SET is what let the
+        // (AggregateJob, RibbonAggregateJob, then FillGatherJob); a STALE CONSUMER SET is what let the
         // third instance hide, not what recurred, and that stale-set failure IS mechanical. This counts
         // nodes, not tokens, so it never looks at a BORROWED sizing-owned-buffers field
-        // (LineRibbonBatchJob.RingSubOffsets, LineRibbonAggregateJob.RingFeature, EarcutBatchJob.PolyHoleCount)
+        // (RibbonBatchJob.RingSubOffsets, RibbonAggregateJob.RingFeature, EarcutBatchJob.PolyHoleCount)
         // and cannot cry wolf on any of them.
 
         // Regex on the type plus any identifier, not a literal including the field NAME: a bare-string token
-        // ("FillTriangulationBuffers Buffers;") would let a node declaring "FillTriangulationBuffers
+        // ("TriangulationBuffers Buffers;") would let a node declaring "TriangulationBuffers
         // FillBuffers;" walk straight past this fence — the exact evasion a rename invites.
         private static readonly Regex[] SizingOwnedBuffersFieldPatterns =
         {
-            new Regex(@"FillTriangulationBuffers\s+\w+;"), new Regex(@"LineRibbonBuffers\s+\w+;"),
+            new Regex(@"TriangulationBuffers\s+\w+;"), new Regex(@"RibbonBuffers\s+\w+;"),
         };
 
         /// <summary>Verified today: exactly these seven declare a sizing-owned buffers struct as a field.
@@ -226,8 +226,8 @@ namespace MapRenderer.Tests.Structure
         /// against job-scheduling-design.md §7 rule 2 before adding it here.</summary>
         private static readonly string[] KnownSizingOwnedBuffersConsumers =
         {
-            "FillSizingJob.cs", "FillGatherJob.cs", "EarcutBatchJob.cs", "FillAggregateJob.cs",
-            "LineRibbonSizingJob.cs", "LineRibbonBatchJob.cs", "LineRibbonAggregateJob.cs",
+            "SizingJob.cs", "FillGatherJob.cs", "EarcutBatchJob.cs", "AggregateJob.cs",
+            "RibbonSizingJob.cs", "RibbonBatchJob.cs", "RibbonAggregateJob.cs",
         };
 
         [Test]
@@ -257,7 +257,7 @@ namespace MapRenderer.Tests.Structure
             var expected = new List<string>(KnownSizingOwnedBuffersConsumers);
             expected.Sort();
             CollectionAssert.AreEqual(expected, consumers,
-                "the set of files declaring a FillTriangulationBuffers/LineRibbonBuffers field no longer " +
+                "the set of files declaring a TriangulationBuffers/RibbonBuffers field no longer " +
                 "matches KnownSizingOwnedBuffersConsumers — job-scheduling-design.md §7 rule 2 requires every " +
                 "node in this family to bound its own loop by a column the sizing job resizes, never a " +
                 "borrowed count; verify the new/removed file against that rule before updating this list.");

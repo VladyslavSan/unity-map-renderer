@@ -66,7 +66,7 @@ Verified against source (2026-09-02):
   two attribute sites for the diagnostic probe in `MapRenderer.App`. The fill path's *stages* are jobs —
   `RingSelectJob`/`RingClipJob` → `RingAssemblyJob` → `EarcutJob` (per polygon) → `TileToGeoJob` →
   `ProjectPointsJob<TProj>` → `GlobeFillSubdivideJob<TProj>` — but the work **between** those stages is not
-  (next bullet). The line path has `TileToGeoJob` + `LineRibbonJob`; decode has `MvtDecodeJob`; symbols have
+  (next bullet). The line path has `TileToGeoJob` + `RibbonJob`; decode has `MvtDecodeJob`; symbols have
   six per-frame jobs.
 - **Managed work sat between the fill jobs, on the calling thread.** In the now-retired
   `FillMeshPipeline.Schedule` (job-scheduling-design.md §8 stage 4 Group B): the `maxRingLen`/`totalVerts`
@@ -186,10 +186,10 @@ every job that references it has been `Complete()`d by that owner.**
 | today (managed, calling thread) | in the graph |
 |---|---|
 | `maxRingLen`/`totalVerts` pre-pass sizing the clip's ping-pong scratch and output capacities | **absorbed**: `RingClipJob` allocates its ping-pong scratch as `Allocator.Temp` locals inside `Execute` (the job-scratch rule in `lessons-learned.md`) sized from the visit order it already walks; output lists grow themselves |
-| assembly count read-back (`polyCountArr[0]`) → earcut scratch sizing loop (offset tables) | **`FillSizingJob`** (serial `IJob`): reads the assembly's polygon descriptors, writes the four offset tables and `Resize`s the flat scratch `NativeList`s (a single-threaded job may resize a list it owns); asserts the tables are strictly increasing and sets the error flag otherwise |
+| assembly count read-back (`polyCountArr[0]`) → earcut scratch sizing loop (offset tables) | **`SizingJob`** (serial `IJob`): reads the assembly's polygon descriptors, writes the four offset tables and `Resize`s the flat scratch `NativeList`s (a single-threaded job may resize a list it owns); asserts the tables are strictly increasing and sets the error flag otherwise |
 | populate pass: hole sort via `HoleRingComparer` + outer/hole vertex copy + `perPolyFeatureIdx` capture | **`FillGatherJob`** (serial `IJob`): `NativeSortExtension.Sort` with the same struct comparer (Burst-compatible). Determinism does not rest on the sort algorithm: the comparer's final `ring-index` key makes it a **total order**, so any correct sort yields the managed order. This is the **first parity risk to RED-verify** (perturb the tie-break → parity reds). |
-| per-polygon `EarcutJob.Run()` in a loop, slices taken on the calling thread | **`EarcutBatchJob`** (`IJob` at stage 1; `IJobParallelForDefer` since stage 6): holds the flat columns + offset tables, one polygon per `Execute` call, takes each polygon's `GetSubArray` views there and calls `EarcutJob.Execute()` directly — `EarcutJob`'s fields are untouched, so its two existing callers (`FillMeshPipeline`, `BurstJobRunOffMainSpikeTests`) stay valid. Stage 6 converted this job to `IJobParallelForDefer`, batched by 1 polygon, deferred over `FillMeshGraph`'s own `buffers.PerPolyOuterCount` (the only column with length exactly `polyCount` — every offset table is `polyCount + 1`). It STILL takes the whole `FillTriangulationBuffers` field (the A.2 branch, §5) — the field just gained `[NativeDisableParallelForRestriction]` — and `PolyCount` retired (§4's count rule): the deferred iteration count is the guard the field used to be. |
-| per-polygon merged-count read-back + aggregate (concat + index rebase) | **`FillAggregateJob`** (serial `IJob`): prefix sums over `perPolyMergedVC`/`perPolyIdxCount`, then the concat; output lists resized by the job |
+| per-polygon `EarcutJob.Run()` in a loop, slices taken on the calling thread | **`EarcutBatchJob`** (`IJob` at stage 1; `IJobParallelForDefer` since stage 6): holds the flat columns + offset tables, one polygon per `Execute` call, takes each polygon's `GetSubArray` views there and calls `EarcutJob.Execute()` directly — `EarcutJob`'s fields are untouched, so its two existing callers (`FillMeshPipeline`, `BurstJobRunOffMainSpikeTests`) stay valid. Stage 6 converted this job to `IJobParallelForDefer`, batched by 1 polygon, deferred over `FillMeshGraph`'s own `buffers.PerPolyOuterCount` (the only column with length exactly `polyCount` — every offset table is `polyCount + 1`). It STILL takes the whole `TriangulationBuffers` field (the A.2 branch, §5) — the field just gained `[NativeDisableParallelForRestriction]` — and `PolyCount` retired (§4's count rule): the deferred iteration count is the guard the field used to be. |
+| per-polygon merged-count read-back + aggregate (concat + index rebase) | **`AggregateJob`** (serial `IJob`): prefix sums over `perPolyMergedVC`/`perPolyIdxCount`, then the concat; output lists resized by the job |
 | `TileToGeoJob.Run(n)`, `ProjectionDispatch.Run` | the same jobs over `AsDeferredJobArray()` views (length resolved at execution); `ScheduleParallel` in stage 6 |
 | `GlobeFillSubdivideDispatch.Run` | `GlobeFillSubdivideDispatch.Schedule` node (serial, budgeted `NativeList` appends). **"Budgeted" means bounded, not configurable:** the graph passes `GlobeFillSubdivideDispatch`'s `Default*` constants with no override parameter, so the budget binds but is not wired to any config. The budget tooth pins the *bound mechanism* through a direct dispatcher call — it does not prove an end-to-end wired budget, and should not be read as doing so. |
 | `WriteGeometry`'s stream copy loops (position/normal, UV, tangent, colour, index winding swap) | **`FillStreamWriteJob`** in the write graph, one per layer |
@@ -435,7 +435,7 @@ This exists because the alternative accretes. Two jobs already carry a boolean s
 count" and "array length" — `RingAssemblyJob.RingCountFromOffsetsLength` and
 `GlobeFillSubdivideJob.CountsFromArrayLength` — each added for a sound local reason: a `NativeArray` job field
 left at literal `default` fails Unity's schedule-time container validation, so the discriminator had to be a
-value type. But the *count field* is what forces the choice, and `LineRibbonJob.PointCount` is the next one
+value type. But the *count field* is what forces the choice, and `RibbonJob.PointCount` is the next one
 the line graph would give a third bool. `EarcutJob` never needed a flag, because it already takes views.
 
 Construction cost is small, and was overstated once: `RingAssemblyJob` had 9 construction sites (1 production,
@@ -450,7 +450,7 @@ it; it retires with the line graph (stage 5).
 **Stage 6 retires the rule's next predicted casualty: `EarcutBatchJob.PolyCount`.** Converting to
 `IJobParallelForDefer` over `FillMeshGraph`'s own `buffers.PerPolyOuterCount` removed the count field's last
 reason to exist — `Execute(int pi)` has no `polyCount` to guard against, the deferred iteration count IS the
-guard. `LineRibbonBatchJob`/`LineRibbonAggregateJob` never had a count field to begin with (ring count was
+guard. `RibbonBatchJob`/`RibbonAggregateJob` never had a count field to begin with (ring count was
 always `RingSubOffsets.Length - 1`).
 
 ### 4.1 What the discriminator says about the existing argument for `.Run()`
@@ -609,34 +609,34 @@ assumed before it was measured:
 2. **No `[NativeDisableContainerSafetyRestriction]` in a graph builder, and no
    `[NativeDisableParallelForRestriction]` before stage 6.** Stage 6 sanctions exactly two job types, each
    with exactly one occurrence — the per-polygon parallel earcut (`EarcutBatchJob`) and the per-ring parallel
-   ribbon (`LineRibbonBatchJob`). Both share the same shape: `Execute(index)` writes into a pre-sized *slice*
+   ribbon (`RibbonBatchJob`). Both share the same shape: `Execute(index)` writes into a pre-sized *slice*
    of a flat oversized-per-item column, taken from consecutive entries of a monotonic offset table a serial
    sizing node built, so the attribute goes on the SINGLE struct field nesting those columns
-   (`FillTriangulationBuffers`/`LineRibbonBuffers`) — verified empirically that a
+   (`TriangulationBuffers`/`RibbonBuffers`) — verified empirically that a
    `[NativeDisableParallelForRestriction]` on an OUTER struct field legalises a non-`index` write through a
    nested `NativeList<T>`, even though `NativeList<T>` itself lacks
    `[NativeContainerSupportsMinMaxWriteRestriction]` (package source); a control run with the identical body
    and no attribute throws instead. **Per-item slice disjointness is structural, not asserted** — consecutive
    entries of a monotonic table share no element for any values the table can hold, so the bytes one item
    touches are a function of its own input alone, independent of which worker runs it or how many run at
-   once. Each sizing job (`FillSizingJob`/`LineRibbonSizingJob`) ALSO asserts its own offset tables are
+   once. Each sizing job (`SizingJob`/`RibbonSizingJob`) ALSO asserts its own offset tables are
    strictly increasing (a plain `if` → an error flag, compiled into every build) — this is **defence-in-depth
    against a non-monotonic table surfacing as a player-build error code instead of an Editor-only
    `GetSubArray` bounds throw**, not what makes the parallel node bit-exact; no edit to a sizing job can make
    two items' slices overlap. **This protection reaches the WHOLE downstream chain because every node that
-   holds a sizing-owned buffer struct (`FillTriangulationBuffers`/`LineRibbonBuffers`) bounds its own loop —
+   holds a sizing-owned buffer struct (`TriangulationBuffers`/`RibbonBuffers`) bounds its own loop —
    or its deferred count — by a column its sizing job resizes, never a borrowed count that job's early return
    does not touch. Nodes past the aggregate bound by columns the *aggregate* sizes, and inherit emptiness
-   through it.** Three nodes (`FillAggregateJob`, `LineRibbonAggregateJob`, then `FillGatherJob` found later —
+   through it.** Three nodes (`AggregateJob`, `RibbonAggregateJob`, then `FillGatherJob` found later —
    the release-build memory-safety defect this rule guards against RECURRED three times, not once) used to
    bound by a borrowed count instead, which a release build's stripped `NativeList`/`NativeArray` bounds check
    turned into a silent out-of-bounds write/read one node past where sizing correctly stopped; every node now
    bounds by the real count sizing resizes. `FillSizingJobTests
    .SizingCapacityOverrun_LeavesGatherAndAggregate_WithNothingToDo` is the observing tooth for
-   `FillGatherJob.Execute` and `FillAggregateJob.Execute` — it drives both, over the same buffers;
+   `FillGatherJob.Execute` and `AggregateJob.Execute` — it drives both, over the same buffers;
    `LineRibbonSizingJobTests.AggregateOverUnsizedBuffers_ProducesEmptyOutput_AndDoesNotIndexPastThem` is its
-   line twin, for `LineRibbonAggregateJob.Execute`. Neither tooth constructs `EarcutBatchJob`/
-   `LineRibbonBatchJob` — those two have no loop of their own to bound (each is deferred over a sizing-owned
+   line twin, for `RibbonAggregateJob.Execute`. Neither tooth constructs `EarcutBatchJob`/
+   `RibbonBatchJob` — those two have no loop of their own to bound (each is deferred over a sizing-owned
    column), so nothing above reds if their deferred-count SOURCE regresses to a borrowed count; that is what
    the consumer-set fence and a `RequiredTokens` pin on the literal `Schedule` call below cover instead.
    **The attribute fence is a structure test** over production sources in `MapRenderer.Jobs/` and
@@ -646,7 +646,7 @@ assumed before it was measured:
    pinning each sanctioned (file, token, count) triple rather than a bare filename — a bare filename would
    exempt that file from EVERY forbidden token at ANY count, which would have let
    `[NativeDisableContainerSafetyRestriction]` through on the same file. **Sanctioned today:
-   `EarcutBatchJob.cs` and `LineRibbonBatchJob.cs`, one `[NativeDisableParallelForRestriction]` occurrence
+   `EarcutBatchJob.cs` and `RibbonBatchJob.cs`, one `[NativeDisableParallelForRestriction]` occurrence
    each; `[NativeDisableContainerSafetyRestriction]` stays at zero everywhere, unconditionally.**
 
    **The consumer-set fence is a separate structure test**, over the same two directories: it counts which
@@ -730,9 +730,9 @@ the margin here is ~3 orders of magnitude, so it does not change the verdict.
 
 `MapRenderer.Jobs/FillMeshGraph`: the scheduled form of `FillMeshPipeline.Schedule` — same `LayerInput`,
 returning `FillGraphOutput { outputs, Handle }` uncompleted. Adds the nodes §3.2 lists:
-`FillSizingJob`, `FillGatherJob` (with the sort), `EarcutBatchJob` (a serial `IJob` looping polygons inside
+`SizingJob`, `FillGatherJob` (with the sort), `EarcutBatchJob` (a serial `IJob` looping polygons inside
 `Execute`, taking `GetSubArray` views there and calling `EarcutJob.Execute()` directly — `EarcutJob` is not
-modified), `FillAggregateJob`, `Dispose(handle)` scratch nodes, `ProjectionDispatch.Schedule`
+modified), `AggregateJob`, `Dispose(handle)` scratch nodes, `ProjectionDispatch.Schedule`
 (the `internal` generic entry point, §10) and the error flag. `FillMeshPipeline.Schedule` is untouched.
 
 - *Invariant:* pure addition; the existing suite is unchanged. This holds because `EarcutJob`'s fields are
@@ -1159,7 +1159,7 @@ extrusion roof reuses `FillMeshGraph`.
 > stage demonstrates is narrower than "managed and Burst agree": it is that *these* crossings, measured
 > per-vertex against pre-captured goldens rather than assumed, held. Line must still measure its own.
 >
-> The one datum the repo has points away from bit-exactness: `LineRibbonJob`'s own doc claims parity with
+> The one datum the repo has points away from bit-exactness: `RibbonJob`'s own doc claims parity with
 > the managed tessellator **"to floating-point epsilon"**, not bit-for-bit. Note also that
 > `ProjectPointsJob.cs:26` says it calls the *same* `ProjectPoint` as the OOP `IProjection` — same source
 > is not the same codegen, since Burst's math mode may reassociate.
@@ -1312,15 +1312,15 @@ extrusion roof reuses `FillMeshGraph`.
 
 **What shipped (Group A landed; folded in from the retired standalone `README-line-graph.md`, which
 duplicated this section once the graph existed — see this file's own "Files" table, now below).**
-`LineMeshGraph.Schedule` chains: `LineRingGatherJob` (the ring gate — selection + LineString kind + line's
+`LineMeshGraph.Schedule` chains: `RingGatherJob` (the ring gate — selection + LineString kind + line's
 own `>= 2` length filter, never fill's `>= 3`) → `TileToGeoJob` → `ProjectionDispatch` (the ORIGINAL
 centerline's per-point surface up — the subdivision metric only; that pass's `world` output is read by
-nothing, `StyledLineTileBuilder.cs:320`) → `LineSubdivideJob` (the managed `SubdivideCenterline`'s
+nothing, `StyledLineTileBuilder.cs:320`) → `SubdivideJob` (the managed `SubdivideCenterline`'s
 `LineCurvatureSubdivision.SegmentSteps` split, as a Burst job) → `TileToGeoJob` → `ProjectionDispatch` again
-(the SUBDIVIDED centerline's real position/up columns) → `LineRibbonBatchJob` (loops rings inside one
-`Execute`, running `LineRibbonJob` per ring; winding-swaps + offsets indices; the always-bound-loops vertex
+(the SUBDIVIDED centerline's real position/up columns) → `RibbonBatchJob` (loops rings inside one
+`Execute`, running `RibbonJob` per ring; winding-swaps + offsets indices; the always-bound-loops vertex
 ceiling). No arm split, unlike fill: a flat projection's infinite `MaxRefineAngleRad` makes
-`LineSubdivideJob` a no-op (1 step/segment), so the flat case is the chain's own degenerate value, not a
+`SubdivideJob` a no-op (1 step/segment), so the flat case is the chain's own degenerate value, not a
 branch. Projection stays a closed enumeration in `LineMeshGraph.Schedule`; the generic
 `LineMeshGraph.ScheduleTyped<TProj>` entry point (internal — `ProjectionDispatch.ScheduleTyped` widened
 `private` → `internal` alongside it) is how `RightHandedSphereProjectionWindingTests` reaches a projection
@@ -1332,11 +1332,11 @@ revision of this paragraph said did not exist; it now does, by construction, not
 | `LineMeshGraph.cs` | the graph builder — schedules every node, owns the dispose nodes, returns the output |
 | `LineGraphOutput.cs` | the output columns + terminal handle, and their disposal |
 | `LineGraphCounts.cs` | the error codes |
-| `LineGraphInput.cs` | `LineLayerInput` — the per-layer input descriptor |
-| `LineRingGatherJob.cs` | the ring gate + filter that produces the ring set the rest of the chain walks |
-| `LineSubdivideJob.cs` | curvature subdivision, driven by the projection's refine-angle tolerance |
-| `LineRibbonBatchJob.cs` | loops rings, running `LineRibbonJob` per ring; winding swap + vertex ceiling |
-| `LineRibbonJob.cs` | the projection-agnostic 3D ribbon builder (join/cap topology, one code path) |
+| `LayerInput.cs` | `LayerInput` — the per-layer input descriptor |
+| `RingGatherJob.cs` | the ring gate + filter that produces the ring set the rest of the chain walks |
+| `SubdivideJob.cs` | curvature subdivision, driven by the projection's refine-angle tolerance |
+| `RibbonBatchJob.cs` | loops rings, running `RibbonJob` per ring; winding swap + vertex ceiling |
+| `RibbonJob.cs` | the projection-agnostic 3D ribbon builder (join/cap topology, one code path) |
 
 - *Invariant:* byte-identical line snapshots (`LinePaintSnapshotTests`, `LineAaSnapshotTests`,
   `GlobeLineSnapshotTests`); `LineRibbonJobTests` unchanged.
@@ -1354,7 +1354,7 @@ reasoning: `TileToGeoJob`/`ProjectPointsJob` are ~10-50 µs of work per 1024 ver
 batch hand-off's own cost); `EarcutBatchJob` → `IJobParallelForDefer` over `FillMeshGraph`'s own
 `buffers.PerPolyOuterCount` (`EarcutPolygonBatch = 1` — earcut is superlinear and corpus polygons vary by
 orders of magnitude, so batch 1 lets the job system's work-stealing balance the load); the ribbon restructured
-into sizing → `LineRibbonBatchJob` (`IJobParallelForDefer` over rings, `RibbonRingBatch = 1`, same reasoning)
+into sizing → `RibbonBatchJob` (`IJobParallelForDefer` over rings, `RibbonRingBatch = 1`, same reasoning)
 → aggregate. The stream-write jobs (fill/extrusion/line) were measured (§9) and NOT parallelised — the
 measurement did not clear its own pre-committed gate.
 
@@ -1362,16 +1362,16 @@ measurement did not clear its own pre-committed gate.
   unchanged); the disabled-safety attribute confined to two job types, one occurrence each (§7 rule 2, above)
   — the plan's original wording ("no disabled-safety attribute outside `EarcutBatchJob`") is corrected by
   A0.3's resolution: the ribbon needed the identical shape, so the sanctioned set is
-  `{ EarcutBatchJob, LineRibbonBatchJob }`, not one job.
+  `{ EarcutBatchJob, RibbonBatchJob }`, not one job.
 > **What bit-exactness actually rests on.** The **slice derivation**, not any assertion: each item
 > (polygon/ring) reads and writes only `GetSubArray` views taken between *consecutive* entries of a monotonic
 > offset table a serial sizing node built — so the bytes one item touches are a function of its own input
 > alone, independent of which worker runs it, in what order, or how many run at once. Each sizing job
-> (`FillSizingJob`/`LineRibbonSizingJob`) additionally asserts its own tables are strictly increasing —
+> (`SizingJob`/`RibbonSizingJob`) additionally asserts its own tables are strictly increasing —
 > defence-in-depth against a non-monotonic table surfacing as a *player-build* error code
 > (`ErrorOffsetTableNotDisjoint`) instead of an Editor-only `GetSubArray` bounds throw, **not** what makes the
 > parallel node bit-exact. No edit to a sizing job can make two items' slices overlap; the determinism
-> tooth's RED injection therefore goes in the CONSUMER (`EarcutBatchJob`/`LineRibbonBatchJob`), colliding the
+> tooth's RED injection therefore goes in the CONSUMER (`EarcutBatchJob`/`RibbonBatchJob`), colliding the
 > base of adjacent items — e.g. `int sOff = workOffsets[pi - (pi & 1)];` — never in the sizing job.
 > **A.2 cleared, contrary to this plan's own reweighting.** The primary-source finding that `NativeList<T>`
 > lacks `[NativeContainerSupportsMinMaxWriteRestriction]` was read as meaning the disable attribute could not
@@ -1379,7 +1379,7 @@ measurement did not clear its own pre-committed gate.
 > on the OUTER struct field suppresses the parallel-write safety check entirely for a container that lacks
 > index-restriction support, not narrowly a bound it lacks the metadata to enforce (a control run with the
 > identical body and no attribute throws *"is not declared [ReadOnly] in a IJobParallelFor job"* instead). So
-> both `EarcutBatchJob` and `LineRibbonBatchJob` keep their single `Buffers` field, one attribute each — the
+> both `EarcutBatchJob` and `RibbonBatchJob` keep their single `Buffers` field, one attribute each — the
 > smaller of the two probed shapes, not the 11-written/7-read-only field split A.1 also proved viable.
 >
 > **A.1's own result, for the record:** a deferred `NativeArray<int>` field with `[NativeDisableParallelForRestriction]`,
@@ -1404,11 +1404,11 @@ measurement did not clear its own pre-committed gate.
   **The three primary REDs, executed, observed text below (not a recipe — this is what actually happened;
   correcting one wrong prediction in place, per this stage's own review):**
   - **B.5 (i)** — `EarcutBatchJob.Execute`, `int sOff = workOffsets[pi - (pi & 1)];`: observed **not** a
-    digest mismatch but a fatal `IndexOutOfRangeException` thrown from `FillAggregateJob` (the collided base
+    digest mismatch but a fatal `IndexOutOfRangeException` thrown from `AggregateJob` (the collided base
     makes a polygon's merged count exceed its slice, and the aggregate read past `FlatVx`). The tooth reds —
     through a downstream bounds check, not the two-pass digest comparison — and the run crashed the Editor
     process, a stronger divergence than the digest mismatch this doc predicted.
-  - **E.4** — `LineRibbonBatchJob.Execute`, `RingVertexOffsets[r - (r & 1)]`: observed *"Indices diverge from
+  - **E.4** — `RibbonBatchJob.Execute`, `RingVertexOffsets[r - (r & 1)]`: observed *"Indices diverge from
     the captured oracle"* on all four `LineGraphParityTests` cases — no crash this time.
   - **B.5 (ii) — the prediction below was WRONG; corrected in place, not merely annotated.** Restoring
     `FillMeshGraph.VertexBatch` to `1 << 20` reds `GraphDeterminismTests` **via its contention guard**
@@ -1419,16 +1419,16 @@ measurement did not clear its own pre-committed gate.
     the corpus offers more than one batch), but this specific restoration is no longer a clean demonstration
     of that — it reds for an unrelated, correct reason first.
 - **Error-path bonus (C.4), extended by review to close a second hazard the first pass introduced.**
-  `EarcutBatchJob`'s deferred count source is `buffers.PerPolyOuterCount` — a `FillSizingJob` capacity
+  `EarcutBatchJob`'s deferred count source is `buffers.PerPolyOuterCount` — a `SizingJob` capacity
   early-return leaves it at length 0, so the earcut runs ZERO batches on that path. **That alone was not
-  sufficient**: `FillAggregateJob` (fill) and `LineRibbonAggregateJob` (line, new this stage) both used to
+  sufficient**: `AggregateJob` (fill) and `RibbonAggregateJob` (line, new this stage) both used to
   take their own loop bound from a BORROWED count (`PolyCountArr[0]` / `RingSubOffsets.Length - 1`) that a
   sizing early-return never touches, so the parallel node's own safe zero-batch behaviour did NOT stop the
   serial aggregate one node downstream from indexing a length-0 `NativeList` for the polygon/ring count the
   UPSTREAM job still reported. `NativeList<T>`'s indexer bounds check is
   `[Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]` — compiled OUT of a release player build — so this was
   not a throw, it was `Ptr[index]` past the allocation, on a path the fill side has been reachable through
-  since before this stage (`FillSizingJob`'s own doc: a test can hand it undersized capacity). Both aggregates
+  since before this stage (`SizingJob`'s own doc: a test can hand it undersized capacity). Both aggregates
   now bound their own loop by a column their own upstream sizing job resizes (`PerPolyMergedVertexCount.Length`
   / `PerRingVertexCount.Length`), which reads 0 exactly when sizing bailed early — so the WHOLE chain, not
   just the earcut/ribbon node, now safely no-ops on a sizing failure instead of reading garbage-length flat
@@ -1560,7 +1560,7 @@ per-frame `.Run()` jobs; scheduling graphs at the frame tail (`endContextRenderi
 | # | measurement | decides | when |
 |---|---|---|---|
 | 1 | main-thread µs per scheduled node (Editor, safety on; player), × nodes per tile | per-layer builders vs fused per-tile jobs | **stage 0** |
-| 2 | serial span of `SymbolProjectionJob`/`SymbolCullJob` at realistic symbol counts vs the `ScheduleParallel().Complete()` fan-out cost | rule 3 for the per-frame symbol sites | any time |
+| 2 | serial span of `SymbolProjectionJob`/`CullJob` at realistic symbol counts vs the `ScheduleParallel().Complete()` fan-out cost | rule 3 for the per-frame symbol sites | any time |
 | 3 | `Complete()` wait on the symbol collision at the next Tick with N tile graphs in flight on web (5 workers) | whether an in-flight-graph cap below `MaxConcurrentTileLoads` is needed. **This is the one runtime hazard with no mitigation in the plan**: jobs have no priorities, and a queued collision behind a long earcut batch stalls the main thread at `HarvestCollision`. The mitigation, if it bites, is that cap — a knob on `TileBuildGraph` scheduling, not a design change. | after stage 3, on a web trace |
 | 4 | on web, the prologue's main-thread ms per tile (selection + paint bake) vs the Burst chain it used to run inline | how much of the web win stage 3 delivers versus stage 7; sizes what stage 7 has left to win | **OVERDUE — not taken. Stage 3 is complete and this number does not exist**, and it is still worth taking. It no longer *gates* anything, though: §11 fork 1 was **CLOSED BY ACTION on 2026-09-04** (the line graph shipped — `4b373d12`, then `6a1ec875` — so "stage 5 before stage 7" is simply what happened, settled by a landed stage rather than by this measurement), and §11 fork 2 was separately **CORRECTED on 2026-09-04** to say it is not gated on measurement 4 either. It is one `Tools/build.sh web` away and would still size the web prologue's main-thread cost. The extrusion wall loop no longer belongs in this trace — job-scheduling-design.md §8 stage 5 (the wall-job-graph stage) moved it off the main thread onto the Burst `ProjectPointsJob<TProj>` chain (`FillExtrusionMeshGraph.Schedule`), so it is not a main-thread cost to size here any more; what was a per-edge managed `ProjectPoint` cost (thousands of buildings × ~6 edges × 2 calls each) is now scheduled work, not prologue work. |
 | 5 | ~~whether `Mesh.MeshData.SetVertexBufferParams`/`SetIndexBufferParams` are callable from inside a Burst job~~ | **CLOSED 2026-09-02, no run needed.** Off-main: **yes, already proven by shipping code** — `StyledFillTileBuilder.WriteMeshData` runs off the main thread (`StyledFillTileBuilder.cs:29`) and calls `SetVertexBufferParams` at `:457`/`:543`, with `:47` stating these APIs are off-main-thread safe. Inside a **Burst** job: no — it is a managed API taking a `NativeArray<VertexAttributeDescriptor>`. And it does not matter: `AllocateWritableMeshData` is main-only (`MeshDataPayload.cs:37`) and the vertex/index counts are measure-graph outputs, so the main-thread allocate+size step stays regardless. **Write step shape: main allocates and sizes one `MeshData` per layer; a Burst job writes the data.** *Partial — this closes the SHAPE, not every question.* The evidence covers writes made **synchronously on the writing thread**, which is what `WriteMeshData` does. It does **not** cover handing a `MeshData`-derived `NativeArray` to the job system's safety registration and reading it back after `Complete()` — nothing in this repo has done that, and it is what the stream-write job needs. That half is now **CLOSED, measured 2026-09-02**: a `[BurstCompile] IJob` **scheduled** (not `.Run()`) over a `NativeArray<T>` taken from `Mesh.MeshData.GetVertexData<T>()` writes correctly and reads back after `Complete()` + `ApplyAndDisposeWritableMeshData`, with no Burst-error output. **CORRECTED 2026-09-02, during stage 2:** that probe cleared a **single** stream, and the conclusion drawn from it — "so the stream-write job takes plain `NativeArray<T>` fields" — was **wrong for the real job, which writes four**. Every stream view of one `Mesh.MeshData` is tracked under a **shared** safety handle, so two *writable* views cannot be two job fields: scheduling throws *"Stream0 is the same … as Stream1, two containers may not be the same (aliasing)"*. **The shipped shape is this row's own documented fallback** — the job holds the whole `Mesh.MeshData` as ONE field and resolves every stream/index view inside `Execute()`. The probe was not wrong about what it measured; the *generalisation* from one stream to four was never measured, and a single-stream instrument is structurally blind to an aliasing defect that needs two (`lessons-learned.md`, "blind spots don't transfer between instruments"). Caught by the existing background snapshot suite, not by any tooth this stage wrote — which is what the byte-identical invariant is for. | closed |

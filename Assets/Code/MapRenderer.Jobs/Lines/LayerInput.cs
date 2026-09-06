@@ -10,7 +10,7 @@ namespace MapRenderer.Jobs.Lines
     /// Input descriptor for one line layer's graph build (job-scheduling-design.md §8 stage 5) — the line
     /// twin of <see cref="FillMeshPipeline.LayerInput"/>; mirrors its role and its BORROWED/owned split.
     /// </summary>
-    public struct LineLayerInput
+    public struct LayerInput
     {
         /// <summary>Waist 1's shared tile geometry — <b>BORROWED</b>. <see cref="LineMeshGraph.Schedule"/>
         /// never disposes it, never writes into it, and does not retain it past <c>Handle.Complete()</c>.
@@ -41,10 +41,10 @@ namespace MapRenderer.Jobs.Lines
         /// <summary>Endpoint geometry style for the ribbon.</summary>
         public CapType Cap;
 
-        /// <summary>Maximum miter ratio — <see cref="LineRibbonJob.MiterLimit"/>'s own contract.</summary>
+        /// <summary>Maximum miter ratio — <see cref="RibbonJob.MiterLimit"/>'s own contract.</summary>
         public double MiterLimit;
 
-        /// <summary>Minimum miter ratio a round join needs before it fans — <see cref="LineRibbonJob.RoundLimit"/>'s
+        /// <summary>Minimum miter ratio a round join needs before it fans — <see cref="RibbonJob.RoundLimit"/>'s
         /// own contract.</summary>
         public double RoundLimit;
 

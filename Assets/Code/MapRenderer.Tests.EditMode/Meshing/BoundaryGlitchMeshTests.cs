@@ -14,7 +14,7 @@ namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
     /// Rung 2 (EditMode, the source of truth): build the REAL boundary_3 line mesh through the production
-    /// path — projection (TileToGeoJob → managed ProjectPoint) + the actual Burst LineRibbonJob + the
+    /// path — projection (TileToGeoJob → managed ProjectPoint) + the actual Burst RibbonJob + the
     /// Mercator bake — for the three maintainer-reported "line/polygon across the whole screen" tiles, and
     /// scan the resulting Mesh for any triangle whose edge spans more than half a tile.
     ///
@@ -49,7 +49,7 @@ namespace MapRenderer.Tests.Meshing
             var selected = TestTileMeshBuilder.Select(layer, mvtLayer, z);
             Assert.Greater(selected.Count, 0, "expected boundary_3 line features in this tile");
 
-            // Production path: real projection + real Burst LineRibbonJob + Mercator bake, over the layer's
+            // Production path: real projection + real Burst RibbonJob + Mercator bake, over the layer's
             // own buffer with this style layer's ordinal-bearing selection.
             Mesh mesh = TestTileMeshBuilder.BuildLineFromLayer(
                 mvtLayer, selected, layer.Paint, layer.Layout, z, id, new WebMercatorProjection());

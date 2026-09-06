@@ -32,11 +32,11 @@ namespace MapRenderer.Tests.Meshing
         private static readonly TileId SyntheticTile = new TileId { Z = 10, X = 300, Y = 380 };
         private const double SyntheticExtent = 4096.0;
 
-        /// <summary>Builds a <see cref="LineLayerInput"/> directly from ring point lists, bypassing MVT
+        /// <summary>Builds a <see cref="LayerInput"/> directly from ring point lists, bypassing MVT
         /// decode — every ring is a selected LineString feature, one feature per ring. Caller disposes the
-        /// returned <see cref="LineLayerInput"/> (via its own <c>Dispose</c> convention: the request's
+        /// returned <see cref="LayerInput"/> (via its own <c>Dispose</c> convention: the request's
         /// owning caller frees <c>FeatureSelected</c>) and the returned <c>geometry</c>.</summary>
-        private static (LineLayerInput input, TileGeometryBuffers geometry) SyntheticLineInput(
+        private static (LayerInput input, TileGeometryBuffers geometry) SyntheticLineInput(
             IProjection projection, int maxOutputVertices, params double2[][] rings)
         {
             int ringCount = rings.Length;
@@ -61,7 +61,7 @@ namespace MapRenderer.Tests.Meshing
             for (int i = 0; i < ringCount; i++) featSelected[i] = true;
 
             double3 origin = TileRenderOrigin.Project(SyntheticTile, projection);
-            var input = new LineLayerInput
+            var input = new LayerInput
             {
                 Geometry = geometry, FeatureSelected = featSelected, OriginRender = origin,
                 Projection = projection, Join = JoinType.Miter, Cap = CapType.Butt,
@@ -71,7 +71,7 @@ namespace MapRenderer.Tests.Meshing
             return (input, geometry);
         }
 
-        private static void DisposeSynthetic(LineLayerInput input, TileGeometryBuffers geometry)
+        private static void DisposeSynthetic(LayerInput input, TileGeometryBuffers geometry)
         {
             if (input.FeatureSelected.IsCreated) input.FeatureSelected.Dispose();
             geometry.Dispose();
@@ -120,7 +120,7 @@ namespace MapRenderer.Tests.Meshing
             featSelected[0] = true; featSelected[1] = true; featSelected[2] = true; featSelected[3] = false;
 
             var projection = new WebMercatorProjection();
-            var input = new LineLayerInput
+            var input = new LayerInput
             {
                 Geometry = geometry, FeatureSelected = featSelected,
                 OriginRender = TileRenderOrigin.Project(SyntheticTile, projection), Projection = projection,
@@ -180,7 +180,7 @@ namespace MapRenderer.Tests.Meshing
             var ring1 = new[] { new double2(2000, 500), new double2(3000, 500) };
 
             var projection = new WebMercatorProjection();
-            (LineLayerInput input, TileGeometryBuffers geometry) =
+            (LayerInput input, TileGeometryBuffers geometry) =
                 SyntheticLineInput(projection, LineMeshGraph.DefaultMaxOutputVertices, ring0, ring1);
 
             LineGraphOutput output = default;
@@ -232,7 +232,7 @@ namespace MapRenderer.Tests.Meshing
 
         /// <summary>
         /// (e) A synthetic ring whose ribbon vertex count exceeds a deliberately tiny
-        /// <see cref="LineLayerInput.MaxOutputVertices"/> (passed explicitly, never the production
+        /// <see cref="LayerInput.MaxOutputVertices"/> (passed explicitly, never the production
         /// constant) trips <see cref="LineGraphCounts.ErrorLineVertexCapacity"/> and the graph produces NO
         /// vertices for it — the always-bound-loops backstop.
         /// </summary>
@@ -246,7 +246,7 @@ namespace MapRenderer.Tests.Meshing
                 pts[i] = new double2(500 + i * 20, 500 + (i % 2) * 200);
 
             var projection = new WebMercatorProjection();
-            (LineLayerInput input, TileGeometryBuffers geometry) =
+            (LayerInput input, TileGeometryBuffers geometry) =
                 SyntheticLineInput(projection, maxOutputVertices: 8, pts);
             input.Join = JoinType.Round; input.RoundSegments = 8;
 
@@ -258,7 +258,7 @@ namespace MapRenderer.Tests.Meshing
 
                 Assert.AreEqual(LineGraphCounts.ErrorLineVertexCapacity, output.Error.Value,
                     "a ring whose ribbon vertex count exceeds MaxOutputVertices must set the capacity error");
-                // The contract (LineRibbonAggregateJob's own append-loop guard) checks BEFORE appending a ring
+                // The contract (RibbonAggregateJob's own append-loop guard) checks BEFORE appending a ring
                 // that would push the total over MaxOutputVertices, so a correct run never exceeds it — here,
                 // with the fixture's one ring already exceeding 8 by itself, the correct result is exactly 0,
                 // never a partial write. LessOrEqual(8), not a loose upper bound: an implementation that flags
@@ -286,7 +286,7 @@ namespace MapRenderer.Tests.Meshing
                 pts[i] = new double2(500 + i * 20, 500 + (i % 2) * 200);
 
             var projection = new WebMercatorProjection();
-            (LineLayerInput input, TileGeometryBuffers geometry) =
+            (LayerInput input, TileGeometryBuffers geometry) =
                 SyntheticLineInput(projection, LineMeshGraph.DefaultMaxOutputVertices, pts);
             input.Join = JoinType.Round; input.RoundSegments = 8;
 
@@ -325,11 +325,11 @@ namespace MapRenderer.Tests.Meshing
                 pts[i] = new double2(500 + i * 500, 500 + math.sin(i) * 400);
 
             var flatProjection = new WebMercatorProjection();
-            (LineLayerInput flatInput, TileGeometryBuffers flatGeometry) =
+            (LayerInput flatInput, TileGeometryBuffers flatGeometry) =
                 SyntheticLineInput(flatProjection, LineMeshGraph.DefaultMaxOutputVertices, pts);
 
             var rhProjection = new RightHandedSphereTestProjection();
-            (LineLayerInput rhInput, TileGeometryBuffers rhGeometry) =
+            (LayerInput rhInput, TileGeometryBuffers rhGeometry) =
                 SyntheticLineInput(rhProjection, LineMeshGraph.DefaultMaxOutputVertices, pts);
 
             LineGraphOutput flatOutput = default, rhOutput = default;
@@ -407,7 +407,7 @@ namespace MapRenderer.Tests.Meshing
         {
             var ring = new[] { new double2(500, 500), new double2(900, 900), new double2(1200, 600) };
             var projection = new WebMercatorProjection();
-            (LineLayerInput input, TileGeometryBuffers geometry) =
+            (LayerInput input, TileGeometryBuffers geometry) =
                 SyntheticLineInput(projection, LineMeshGraph.DefaultMaxOutputVertices, ring);
 
             long liveBaseline = LineGraphOutput.DebugLiveCount;
@@ -454,7 +454,7 @@ namespace MapRenderer.Tests.Meshing
             long liveBaseline = LineGraphOutput.DebugLiveCount;
             for (int iter = 0; iter < 5; iter++)
             {
-                (LineLayerInput input, TileGeometryBuffers geometry) =
+                (LayerInput input, TileGeometryBuffers geometry) =
                     SyntheticLineInput(projection, LineMeshGraph.DefaultMaxOutputVertices, ring);
                 LineGraphOutput output = LineMeshGraph.Schedule(input);
                 output.Handle.Complete();

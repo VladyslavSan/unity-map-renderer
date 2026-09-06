@@ -20,7 +20,7 @@ namespace MapRenderer.Jobs.Fill
         public NativeArray<int> HoleCountArr;
 
         /// <summary>Plain <see cref="NativeArray{T}"/>s, not scratch <see cref="NativeList{T}"/>s — matches
-        /// <c>FillMeshGraph.cs</c>'s existing convention that only the <see cref="FillTriangulationBuffers"/> allocations
+        /// <c>FillMeshGraph.cs</c>'s existing convention that only the <see cref="TriangulationBuffers"/> allocations
         /// are counted by the leak/balance counters.</summary>
         internal static PolygonDescriptors Allocate(int maxPolygons, int maxHoles) => new PolygonDescriptors
         {
@@ -34,7 +34,7 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>Schedules a <c>Dispose(handle)</c> for every field, fanned out on <paramref name="deps"/> and
         /// combined once via the array overload — same shape, and same <c>Allocator.Temp</c> reasoning, as
-        /// <see cref="FillTriangulationBuffers.DisposeAfter"/>. No <see cref="FillGraphOutput.RecordBufferDisposeNode"/>
+        /// <see cref="TriangulationBuffers.DisposeAfter"/>. No <see cref="FillGraphOutput.RecordBufferDisposeNode"/>
         /// call here: unlike that type's scratch, these six fields are not counted by the balance
         /// check (see <see cref="Allocate"/>'s own doc).</summary>
         internal JobHandle DisposeAfter(JobHandle deps)

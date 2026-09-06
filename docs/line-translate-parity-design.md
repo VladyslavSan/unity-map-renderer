@@ -97,7 +97,7 @@ tangent lights and textures a curved fill wrong — and `GlobeFillTangentTests` 
 
 A second misreading, worth recording because it changes the options. The line does **not** lack a
 per-vertex frame. `StyledLineTileBuilder:227/247` writes `projection.ProjectPoint(geo).Up` per point — real
-geodetic up on the globe — and `LineRibbonJob` builds `across = normalize(cross(along, up))` against that
+geodetic up on the globe — and `RibbonJob` builds `across = normalize(cross(along, up))` against that
 same up. With the shader-derived `along`, the line has a complete, correct, per-vertex orthonormal tangent
 frame, free. (`Line_VertexExtrude.hlsl:30` still describes the NORMAL stream as a *"constant +Y lighting
 normal"* — **stale** since the globe work, and a contributing cause of both misreadings here. Fix that
@@ -110,7 +110,7 @@ Separate the needs:
   is rotated by the road's own heading, which varies per segment and is unrelated to north.
 
 That reframing kills the 3-vector stream. **Inside a known orthonormal frame, east is one angle, not three
-floats** — and it need not even be an angle. `LineRibbonJob` already calls the projection per point for
+floats** — and it need not even be an angle. `RibbonJob` already calls the projection per point for
 `Up`, the same seam where fill gets east from `TangentBasisAt(geo).c0`; it can store
 `(dot(east, across), dot(east, along))` — exactly `(cos θ, sin θ)`, two dot products, no trig. The shader
 reconstructs `east = c·across + s·along` in two multiply-adds. This can ride the existing `widthScale`

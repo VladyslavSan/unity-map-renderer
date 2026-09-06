@@ -20,7 +20,7 @@ new case.
 ```
   TileResponse.Encoding                          a geojson source builds its own GeoJsonTileDecoder
         │                                         directly, closed over its dataset — ForEncoding never
-        │  TileDecoders.ForEncoding               returns one
+        │  Decoders.ForEncoding               returns one
         ▼
   ITileDecoder   (MvtTileDecoder, from ForEncoding; or a directly-constructed GeoJsonTileDecoder)
         │
@@ -30,7 +30,7 @@ new case.
         │
         │  SourceLayerResolver.ResolveTileLayer   style layer's source-layer string → the matching ITileLayer
         ▼                                          (each tile format answers for its own empty-name semantics)
-  ITileLayer   (features + the layer's borrowed TileGeometryBuffers, adopted once via TileLayerGeometryAdoption)
+  ITileLayer   (features + the layer's borrowed TileGeometryBuffers, adopted once via LayerGeometryAdoption)
         │
         │  FeatureSelector.SelectFeatures         resolves the layer's filter, then evaluates it per feature —
         ▼                                          native (INativeFilterSource) when the layer supports it,
@@ -49,7 +49,7 @@ format-agnostic: today only `MvtLayer` implements the capability (forwarding to 
 an `is MvtLayer` check.
 
 **One shared adopt-once guard.** `MvtLayer` and `GeoJsonTileLayer` each own a `TileGeometryBuffers` they take
-from a materializer exactly once; `TileLayerGeometryAdoption.Validate` is the single place both guards
+from a materializer exactly once; `LayerGeometryAdoption.Validate` is the single place both guards
 (already-adopted, feature-count lockstep) live, so the invariant three ordinal-indexed consumers rely on
 cannot drift between the two implementations.
 
@@ -61,7 +61,7 @@ cannot drift between the two implementations.
 | `IDecodedTile` | a decoded tile: layers looked up by name; `IDisposable`, owned by a `SharedDisposable{IDecodedTile}` |
 | `ITileDecoder` | the decode seam: `(TileId, bytes) → IDecodedTile`, selected by `TileEncoding` |
 | `MvtTileDecoder` | the MVT `ITileDecoder`: the sole production call site of `MvtDecoder.Decode` |
-| `TileDecoders` | resolves the `ITileDecoder` for a `TileEncoding` |
+| `Decoders` | resolves the `ITileDecoder` for a `TileEncoding` |
 | `GeoJsonTileLayer` | the second production `ITileLayer`: one GeoJSON dataset's geometry as it falls inside one tile; presents the same shape `MvtLayer` does |
 | `GeoJsonTile` | the GeoJSON `IDecodedTile`: zero or one `GeoJsonTileLayer`, returned regardless of the name asked for (a geojson source has no sub-layers to match) |
 | `GeoJsonTileDecoder` | the GeoJSON `ITileDecoder`: a closure over a projected dataset that slices it per tile; `bytes` is always ignored |
@@ -71,4 +71,4 @@ cannot drift between the two implementations.
 | `KeyBindingBuffers` | a `[ThreadStatic]` free-list of `int[]` scratch for `FeatureSelector`'s per-call key-binding step (the string→id key hoist) |
 | `INativeFilterSource` | the native-filter capability seam a tile layer implements to evaluate a compiled program without going through the managed `CompiledFilter` |
 | `INativeFeatureMatcher` | the per-selection product `INativeFilterSource.TryBindNativeFilter` hands back; owns its evaluation scratch, disposed by the caller |
-| `TileLayerGeometryAdoption` | the shared adopt-once + feature-count-lockstep guard both `MvtLayer.AdoptGeometry` and `GeoJsonTileLayer.AdoptGeometry` call through |
+| `LayerGeometryAdoption` | the shared adopt-once + feature-count-lockstep guard both `MvtLayer.AdoptGeometry` and `GeoJsonTileLayer.AdoptGeometry` call through |

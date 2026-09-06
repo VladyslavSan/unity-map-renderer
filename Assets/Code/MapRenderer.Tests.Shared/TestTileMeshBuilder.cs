@@ -326,7 +326,7 @@ namespace MapRenderer.Tests
             AssertLayerPairing(layer, id);
             double3 renderOrigin = TileRenderOrigin.Project(id, projection);
 
-            LineLayerInput input = StyledLineTileBuilder.BuildLayerInput(
+            LayerInput input = StyledLineTileBuilder.BuildLayerInput(
                 selection, layer.Geometry, paint, layout, zoom, renderOrigin,
                 out NativeArray<Vector4> featureColors, out NativeArray<float> featureWidths, projection);
 

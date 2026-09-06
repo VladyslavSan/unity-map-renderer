@@ -23,7 +23,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <c>StyledFillTileBuilder.FillStreamWriteJob</c>'s own doc).</para>
         ///
         /// <para><b>Indices are copied VERBATIM</b> — the winding swap already happened in
-        /// <see cref="LineRibbonAggregateJob"/>, offset per ring, before this job ever runs.
+        /// <see cref="RibbonAggregateJob"/>, offset per ring, before this job ever runs.
         /// This is the one deliberate difference from fill's write job, which does the swap here.</para>
         ///
         /// <para><b>The <c>.AsArray()</c> rule</b>: resolved inside <see cref="Execute"/>, never at schedule

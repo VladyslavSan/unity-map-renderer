@@ -7,29 +7,29 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
-    /// The <c>GatherSymbolPoints</c> Compact pass, ported to Burst — consumes <see cref="SymbolCullJob"/>'s
+    /// The <c>GatherSymbolPoints</c> Compact pass, ported to Burst — consumes <see cref="CullJob"/>'s
     /// per-record <see cref="GatherTrigger"/> verdict IN RECORD ORDER: a Dropped record is hard-skipped with no
     /// fade/count; a triggered record whose fade is still alive KEEPS staging (its FadeIds recorded into
     /// <see cref="ForceFadeOut"/> so the emit loop eases it to 0 — no pop); a triggered fade-dead record is
     /// hard-skipped and tallied into its trigger's <see cref="Counts"/> slot; a kept (<c>None</c>) record is
     /// appended. The running append length (<see cref="OutPoints"/><c>.Length</c>) is the destination offset, so
     /// this pass is inherently serial — <see cref="IJob"/>, not <see cref="IJobParallelFor"/> (unlike
-    /// <see cref="SymbolCullJob"/>, whose per-index verdict has no cross-record dependency).
+    /// <see cref="CullJob"/>, whose per-index verdict has no cross-record dependency).
     ///
-    /// <para><c>.Run()</c>, like <see cref="SymbolCullJob"/>/<see cref="SymbolProjectionJob"/>: no
+    /// <para><c>.Run()</c>, like <see cref="CullJob"/>/<see cref="SymbolProjectionJob"/>: no
     /// Schedule/Complete round-trip, no worker hand-off — the caller blocks here regardless (<c>EmitSymbols</c>
     /// reads <see cref="OutPoints"/>/<see cref="OutUps"/> immediately after).</para>
     ///
     /// <para>Integer branch + verbatim <c>double3</c>/<c>float3</c> copy + a single <c>float</c> compare
     /// (<c>&gt; FadeEpsilon</c>) — no <c>dot</c>, no FMA-reorderable math — so Burst and managed are
     /// bit-identical here; there is no near-threshold ULP hazard to fence a fixture around (contrast
-    /// <see cref="SymbolCullJob"/>'s Horizon/Distance double-precision <c>dot</c> math).</para>
+    /// <see cref="CullJob"/>'s Horizon/Distance double-precision <c>dot</c> math).</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct SymbolCompactJob : IJob
+    public struct CompactJob : IJob
     {
         // ── Input — per-record verdict + fields, index-parallel to the mirror ───────────────────────────────
-        /// <summary>Per-record cull verdict from <see cref="SymbolCullJob"/>, consumed in record order.</summary>
+        /// <summary>Per-record cull verdict from <see cref="CullJob"/>, consumed in record order.</summary>
         [ReadOnly] public NativeArray<GatherTrigger> Trigger;
         /// <summary>Per-record <see cref="SymbolPlacementKind"/> — selects which detail path (<see cref="PointDetails"/>
         /// / the curved anchor arrays) the fade-alive probe reads.</summary>

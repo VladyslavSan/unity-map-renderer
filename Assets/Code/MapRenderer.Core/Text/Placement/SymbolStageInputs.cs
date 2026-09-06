@@ -21,7 +21,7 @@ namespace MapRenderer.Core.Text.Placement
         public bool   Projected;                    // false = behind the camera (skip)
 
         /// <summary>P2: the unit surface normal at this anchor, from <c>IProjection.ProjectPoint(...).Up</c>.
-        /// PER-FRAME PATCHED by <see cref="SymbolStageJob"/> — like <see cref="ScreenPx"/>/<see cref="Depth"/>/
+        /// PER-FRAME PATCHED by <see cref="StageJob"/> — like <see cref="ScreenPx"/>/<see cref="Depth"/>/
         /// <see cref="Projected"/> — NOT a stable baked field (the baker/<c>BuildPointInput</c> never sets it).
         /// WRITTEN by P2; not yet consumed by any placement math.</summary>
         public float3 SurfaceUp;
@@ -86,7 +86,7 @@ namespace MapRenderer.Core.Text.Placement
     /// pre-resolved by the caller (managed sRGB→linear / slot clamp).
     ///
     /// <para>Stable per symbol EXCEPT <see cref="MetresPerLogicalPixel"/>, which is this frame's camera ruler
-    /// and is PER-FRAME PATCHED by <see cref="SymbolStageJob"/> — the curved analogue of
+    /// and is PER-FRAME PATCHED by <see cref="StageJob"/> — the curved analogue of
     /// <see cref="PointStageInput.ScreenPx"/>/<see cref="PointStageInput.Depth"/>/
     /// <see cref="PointStageInput.Projected"/>/<see cref="PointStageInput.SurfaceUp"/>. The baker never sets
     /// it.</para>
@@ -151,7 +151,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <c>SymbolPlacementSystem.Tick</c>; the value that travels from there is already per-logical-px and
         /// the name never changes at any hop.
         ///
-        /// <para><b>PER-FRAME PATCHED</b> by <see cref="SymbolStageJob"/> — never baked. Read ONLY inside
+        /// <para><b>PER-FRAME PATCHED</b> by <see cref="StageJob"/> — never baked. Read ONLY inside
         /// <see cref="SymbolStagingMath.StageCurved"/>'s <see cref="AlignmentMode.Map"/> branch, so a
         /// non-map-pitched symbol cannot observe it (pinned by W1-T8). A value of 0 (never patched) degrades
         /// that branch to the screen walk rather than collapsing the symbol (pinned by W1-T9).</para>

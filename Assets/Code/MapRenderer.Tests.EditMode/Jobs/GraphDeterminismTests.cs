@@ -250,7 +250,7 @@ namespace MapRenderer.Tests.Jobs
                     for (int i = 0; i < geometry.FeatureCount; i++) selected[i] = true;
                     try
                     {
-                        var input = new LineLayerInput
+                        var input = new LayerInput
                         {
                             Geometry = geometry, FeatureSelected = selected, OriginRender = default, Projection = projection,
                             Join = JoinType.Miter, Cap = CapType.Butt, MiterLimit = 2.0, RoundSegments = 8, RoundLimit = 0.25,
@@ -521,7 +521,7 @@ namespace MapRenderer.Tests.Jobs
                         var subUp = new NativeList<double3>(64, Allocator.Persistent);
                         try
                         {
-                            new LineRingGatherJob
+                            new RingGatherJob
                             {
                                 Vertices = geometry.Vertices, RingOffsets = geometry.RingOffsets, RingFeatureIdx = geometry.RingFeatureIdx,
                                 FeatureGeometryType = geometry.FeatureGeometryType, RingCount = geometry.RingCount,
@@ -540,7 +540,7 @@ namespace MapRenderer.Tests.Jobs
 
                             DispatchProjectionForMeasurement(projection, double3.zero, srcGeo, srcWorld, srcUp);
 
-                            new LineSubdivideJob
+                            new SubdivideJob
                             {
                                 SrcTile = srcTile, RingSrcOffsets = ringSrcOffsets, SrcUp = srcUp,
                                 MaxRefineAngleRad = projection.MaxRefineAngleRad,

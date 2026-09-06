@@ -178,7 +178,7 @@ reads.
 ### Pluggable-by-encoding on the Burst side (no vtable in Burst)
 
 Mirror the existing **`ProjectionDispatch`** precedent: a managed dispatcher switches on `TileEncoding` (parallel
-to `TileDecoders.ForEncoding`) and runs the chosen **concrete** Burst job — Burst never holds a managed
+to `Decoders.ForEncoding`) and runs the chosen **concrete** Burst job — Burst never holds a managed
 interface. A real difference from `ProjectionDispatch`: projections share one input/output shape (one generic
 job, N struct instantiations); geometry decoders do **not** share input shape (MVT = command stream; GeoJSON =
 coordinate pairs), so this is **N independently-shaped concrete jobs unified only by a common output**

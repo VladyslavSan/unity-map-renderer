@@ -19,7 +19,7 @@ namespace MapRenderer.Jobs.Tiles
     /// column mis-buckets every ring — silently while the ordinals stay in range, and as an
     /// index-out-of-range once they do not.</para>
     /// </summary>
-    internal static class TileLayerGeometryAdoption
+    internal static class LayerGeometryAdoption
     {
         /// <param name="owner">How the layer names itself in a diagnostic (e.g. <c>MvtLayer 'roads'</c>).</param>
         /// <param name="alreadyAdopted">The caller's set-once flag, read before it is set.</param>

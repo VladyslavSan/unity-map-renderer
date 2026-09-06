@@ -14,7 +14,7 @@ namespace MapRenderer.Jobs.Symbols
     /// does — over <c>NativeArray.AsSpan()</c> slices — so it is byte-identical (the full EditMode gate is the
     /// teeth); Burst just SIMD-compiles the transcendental-heavy per-glyph geometry and drops the managed-call
     /// overhead. ONE job, not a fan-out: the candidate ordinal is assigned in record order (each record's
-    /// <c>candidateCount</c> depends on all prior), so the loop is inherently serial — like <see cref="SymbolCollisionJob"/>.
+    /// <c>candidateCount</c> depends on all prior), so the loop is inherently serial — like <see cref="CollisionJob"/>.
     ///
     /// <para>Outputs are pre-sized by the caller to the batch's worst case (<c>MaxBoxes/MaxQuads/MaxCandidates</c>)
     /// and declared as fixed-length <see cref="NativeArray{T}"/>s, which genuinely cannot grow mid-run — this job's
@@ -25,7 +25,7 @@ namespace MapRenderer.Jobs.Symbols
     /// arm into the <see cref="AnchorWasPlaced"/> scratch this job fills.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct SymbolStageJob : IJob
+    public struct StageJob : IJob
     {
         // ── batch mirror (per-symbol records, in collected order) ──
         public NativeArray<SymbolPlacementKind> Kinds;   // point / curved

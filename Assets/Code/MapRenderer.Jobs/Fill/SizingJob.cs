@@ -8,9 +8,9 @@ namespace MapRenderer.Jobs.Fill
     /// <summary>
     /// The fill graph's sizing node: reproduces <c>FillMeshPipeline.cs:312–371</c>'s earcut-scratch sizing
     /// pass — the four prefix-sum offset tables plus every flat scratch/output list downstream nodes
-    /// (<see cref="FillGatherJob{TComparer}"/>, <see cref="EarcutBatchJob"/>, <see cref="FillAggregateJob"/>)
+    /// (<see cref="FillGatherJob{TComparer}"/>, <see cref="EarcutBatchJob"/>, <see cref="AggregateJob"/>)
     /// consume, sized once and up front (job-scheduling-design.md §3.2, §8 stage 1) and held as one
-    /// <see cref="FillTriangulationBuffers"/> field (§8 stage 4's R2 reshape). A single-threaded job may resize a list
+    /// <see cref="TriangulationBuffers"/> field (§8 stage 4's R2 reshape). A single-threaded job may resize a list
     /// it owns.
     ///
     /// <para><b>Also reports the ring-count statistic.</b> <see cref="RingOffsets"/> is already a borrowed
@@ -33,7 +33,7 @@ namespace MapRenderer.Jobs.Fill
     /// flat list is <see cref="NativeArrayOptions.UninitializedMemory"/>.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    internal struct FillSizingJob : IJob
+    internal struct SizingJob : IJob
     {
         // ── Input — RingAssemblyJob's polygon descriptors and counts ──────────────────────────────
         [ReadOnly] public NativeArray<int> PolyOuterRingIdx;
@@ -55,7 +55,7 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>The offset tables, flat scratch/output columns and per-polygon columns this node sizes
         /// and every downstream node reads or fills.</summary>
-        public FillTriangulationBuffers Buffers;
+        public TriangulationBuffers Buffers;
 
         public NativeArray<FillGraphCounts> Counts;
 
@@ -133,13 +133,13 @@ namespace MapRenderer.Jobs.Fill
             // column a downstream node bounds its own loop by stays at length 0 (the four offset tables above
             // may already be non-empty on THIS return — they are filled before this check — but no node
             // bounds a loop by one of them). Every node that holds a sizing-owned buffer struct
-            // (FillTriangulationBuffers/LineRibbonBuffers) bounds its own loop — or its deferred count — by a
+            // (TriangulationBuffers/RibbonBuffers) bounds its own loop — or its deferred count — by a
             // column its sizing job resizes, never a borrowed count that job's early return does not touch.
             // Nodes past the aggregate bound by columns the AGGREGATE sizes, and inherit emptiness through
             // it. A downstream node re-introducing a borrowed count as its loop bound would silently reopen
             // the release-build OOB this stage found and fixed — FillSizingJobTests
             // .SizingCapacityOverrun_LeavesGatherAndAggregate_WithNothingToDo is the observing tooth for
-            // FillGatherJob.Execute and FillAggregateJob.Execute; EarcutBatchJob has no loop of its own to
+            // FillGatherJob.Execute and AggregateJob.Execute; EarcutBatchJob has no loop of its own to
             // bound (deferred over buffers.PerPolyOuterCount) — FillMeshGraphStructureTests pins that
             // deferred-count source structurally instead.
             for (int pi = 0; pi < polyCount; pi++)

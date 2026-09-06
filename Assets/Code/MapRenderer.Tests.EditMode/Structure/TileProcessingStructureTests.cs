@@ -357,14 +357,14 @@ namespace MapRenderer.Tests.Structure
                 // TileGeometryBuffers and matched with word boundaries would still be weak); `tileLayer` is
                 // the identifier that only exists because the LAYER owns the geometry.
                 //
-                // job-scheduling-design.md §8 stage 5 Group B: RingFeatureIdx/RingOffsets/LineRibbonJob
+                // job-scheduling-design.md §8 stage 5 Group B: RingFeatureIdx/RingOffsets/RibbonJob
                 // retired from the LINE row (they survive only in prose comments now, stripped here) — the
                 // per-ring buffer read and the ribbon build moved into the Burst job graph
                 // (MapRenderer.Jobs/LineMeshGraph.cs), which StyledLineTileBuilder.cs no longer names; it
                 // schedules and completes that graph instead. Replaced by identifiers of THAT mechanism —
                 // SymbolFeatureExtractor.cs is untouched by this stage and keeps its original set.
                 (Path.Combine("Rendering", "Meshing", "StyledLineTileBuilder.cs"),
-                    new[] { "TileGeometryBuffers", "LineMeshGraph", "LineGraphOutput", "LineLayerInput" }),
+                    new[] { "TileGeometryBuffers", "LineMeshGraph", "LineGraphOutput", "LayerInput" }),
                 (Path.Combine("Text", "SymbolFeatureExtractor.cs"),
                     new[] { "TileGeometryBuffers", "RingFeatureIdx", "tileLayer", "RingOffsets",
                             "LineAnchorPlacement" }),

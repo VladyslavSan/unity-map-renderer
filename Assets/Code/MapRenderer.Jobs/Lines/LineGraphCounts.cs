@@ -13,14 +13,14 @@ namespace MapRenderer.Jobs.Lines
         public const int Ok = 0;
 
         /// <summary>The layer's total ribbon vertex count would exceed
-        /// <see cref="LineLayerInput.MaxOutputVertices"/> — the always-bound-loops backstop
-        /// <see cref="LineRibbonAggregateJob"/> enforces per-ring, stopping the append rather than
+        /// <see cref="LayerInput.MaxOutputVertices"/> — the always-bound-loops backstop
+        /// <see cref="RibbonAggregateJob"/> enforces per-ring, stopping the append rather than
         /// overrunning its output buffer.</summary>
         public const int ErrorLineVertexCapacity = 1;
 
-        /// <summary>One of <see cref="LineRibbonSizingJob"/>'s two offset tables was not strictly increasing
+        /// <summary>One of <see cref="RibbonSizingJob"/>'s two offset tables was not strictly increasing
         /// for some ring — defence-in-depth, not the parallel ribbon's bit-exactness precondition (that is
-        /// structural — see <see cref="LineRibbonBatchJob"/>'s own doc). Mirrors
+        /// structural — see <see cref="RibbonBatchJob"/>'s own doc). Mirrors
         /// <see cref="FillGraphCounts.ErrorOffsetTableNotDisjoint"/>'s reasoning exactly, for the line
         /// graph's own offset tables.</summary>
         public const int ErrorOffsetTableNotDisjoint = 2;

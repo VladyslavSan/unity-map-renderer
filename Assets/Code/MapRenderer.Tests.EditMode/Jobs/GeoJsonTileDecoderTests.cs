@@ -232,7 +232,7 @@ namespace MapRenderer.Tests.Jobs
         /// arm is the only one here that can fail on it.</para>
         ///
         /// <para><b>What the other two arms are, honestly.</b> The count arm cannot fail:
-        /// <c>TileLayerGeometryAdoption.Validate</c> throws on exactly this mismatch inside
+        /// <c>LayerGeometryAdoption.Validate</c> throws on exactly this mismatch inside
         /// <c>AdoptGeometry</c>, i.e. during <c>Decode</c>, so a violating decode never returns a layer to
         /// assert against — measured, not reasoned. The ordinal-range arm cannot fail either:
         /// <c>FeatureSelector</c> assigns <c>Ordinal = i</c> over <c>layer.Features</c>, and the guard has

@@ -127,7 +127,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     }
 
                     // (VertexEast, 1) on both arms: the flat arm's east is the constant (1,0,0), written by
-                    // FillAggregateJob — the retired managed roof writer's constant +X tangent, byte for
+                    // AggregateJob — the retired managed roof writer's constant +X tangent, byte for
                     // byte — same argument as FillStreamWriteJob's own doc; no arm branch needed here either.
                     float3 east = (float3)vertexEast[i];
                     s2[i] = new Vector4(east.x, east.y, east.z, 1f);

@@ -408,7 +408,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(7, vertexCount,
                 $"line-miter-limit: 1.0 at a 90° corner (f=1.414 > 1.0) must bevel (7 verts), not stay a " +
                 $"sharp miter (6 verts). Got {vertexCount} — StyledLineTileBuilder must thread " +
-                "layout.MiterLimit into LineRibbonJob instead of hardcoding 2.0.");
+                "layout.MiterLimit into RibbonJob instead of hardcoding 2.0.");
         }
 
         // ── Tooth #4: line-round-limit threaded ──────────────────────────────────
@@ -462,7 +462,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(6, collapsedCount,
                 $"line-round-limit: 2.0 at the SAME 90° corner must collapse to the (unclamped) miter path " +
                 $"(6 verts). Got {collapsedCount} — if this reads 11 (same as the fan case), " +
-                "StyledLineTileBuilder is not threading layout.RoundLimit into LineRibbonJob.");
+                "StyledLineTileBuilder is not threading layout.RoundLimit into RibbonJob.");
         }
     }
 }

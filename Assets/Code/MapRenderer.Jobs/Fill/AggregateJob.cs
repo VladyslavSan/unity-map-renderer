@@ -25,21 +25,21 @@ namespace MapRenderer.Jobs.Fill
     /// <para><b>Bounds its own loop by <c>PerPolyMergedVertexCount.Length</c>, never the borrowed
     /// <c>PolyCountArr[0]</c></b> — see <see cref="Execute"/>'s own comment for the mechanism. This was a real
     /// bug found and fixed during job-scheduling-design.md §8 stage 6's review, PRE-EXISTING and reachable
-    /// before that stage (<see cref="FillSizingJob"/>'s own doc: a test can hand it undersized capacity): a
-    /// borrowed count does not shrink when <see cref="FillSizingJob"/> returns early, so this job would
+    /// before that stage (<see cref="SizingJob"/>'s own doc: a test can hand it undersized capacity): a
+    /// borrowed count does not shrink when <see cref="SizingJob"/> returns early, so this job would
     /// otherwise index a length-0 <c>PerPolyMergedVertexCount</c> et al. — silent, since
     /// <see cref="NativeList{T}"/>'s indexer bounds check is
     /// <c>[Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]</c> and compiled OUT of a release player
     /// build.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    internal struct FillAggregateJob : IJob
+    internal struct AggregateJob : IJob
     {
         // ── Input ──────────────────────────────────────────────────────────────────────────────
         /// <summary>Reads <c>PerPolyMergedVertexCount</c>/<c>PerPolyIndexCount</c>/<c>PerPolyForceClip</c>/
         /// <c>PerPolyFeatureIndex</c>/<c>WorkOffsets</c>/<c>IndexOffsets</c>/<c>FlatWorkVerts</c>/
         /// <c>FlatIndexArrays</c> of the eight columns it needs.</summary>
-        public FillTriangulationBuffers Buffers;
+        public TriangulationBuffers Buffers;
 
         /// <summary>Set (never cleared) on capacity overrun — job-scheduling-design.md §8 stage 6, C.1: moved
         /// here from <see cref="EarcutBatchJob"/>, which parallelised over polygons and so can no longer hold
@@ -88,7 +88,7 @@ namespace MapRenderer.Jobs.Fill
             NativeList<int>     flatIndexArrays = Buffers.FlatIndexArrays;
 
             // Bound by PerPolyMergedVertexCount's OWN length, never PolyCountArr[0] — a borrowed input
-            // FillSizingJob's own early returns (MaxPolygons/MaxHoles capacity overrun) never touch. Those
+            // SizingJob's own early returns (MaxPolygons/MaxHoles capacity overrun) never touch. Those
             // early returns leave every Buffers column at length 0; bounding by PolyCountArr[0] would still
             // loop `polyCount` times over a zero-length list — NativeList's indexer bounds check is
             // [Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")], compiled OUT of a release player build, so

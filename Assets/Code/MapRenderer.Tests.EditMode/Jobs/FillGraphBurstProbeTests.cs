@@ -42,14 +42,14 @@ namespace MapRenderer.Tests.Jobs
 
         // ── Shared setup: derive the visited-ring buffer + assemble polygons + size the flat buffers, ──────
         // ── exactly what the retired synchronous FillMeshPipeline.Schedule's private code did (Stage 1/2/3a; ─
-        // ── job-scheduling-design.md §8 stage 4 Group B retired it), duplicated here because FillSizingJob ──
+        // ── job-scheduling-design.md §8 stage 4 Group B retired it), duplicated here because SizingJob ──
         // ── did not exist yet at stage 1 — it exists now, in FillMeshGraph.cs's own sizing node. ───────────
 
         private struct GatherState
         {
             public NativeArray<int> PolyOuterIdx, PolyHoleStart, PolyHoleCount, HoleRingIdxs, PolyCountArr;
             public int PolyCount;
-            public FillTriangulationBuffers Buffers;
+            public TriangulationBuffers Buffers;
 
             public void Dispose()
             {
@@ -61,12 +61,12 @@ namespace MapRenderer.Tests.Jobs
 
         /// <summary>Derives the visited-ring buffer (RingSelectJob's no-clip fast path — every unset caller's
         /// path), assembles polygons (RingAssemblyJob, unmodified), sizes the flat buffers (hand-reproducing
-        /// FillMeshPipeline.cs:312–371 — FillSizingJob's future job, not yet written), then runs
+        /// FillMeshPipeline.cs:312–371 — SizingJob's future job, not yet written), then runs
         /// <see cref="FillGatherJob{TComparer}"/> to populate the flat vertex/hole-count/outer-count/feature-idx
         /// outputs. Caller disposes the returned <paramref name="derived"/> buffer and <paramref name="state"/>.
         ///
         /// <para>The hand-written <c>PerPolyFeatureIndex</c>/<c>PerPolyOuterCount</c> pre-sizing below (mirroring
-        /// <see cref="FillSizingJob"/>, which did not exist yet when this helper was written) is NOT incidental
+        /// <see cref="SizingJob"/>, which did not exist yet when this helper was written) is NOT incidental
         /// setup: <see cref="FillGatherJob{TComparer}"/> now bounds its own loop by
         /// <c>Buffers.PerPolyOuterCount.Length</c>, so removing it as "redundant" would silently zero the
         /// gather loop's bound.</para></summary>
@@ -107,7 +107,7 @@ namespace MapRenderer.Tests.Jobs
             holeCountArr.Dispose();
             Assert.Greater(polyCount, 0, "precondition: the water layer has polygons");
 
-            FillTriangulationBuffers buffers = FillTriangulationBuffers.Allocate();
+            TriangulationBuffers buffers = TriangulationBuffers.Allocate();
             NativeList<int> vertexOffsets    = buffers.VertexOffsets;
             NativeList<int> holeCountOffsets = buffers.HoleCountOffsets;
             NativeList<int> workOffsets = buffers.WorkOffsets;
@@ -246,12 +246,12 @@ namespace MapRenderer.Tests.Jobs
                 // FlatSortedHoleCounts/PerPolyOuterCount) comes from s.Buffers (gather already populated it);
                 // the write side is this test's own fresh "batch*" set, so the batch arm never shares
                 // buffers with the per-polygon reference arm above.
-                // Every FillTriangulationBuffers field must be a VALID container when the job schedules — Unity's
+                // Every TriangulationBuffers field must be a VALID container when the job schedules — Unity's
                 // safety system rejects an uncreated NativeList<T> field even when Execute() never reads it
                 // (confirmed empirically here: PerPolyFeatureIndex, unused by EarcutBatchJob, still had to be
                 // set or scheduling threw). So PerPolyFeatureIndex is carried over too, even though this job
                 // never touches it.
-                var batchBuffers = new FillTriangulationBuffers
+                var batchBuffers = new TriangulationBuffers
                 {
                     VertexOffsets = s.Buffers.VertexOffsets, HoleCountOffsets = s.Buffers.HoleCountOffsets,
                     WorkOffsets = s.Buffers.WorkOffsets, IndexOffsets = s.Buffers.IndexOffsets,
@@ -272,9 +272,9 @@ namespace MapRenderer.Tests.Jobs
 
                 for (int pi = 0; pi < polyCount; pi++)
                 {
-                    // The capacity backstop this job used to write moved to FillAggregateJob (job-scheduling-
+                    // The capacity backstop this job used to write moved to AggregateJob (job-scheduling-
                     // design.md §8 stage 6, C.1) — checked here directly instead, against the same bound
-                    // (WorkOffsets[pi+1] - WorkOffsets[pi]) FillAggregateJob now compares against.
+                    // (WorkOffsets[pi+1] - WorkOffsets[pi]) AggregateJob now compares against.
                     int sLen = s.Buffers.WorkOffsets[pi + 1] - s.Buffers.WorkOffsets[pi];
                     Assert.LessOrEqual(batchMergedVC[pi], sLen, $"polygon {pi}: the earcut batch must not overrun buffers on real corpus input");
 

@@ -235,7 +235,7 @@ namespace MapRenderer.Tests.Meshing
         /// T3 — a two-point polyline is the boundary value of line's own filter and must still render. B2's
         /// seam tooth observes that the shared <i>buffer</i> stays unfiltered; this observes <b>the line
         /// consumer's own threshold</b>, which is the direction that is actually observable downstream:
-        /// <c>LineRibbonJob.Execute</c> already early-returns on <c>PointCount &lt; 2</c>, so a short ring
+        /// <c>RibbonJob.Execute</c> already early-returns on <c>PointCount &lt; 2</c>, so a short ring
         /// filtered upstream is behaviourally invisible either way. The mis-threshold direction is not.
         /// </summary>
         [Test]
@@ -366,8 +366,8 @@ namespace MapRenderer.Tests.Meshing
             // least two vertices per centerline point, and cannot exceed the job's own sized bound.
             Assert.GreaterOrEqual(vertexCount, 6,
                 "a 3-point ribbon carries at least two vertices per centerline point");
-            Assert.LessOrEqual(vertexCount, LineRibbonJob.MaxVertexCount(collinear.Count, 4),
-                "…and no more than LineRibbonJob's own sized bound for a 3-point polyline");
+            Assert.LessOrEqual(vertexCount, RibbonJob.MaxVertexCount(collinear.Count, 4),
+                "…and no more than RibbonJob's own sized bound for a 3-point polyline");
         }
 
         // ── Helpers ────────────────────────────────────────────────────────────────────────────────

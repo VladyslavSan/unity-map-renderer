@@ -20,7 +20,7 @@ namespace MapRenderer.Jobs.Symbols
     /// gather only ever indexes a block's arrays by a winner's own <c>LocalIndex</c>/<c>Detail</c>/<c>*Start</c>,
     /// never by a block-level pool count.</para>
     /// </summary>
-    public struct SymbolBlockView
+    public struct BlockView
     {
         // ── per-symbol records, RAW list order ──
         public UnsafeList<SymbolPlacementKind> Kinds;

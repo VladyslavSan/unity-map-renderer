@@ -168,14 +168,14 @@ namespace MapRenderer.Unity.Text.Placement
         // move to the test assembly as extension methods instead.
         internal WorldSymbolRenderer WorldRenderer { get; } = new WorldSymbolRenderer();
 
-        // ── B-4a: collision runs as a Burst IJob (SymbolCollisionJob) directly over the STAGE job's native output
+        // ── B-4a: collision runs as a Burst IJob (CollisionJob) directly over the STAGE job's native output
         // pools (_stageCandidates/_stageBoxes — see below), with no managed round-trip. Every symbol, point (1 box) or
         // curved along-line (N glyph boxes), is ONE SymbolCandidate spanning a contiguous range of the flat box
         // pool, so a road name and a city name compete in ONE greedy pass; the grid keeps it ~O(n·k), and the
         // greedy is inherently serial (each placement depends on all prior survivors) so it is ONE job. The job
         // sorts _stageCandidates in place into placement order and writes _nSurvivors; the emit loop reads the sorted
         // candidates (via SymbolCandidate.SymbolIndex, stable across the sort) + survivor flags + _stageEmit/_stageQuads.
-        // The uniform grid is PRE-SIZED on the main thread (SymbolCollisionGridSizing) each frame because a Burst
+        // The uniform grid is PRE-SIZED on the main thread (CollisionGridSizing) each frame because a Burst
         // job cannot grow a NativeArray. Bit-identical to the managed SymbolCollision reference (differential test).
         private NativeList<byte>           _nSurvivors;
         private NativeList<int>            _gridCellHead;
@@ -253,7 +253,7 @@ namespace MapRenderer.Unity.Text.Placement
         // pre-projection zoom gate is one array read per symbol, not a managed StyleLayer.IsVisibleAtZoom call per
         // symbol (slots number in the tens; symbols in the tens of thousands). Reused across frames; only grown
         // when the slot count rises (never shrinks). Index == material slot == ShapedSymbol.MaterialIndex.
-        // Native (not a managed bool[]) so the Cull pass's per-symbol read can move into SymbolCullJob (Burst).
+        // Native (not a managed bool[]) so the Cull pass's per-symbol read can move into CullJob (Burst).
         private NativeList<bool> _slotVisibleThisFrame; // NOT readonly — allocated in the ctor
 
         // Per-symbol cull verdict from GatherSymbolPoints' first pass (Cull), consumed by its second pass (Compact).
@@ -262,7 +262,7 @@ namespace MapRenderer.Unity.Text.Placement
         // (ResizeUninitialized), zero per-frame GC.
         private NativeList<GatherTrigger> _gatherTrigger; // NOT readonly — allocated in the ctor
 
-        // Per-trigger culled tally the Compact pass (SymbolCompactJob) writes, indexed by (int)GatherTrigger, then
+        // Per-trigger culled tally the Compact pass (CompactJob) writes, indexed by (int)GatherTrigger, then
         // added back onto the five Last*CulledCount properties after .Run() — a job cannot write those managed
         // properties, so this native array is the bridge. Persistent (allocated once, like _gatherTrigger) and
         // zeroed at the top of each dispatch. NOT readonly — allocated in the ctor.
@@ -273,7 +273,7 @@ namespace MapRenderer.Unity.Text.Placement
         // SymbolCandidate.WasPlacedLastFrame, which biases the greedy sort so an incumbent keeps its slot over a
         // near-tied newcomer (killing the tile-churn/reprojection tiebreak flip that reads as flicker). Rebuilt
         // from the survivors AFTER each real collision. Reused across frames → zero per-frame GC (T4).
-        // R2: NATIVE so SymbolStageJob can read it from Burst (the A-5 resolve moved into the job). Sized up front
+        // R2: NATIVE so StageJob can read it from Burst (the A-5 resolve moved into the job). Sized up front
         // to the maintainer's scene order-of-magnitude so the first frames don't pay rehash growth; Clear() never
         // shrinks, so this only shapes startup. Holds SURVIVORS (shown candidates), not all candidates.
         private const int PlacedSetInitialCapacity = 16384;
@@ -285,7 +285,7 @@ namespace MapRenderer.Unity.Text.Placement
         // the emit loop runs BEFORE collision, so a dropped half can only be skipped on the following frame.
         // ONLY a pair whose style sets one of the two properties ever gets an entry, so on every shipped style
         // today this map is allocated, cleared and read as empty — a probe the stage job also skips outright.
-        // Small initial capacity for the same reason. Native so SymbolStageJob can read it from Burst.
+        // Small initial capacity for the same reason. Native so StageJob can read it from Burst.
         private const int DroppedHalvesInitialCapacity = 64;
         private NativeHashMap<long, byte> _droppedHalvesLastFrame; // NOT readonly — allocated in the ctor
 
@@ -307,7 +307,7 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeList<float>   _symbolDepth;
         private NativeList<byte>    _symbolValid;
 
-        // ── Lever C step 3b: the Burst SymbolStageJob's native buffers ──────────────────────────────────────────
+        // ── Lever C step 3b: the Burst StageJob's native buffers ──────────────────────────────────────────
         // A native MIRROR of the plan's STAGE data (refreshed only when the plan's WinnerSetVersion changes —
         // never per frame), the per-frame job inputs (gather offsets + resolved incumbency), its pre-sized
         // outputs, and reused buffer. The job calls the SAME SymbolStagingMath the differential test pins; its
@@ -325,12 +325,12 @@ namespace MapRenderer.Unity.Text.Placement
         private SymbolGatherPlan _mirrorPlan;            // the plan the mirror was last filled from
         private long _mirrorVersion = long.MinValue;     // that plan's WinnerSetVersion when it was mirrored
         // Burst-gather Stage 1 (design doc §10.9, §2 of the plan): a per-frame REUSED table of non-owning
-        // SymbolBlockView pointer-views over plan.Blocks[0, plan.BlockCount) — built by BuildBlockViews just
+        // BlockView pointer-views over plan.Blocks[0, plan.BlockCount) — built by BuildBlockViews just
         // before SymbolGatherJob.Run(), read only during that synchronous call, never held across a frame
         // boundary. Stage 2 (async gather) must pin the owning snapshot independently of the front pin before
         // these pointers are allowed to outlive a frame — see the design doc §2.4; NOT this stage's problem
         // (GatherIntoMirror's .Run() is synchronous, so a view can never outlive the block it points into).
-        private NativeList<SymbolBlockView> _gatherBlockViews;
+        private NativeList<BlockView> _gatherBlockViews;
         private NativeArray<int> _gatherCounts; // SymbolGatherJob.OutCounts — see its Count* consts for the layout
         // ── mirror: per-symbol fields (one entry per gathered winner, mirror-local index) ──
         private NativeList<SymbolPlacementKind> _mirrorKinds;
@@ -402,7 +402,7 @@ namespace MapRenderer.Unity.Text.Placement
 
         // ── stage-job buffers (pre-sized to the mirror's worst case, refilled every Tick) ──
         private NativeList<int>            _stagePointOffset;     // gather output (-1 = culled)
-        private NativeList<byte>           _stageAnchorWasPlaced; // per-frame A-5 anchor incumbency — filled by SymbolStageJob, sized here
+        private NativeList<byte>           _stageAnchorWasPlaced; // per-frame A-5 anchor incumbency — filled by StageJob, sized here
         internal NativeList<SymbolBox>      _stageBoxes;           // internal: read by SymbolPlacementSystemTestExtensions.LastStagedBoxes()
         private NativeList<PlacedQuad>     _stageQuads;
         private NativeList<SymbolCandidate> _stageCandidates;
@@ -494,7 +494,7 @@ namespace MapRenderer.Unity.Text.Placement
         /// the live camera zoom's <c>[minzoom, maxzoom)</c> and they have no live fade, so gather hard-skips them
         /// (never projected/staged/collided) instead of projecting then suppressing them post-stage. Telemetry —
         /// the direct measure of the overzoom waste this gate removes (e.g. z14 <c>poi_r*</c> points). Symbols
-        /// still fading out are exempt (kept staged via <c>SymbolCompactJob</c>'s fade-alive probe), so they are
+        /// still fading out are exempt (kept staged via <c>CompactJob</c>'s fade-alive probe), so they are
         /// NOT counted here — <see cref="ApplySuppression"/> still owns their same-frame hide.</summary>
         internal int LastZoomCulledCount { get; private set; }
 
@@ -553,7 +553,7 @@ namespace MapRenderer.Unity.Text.Placement
             _survivorCountOut = new NativeArray<int>(1, Allocator.Persistent);
 
             // Burst-gather Stage 1: the reusable block-view table + SymbolGatherJob's output counts.
-            _gatherBlockViews = new NativeList<SymbolBlockView>(Allocator.Persistent);
+            _gatherBlockViews = new NativeList<BlockView>(Allocator.Persistent);
             _gatherCounts = new NativeArray<int>(SymbolGatherJob.CountLength, Allocator.Persistent);
 
             // Lever C step 3b: the Burst stage job's native buffers.
@@ -655,7 +655,7 @@ namespace MapRenderer.Unity.Text.Placement
             using (PmTick.Auto())
             {
                 // R3: complete the PREVIOUS Tick's scheduled collision and re-key its survivors into
-                // _placedLastFrame — read by BOTH SymbolStageJob (A-5 incumbency) and the emit loop below.
+                // _placedLastFrame — read by BOTH StageJob (A-5 incumbency) and the emit loop below.
                 using (PmCollideHarvest.Auto())
                     HarvestCollision();
 
@@ -709,7 +709,7 @@ namespace MapRenderer.Unity.Text.Placement
                     // coincide. The bearing sign lives in SymbolBearing (the single visual-verify constant).
                     float bearingRadians = (float)_camera.CurrentProperties.Heading.Radians;
 
-                    // (1) Project + STAGE every symbol into the unified native pools (the Burst SymbolStageJob): one
+                    // (1) Project + STAGE every symbol into the unified native pools (the Burst StageJob): one
                     //     SymbolCandidate per symbol (point = 1 AABB box; curved = N rotated-glyph boxes) in _stageBoxes,
                     //     its drawn quads in _stageQuads. Point and curved share the collision pass from here, so a
                     //     road name and a city name compete for space (#5 B3).
@@ -740,7 +740,7 @@ namespace MapRenderer.Unity.Text.Placement
 
                         using (PmStage.Auto())
                         {
-                            // Stage the whole mirror in ONE Burst job (SymbolStageJob) — same SymbolStagingMath as the
+                            // Stage the whole mirror in ONE Burst job (StageJob) — same SymbolStagingMath as the
                             // managed reference, SIMD-compiled. The mirror is already filled (GatherIntoMirror,
                             // before this core); pre-size outputs (the job itself resolves this
                             // frame's A-5 incumbency, R2); run; read counts. Its native outputs feed the collision +
@@ -796,7 +796,7 @@ namespace MapRenderer.Unity.Text.Placement
                                 long fadeId = cand.FadeId;
 
                                 // `WasPlacedLastFrame` IS `_placedLastFrame.Contains(fadeId)`, already resolved in
-                                // Burst by SymbolStageJob and carried on the candidate we just loaded — so read it
+                                // Burst by StageJob and carried on the candidate we just loaded — so read it
                                 // instead of re-probing the set here (one native hash lookup, plus its Editor safety
                                 // check, per candidate). Exact on both arms: the job fills AnchorWasPlaced over its
                                 // whole range element-wise against AnchorFadeIds, slices both with the SAME
@@ -918,12 +918,12 @@ namespace MapRenderer.Unity.Text.Placement
             // a symbol that is BOTH out-of-zoom AND beyond-far/behind-horizon now counts as zoom-gated. KEEP/SKIP is
             // byte-identical either way; only which counter increments moves. Horizon still precedes distance.
             //
-            // Ported to Burst (SymbolCullJob): the chain is identical, only the per-element READ moves under
+            // Ported to Burst (CullJob): the chain is identical, only the per-element READ moves under
             // .Run() (Burst-compiled, inline, no worker hand-off — see SymbolProjectionJob's ProjectSymbols for
             // the same pattern) so the mirror reads skip the AtomicSafetyHandle overhead the Editor pays per
             // NativeArray access. SlotCount (not SlotVisible.Length) bounds the zoom-slot read.
             using (PmGatherCull.Auto())
-                new SymbolCullJob
+                new CullJob
                 {
                     SymbolDropped = _mirrorSymbolDropped.AsArray(), SymbolDeparting = _mirrorSymbolDeparting.AsArray(),
                     SymbolCoverageFading = _mirrorSymbolCoverageFading.AsArray(),
@@ -937,13 +937,13 @@ namespace MapRenderer.Unity.Text.Placement
                 }.Run(_mirrorCount);
 
             // Pass 2 — Compact: consume the verdict in symbol order (so _stagePointOffset / _symbolPoints match the
-            // old single-loop form byte-for-byte) via the Burst SymbolCompactJob. A triggered symbol whose fade is
+            // old single-loop form byte-for-byte) via the Burst CompactJob. A triggered symbol whose fade is
             // still alive KEEPS staging (its FadeIds recorded into _forceFadeOut; the emit loop eases it to 0 — no
             // pop); a triggered fade-DEAD symbol is hard-skipped (offset -1) and tallied into its trigger's counter
             // (_gatherCulledCounts, enum-indexed — see the job's Execute for why that is equivalent to the old switch); a
             // kept (None) symbol is appended. A Dropped symbol is hard-skipped with no counter (never on screen).
             // The running offset is load-bearing (symbol r's destination depends on every kept symbol before it),
-            // so the job is IJob (not IJobParallelFor) — same inline .Run() pattern as SymbolCullJob above.
+            // so the job is IJob (not IJobParallelFor) — same inline .Run() pattern as CullJob above.
             using (PmGatherCompact.Auto())
             {
                 // _gatherCulledCounts is persistent buffer (allocated once, like _gatherTrigger) — a job cannot
@@ -951,7 +951,7 @@ namespace MapRenderer.Unity.Text.Placement
                 // after .Run(). Zero it each call: the job does Counts[(int)t]++, so a stale array would
                 // accumulate across ticks (a missing reset surfaces as a doubling in the multi-tick gather teeth).
                 for (int i = 0; i < _gatherCulledCounts.Length; i++) _gatherCulledCounts[i] = 0;
-                new SymbolCompactJob
+                new CompactJob
                 {
                     Trigger = _gatherTrigger.AsArray(),
                     Kinds = _mirrorKinds.AsArray(), Detail = _mirrorDetail.AsArray(),
@@ -1041,7 +1041,7 @@ namespace MapRenderer.Unity.Text.Placement
             LastSurvivorCount = _survivorCountOut[0];
         }
 
-        // B-4a: run the greedy collision as the Burst SymbolCollisionJob directly over the stage job's native output
+        // B-4a: run the greedy collision as the Burst CollisionJob directly over the stage job's native output
         // pools (no managed round-trip — the stage job already wrote them native). PRE-SIZES the uniform grid on the
         // main thread (a Burst job cannot grow a NativeArray, and this sizing pass stays on frame N — R4, not this
         // stage), then SCHEDULES the job and returns without completing it. R3 (design §10.3): the Complete moves to
@@ -1072,16 +1072,16 @@ namespace MapRenderer.Unity.Text.Placement
             // equals the per-unique bound when the ranges tile disjointly — the normal case the assert above checks
             // — and strictly exceeds it if a box were ever shared). Adopted after a dense-scene overflow whose exact
             // trigger was never reproduced; the assert catches a malformed stream if one ever occurs.
-            SymbolCollisionGridSizing.Dims dims = SymbolCollisionGridSizing.ComputeDims(nb, boxCount);
+            CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(nb, boxCount);
             int cells   = dims.W * dims.H;
-            int nodeCap = math.max(1, SymbolCollisionGridSizing.NodeUpperBoundByCandidates(nc, candidateCount, nb, boxCount, in dims));
+            int nodeCap = math.max(1, CollisionGridSizing.NodeUpperBoundByCandidates(nc, candidateCount, nb, boxCount, in dims));
             _gridCellHead.Resize(cells,   NativeArrayOptions.UninitializedMemory);
             _gridNodeBox.Resize(nodeCap,  NativeArrayOptions.UninitializedMemory);
             _gridNodeNext.Resize(nodeCap, NativeArrayOptions.UninitializedMemory);
             NativeArray<int> cellHead = _gridCellHead.AsArray();
             for (int c = 0; c < cells; c++) cellHead[c] = -1;
 
-            _collisionHandle = new SymbolCollisionJob
+            _collisionHandle = new CollisionJob
             {
                 Candidates     = nc, CandidateCount = candidateCount,
                 Boxes          = nb, BoxCount = boxCount,
@@ -1169,7 +1169,7 @@ namespace MapRenderer.Unity.Text.Placement
 
         // §10 D10: debug-only (compiled out of release, costs a live build nothing — no field, no allocation).
         // Walks the mirror's compacted POINT pool: every Owner must be immediately followed by its Rider
-        // (Points[d+1]) and every Rider immediately preceded by its Owner — SymbolStageJob.Execute's own
+        // (Points[d+1]) and every Rider immediately preceded by its Owner — StageJob.Execute's own
         // adjacency check (SAME shape), surfaced here loudly instead of silently degrading to a lone badge.
         [System.Diagnostics.Conditional("UNITY_ASSERTIONS")]
         private void AssertPairAdjacency()
@@ -1184,7 +1184,7 @@ namespace MapRenderer.Unity.Text.Placement
                     if (!riderFollows)
                         UnityEngine.Debug.LogAssertion(
                             $"[SymbolPlacementSystem] mirror point[{d}] is a §10 pair Owner with no Rider immediately " +
-                            "after it — SymbolStageJob degrades it to a lone badge (safe), but the reconciler's " +
+                            "after it — StageJob degrades it to a lone badge (safe), but the reconciler's " +
                             "owner->rider adjacency contract was broken upstream; capture this frame.");
                 }
                 else if (role == SymbolPairRole.Rider)
@@ -1193,7 +1193,7 @@ namespace MapRenderer.Unity.Text.Placement
                     if (!ownerPrecedes)
                         UnityEngine.Debug.LogAssertion(
                             $"[SymbolPlacementSystem] mirror point[{d}] is a §10 pair Rider with no Owner immediately " +
-                            "before it — an orphan rider; SymbolStageJob skips staging it (safe), but the reconciler's " +
+                            "before it — an orphan rider; StageJob skips staging it (safe), but the reconciler's " +
                             "adjacency contract was broken upstream; capture this frame.");
                 }
             }
@@ -1336,7 +1336,7 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         // Burst-gather Stage 1 (design doc §2.4): rebuild the reusable view table from plan.Blocks[0,
-        // plan.BlockCount) — one SymbolBlockView per block, each field a non-owning UnsafeList<T> pointer view
+        // plan.BlockCount) — one BlockView per block, each field a non-owning UnsafeList<T> pointer view
         // over that block's OWN Allocator.Persistent array. NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr performs
         // an AtomicSafetyHandle.CheckRead per call — a disposed block throws HERE, on the main thread, with a
         // real stack, rather than the job silently reading freed memory (§2.3's decisive argument for this
@@ -1349,7 +1349,7 @@ namespace MapRenderer.Unity.Text.Placement
             for (int b = 0; b < plan.BlockCount; b++)
             {
                 SymbolTileBlock block = plan.Blocks[b];
-                _gatherBlockViews[b] = new SymbolBlockView
+                _gatherBlockViews[b] = new BlockView
                 {
                     Kinds = new UnsafeList<SymbolPlacementKind>((SymbolPlacementKind*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Kinds), block.Kinds.Length),
                     Detail = new UnsafeList<int>((int*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(block.Detail), block.Detail.Length),
@@ -1487,7 +1487,7 @@ namespace MapRenderer.Unity.Text.Placement
 
         // Pre-size the job's output pools to the mirror worst case (Burst cannot grow) + the arc-walk buffer to at
         // least the longest path (the total gathered-point count is a safe upper bound for any single path).
-        // R2: also sizes _stageAnchorWasPlaced — the A-5 anchor-incumbency resolve moved into SymbolStageJob itself
+        // R2: also sizes _stageAnchorWasPlaced — the A-5 anchor-incumbency resolve moved into StageJob itself
         // (Burst), so this method only sizes the buffer the job fills; it no longer resolves any fade id.
         private void PreSizeStageOutputs()
         {
@@ -1507,7 +1507,7 @@ namespace MapRenderer.Unity.Text.Placement
         private void RunStageJob(float bearingRadians, double2 viewportLogicalPx, float metresPerLogicalPixel,
             in SymbolViewTransform view)
         {
-            new SymbolStageJob
+            new StageJob
             {
                 Kinds = _mirrorKinds.AsArray(), Detail = _mirrorDetail.AsArray(), WorldCount = _mirrorWorldCount.AsArray(), Count = _mirrorCount,
                 Points = _mirrorPoints.AsArray(), PointQuadStart = _mirrorPointQuadStart.AsArray(), PointQuadCount = _mirrorPointQuadCount.AsArray(),
@@ -1546,7 +1546,7 @@ namespace MapRenderer.Unity.Text.Placement
             // seen this frame, and a staged candidate is always seen — so every candidate that never places (most
             // of them, in a dense view) would park a 0 that nothing collects. Drop instead. This is the same floor
             // rule DecayUnseenFadeSymbols already applies to its own decay; it just never reached the hot path.
-            // Both readers outside this loop (SymbolCompactJob's fade-alive probe) test `TryGetValue && > epsilon`,
+            // Both readers outside this loop (CompactJob's fade-alive probe) test `TryGetValue && > epsilon`,
             // under which an ABSENT entry and ANY sub-epsilon stored value read alike — covering every value this
             // branch can discard, not just exact zeros — so dropping is behaviour-preserving there.
             // `target <= current` confines the drop to a fade-OUT (or an already-invisible identity): without it, a
@@ -1725,8 +1725,8 @@ namespace MapRenderer.Unity.Text.Placement
             _droppedHalvesLastFrame.Dispose(); // Stage C: same lifetime as _placedLastFrame
             _fadeOpacity.Dispose(); _seenFade.Dispose(); _forceFadeOut.Dispose(); _fadeSweepKeys.Dispose(); // fade collections, same lifetime
             _gatherTrigger.Dispose(); // gather Cull→Compact per-symbol verdict buffer
-            _slotVisibleThisFrame.Dispose(); // per-slot zoom-visibility lookup, SymbolCullJob input
-            _gatherCulledCounts.Dispose(); // per-trigger culled tally, SymbolCompactJob output bridge
+            _slotVisibleThisFrame.Dispose(); // per-slot zoom-visibility lookup, CullJob input
+            _gatherCulledCounts.Dispose(); // per-trigger culled tally, CompactJob output bridge
             // R3: AssertFadeIdsUnique's persistent buffer set (see its field doc) — lazily allocated, so it may
             // be a default (never-created) value here; Dispose() already no-ops on that, so no IsCreated guard.
             _debugFadeIdSeen.Dispose();

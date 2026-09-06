@@ -9,33 +9,33 @@ namespace MapRenderer.Jobs.Lines
     /// <summary>
     /// The line graph's ribbon node: one ring per <see cref="Execute"/> call, taking that ring's
     /// <c>GetSubArray</c> view of the subdivided world/up columns there, populating a
-    /// <see cref="LineRibbonJob"/> and calling <see cref="LineRibbonJob.Execute"/> directly — that job's
+    /// <see cref="RibbonJob"/> and calling <see cref="RibbonJob.Execute"/> directly — that job's
     /// fields are untouched, so its existing callers stay valid. <see cref="IJobParallelForDefer"/> since
     /// stage 6 — batched by <see cref="LineMeshGraph.RibbonRingBatch"/>, deferred over
     /// <see cref="Buffers"/>' own <c>PerRingVertexCount</c> — the ONLY column in
-    /// <see cref="LineRibbonBuffers"/> with length exactly <c>ringCount</c>; every offset table has length
+    /// <see cref="RibbonBuffers"/> with length exactly <c>ringCount</c>; every offset table has length
     /// <c>ringCount + 1</c> (sentinel layout), so deferring over one of those would run
     /// <c>Execute(ringCount)</c> once too many (the earcut's <c>EarcutBatchJob</c> pattern verbatim — it
     /// defers over <c>PerPolyOuterCount</c> for the identical reason — job-scheduling-design.md §8 stage 6,
     /// E.2).
     ///
     /// <para><b>Writes the RAW per-ring output, unswapped and unrebased.</b> Each ring's vertices go to
-    /// <see cref="LineRibbonBuffers.FlatVertices"/> at its own offset, byte for byte what
-    /// <see cref="LineRibbonJob.Execute"/> produced; each ring's indices go to
-    /// <see cref="LineRibbonBuffers.FlatIndices"/> RING-LOCAL (no <c>+offset</c> rebase) and UNSWAPPED. The
+    /// <see cref="RibbonBuffers.FlatVertices"/> at its own offset, byte for byte what
+    /// <see cref="RibbonJob.Execute"/> produced; each ring's indices go to
+    /// <see cref="RibbonBuffers.FlatIndices"/> RING-LOCAL (no <c>+offset</c> rebase) and UNSWAPPED. The
     /// 2nd/3rd winding swap and the running-offset rebase — <c>StyledLineTileBuilder.cs:398-403</c>'s rule —
-    /// move to <see cref="LineRibbonAggregateJob"/>, which is what makes ring order (not scheduling order)
+    /// move to <see cref="RibbonAggregateJob"/>, which is what makes ring order (not scheduling order)
     /// the only thing that can affect final byte layout: relocating a formula is not changing it
     /// (job-scheduling-design.md §1).</para>
     ///
     /// <para><b>Bit-exact regardless of which worker runs a ring, or how many run at once</b>
     /// (job-scheduling-design.md §1): every index into <see cref="Buffers"/>' offset tables and flat columns
-    /// is taken from CONSECUTIVE entries of a monotonic table (<see cref="LineRibbonSizingJob"/>'s own
+    /// is taken from CONSECUTIVE entries of a monotonic table (<see cref="RibbonSizingJob"/>'s own
     /// disjointness), so the bytes one ring touches are a function of that ring's own input alone.</para>
     ///
     /// <para><b>Zero allocation per ring</b> — the earcut's own <c>EarcutBatchJob</c> shape, not a scratch
-    /// buffer: <see cref="LineRibbonJob.OutVertexCount"/>/<c>OutIndexCount</c> write straight into this
-    /// ring's own single-element slice of <see cref="LineRibbonBuffers.PerRingVertexCount"/>/
+    /// buffer: <see cref="RibbonJob.OutVertexCount"/>/<c>OutIndexCount</c> write straight into this
+    /// ring's own single-element slice of <see cref="RibbonBuffers.PerRingVertexCount"/>/
     /// <c>PerRingIndexCount</c> via <c>GetSubArray(r, 1)</c>, the same way <c>EarcutBatchJob</c> writes
     /// <c>OutIndexCount</c> straight into <c>PerPolyIndexCount</c>. No per-<see cref="Execute"/>
     /// <see cref="Allocator.Temp"/> allocation.</para>
@@ -48,7 +48,7 @@ namespace MapRenderer.Jobs.Lines
     /// 2, §8 stage 6's A0.3 resolution).</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    internal struct LineRibbonBatchJob : IJobParallelForDefer
+    internal struct RibbonBatchJob : IJobParallelForDefer
     {
         // ── Input (borrowed) ───────────────────────────────────────────────────────────────────
         [ReadOnly] public NativeList<double3> SubWorld;
@@ -62,7 +62,7 @@ namespace MapRenderer.Jobs.Lines
         public double   RoundLimit;
 
         [NativeDisableParallelForRestriction]
-        public LineRibbonBuffers Buffers;
+        public RibbonBuffers Buffers;
 
         public void Execute(int r)
         {
@@ -80,7 +80,7 @@ namespace MapRenderer.Jobs.Lines
             NativeArray<int>              perRingVertexCount = Buffers.PerRingVertexCount.AsArray();
             NativeArray<int>              perRingIndexCount  = Buffers.PerRingIndexCount.AsArray();
 
-            new LineRibbonJob
+            new RibbonJob
             {
                 Points         = SubWorld.AsArray().GetSubArray(rStart, m),
                 Ups            = SubUp.AsArray().GetSubArray(rStart, m),

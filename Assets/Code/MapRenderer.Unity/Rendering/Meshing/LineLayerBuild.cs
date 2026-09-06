@@ -8,13 +8,13 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// One line layer's <see cref="ILayerMeshBuild"/> — owns <see cref="LineLayerInput"/>'s own columns
+    /// One line layer's <see cref="ILayerMeshBuild"/> — owns <see cref="LayerInput"/>'s own columns
     /// (<c>Geometry</c> excepted — BORROWED), <see cref="LineGraphOutput"/> and <see cref="MeshWriteOutput"/>.
     /// Pooled via <see cref="LayerMeshBuildPool{T}"/>.
     /// </summary>
     internal sealed class LineLayerBuild : ILayerMeshBuild
     {
-        private LineLayerInput       _input;
+        private LayerInput       _input;
         private NativeArray<Vector4> _featureColors;
         private NativeArray<float>   _featureWidths;
         private int                  _materialIndex;
@@ -31,7 +31,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <see cref="FillLayerBuild.Rent"/>'s own doc for why <see cref="LayerMeshBuildCounters.RecordRented"/> is
         /// unconditional here.</summary>
         internal static LineLayerBuild Rent(
-            LineLayerInput input, NativeArray<Vector4> featureColors, NativeArray<float> featureWidths,
+            LayerInput input, NativeArray<Vector4> featureColors, NativeArray<float> featureWidths,
             int materialIndex, string payloadName)
         {
             LineLayerBuild build = LayerMeshBuildPool<LineLayerBuild>.Rent();
@@ -43,7 +43,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <summary>Re-initializes a pooled (or freshly-minted) instance — every field <see cref="Dispose"/>
         /// reads, so a reused instance never leaks a prior build's state into the next one.</summary>
         private void Reset(
-            LineLayerInput input, NativeArray<Vector4> featureColors, NativeArray<float> featureWidths,
+            LayerInput input, NativeArray<Vector4> featureColors, NativeArray<float> featureWidths,
             int materialIndex, string payloadName)
         {
             _input         = input;

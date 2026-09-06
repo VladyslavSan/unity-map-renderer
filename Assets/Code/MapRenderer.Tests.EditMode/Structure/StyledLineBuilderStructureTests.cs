@@ -49,15 +49,15 @@ namespace MapRenderer.Tests.Structure
         // identifiers of the mechanism the file uses NOW — the borrowed buffer type and the ordinal join —
         // so a gutted or re-pointed file still cannot satisfy the zero-counts trivially.
         //
-        // job-scheduling-design.md §8 stage 5 Group B: RingFeatureIdx/FeatureGeometryType/LineRibbonJob/
+        // job-scheduling-design.md §8 stage 5 Group B: RingFeatureIdx/FeatureGeometryType/RibbonJob/
         // RingOffsets retired from this SET (though the first three still appear in prose comments) — the
         // per-ring buffer read and the ribbon build both moved into the Burst job graph
-        // (LineRingGatherJob/LineRibbonBatchJob, MapRenderer.Jobs/LineMeshGraph.cs), which this file no
+        // (RingGatherJob/RibbonBatchJob, MapRenderer.Jobs/LineMeshGraph.cs), which this file no
         // longer touches by name; it schedules and completes the graph, then writes. The replacements name
         // THAT mechanism, so a gutted file still cannot satisfy the zero-counts trivially.
         private static readonly string[] RequiredTokens =
         {
-            "TileGeometryBuffers", "LineMeshGraph", "LineGraphOutput", "LineLayerInput", "LineStreamWriteJob",
+            "TileGeometryBuffers", "LineMeshGraph", "LineGraphOutput", "new LayerInput", "LineStreamWriteJob",
         };
 
         [Test]
@@ -107,14 +107,15 @@ namespace MapRenderer.Tests.Structure
             Assert.GreaterOrEqual(CountOccurrences(body, "BuildLayerInput("), 1,
                 "precondition: the builder still passes the borrowed `geometry` on to build the graph's " +
                 "input — without this, a gutted file would satisfy both zero-counts below vacuously");
-            Assert.GreaterOrEqual(CountOccurrences(body, "LineLayerInput"), 1,
-                "precondition: the builder still constructs and returns a LineLayerInput from the borrowed " +
-                "geometry — without this, a gutted file would satisfy both zero-counts below vacuously. (Not " +
-                "the bare word 'geometry': BuildLayerInput's own parameter declaration already contains it, " +
-                "so a stub with a gutted body but an intact signature would satisfy that trivially and make " +
-                "the check no longer independent of the `BuildLayerInput(` anchor above. `LineLayerInput` " +
-                "appears a second time only at `return new LineLayerInput`, deep in the body, which a gutted " +
-                "implementation cannot reach.)");
+            Assert.GreaterOrEqual(CountOccurrences(body, "new LayerInput"), 1,
+                "precondition: the builder still constructs a LayerInput from the borrowed geometry — " +
+                "without this, a gutted file would satisfy both zero-counts below vacuously. (Not the bare " +
+                "word `LayerInput`: it is a substring of `BuildLayerInput` — both the method's own name and " +
+                "its return-type token in the signature — so a stub with a gutted body but an intact " +
+                "signature would satisfy that trivially and make the check no longer independent of the " +
+                "`BuildLayerInput(` anchor above. `new LayerInput` appears only at the real construction " +
+                "site, `return new LayerInput { ... }`, deep in the body, which a gutted implementation " +
+                "cannot reach.)");
 
             // Three mint APIs exist on the buffer type: .Materialize(), TileGeometryBuffers.Allocate(...) and
             // TileGeometryBuffers.AdoptDerivedLists(...). Greping only the first would leave a per-layer
@@ -141,7 +142,7 @@ namespace MapRenderer.Tests.Structure
         // NotManagedLists is RETIRED here, not "made to pass". Its subject was the cross-ring staging
         // accumulators (NativeList<LinePositionNormal>/<LineWidthColor>/<Vector2>) that used to live INSIDE
         // WriteMeshData's own per-ring loop, block-copied into the Mesh.MeshData at the end. B.5 deleted
-        // that loop: the ribbon is now built by LineRibbonBatchJob (MapRenderer.Jobs/LineMeshGraph.cs) and
+        // that loop: the ribbon is now built by RibbonBatchJob (MapRenderer.Jobs/LineMeshGraph.cs) and
         // written straight into the Mesh.MeshData by LineStreamWriteJob — there is no cross-ring staging
         // step left anywhere for a managed List<> to sneak into.
         //

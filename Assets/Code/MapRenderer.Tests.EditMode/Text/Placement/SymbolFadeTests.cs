@@ -497,7 +497,7 @@ namespace MapRenderer.Tests.Text.Placement
             // Tick 1: Y alone places (default deltaTime snaps it to full opacity) — _placedLastFrame == { fadeId(Y) }.
             // R3: the verdict a Tick's stage/emit reads is one Tick behind (§2.6) — duplicate (same args) so the
             // scheduled collision has been harvested before the assertion. This ALSO matters structurally here:
-            // Y must be the harvested incumbent BEFORE the {X,Y} Tick below stages, or SymbolStageJob never sees
+            // Y must be the harvested incumbent BEFORE the {X,Y} Tick below stages, or StageJob never sees
             // WasPlacedLastFrame=true for Y and the tiebreak this test pins never engages.
             h.System.TickSymbols(in h.Frame, yOnly, h.Atlas, h.Projection);
             h.System.TickSymbols(in h.Frame, yOnly, h.Atlas, h.Projection);

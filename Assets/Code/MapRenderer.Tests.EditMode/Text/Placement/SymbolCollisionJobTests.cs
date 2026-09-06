@@ -16,7 +16,7 @@ using MapRenderer.Jobs.Symbols;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// B-4a: <see cref="SymbolCollisionJob"/> (the Burst native port of the grid-accelerated greedy collision) must
+    /// B-4a: <see cref="CollisionJob"/> (the Burst native port of the grid-accelerated greedy collision) must
     /// produce the EXACT same survivor set as the managed
     /// <see cref="SymbolCollision.SelectSurvivors(SymbolCandidate[],int,SymbolBox[],int,bool[],SymbolCollisionGrid)"/>
     /// reference. The real hazard is the caller pre-sizing the grid node storage (a Burst job cannot grow it): an
@@ -63,16 +63,16 @@ namespace MapRenderer.Tests.Text.Placement
                 for (int i = 0; i < candCount; i++) nc[i] = cands[i];
                 for (int i = 0; i < boxCount; i++) nb[i] = boxes[i];
 
-                SymbolCollisionGridSizing.Dims dims = SymbolCollisionGridSizing.ComputeDims(nb, boxCount);
+                CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(nb, boxCount);
                 int cells = dims.W * dims.H;
-                int nodeCap = math.max(1, SymbolCollisionGridSizing.NodeUpperBound(nb, boxCount, in dims));
+                int nodeCap = math.max(1, CollisionGridSizing.NodeUpperBound(nb, boxCount, in dims));
                 var cellHead = new NativeArray<int>(cells, Allocator.TempJob);
                 var nodeBox = new NativeArray<int>(nodeCap, Allocator.TempJob);
                 var nodeNext = new NativeArray<int>(nodeCap, Allocator.TempJob);
                 try
                 {
                     for (int c = 0; c < cells; c++) cellHead[c] = -1;
-                    new SymbolCollisionJob
+                    new CollisionJob
                     {
                         Candidates = nc, CandidateCount = candCount, Boxes = nb, BoxCount = boxCount,
                         Survivors = ns, OutSurvivorCount = outCount,
@@ -103,11 +103,11 @@ namespace MapRenderer.Tests.Text.Placement
             List<string> managed = ManagedVerdicts(cands, cands.Length, boxes, boxes.Length, out List<int> managedIds);
             List<string> native = NativeVerdicts(cands, cands.Length, boxes, boxes.Length, out List<int> nativeIds);
             CollectionAssert.AreEquivalent(managedIds, nativeIds,
-                $"native SymbolCollisionJob survivor set must equal the managed reference ({what})");
+                $"native CollisionJob survivor set must equal the managed reference ({what})");
             // Stage C: and the per-half DroppedBoxMask verdict too — the survivor set alone cannot see an
             // asymmetry in WHICH optional half each implementation dropped.
             CollectionAssert.AreEqual(managed, native,
-                $"native SymbolCollisionJob (placed, DroppedBoxMask) verdicts must equal the managed reference ({what})");
+                $"native CollisionJob (placed, DroppedBoxMask) verdicts must equal the managed reference ({what})");
         }
 
         // 1-box candidates (point-like) — fully exercises the grid, which is the B-4a risk. Box size range is a
@@ -305,11 +305,11 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // Regression (live-demo crash at a dense scene): the node pool is pre-sized on the MAIN thread
-        // (SymbolCollisionGridSizing, managed float) but filled by the job in BURST — a coordinate on a cell
+        // (CollisionGridSizing, managed float) but filled by the job in BURST — a coordinate on a cell
         // boundary can truncate one cell wider in Burst than the managed sizing counted, so the job needs one
         // more node than the pool holds. A Burst job CANNOT grow a NativeArray (the retired managed grid could,
         // so it never overflowed), and an under-count was an out-of-range WRITE → IndexOutOfRangeException from
-        // SymbolCollisionJob.Insert, crashing the frame every time at that scene. Insert now guards every write
+        // CollisionJob.Insert, crashing the frame every time at that scene. Insert now guards every write
         // against NodeBox.Length. This forces the under-count directly (a starved pool over a scene that places
         // many boxes) and asserts the job COMPLETES instead of throwing. RED without the guard: NodeBox[cap]
         // write throws. Survivors stay correct here because the boxes are disjoint (a dropped node only removes
@@ -337,7 +337,7 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 for (int i = 0; i < n; i++) { nc[i] = cands[i]; nb[i] = boxes[i]; }
-                SymbolCollisionGridSizing.Dims dims = SymbolCollisionGridSizing.ComputeDims(nb, n);
+                CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(nb, n);
                 int cells = dims.W * dims.H;
                 var cellHead = new NativeArray<int>(cells, Allocator.TempJob);
                 var nodeBox  = new NativeArray<int>(3, Allocator.TempJob); // STARVED: 3 nodes for ≥12 inserts
@@ -346,7 +346,7 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     for (int c = 0; c < cells; c++) cellHead[c] = -1;
                     Assert.DoesNotThrow(() =>
-                        new SymbolCollisionJob
+                        new CollisionJob
                         {
                             Candidates = nc, CandidateCount = n, Boxes = nb, BoxCount = n,
                             Survivors = ns, OutSurvivorCount = outCount,
@@ -373,8 +373,8 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 for (int i = 0; i < boxes.Length; i++) nb[i] = boxes[i];
-                SymbolCollisionGridSizing.Dims dims = SymbolCollisionGridSizing.ComputeDims(nb, boxes.Length);
-                int bound = SymbolCollisionGridSizing.NodeUpperBound(nb, boxes.Length, in dims);
+                CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(nb, boxes.Length);
+                int bound = CollisionGridSizing.NodeUpperBound(nb, boxes.Length, in dims);
 
                 int tight = 0;
                 for (int i = 0; i < boxes.Length; i++)
@@ -392,7 +392,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ROOT CAUSE of the live dense-scene crash: candidate box ranges are NOT guaranteed disjoint — a box can
-        // be referenced by more than one candidate. The job (SymbolCollisionJob.Insert) inserts every box in every
+        // be referenced by more than one candidate. The job (CollisionJob.Insert) inserts every box in every
         // placed candidate's [BoxStart,BoxStart+BoxCount) range, so a SHARED box is inserted once PER candidate.
         // The old per-UNIQUE-box bound (NodeUpperBound) counts it once → under-count → pool overflow. Even the
         // ±1-cell margin only raises the overflow THRESHOLD; enough sharing still overflows it (proven here).
@@ -414,9 +414,9 @@ namespace MapRenderer.Tests.Text.Placement
                     cands[i] = new SymbolCandidate { BoxStart = 0, BoxCount = 1, AllowOverlap = true,
                         SortKey = 0, FeatureIndex = i, TileKey = 0, SymbolIndex = i };
 
-                SymbolCollisionGridSizing.Dims dims = SymbolCollisionGridSizing.ComputeDims(boxes, 1);
-                int perUnique = SymbolCollisionGridSizing.NodeUpperBound(boxes, 1, in dims);
-                int perCand   = SymbolCollisionGridSizing.NodeUpperBoundByCandidates(cands, shares, boxes, 1, in dims);
+                CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(boxes, 1);
+                int perUnique = CollisionGridSizing.NodeUpperBound(boxes, 1, in dims);
+                int perCand   = CollisionGridSizing.NodeUpperBoundByCandidates(cands, shares, boxes, 1, in dims);
                 const int jobInserts = shares; // box 0 is one cell → one node per referencing candidate
 
                 Assert.Less(perUnique, jobInserts,
@@ -431,7 +431,7 @@ namespace MapRenderer.Tests.Text.Placement
                 try
                 {
                     for (int c = 0; c < cellHead.Length; c++) cellHead[c] = -1;
-                    new SymbolCollisionJob
+                    new CollisionJob
                     {
                         Candidates = cands, CandidateCount = shares, Boxes = boxes, BoxCount = 1,
                         Survivors = ns, OutSurvivorCount = outCount,

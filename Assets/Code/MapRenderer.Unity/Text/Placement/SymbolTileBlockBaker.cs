@@ -50,7 +50,7 @@ namespace MapRenderer.Unity.Text.Placement
             // I6: icon FadeId identity now rides symbol.IconImage (null for text, so a text symbol's FadeId
             // is unchanged — PointFadeId's guard-skip fold). §10 D9: UNCONDITIONAL on pairRole — a pair's
             // identity IS the owner's existing icon identity; a rider's FadeId is never read by a candidate
-            // (SymbolStageJob skips staging a Rider symbol entirely) but is left correctly resolved so
+            // (StageJob skips staging a Rider symbol entirely) but is left correctly resolved so
             // the gather Compact pass's per-symbol fade-alive probe stays well-defined.
             long   fadeId = SymbolPlacementSystem.PointFadeId(symbol.AnchorRender, symbol.MaterialIndex, symbol.Text, symbol.IconImage);
 
@@ -109,7 +109,7 @@ namespace MapRenderer.Unity.Text.Placement
                 IconRotateRadians = symbol.IconRotateRadians,
                 // W1: the resolved pitch alignment — StageCurved's world-arc predicate. MetresPerLogicalPixel
                 // is deliberately absent: it is this frame's camera ruler, patched per frame by
-                // SymbolStageJob, not a stable baked field.
+                // StageJob, not a stable baked field.
                 PitchAlignment = symbol.PitchAlignment,
             };
         internal static SymbolTileBlock Bake(SymbolTileBuffer buffer, int slotCount, in double3 tileOriginRender,

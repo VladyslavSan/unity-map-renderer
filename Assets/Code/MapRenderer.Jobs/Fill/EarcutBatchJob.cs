@@ -17,7 +17,7 @@ namespace MapRenderer.Jobs.Fill
     /// <para><b>Bit-exact regardless of which worker runs a polygon, or how many run at once</b>
     /// (job-scheduling-design.md §1): the construction is the slice derivation, not any assertion. Every
     /// index into <see cref="Buffers"/>' offset tables and flat columns is taken from CONSECUTIVE entries of
-    /// a monotonic table (<c>FillSizingJob</c>'s own disjointness — see its type doc), so the bytes one
+    /// a monotonic table (<c>SizingJob</c>'s own disjointness — see its type doc), so the bytes one
     /// polygon touches are a function of that polygon's own input alone.</para>
     ///
     /// <para><b>One field, one attribute (job-scheduling-design.md §8 stage 6, the A.2 branch).</b>
@@ -29,12 +29,12 @@ namespace MapRenderer.Jobs.Fill
     /// alternative (declaring the 18 columns this job uses as the job's own deferred <see cref="NativeArray{T}"/>
     /// fields, split by read/write access) was probed first and also works, but costs more surface for no
     /// behavioural difference — the safety system already treats every column here as conservatively
-    /// written, same as before this stage (<see cref="FillTriangulationBuffers"/>'s own doc). The attribute
+    /// written, same as before this stage (<see cref="TriangulationBuffers"/>'s own doc). The attribute
     /// appears in this file and nowhere else (job-scheduling-design.md §7 rule 2).</para>
     ///
     /// <para><b>Reproduces <c>FillMeshPipeline.cs:384–461</c>'s per-polygon loop</b>: field-for-field the same
     /// <see cref="EarcutJob"/> population, over the flat scratch/output columns a prior sizing node
-    /// (<c>FillSizingJob</c>) resized and a prior gather node (<see cref="FillGatherJob{TComparer}"/>)
+    /// (<c>SizingJob</c>) resized and a prior gather node (<see cref="FillGatherJob{TComparer}"/>)
     /// populated. Every column is resolved with <c>.AsArray()</c> <b>inside</b> <see cref="Execute"/> — never
     /// at schedule time — because the sizing node is what gives these lists their final length (the graph's
     /// <c>.AsArray()</c> rule, <c>FillMeshGraph.cs</c>'s doc); this holds under <see cref="IJobParallelForDefer"/>
@@ -42,7 +42,7 @@ namespace MapRenderer.Jobs.Fill
     /// time regardless of how many indices run, or when.</para>
     ///
     /// <para><b>No <see cref="Error"/> field.</b> The per-polygon capacity backstop this job used to write
-    /// moved to <see cref="FillAggregateJob"/> (job-scheduling-design.md §8 stage 6, C.1) — a
+    /// moved to <see cref="AggregateJob"/> (job-scheduling-design.md §8 stage 6, C.1) — a
     /// <see cref="NativeReference{T}"/> is not index-restricted, so a parallel writer would need its own
     /// disable attribute for a check that already has a cheaper, already-serial home downstream.</para>
     /// </summary>
@@ -54,12 +54,12 @@ namespace MapRenderer.Jobs.Fill
         /// for the graph's life, so a schedule-time field is safe here.</summary>
         [ReadOnly] public NativeArray<int> PolyHoleCount;
 
-        /// <summary>The offset tables <c>FillSizingJob</c> sized, <c>FillGatherJob</c>'s
+        /// <summary>The offset tables <c>SizingJob</c> sized, <c>FillGatherJob</c>'s
         /// <c>FlatPolyVerts</c>/<c>FlatSortedHoleCounts</c>/<c>PerPolyOuterCount</c> inputs, and this node's own
         /// <c>FlatIndexArrays</c>/scratch/per-polygon outputs — one field, not the individual list-per-column
         /// this job used to declare. See the type doc for why the disable attribute lives here.</summary>
         [NativeDisableParallelForRestriction]
-        public FillTriangulationBuffers Buffers;
+        public TriangulationBuffers Buffers;
 
         public void Execute(int pi)
         {

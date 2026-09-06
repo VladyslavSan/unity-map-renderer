@@ -66,7 +66,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.Greater(selected.Count, 0, "expected boundary_3 line features in this tile");
 
             double3 origin = TileRenderOrigin.Project(id, projection);
-            LineLayerInput input = StyledLineTileBuilder.BuildLayerInput(
+            LayerInput input = StyledLineTileBuilder.BuildLayerInput(
                 selected, mvtLayer.Geometry, layer.Paint, layer.Layout, z, origin,
                 out NativeArray<Vector4> featureColors, out NativeArray<float> featureWidths, projection);
             Assert.IsTrue(input.FeatureSelected.IsCreated, "precondition: real line geometry must be selected");
@@ -123,7 +123,7 @@ namespace MapRenderer.Tests.Meshing
 
                 // ── Step 2b: Stream0/1/2, per-vertex, per-COMPONENT-CLASS, each bound on its own mechanism.
                 // No single ceiling: the five classes below are not one phenomenon with a spread — each has
-                // a different (or absent) numerical hazard, established by reading LineRibbonJob/
+                // a different (or absent) numerical hazard, established by reading RibbonJob/
                 // ProjectPointsJob, not by curve-fitting the observed numbers. See each Assert call's own
                 // comment for the mechanism — Position/Normal/Side are bit-exact (no hazard), Across/
                 // DistanceAlong each get an explicit measured-plus-margin ceiling.
@@ -176,21 +176,21 @@ namespace MapRenderer.Tests.Meshing
                     "has NO computed hazard (a straight copy/trig evaluation), so ANY divergence is a real " +
                     "regression, not noise.");
 
-                // Side: EVERY assignment site in LineRibbonJob is a bare literal (+1f/-1f/0f — MakeVertex's
-                // callers, LineRibbonJob.cs). Two literals of the same value are the SAME bit pattern in
+                // Side: EVERY assignment site in RibbonJob is a bare literal (+1f/-1f/0f — MakeVertex's
+                // callers, RibbonJob.cs). Two literals of the same value are the SAME bit pattern in
                 // both the managed and Burst arms; there is no floating computation to diverge. Bit-exact.
                 Assert.AreEqual(0u, sideMax.Delta,
                     $"[{tag}/{label}] Side exceeds 0 ULP at vertex {sideMax.Index} — every Side value is a " +
                     "bare literal in production; ANY divergence here is a branch/topology bug, never rounding.");
 
                 // Across carries TWO hazards, not one:
-                //   (1) near-singular miter division (1/cosHalf, LineRibbonJob.TryJoinBisector/
+                //   (1) near-singular miter division (1/cosHalf, RibbonJob.TryJoinBisector/
                 //       ComputeMiterNormals/NeedsBevel) amplifies ordinary input ULP by a factor that blows
                 //       up as a join angle approaches a hairpin — this is the fixture-dependent one,
                 //       confirmed by the measurement itself: 1/10/81/1000 ULP across the four cases, a 1000x
                 //       spread consistent with "how close the sharpest join on this corpus's fixture came to
                 //       a hairpin", not a fixed noise floor.
-                //   (2) `across = math.normalize(math.cross(along, up))` (LineRibbonJob.cs:249) — Burst's
+                //   (2) `across = math.normalize(math.cross(along, up))` (RibbonJob.cs:249) — Burst's
                 //       relaxed-math `normalize` does not guarantee managed IEEE rounding on every input,
                 //       the SAME mechanism the wall-job stage measured diverging ~1-2 ULP at three call
                 //       sites, data-dependently (job-scheduling-design.md §8 stage 5's invariant block).
@@ -206,7 +206,7 @@ namespace MapRenderer.Tests.Meshing
                     "hazards this component has; a delta orders of magnitude past this is a different bug, " +
                     "not a sharper join.");
 
-                // DistanceAlong: a per-ring running SUM (LineRibbonJob.cs cumDist accumulation) is the
+                // DistanceAlong: a per-ring running SUM (RibbonJob.cs cumDist accumulation) is the
                 // hazard for this quantity in THEORY — error would grow with the number of terms summed
                 // (up to ~660 on this corpus), not with tile/origin magnitude. MEASURED bit-exact (0 ULP) on
                 // all four cases: bit-exact is the honest bound, not a margin over a nonzero observation.
@@ -250,7 +250,7 @@ namespace MapRenderer.Tests.Meshing
         /// <c>LineCurvatureSubdivision.SegmentSteps</c> quantises on — a managed-arm substitute here could
         /// silently disagree with what the real graph actually computes.</summary>
         private static List<int> ComputeGraphRingSubdivideCounts(
-            TileGeometryBuffers geometry, LineLayerInput input, IProjection projection)
+            TileGeometryBuffers geometry, LayerInput input, IProjection projection)
         {
             using var srcTile = new NativeList<double2>(Allocator.Persistent);
             using var ringSrcOffsets = new NativeList<int>(Allocator.Persistent);
@@ -259,7 +259,7 @@ namespace MapRenderer.Tests.Meshing
             using var srcWorld = new NativeList<double3>(Allocator.Persistent);
             using var srcUp = new NativeList<double3>(Allocator.Persistent);
 
-            new LineRingGatherJob
+            new RingGatherJob
             {
                 Vertices = geometry.Vertices, RingOffsets = geometry.RingOffsets, RingFeatureIdx = geometry.RingFeatureIdx,
                 FeatureGeometryType = geometry.FeatureGeometryType, RingCount = geometry.RingCount,
@@ -280,7 +280,7 @@ namespace MapRenderer.Tests.Meshing
             // few ULP of divergence can flip a ceil() and shift the whole quantised count Step 1 gates on —
             // a gate built from the managed arm could agree with the golden while the real graph's counts
             // differ, or red on a divergence the graph never had. `originWorld` is irrelevant here (only
-            // affects the discarded World output, never Up) — see LineRingGatherJob's own doc on why that
+            // affects the discarded World output, never Up) — see RingGatherJob's own doc on why that
             // column is a deliberate dead output. Same Burst kernel, bit-identical, scheduled+completed
             // inline instead of run — the wall-job-graph stage retired the synchronous Run/RunTyped entry
             // points (ProjectionDispatch's own class doc).
@@ -293,7 +293,7 @@ namespace MapRenderer.Tests.Meshing
             using var subWorld = new NativeList<double3>(Allocator.Persistent);
             using var subUp = new NativeList<double3>(Allocator.Persistent);
 
-            new LineSubdivideJob
+            new SubdivideJob
             {
                 SrcTile = srcTile, RingSrcOffsets = ringSrcOffsets, SrcUp = srcUp,
                 MaxRefineAngleRad = projection.MaxRefineAngleRad,

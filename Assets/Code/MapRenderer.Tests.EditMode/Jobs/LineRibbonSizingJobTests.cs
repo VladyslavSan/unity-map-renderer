@@ -1,8 +1,8 @@
 // Unity EditMode only — NativeList, Burst jobs. NOT registered in core-tests.csproj.
 //
 // The line twin of FillSizingJobTests' capacity-overrun arm (job-scheduling-design.md §8 stage 6, E.2):
-// LineRibbonSizingJob's early return is genuinely unreachable — every ring's growth is floored at 1
-// (LineRibbonSizingJob.cs:68-69) — so unlike the fill side, Arm A below CONSTRUCTS the post-early-return
+// RibbonSizingJob's early return is genuinely unreachable — every ring's growth is floored at 1
+// (RibbonSizingJob.cs:68-69) — so unlike the fill side, Arm A below CONSTRUCTS the post-early-return
 // state directly rather than driving sizing into it. See Arm A's own doc for the one way that differs from
 // the real early-return state, and why the delta cannot change what the arm observes.
 //
@@ -23,24 +23,24 @@ namespace MapRenderer.Tests.Jobs
     public class LineRibbonSizingJobTests
     {
         /// <summary>The arm that would have caught the line side's counterpart of the fill bug: the real
-        /// <see cref="LineRibbonAggregateJob"/> over a <see cref="LineRibbonBuffers"/> already at the
+        /// <see cref="RibbonAggregateJob"/> over a <see cref="RibbonBuffers"/> already at the
         /// post-early-return shape (every column length 0), with a real <c>RingFeature</c> standing in for the
         /// borrowed ring count the retired bound would have used.
         ///
         /// <para><b>Constructed, not driven — the one way it differs from the real early-return state, stated
-        /// plainly (not "byte-for-byte", which would be false):</b> <see cref="LineRibbonSizingJob"/>
+        /// plainly (not "byte-for-byte", which would be false):</b> <see cref="RibbonSizingJob"/>
         /// (<c>:62-73</c>) fills <c>RingVertexOffsets</c>/<c>RingIndexOffsets</c> with <c>ringCount + 1</c>
-        /// entries BEFORE its monotonicity return (<c>:75-82</c>), whereas <see cref="LineRibbonBuffers.Allocate"/>
+        /// entries BEFORE its monotonicity return (<c>:75-82</c>), whereas <see cref="RibbonBuffers.Allocate"/>
         /// leaves both at length 0. That delta cannot change what this arm observes:
-        /// <see cref="LineRibbonAggregateJob"/> reads <c>perRingVertexCount[r]</c> before it ever touches
+        /// <see cref="RibbonAggregateJob"/> reads <c>perRingVertexCount[r]</c> before it ever touches
         /// either offset table, and that column is length 0 in BOTH states, so the loop this arm is about
         /// never runs in either. Driving it through sizing to reach the state exactly would require an
         /// impossible non-monotonic table (sizing's growth floor at 1 makes disjointness structural) — not a
-        /// degenerate <c>m &lt; 2</c> ring either, since <c>LineRingGatherJob.cs:101</c> filters those out
+        /// degenerate <c>m &lt; 2</c> ring either, since <c>RingGatherJob.cs:101</c> filters those out
         /// before sizing ever sees them.</para>
         ///
-        /// <para><b>RED recipe — hand-written (LineRibbonAggregateJob has only ever existed in its fixed
-        /// form; <c>git log -- LineRibbonAggregateJob.cs</c> returns one commit), executed once by the
+        /// <para><b>RED recipe — hand-written (RibbonAggregateJob has only ever existed in its fixed
+        /// form; <c>git log -- RibbonAggregateJob.cs</c> returns one commit), executed once by the
         /// developer, reverted immediately.</b> Add <c>[ReadOnly] public NativeList&lt;int&gt; RingSubOffsets;</c>
         /// to the job, replace <c>int ringCount = perRingVertexCount.Length;</c> with
         /// <c>int ringCount = RingSubOffsets.Length - 1;</c>, and hand the tooth a length-3
@@ -54,7 +54,7 @@ namespace MapRenderer.Tests.Jobs
             Assert.Fail("ENABLE_UNITY_COLLECTIONS_CHECKS is not defined in this test assembly build — " +
                 "without it this tooth cannot detect a borrowed-count OOB read in a release-configured build.");
 #endif
-            LineRibbonBuffers buffers = LineRibbonBuffers.Allocate();
+            RibbonBuffers buffers = RibbonBuffers.Allocate();
             var ringFeature = new NativeList<int>(Allocator.Persistent);
             ringFeature.Add(0);
             ringFeature.Add(0);
@@ -66,7 +66,7 @@ namespace MapRenderer.Tests.Jobs
 
             try
             {
-                new LineRibbonAggregateJob
+                new RibbonAggregateJob
                 {
                     RingFeature = ringFeature,
                     Buffers = buffers,
@@ -101,7 +101,7 @@ namespace MapRenderer.Tests.Jobs
         /// <see cref="LineGraphCounts.Ok"/>.
         ///
         /// <para><b>RED recipe, mirroring the fill arm's word for word — executed once, observed, reverted.</b>
-        /// Temporarily change <c>LineRibbonSizingJob.cs:71</c>'s <c>ringVertexOffsets.Add(ringVertexOffsets[r]
+        /// Temporarily change <c>RibbonSizingJob.cs:71</c>'s <c>ringVertexOffsets.Add(ringVertexOffsets[r]
         /// + maxV);</c> to <c>ringVertexOffsets.Add(r &gt; 0 ? ringVertexOffsets[r] : ringVertexOffsets[r] +
         /// maxV);</c> — ring 1's entry then equals ring 0's (a zero-length slice) — and this test flips from
         /// <see cref="LineGraphCounts.Ok"/> to <see cref="LineGraphCounts.ErrorOffsetTableNotDisjoint"/>.
@@ -117,12 +117,12 @@ namespace MapRenderer.Tests.Jobs
             var ringSubOffsets = new NativeList<int>(Allocator.Persistent);
             ringSubOffsets.Add(0); ringSubOffsets.Add(4); ringSubOffsets.Add(9);
 
-            LineRibbonBuffers buffers = LineRibbonBuffers.Allocate();
+            RibbonBuffers buffers = RibbonBuffers.Allocate();
             var error = new NativeReference<int>(Allocator.Persistent);
 
             try
             {
-                new LineRibbonSizingJob
+                new RibbonSizingJob
                 {
                     RingSubOffsets = ringSubOffsets,
                     RoundSegments = 8,

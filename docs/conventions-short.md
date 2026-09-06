@@ -60,7 +60,7 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   - Generic names (`MeshBuilder`, `TileMeshFactory`) are reserved for genuinely type-agnostic dispatchers.
 
 - **Geometry producers declare their output winding; boundaries convert.**
-  - A triangle-producing type (`Earcut`, `LineTessellator`, `LineRibbonJob`, `GlobeFillSubdivideJob`) states
+  - A triangle-producing type (`Earcut`, `LineTessellator`, `RibbonJob`, `GlobeFillSubdivideJob`) states
     its output winding + coordinate space in its XML summary.
   - There is **one canonical winding** (CCW in tile space); the producer never bakes the render convention.
   - The Unity-front reversal for stock Cull Back happens at **one** boundary per mesh kind
@@ -89,7 +89,7 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   one iteration touch?" — walk the loop bodies, not the field list.
   - `EarcutJob`'s `Vx`/`Vy` (two `NativeArray<double>`, always accessed at the same index, every write
     de-interleaving an already-`double2` source) merged into one `NativeArray<double2> Verts` —
-    `FillTriangulationBuffers.FlatWorkVerts`. Contrast `Next` in the *same* file, which correctly stays its
+    `TriangulationBuffers.FlatWorkVerts`. Contrast `Next` in the *same* file, which correctly stays its
     own column: `scan = Next[scan]` streams it alone on every ring walk, touching no position field at all.
   - **Co-access is necessary but not sufficient.** If a field's only same-index partner is itself streamed
     alone somewhere, merging into it taxes that stream for the newcomer's benefit. `EarcutJob`'s `IsEar` and
@@ -176,7 +176,7 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   - `Scratch`, `Data`, `Info`, `Manager`, `Helper`, `Util`, `Temp`, `Stuff` may never be the part of a name
     that carries the meaning. Name for what the thing holds or does.
   - **Never name a shared type after one of its consumers** — `EarcutScratch` was used by four jobs; naming
-    it for one was wrong, not just vague. It is `FillTriangulationBuffers`.
+    it for one was wrong, not just vague. It is `TriangulationBuffers`.
   - Grouped buffers join the existing family: `TileGeometryBuffers`, `FillGraphOutput`, `EvalArgBuffers`.
   - Keep a qualifier that distinguishes (`FlatWorkVerts` — flattened across the layer's polygons), drop one
     that does not (`FlatScratchWorkVerts`). Test: delete the word — if the name is still unambiguous, it was

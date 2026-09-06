@@ -44,7 +44,7 @@ namespace MapRenderer.Jobs.Tiles
     /// <summary>Resolves the <see cref="ITileDecoder"/> for a <see cref="TileEncoding"/>. No production
     /// dead branch: today only <see cref="TileEncoding.Mvt"/> exists (a non-MVT decoder is exercised by
     /// tests injecting a fake <see cref="ITileDecoder"/> directly, not a new enum member — design §B-3).</summary>
-    public static class TileDecoders
+    public static class Decoders
     {
         /// <param name="encoding">Selects which decoder to build.</param>
         public static ITileDecoder ForEncoding(TileEncoding encoding) => encoding switch

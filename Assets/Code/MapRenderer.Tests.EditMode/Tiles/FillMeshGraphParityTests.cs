@@ -17,7 +17,7 @@
 //
 // Per-stream (N1): nine separate digests for the flat (WebMercator) arm — one per output array plus one per
 // count — so a red names WHICH stream moved, not just "fill geometry changed". The spherical arm compares only
-// the four counts: FillAggregateJob/FillSizingJob compute them from the PRE-subdivision earcut output on both
+// the four counts: AggregateJob/SizingJob compute them from the PRE-subdivision earcut output on both
 // arms (unaffected by §3.7's curved-arm reshape), but the five geometry arrays are POST-subdivision there and
 // no longer the same quantity FillMeshPipeline.Schedule returns — this file never compared them on the curved
 // arm even before Group B (see the old AssertParity's `if (curved) return;`).

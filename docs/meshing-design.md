@@ -3,7 +3,7 @@
 How decoded vector-tile geometry becomes drawn, lit meshes: the per-kind build pipeline, line antialiasing, the
 URP-Lit shading convention every map shader follows, and the render-layer model that gives every painted style
 layer a uniform place. Read this before touching `FillMeshPipeline`, `StyledFillTileBuilder`,
-`StyledLineTileBuilder`, `LineRibbonJob`, the map shaders under `Shaders/Map/`, or `IRenderLayer`/`RenderLayerSet`.
+`StyledLineTileBuilder`, `RibbonJob`, the map shaders under `Shaders/Map/`, or `IRenderLayer`/`RenderLayerSet`.
 
 1. **[Mesh pipeline](#1-mesh-pipeline)** — how MVT bytes become a mesh, per geometry kind (fill vs line orderings, the build/consume loop).
 2. **[Line antialiasing](#2-line-antialiasing)** — why there is no edge AA, the trilemma, the single-pass-cased-line path forward.
@@ -24,8 +24,8 @@ The only survivor is `LineTessellator`, where "tessellate" now means strictly **
 | Former loose meaning | Now called | Lives in |
 |----------------------|-----------|----------|
 | the whole decode→mesh chain | **the mesh pipeline** | `FillMeshPipeline`, the `StyledFill/LineTileBuilder`s |
-| inserting curvature points (globe) | **Subdivide** | `LineSubdivideJob` (line), `GlobeFillSubdivideJob` (fill) — job-scheduling-design.md §8 stage 5 Group B retired the managed `SubdivideCenterline` this row used to name |
-| earcut / ribbon-offset | **Triangulate** (the only surviving "tessellate") | `Earcut`, `LineTessellator` (oracle), `LineRibbonJob` |
+| inserting curvature points (globe) | **Subdivide** | `SubdivideJob` (line), `GlobeFillSubdivideJob` (fill) — job-scheduling-design.md §8 stage 5 Group B retired the managed `SubdivideCenterline` this row used to name |
+| earcut / ribbon-offset | **Triangulate** (the only surviving "tessellate") | `Earcut`, `LineTessellator` (oracle), `RibbonJob` |
 | "build one whole tile's mesh" (async scheduling) | **mesh build** (worker) + **consume** (main thread) | `TileManager` (`KickMeshBuild`, `MeshBuildTask`, `MaxMeshBuildsPerTick` / `ConsumeMeshBuild`, `MaxConsumesPerTick`) |
 
 That last row is the tile-build loop — two verbs, no "phases":
@@ -44,7 +44,7 @@ That last row is the tile-build loop — two verbs, no "phases":
   Driven entirely by `IProjection.MaxRefineAngleRad` (∞ for Mercator ⇒ no split; a small angle for the globe).
   No projection constants leak in — the flat case is the degenerate value of one formula, not a branch.
 - **Triangulate** — rings/centerline → triangle vertices + indices. Fills use ear-clipping (`Earcut`/`EarcutJob`);
-  lines extrude a ribbon (`LineRibbonJob`, with `LineTessellator` as its planar differential oracle).
+  lines extrude a ribbon (`RibbonJob`, with `LineTessellator` as its planar differential oracle).
 - **Project** — tile-space → geodetic surface (`TileToGeoJob`, projection-independent) → render-space `double3` +
   per-vertex `up`, through the chosen `IProjection` (`ProjectPointsJob<TProj>`).
 - **Write** — stream the vertices/indices into a caller-allocated `Mesh.MeshData` on the worker; the main thread
@@ -59,7 +59,7 @@ overload it replaced.
 | Kind | Order | Where |
 |------|-------|-------|
 | **Fill** | Decode → **Clip** → Assemble → **Triangulate** (earcut, flat tile space) → **Project** → *(globe only)* **Subdivide** | `FillMeshGraph.Schedule` (job-scheduling-design.md §8 stage 4 Group B retired the synchronous `FillMeshPipeline.Schedule` this row used to name) schedules Decode→Clip→Assemble→Triangulate→Project, and on the curved arm the globe Subdivide too (`GlobeFillSubdivideDispatch.Schedule` + `GlobeFillScatterJob`, gated by `!double.IsInfinity(proj.MaxRefineAngleRad)` — inside the graph now, not bolted on after it); `StyledFillTileBuilder` schedules the graph then schedules the write step. |
-| **Line** | Decode → **Subdivide** (centerline, tile space) → **Project** → **Triangulate** (ribbon) | `LineMeshGraph.Schedule` (job-scheduling-design.md §8 stage 5 Group B retired the synchronous per-ring loop this row used to name) schedules `LineRingGatherJob` → `TileToGeoJob`/`ProjectionDispatch` → `LineSubdivideJob` → `TileToGeoJob`/`ProjectionDispatch` → `LineRibbonBatchJob`; `LineRenderLayer.BuildGraphRequest` builds the request via `StyledLineTileBuilder.BuildLayerInput`, and `LineStreamWriteJob` writes the mesh. `StyledLineTileBuilder.WriteMeshData` is a synchronous convenience over the same graph, kept public and test-facing. |
+| **Line** | Decode → **Subdivide** (centerline, tile space) → **Project** → **Triangulate** (ribbon) | `LineMeshGraph.Schedule` (job-scheduling-design.md §8 stage 5 Group B retired the synchronous per-ring loop this row used to name) schedules `RingGatherJob` → `TileToGeoJob`/`ProjectionDispatch` → `SubdivideJob` → `TileToGeoJob`/`ProjectionDispatch` → `RibbonBatchJob`; `LineRenderLayer.BuildGraphRequest` builds the request via `StyledLineTileBuilder.BuildLayerInput`, and `LineStreamWriteJob` writes the mesh. `StyledLineTileBuilder.WriteMeshData` is a synchronous convenience over the same graph, kept public and test-facing. |
 
 **Why fills Triangulate *before* Project.** Ear-clipping is a **planar 2D algorithm**, and triangle
 **connectivity is projection-invariant** — which vertices form a triangle doesn't change when you bend the sheet
@@ -71,7 +71,7 @@ resulting vertices afterward. On the globe a post-Project **Subdivide** then ref
 `up` the centerline was projected with (**winding consistent by construction** across projections — no
 per-projection flip; the uniform Unity-front reversal for stock Cull Back happens at the mesh-write boundary,
 see [`coordinates-and-projections.md` §7.1](coordinates-and-projections.md) and §8). So the centerline
-is subdivided and projected first, then `LineRibbonJob` triangulates in render space.
+is subdivided and projected first, then `RibbonJob` triangulates in render space.
 
 ## Why the fill path Clips, and why only the fill path
 
@@ -120,10 +120,10 @@ rule in [`conventions-short.md`](conventions-short.md).
 | `TileBufferClip` | `MapRenderer.Core` | The knob: how much buffer to keep, in tile units at extent 4096, converted to the layer's own extent in one place. `default` ⇒ disabled. |
 | `TileRenderOrigin` | `MapRenderer.Core` | The single source of a tile's bake/RTC origin (SW corner projected). Engine-free, shared by fills/lines/symbols/camera — **not** fill-specific, so it lives in Core, not on the fill mesher. |
 | `TileToGeoJob` | `MapRenderer.Jobs` | Project stage part 1: tile-space → geodetic surface (projection-independent). Takes a `TileId`. |
-| `LineRibbonJob` | `MapRenderer.Jobs` | Line Triangulate: projection-agnostic 3D ribbon from a `(point, up)` array. |
-| `LineTessellator` | `MapRenderer.Core` | The planar differential **oracle** for `LineRibbonJob` (`LineRibbonJobTests`). |
+| `RibbonJob` | `MapRenderer.Jobs` | Line Triangulate: projection-agnostic 3D ribbon from a `(point, up)` array. |
+| `LineTessellator` | `MapRenderer.Core` | The planar differential **oracle** for `RibbonJob` (`LineRibbonJobTests`). |
 | `StyledFillTileBuilder` | `MapRenderer.Unity` | Fill orchestration: color eval → `FillMeshGraph` → write mesh (globe subdivide is a graph node on the curved arm, not a separate step). |
-| `StyledLineTileBuilder` | `MapRenderer.Unity` | Line orchestration: Subdivide → Project → `LineRibbonJob` → write mesh. |
+| `StyledLineTileBuilder` | `MapRenderer.Unity` | Line orchestration: Subdivide → Project → `RibbonJob` → write mesh. |
 | `MeshDataPayload` | `MapRenderer.Unity` | The per-`(tile, layer)` mesh handle the consume loop uploads + disposes. |
 | `TileManager` | `MapRenderer.Unity` | The tile-build loop: `KickMeshBuild` / `MeshBuildTask` (build) and `ConsumeMeshBuild` (consume), throttled by `MaxMeshBuildsPerTick` / `MaxConsumesPerTick`. |
 

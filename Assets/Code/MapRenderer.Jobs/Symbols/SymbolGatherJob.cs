@@ -11,7 +11,7 @@ namespace MapRenderer.Jobs.Symbols
     /// <summary>
     /// Burst-gather Stage 1 (docs/symbol-symbol-perf-design.md §10.9): a LINE-FOR-LINE Burst transliteration of
     /// <c>SymbolPlacementSystem.GatherIntoMirror</c>'s two managed loops (<c>SymbolPlacementSystem.cs:1050-1157</c>)
-    /// — compact every winner's pre-baked <see cref="SymbolBlockView"/> slice into one contiguous set of native
+    /// — compact every winner's pre-baked <see cref="BlockView"/> slice into one contiguous set of native
     /// mirror pools, remapping every <c>Detail</c>/<c>*Start</c> field by the running pool offset. Run
     /// SYNCHRONOUSLY (<c>.Run()</c>) inside <c>PmGather</c>, strictly before <c>TickCore</c> reads a single
     /// element — no double-buffering, no swap, no resize under a reader (unchanged from the managed gather).
@@ -46,7 +46,7 @@ namespace MapRenderer.Jobs.Symbols
         public const int CountLength = 10;
 
         // ── inputs ──
-        [ReadOnly] public NativeArray<SymbolBlockView> BlockViews; // one view per plan.Blocks[b], built by the caller
+        [ReadOnly] public NativeArray<BlockView> BlockViews; // one view per plan.Blocks[b], built by the caller
         [ReadOnly] public NativeArray<int> BlockId;                // plan.BlockId — winner r -> BlockViews index
         [ReadOnly] public NativeArray<int> LocalIndex;             // plan.LocalIndex — winner r -> raw record within that block
         public int WinnerCount;
@@ -80,7 +80,7 @@ namespace MapRenderer.Jobs.Symbols
             int records = winners, points = 0, curveds = 0, quads = 0, glyphs = 0, anchors = 0, fades = 0, worlds = 0;
             for (int r = 0; r < winners; r++)
             {
-                SymbolBlockView block = BlockViews[BlockId[r]];
+                BlockView block = BlockViews[BlockId[r]];
                 int li = LocalIndex[r];
                 int detail = block.Detail[li];
                 if (block.Kinds[li] == SymbolPlacementKind.Point)
@@ -126,7 +126,7 @@ namespace MapRenderer.Jobs.Symbols
             // Pass 2 (mirrors :1092-1150): fill, remapping every Detail/*Start by the running pool offset.
             for (int r = 0; r < winners; r++)
             {
-                SymbolBlockView block = BlockViews[BlockId[r]];
+                BlockView block = BlockViews[BlockId[r]];
                 int li = LocalIndex[r];
                 int detail = block.Detail[li];
                 int worldStartSrc = block.WorldStart[li], worldCount = block.WorldCount[li];

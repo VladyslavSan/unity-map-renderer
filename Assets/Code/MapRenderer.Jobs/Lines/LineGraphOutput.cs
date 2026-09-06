@@ -23,8 +23,8 @@ namespace MapRenderer.Jobs.Lines
         public NativeList<int> VertexFeatureIdx;
 
         /// <summary>Triangle indices into <see cref="Vertices"/> — already offset per ring and
-        /// winding-swapped for stock Cull Back BY <see cref="LineRibbonAggregateJob"/> (unlike fill,
-        /// where the write job does the swap — see <see cref="LineRibbonAggregateJob"/>'s own doc for
+        /// winding-swapped for stock Cull Back BY <see cref="RibbonAggregateJob"/> (unlike fill,
+        /// where the write job does the swap — see <see cref="RibbonAggregateJob"/>'s own doc for
         /// why).</summary>
         public NativeList<int> Indices;
 

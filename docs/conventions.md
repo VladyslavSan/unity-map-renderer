@@ -229,7 +229,7 @@ targets.)*
 
 ### Geometry producers declare their output winding; boundaries convert
 
-A type that **produces triangle geometry** (`Earcut`, `LineTessellator`, `LineRibbonJob`, `GlobeFillSubdivideJob`)
+A type that **produces triangle geometry** (`Earcut`, `LineTessellator`, `RibbonJob`, `GlobeFillSubdivideJob`)
 must **state its output winding (CW/CCW) and coordinate space at the API surface** — in the XML summary of the
 method or result type, not left for a consumer to reverse-engineer. There is **one canonical winding** for the
 whole pipeline (**CCW in tile space**), every producer conforms to it, and the render-facing conversion happens
@@ -314,7 +314,7 @@ index as `Removed` on every touch, yet stay their own columns because `Removed` 
 guidance on this existed before Vx/Vy was merged; older split-for-no-reason columns elsewhere have not been
 swept.
 
-*(Established during the `Vx`/`Vy` merge — see `EarcutJob.cs` and `FillTriangulationBuffers.FlatWorkVerts`.)*
+*(Established during the `Vx`/`Vy` merge — see `EarcutJob.cs` and `TriangulationBuffers.FlatWorkVerts`.)*
 
 ### Hot-path allocations: none, then native, then pooled
 
@@ -503,7 +503,7 @@ it worth touching — but none of them may be the part of the name that carries 
 
 **Name for content, in the established shape.** This codebase already has the right idiom for a value that
 groups buffers: `TileGeometryBuffers`, `FillGraphOutput`, `EvalArgBuffers`, `KeyBindingBuffers`. A new one
-joins that family — `FillTriangulationBuffers`, not `EarcutScratch`.
+joins that family — `TriangulationBuffers`, not `EarcutScratch`.
 
 **Never name a shared thing after one of its consumers.** `EarcutScratch` was used by four jobs (sizing,
 gather, earcut, aggregate); naming it for the third of them was not merely vague but wrong, and it would have
@@ -521,7 +521,7 @@ outstanding mechanical sweep, deliberately sequenced so it does not move identif
 citing while a developer executes against it.
 
 Saying this matters, because stating a rule without it makes the rule read as already true. That is how
-two of the examples above survived: `EarcutScratch` was renamed to `FillTriangulationBuffers` while the
+two of the examples above survived: `EarcutScratch` was renamed to `TriangulationBuffers` while the
 field holding it stayed `Scratch` — the type was fixed and the concept was not — and `FlatScratchVx`
 outlived by months the very passage that uses it as the specimen of what to fix.
 

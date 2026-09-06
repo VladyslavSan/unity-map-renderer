@@ -111,12 +111,12 @@ namespace MapRenderer.Jobs.Mvt
         /// ordinal-indexed consumer would then commit — so both fail loudly, before either can happen.
         /// <para>A <c>default</c> buffer (<c>IsCreated == false</c>) is legal: the materializer returns one
         /// for a feature-less layer, and its zero count matches an empty <see cref="Features"/>.</para>
-        /// <para>The two guards themselves live once, in <see cref="TileLayerGeometryAdoption"/> — the second
+        /// <para>The two guards themselves live once, in <see cref="LayerGeometryAdoption"/> — the second
         /// <see cref="ITileLayer"/> now exists, and an invariant three ordinal-indexed consumers rely on must
         /// have one statement rather than two that can drift.</para></summary>
         internal void AdoptGeometry(TileGeometryBuffers geometry)
         {
-            TileLayerGeometryAdoption.Validate(
+            LayerGeometryAdoption.Validate(
                 $"MvtLayer '{Name}'", _geometryAdopted, geometry, Features.Count);
 
             _geometryAdopted = true;

@@ -3,7 +3,7 @@
 // failure falls back to managed IL SILENTLY (FillGraphBurstProbeTests), so the runner alone doesn't decide it.
 // In this project's practice ./Tools/run-tests.sh (batch mode, confirmed via its log) is the Burst-compiled
 // path; the interactive Editor Test Runner is not verified that way. This differential validates that the
-// Burst SymbolCullJob and an independent managed reference reach the SAME per-record verdict.
+// Burst CullJob and an independent managed reference reach the SAME per-record verdict.
 // Dropped/Departing/Coverage/Zoom are pure integer/branch logic ⇒ bit-identical; Horizon/Distance carry
 // double-precision `dot` math where Burst MAY
 // FMA-reorder ⇒ a ULP flip is possible ONLY at the cull boundary, so those fixture records sit CLEARLY on one
@@ -18,7 +18,7 @@ using MapRenderer.Jobs.Symbols;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// <see cref="SymbolCullJob"/> — the Burst port of <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s Cull pass
+    /// <see cref="CullJob"/> — the Burst port of <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s Cull pass
     /// — must produce the SAME per-record <see cref="GatherTrigger"/> verdict, in the SAME chain-priority order
     /// (dropped → departing → coverage → zoom → horizon → distance → none), as an independent managed reference.
     /// </summary>
@@ -121,7 +121,7 @@ namespace MapRenderer.Tests.Text.Placement
         // read as "gated", where the correct SlotCount-bound reading never looks at it (slot 4 >= SlotCount).
         private static bool[] SlotVisible() => new[] { false, false, true, true, false };
 
-        // ── The independent managed reference — re-implements the chain, NOT a call into SymbolCullJob ─────────
+        // ── The independent managed reference — re-implements the chain, NOT a call into CullJob ─────────
 
         private static GatherTrigger ManagedVerdict(int r, byte[] dropped, byte[] departing, byte[] coverage,
             double3[] repAnchor, SymbolPlacementKind[] kinds, int[] detail, PointStageInput[] points, CurvedStageInput[] curveds,
@@ -149,7 +149,7 @@ namespace MapRenderer.Tests.Text.Placement
             return slot >= 0 && slot < SlotCount && !slotVisible[slot];
         }
 
-        // ── The Burst arm — SymbolCullJob.Run() over the same fixture ───────────────────────────────────────
+        // ── The Burst arm — CullJob.Run() over the same fixture ───────────────────────────────────────
 
         private static GatherTrigger[] NativeVerdicts(byte[] dropped, byte[] departing, byte[] coverage,
             double3[] repAnchor, SymbolPlacementKind[] kinds, int[] detail, PointStageInput[] points, CurvedStageInput[] curveds,
@@ -169,7 +169,7 @@ namespace MapRenderer.Tests.Text.Placement
             var outTrigger = new NativeArray<GatherTrigger>(SymbolCount, alloc);
             try
             {
-                new SymbolCullJob
+                new CullJob
                 {
                     SymbolDropped = nDropped, SymbolDeparting = nDeparting, SymbolCoverageFading = nCoverage,
                     RepAnchor = nAnchor, Kinds = nKinds, Detail = nDetail, Points = nPoints, Curveds = nCurveds,
@@ -209,7 +209,7 @@ namespace MapRenderer.Tests.Text.Placement
             CollectionAssert.AreEqual(Expected, managed, "managed reference vs. the fixture's expectation table");
 
             GatherTrigger[] native = NativeVerdicts(dropped, departing, coverage, repAnchor, kinds, detail, points, curveds, slotVisible);
-            CollectionAssert.AreEqual(managed, native, "SymbolCullJob vs. the independent managed reference");
+            CollectionAssert.AreEqual(managed, native, "CullJob vs. the independent managed reference");
         }
     }
 }

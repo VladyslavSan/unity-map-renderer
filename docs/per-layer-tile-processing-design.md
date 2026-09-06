@@ -201,7 +201,7 @@ the mesh consume/dispose Model-B contract, and the `IDataSource`/`MvtTile` gener
   ~K/`MaxBuildsPerFrame` pumps later (a backlog-drain bound) — label **content** is untouched, only appearance
   timing.
 - **A6 — decode + feature generalization.** The two MVT-coupled seams neutralized: `ITileDecoder.Decode(bytes) →
-  IDecodedTile`, resolved by `TileEncoding` via `TileDecoders.ForEncoding` (`MvtTileDecoder` the sole production
+  IDecodedTile`, resolved by `TileEncoding` via `Decoders.ForEncoding` (`MvtTileDecoder` the sole production
   `MvtDecoder.Decode` call site); and `WriteInto(IReadOnlyList<ITileFeature>)` — the fill/line/symbol fan-out
   references only the neutral `IDecodedTile`/`ITileLayer`/`ITileFeature` surface. Carrier types neutralized
   zero-copy (the MVT types implement the neutral interfaces directly). `MvtFeatureAdapter` retired, folded into
@@ -299,7 +299,7 @@ None blocks the stage; each is here so it is not rediscovered from scratch.
   `GetAwaiter().GetResult()`-ing (a UniTask that has not completed does not block there).
 
 - **`T4_ASlicedGeoJsonLayer_ListsOnlyTheSurvivingFeatures_AndItsOrdinalsAddressTheBuffer` has two arms that
-  cannot fail.** The count arm is pinned by `TileLayerGeometryAdoption.Validate`, which throws during
+  cannot fail.** The count arm is pinned by `LayerGeometryAdoption.Validate`, which throws during
   `Decode` before any assertion runs; the ordinal-range arm is tautological because `FeatureSelector`
   assigns `Ordinal = i` over the very list the guard sized the column against. **This was measured, not
   argued** — injecting the plan's named defect (`Features` from the dataset, `Geometry` from the slice)

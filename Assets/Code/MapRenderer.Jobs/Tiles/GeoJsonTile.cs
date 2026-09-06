@@ -51,10 +51,10 @@ namespace MapRenderer.Jobs.Tiles
         private bool _geometryAdopted;
 
         /// <summary>Set-once, lockstep-checked adoption — the same two guards <c>MvtLayer</c> applies,
-        /// through the same <see cref="TileLayerGeometryAdoption"/>.</summary>
+        /// through the same <see cref="LayerGeometryAdoption"/>.</summary>
         internal void AdoptGeometry(TileGeometryBuffers geometry)
         {
-            TileLayerGeometryAdoption.Validate(
+            LayerGeometryAdoption.Validate(
                 $"GeoJsonTileLayer '{Name}'", _geometryAdopted, geometry, Features.Count);
 
             _geometryAdopted = true;

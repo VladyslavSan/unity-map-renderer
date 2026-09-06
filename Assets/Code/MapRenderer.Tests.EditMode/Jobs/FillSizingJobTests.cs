@@ -8,7 +8,7 @@
 // job-scheduling-design.md §8 stage 6, C.2: the offset-table monotonicity assertion. Defence-in-depth, NOT
 // the parallel earcut's bit-exactness precondition (that is structural — see EarcutBatchJob's own doc); what
 // it catches is a non-monotonic table surfacing as a player-build error code instead of an Editor-only
-// GetSubArray bounds throw. This file already drives FillSizingJob with hand-built descriptors — the only
+// GetSubArray bounds throw. This file already drives SizingJob with hand-built descriptors — the only
 // route to this flag, since no REAL descriptor set can make the four offset tables non-monotonic (every
 // premise the RED-verification below defeats is structural, not merely typical).
 
@@ -36,13 +36,13 @@ namespace MapRenderer.Tests.Jobs
             var holeCountArr = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             var ringOffsets  = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory); // never read on the error path
 
-            FillTriangulationBuffers buffers = FillTriangulationBuffers.Allocate();
+            TriangulationBuffers buffers = TriangulationBuffers.Allocate();
             var counts = new NativeArray<FillGraphCounts>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             var error = new NativeReference<int>(Allocator.Persistent);
 
             try
             {
-                new FillSizingJob
+                new SizingJob
                 {
                     PolyOuterRingIdx = polyOuterIdx, PolyHoleListStart = polyHoleStart, PolyHoleCount = polyHoleCount,
                     HoleRingIdxs = holeRingIdxs, PolyCountArr = polyCountArr, HoleCountArr = holeCountArr,
@@ -86,7 +86,7 @@ namespace MapRenderer.Tests.Jobs
 
         /// <summary>The C.2 observing tooth's happy-path arm: two real (non-degenerate, no-hole) polygons
         /// within capacity produce four strictly-increasing offset tables and <see cref="FillGraphCounts.Ok"/>.
-        /// RED-VERIFIED by hand (not left in this file): temporarily change <c>FillSizingJob.cs</c>'s
+        /// RED-VERIFIED by hand (not left in this file): temporarily change <c>SizingJob.cs</c>'s
         /// <c>workOffsets.Add(workOffsets[pi] + workCap)</c> to <c>workOffsets.Add(pi &gt; 0 ? workOffsets[pi]
         /// : workOffsets[pi] + workCap)</c> — polygon 1's entry then equals polygon 0's (a zero-length slice)
         /// — and this test flips from <see cref="FillGraphCounts.Ok"/> to
@@ -103,13 +103,13 @@ namespace MapRenderer.Tests.Jobs
             var holeCountArr  = new NativeArray<int>(new[] { 0 }, Allocator.Persistent);
             var ringOffsets   = new NativeArray<int>(new[] { 0, 3, 6 }, Allocator.Persistent);
 
-            FillTriangulationBuffers buffers = FillTriangulationBuffers.Allocate();
+            TriangulationBuffers buffers = TriangulationBuffers.Allocate();
             var counts = new NativeArray<FillGraphCounts>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             var error = new NativeReference<int>(Allocator.Persistent);
 
             try
             {
-                new FillSizingJob
+                new SizingJob
                 {
                     PolyOuterRingIdx = polyOuterIdx, PolyHoleListStart = polyHoleStart, PolyHoleCount = polyHoleCount,
                     HoleRingIdxs = holeRingIdxs, PolyCountArr = polyCountArr, HoleCountArr = holeCountArr,
@@ -140,14 +140,14 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>The finding that changed this stage's shape (job-scheduling-design.md §7 rule 2 and
-        /// <see cref="FillSizingJob"/>'s own doc, both above <see cref="FillSizingJob.Execute"/>):
+        /// <see cref="SizingJob"/>'s own doc, both above <see cref="SizingJob.Execute"/>):
         /// <see cref="FillGatherJob{TComparer}"/> is the third node found bounding its own loop by a column
         /// this job's early return never touches, and the only one of the three that WRITES. A sizing-only
         /// arm (<see cref="TwoValidPolygons_ProduceStrictlyIncreasingOffsetTables_NoErrorFlag"/>) asserts what
         /// sizing writes, not what a downstream node reads — fill carried this exact defect through that arm,
         /// pre-existing and unfixed. So this drives all three graph nodes IN GRAPH ORDER over the SAME
         /// buffers — this job (undersized capacity) → the real <see cref="FillGatherJob{TComparer}"/> → the
-        /// real <see cref="FillAggregateJob"/> — the whole mechanism the original bug lived in.
+        /// real <see cref="AggregateJob"/> — the whole mechanism the original bug lived in.
         ///
         /// <para>Real descriptors, not dummy ones: <see cref="FillGatherJob{TComparer}"/> dereferences
         /// <c>PolyOuterRingIdx</c>/<c>RingOffsets</c>/<c>RingFeatureIdx</c> BEFORE it ever touches a
@@ -156,7 +156,7 @@ namespace MapRenderer.Tests.Jobs
         ///
         /// <para><b>Be honest about what this detects.</b> Pre-fix, <see cref="FillGatherJob{TComparer}"/>
         /// writes out of bounds through an <c>.AsArray()</c> view and never resizes anything, and pre-fix
-        /// <see cref="FillAggregateJob"/> only reads — so every state assertion below passes on the buggy code
+        /// <see cref="AggregateJob"/> only reads — so every state assertion below passes on the buggy code
         /// if the bounds check does not fire. This is a throw-detector wearing state assertions: the state
         /// assertions pin the contract that must survive the fix, the bounds check is what makes it RED. Does
         /// NOT assert <c>Assert.Throws</c> — that would pin the defect rather than the contract, and would
@@ -167,7 +167,7 @@ namespace MapRenderer.Tests.Jobs
         {
 #if !ENABLE_UNITY_COLLECTIONS_CHECKS
             Assert.Fail("ENABLE_UNITY_COLLECTIONS_CHECKS is not defined in this test assembly build — " +
-                "without it, neither FillGatherJob's nor FillAggregateJob's managed-IL bounds check can fire, " +
+                "without it, neither FillGatherJob's nor AggregateJob's managed-IL bounds check can fire, " +
                 "and this tooth cannot detect the release-build OOB it exists to catch.");
 #endif
             // Two real single-ring, no-hole polygons — same shape as TwoValidPolygons_… above — but a
@@ -183,7 +183,7 @@ namespace MapRenderer.Tests.Jobs
             var vertices       = new NativeArray<double2>(6, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             var ringFeatureIdx = new NativeArray<int>(new[] { 0, 0 }, Allocator.Persistent);
 
-            FillTriangulationBuffers buffers = FillTriangulationBuffers.Allocate();
+            TriangulationBuffers buffers = TriangulationBuffers.Allocate();
             var counts = new NativeArray<FillGraphCounts>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
             var error = new NativeReference<int>(Allocator.Persistent);
 
@@ -197,7 +197,7 @@ namespace MapRenderer.Tests.Jobs
 
             try
             {
-                new FillSizingJob
+                new SizingJob
                 {
                     PolyOuterRingIdx = polyOuterIdx, PolyHoleListStart = polyHoleStart, PolyHoleCount = polyHoleCount,
                     HoleRingIdxs = holeRingIdxs, PolyCountArr = polyCountArr, HoleCountArr = holeCountArr,
@@ -222,7 +222,7 @@ namespace MapRenderer.Tests.Jobs
                     Buffers = buffers,
                 }.Run();
 
-                new FillAggregateJob
+                new AggregateJob
                 {
                     Buffers = buffers,
                     TileVertices = tileVertices, WorldPositions = worldPositions, VertexUp = vertexUp, VertexEast = vertexEast,
@@ -252,12 +252,12 @@ namespace MapRenderer.Tests.Jobs
                 Assert.AreEqual(0, buffers.PerPolyFeatureIndex.Length);
                 Assert.AreEqual(0, buffers.PerPolyOuterCount.Length);
 
-                Assert.AreEqual(0, tileVertices.Length, "FillAggregateJob must produce no vertices");
+                Assert.AreEqual(0, tileVertices.Length, "AggregateJob must produce no vertices");
                 Assert.AreEqual(0, worldPositions.Length);
                 Assert.AreEqual(0, vertexUp.Length);
                 Assert.AreEqual(0, vertexEast.Length);
                 Assert.AreEqual(0, vertexFeatureIdx.Length);
-                Assert.AreEqual(0, triangleIndices.Length, "FillAggregateJob must produce no indices");
+                Assert.AreEqual(0, triangleIndices.Length, "AggregateJob must produce no indices");
                 Assert.AreEqual(0, geo.Length);
 
                 // Non-vacuity witness: the borrowed count sizing read is still 2 — without this the test would

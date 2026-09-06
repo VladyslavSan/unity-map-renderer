@@ -13,12 +13,12 @@ namespace MapRenderer.Tests.Tiles
     /// an unmapped encoding throws rather than silently falling through to an MVT decode.
     /// </summary>
     [TestFixture]
-    public class TileDecodersTests
+    public class DecodersTests
     {
         [Test]
         public void ForEncoding_Mvt_ResolvesToMvtTileDecoder()
         {
-            ITileDecoder decoder = TileDecoders.ForEncoding(TileEncoding.Mvt);
+            ITileDecoder decoder = Decoders.ForEncoding(TileEncoding.Mvt);
             Assert.IsInstanceOf<MvtTileDecoder>(decoder);
         }
     }

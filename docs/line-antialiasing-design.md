@@ -92,8 +92,8 @@ antialiased boundary looks like.** Tooth T2 (§7) permits ≤ 1 px for exactly t
 | A processor selects features for **exactly one** `StyleLayer` | `Rendering/Tile/Processing/TileMeshLayerProcessor.cs:48` |
 | A layer owns **one** material; per-layer uniforms bound by name (`line-X → _X`) | `Rendering/Style/LineRenderLayer.cs:70-78`, `Rendering/Materials/MaterialFactory.cs:172+` |
 | Line vertex format: 4 streams, one colour + one widthScale per vertex | `Rendering/Meshing/StyledLineTileBuilder.cs:84-92, 288-292` |
-| `side` is a per-vertex ±1 baked into the mesh and interpolated; `LineCoverage` keys on `\|side\|` | `Jobs/LineRibbonJob.cs:549-558`, `Line_VertexExtrude.hlsl:222, 247-268` |
-| Ribbon is one continuous shared-vertex strip — consecutive primitives thread `leftPrev`/`rightPrev` | `Jobs/LineRibbonJob.cs:151-152, 196-197, 208-209, 330-331, 346-347, 406-407` |
+| `side` is a per-vertex ±1 baked into the mesh and interpolated; `LineCoverage` keys on `\|side\|` | `Jobs/RibbonJob.cs:549-558`, `Line_VertexExtrude.hlsl:222, 247-268` |
+| Ribbon is one continuous shared-vertex strip — consecutive primitives thread `leftPrev`/`rightPrev` | `Jobs/RibbonJob.cs:151-152, 196-197, 208-209, 330-331, 346-347, 406-407` |
 | `LineVaryings.uv` is a **fully packed `float3`** (dashU/side/innerFrac) — no spare component | `Line_LitForwardPass.hlsl:53-56` |
 | **Five** passes, and **all five** `#include "Line_VertexExtrude.hlsl"` | `Line.shader:168, 258, 290, 320, 352` (passes) / `:247, 281, 311, 342, 407` (includes) |
 | `shader_feature_local` is the established keyword idiom; the vertex-affecting ones are plain `shader_feature_local`, the fragment-only ones `_fragment` | `Line.shader:181-194, 273, 304, 333, 368-375` |
@@ -107,7 +107,7 @@ antialiased boundary looks like.** Tooth T2 (§7) permits ≤ 1 px for exactly t
 | A tweaker enabling a `shader_feature_local` keyword at runtime on a cloned per-layer material is **existing, load-bearing practice** | `Rendering/Materials/FillTweaker.cs:43` (`_SURFACE_TYPE_TRANSPARENT`) |
 | Both mesh backends register **whole `Material` objects**; the BRG SoA carries per-instance *properties*, never keywords | `Backend/BRG/TileRenderer.cs:117`, `Backend/Entities/TileRenderer.cs:187` |
 | px→world scale is measured per-vertex, per-direction, foreshortening-correct | `Line_VertexExtrude.hlsl:80-104` (`MapPixelsToWorld`) |
-| `LineRibbonVertex.Position` is the raw centerline point — the entire styled width is applied in the vertex shader, never in mesh positions | `Jobs/LineRibbonJob.cs:549-558` |
+| `LineRibbonVertex.Position` is the raw centerline point — the entire styled width is applied in the vertex shader, never in mesh positions | `Jobs/RibbonJob.cs:549-558` |
 | Line geometry is **not clipped to the tile boundary** — a decoded feature is ribboned as-is | `Rendering/Meshing/StyledLineTileBuilder.cs:206-308` (no clip step) |
 | The Burst job and the managed `LineTessellator` are held to **exact differential parity**, `Side` included | `Tests.EditMode/LineRibbonJobTests.cs:94-112` (`AssertParity`) |
 | MSAA is off project-wide | `Assets/Settings/RPAsset.asset:28` (`m_MSAA: 1`) |
@@ -287,7 +287,7 @@ local, so no global closed form is needed.
 #### Two implementation-order hazards
 
 - **Add the pad to `outerWorld`, BEFORE the miter multiply — not to the post-miter result.** The miter factor
-  is `1/cos(θ/2)` (`ComputeMiterNormals`, `LineRibbonJob.cs:259-269`), defined so that the *perpendicular*
+  is `1/cos(θ/2)` (`ComputeMiterNormals`, `RibbonJob.cs:259-269`), defined so that the *perpendicular*
   distance from the centreline equals `outerWorld` regardless of `outerWorld`'s value. Scaling
   `outerWorld → outerWorld + pad` and re-applying the same multiply keeps the perpendicular pad at exactly
   0.5 px, at any corner.
@@ -318,7 +318,7 @@ local, so no global closed form is needed.
   fixed 0.5 device px is immaterial. If bounds are *not* widened for the styled width today, that is a
   pre-existing gap, out of scope here and not worsened by the pad.
 - **Vertex/index counts** are unaffected by a shader-side pad (`MaxVertexCount`/`MaxIndexCount`,
-  `LineRibbonJob.cs:74-99`). §6.5's fix does change them; that is accounted for there.
+  `RibbonJob.cs:74-99`). §6.5's fix does change them; that is accounted for there.
 
 ### 5.2 AA is switchable on/off — a boolean shader feature (maintainer amendment)
 
@@ -502,7 +502,7 @@ This section is the verification, and §6.5 is the one place the first pass of t
 
 - **`side` reaches ±1 only at the ribbon's lateral boundary**, so coverage keyed on `|side|` fades **only at
   the silhouette**, never at an internal triangle boundary.
-- **Miter join** (`LineRibbonJob.cs:188-198`): two shared vertices `miterL`/`miterR` and one quad;
+- **Miter join** (`RibbonJob.cs:188-198`): two shared vertices `miterL`/`miterR` and one quad;
   `leftPrev`/`rightPrev` thread forward. One continuous strip, no overlap.
 - **Bevel join** (`:307-349`): a fan about a single shared inner (concave) vertex; the chamfer is on the
   convex side. Every shared **edge** has endpoints `(+1, −1)`, so the interpolated `|side|` field is
@@ -563,7 +563,7 @@ document**, with T3b (§7) recording the measurement rather than gating on it.
 **The first pass of this doc claimed round caps have "no crack, no seam." That is false for the cap's own
 arc.** The T-junction against the ribbon quad is fine (§6.1); the arc tagging is not.
 
-**Mechanism** (`LineRibbonJob.cs:414-478`, `EmitStartCap`, `CapType.Round`). Vertices: centre pivot
+**Mechanism** (`RibbonJob.cs:414-478`, `EmitStartCap`, `CapType.Round`). Vertices: centre pivot
 `side 0`; arc intermediates all `+1`; `leftButt` `+1`; `rightButt` `−1`. The fan is then seeded
 `prevFan = rightButtIdx` (pre-fix code, no longer present — see the correction note below), so the **first** triangle is `(centre[0], fan1[+1], rightButt[−1])`. Its
 outer edge `fan1→rightButt` **is the true silhouette** — no triangle lies beyond it — yet `side` interpolates
@@ -614,7 +614,7 @@ and `:452-456` emit `arcStart`/`arcEnd` **once**, branching on `leftTurn`. The t
    the start cap (`:151-152`), and the managed side documents the same `[count-2]=left, [count-1]=right`
    contract (`LineTessellator.cs:521-526`). The new duplicate must therefore be emitted **before**
    `leftButt`/`rightButt`, not appended after.
-3. **Worst-case sizing.** `LineRibbonJob.MaxVertexCount` (`:74-85`): `startCap` `rs + 3 → rs + 4`,
+3. **Worst-case sizing.** `RibbonJob.MaxVertexCount` (`:74-85`): `startCap` `rs + 3 → rs + 4`,
    `endCap` `rs + 1 → rs + 2`. `MaxIndexCount` is **unchanged** (no new triangles). Three callers depend on
    these (`StyledLineTileBuilder.cs:251-252`, `LineRibbonJobTests.cs:40-41`,
    `BurstJobRunOffMainSpikeTests.cs:131-132`). The managed tessellator is `List`-based and has no formula to
@@ -739,7 +739,7 @@ boolean keyword.
 | stage | content | gate |
 |---|---|---|
 | **A1** | T1, T2, T2b, T3a land **RED-verified** against the current build: T1 fails (staircase); T2, T2b, T3a pass. Record each observation — a tooth never seen red is not a tooth. | green except intentionally-red T1 |
-| **A2** | **Round-cap tagging fix (§6.5).** One duplicated, `+1`-tagged flank vertex per round-capped end, emitted *before* `leftButt`/`rightButt`; **both** `LineRibbonJob` and `LineTessellator`, same commit; `MaxVertexCount` start/end cap terms +1 each, `MaxIndexCount` unchanged. RED-verified via the pre-AA `_Blur`/gap-hole probe (§7 T3c note). | full gate green, `RoundCap_*_Parity` green |
+| **A2** | **Round-cap tagging fix (§6.5).** One duplicated, `+1`-tagged flank vertex per round-capped end, emitted *before* `leftButt`/`rightButt`; **both** `RibbonJob` and `LineTessellator`, same commit; `MaxVertexCount` start/end cap terms +1 each, `MaxIndexCount` unchanged. RED-verified via the pre-AA `_Blur`/gap-hole probe (§7 T3c note). | full gate green, `RoundCap_*_Parity` green |
 | **A3** | **The straddle + the toggle.** (i) Fixed 0.5 px pad added to `outerWorld` *before* the miter multiply at `Line_VertexExtrude.hlsl:142`; the `saturate((1 − \|side\|)/fwidth(side))` ramp in `LineCoverage`; `innerFrac` re-derived against the padded outer; `dashU` still on the styled width. (ii) **Both** guarded by `_EDGE_ANTIALIASING_OFF`, `#pragma shader_feature_local` in **all five** passes. (iii) Registry + GUI, in order: `ShaderKeywords.EdgeAntialiasingOff` → `Line/PropertyNames.EdgeAntialiasing` → `Line/PropertyId.EdgeAntialiasing` → `[ToggleUI] _EdgeAntialiasing` in `Line.shader`'s (B) group → **`LineShaderGUI.ValidateMaterial` override** + `DrawLineInputs` row + XML-doc correction (incl. the stale `LineMaterialTweaker` cref) → `MapLine.mat` default. (iv) `LinePropertyNamesCount_IsExactly10` → `11`, with the `Line/PropertyNames.cs` class doc amended (§5.2 point 7). **No width knob, no new uniform, no new varying, no CBUFFER change.** T3c and T4 land here. | full gate green; T1, T2, T2b, T3a, T3c green with AA on, T4 green with AA off |
 | **A4** | T3b recorded; docs — this file's status, `meshing-design.md` §2 rewritten to the shipped model, the line shader `README.md` § antialiasing, and `docs/lessons-learned.md`'s "per-line transparent-fade AA cannot render a crisp cased line" entry corrected to the §2 mechanism. | green |
 | **A6.0** | **The AA ramps divide by the EUCLIDEAN gradient of `side`, not `fwidth`.** Two lines in `LineCoverage` — the outer edge and the gap-hole straddle. `fwidth` is Manhattan and over-reads by up to √2 with screen angle, so diagonals rendered softer *and* 0.41 px thinner than axis-aligned lines of the same styled width; the defect predates A3 and shipped with it (§2). `_Blur` and dash keep `fwidth` — separate features. | full gate green; diagonal apparent width == axis-aligned |
@@ -789,7 +789,7 @@ different things, and a future reader must not re-derive the wrong conclusion fr
   sentinel-pinned copy at `Fill_VertexModify.hlsl:42-78`). It is a ruler, not a coverage mechanism.
 - **What does not transfer:** the **distance field the entire straddle keys on.** A line carries `side` — a
   per-vertex *signed distance from the centreline*, normalized to ±1 at the lateral edge and interpolated
-  across the ribbon (`LineRibbonJob.cs:549-558`). `|side|`, `fwidth(side)`, `innerFrac` and the `_Blur` mask
+  across the ribbon (`RibbonJob.cs:549-558`). `|side|`, `fwidth(side)`, `innerFrac` and the `_Blur` mask
   are all functions of it. **A fill has no such field**: it is an earcut triangle mesh whose vertex streams
   are Position+Normal, a tile-space UV, Tangent and Color (`StyledFillTileBuilder.cs:76-82`) — an interior
   vertex carries no distance-to-boundary, and there is nothing to ramp against.
@@ -1041,7 +1041,7 @@ lives, and each was found by measurement rather than review.
   material in the build declares the keyword (`FillTweaker.cs`'s doc records this). This is why the keyword is
   `_OFF`-polarity with AA on by default — the shipping variant carries no keyword and can never be stripped.
   Inverting the polarity would make AA work in the Editor and silently vanish in a build.
-- **Burst/managed parity:** `LineRibbonJob` and `LineTessellator` are held to exact differential parity
+- **Burst/managed parity:** `RibbonJob` and `LineTessellator` are held to exact differential parity
   including `Side` (`LineRibbonJobTests.AssertParity`). Any topology or tagging change lands in both, in one
   commit.
 - `Unity.Mathematics` only (`System.Math` banned); `Core` stays engine-free; test-only members do not go on

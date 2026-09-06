@@ -37,7 +37,7 @@ namespace MapRenderer.Jobs.Fill
         public NativeList<double3> VertexUp;
 
         /// <summary>Per-vertex surface east (the fill Tangent stream's xyz), one per <see cref="TileVertices"/>
-        /// entry. Flat arm: constant <c>(1,0,0)</c>, written by <see cref="FillAggregateJob"/>. Curved arm:
+        /// entry. Flat arm: constant <c>(1,0,0)</c>, written by <see cref="AggregateJob"/>. Curved arm:
         /// <see cref="GlobeFillVertex.East"/>, scattered by <see cref="GlobeFillScatterJob"/>.</summary>
         public NativeList<double3> VertexEast;
 
@@ -54,7 +54,7 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>Non-zero ⇒ one of <see cref="FillGraphCounts"/>'s <c>Error*</c> codes; <see cref="FillGraphCounts.Ok"/>
         /// otherwise. A standalone <see cref="NativeReference{T}"/>, not a <see cref="Counts"/> field — every
-        /// writer of an error code (<see cref="FillSizingJob"/>, <see cref="EarcutBatchJob"/>) would otherwise
+        /// writer of an error code (<see cref="SizingJob"/>, <see cref="EarcutBatchJob"/>) would otherwise
         /// also become a writer of <see cref="Counts"/>, which is exactly the hidden-edge hazard this split
         /// removes (job-scheduling-design.md §3.2's own shape).</summary>
         public NativeReference<int> Error;

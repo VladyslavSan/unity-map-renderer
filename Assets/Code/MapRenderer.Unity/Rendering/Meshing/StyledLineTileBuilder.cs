@@ -45,7 +45,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// <para>ONE code path for every projection. Winding is correct BY CONSTRUCTION — <c>across</c> is tied to the
     /// same <c>up</c> the centerline was projected with (one frame), so there is no per-projection winding flip,
     /// no separate tangent-basis second frame, and no curvature/handedness branch. The managed
-    /// <see cref="LineTessellator"/> is the planar differential oracle for <see cref="LineRibbonJob"/>
+    /// <see cref="LineTessellator"/> is the planar differential oracle for <see cref="RibbonJob"/>
     /// (<c>LineRibbonJobTests</c>). This line ordering (Subdivide → Project → Triangulate) mirrors the
     /// fill one; see <c>GlobeLineWindingTests</c>.</para>
     ///
@@ -110,7 +110,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         internal const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        // LineTessellator.Triangulate default — LineRibbonJob (and its managed oracle) share it for parity.
+        // LineTessellator.Triangulate default — RibbonJob (and its managed oracle) share it for parity.
         // MiterLimit/RoundLimit are NOT defaulted here: layout.MiterLimit/layout.RoundLimit thread the
         // style's own values (or LayoutProperties' own 2.0/1.05 defaults when unset).
         private const int DefaultRoundSegments = 4;
@@ -129,10 +129,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// run it on the seam and hand the result to the pump. Mirrors <c>StyledFillTileBuilder.BuildLayerInput</c>'s split: bakes this
         /// layer's per-feature membership, colour and width columns (<paramref name="featureColors"/>/
         /// <paramref name="featureWidths"/>, caller-owned from here on, indexed by feature ORDINAL — the same
-        /// index the buffer's <c>RingFeatureIdx</c> names), and returns a <see cref="LineLayerInput"/> whose
+        /// index the buffer's <c>RingFeatureIdx</c> names), and returns a <see cref="LayerInput"/> whose
         /// <c>FeatureSelected</c> column the ring-gather node reads.
         ///
-        /// <para>Returns <c>default</c> (an uncreated <see cref="LineLayerInput"/>, with
+        /// <para>Returns <c>default</c> (an uncreated <see cref="LayerInput"/>, with
         /// <paramref name="featureColors"/>/<paramref name="featureWidths"/> also left uncreated) when there
         /// is nothing to build — an absent <paramref name="selectedFeatures"/> list or an uncreated
         /// <paramref name="geometry"/>. Unlike fill, EVERY selected feature marks its ordinal selected
@@ -144,7 +144,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <param name="featureColors">Per-feature linear colour, Persistent-allocated and owned by the
         /// caller from here on — created iff the return value is (both share one fate).</param>
         /// <param name="featureWidths">Per-feature width scale, same ownership as <paramref name="featureColors"/>.</param>
-        internal static LineLayerInput BuildLayerInput(
+        internal static LayerInput BuildLayerInput(
             IReadOnlyList<SelectedTileFeature> selectedFeatures,
             TileGeometryBuffers                geometry, // BORROWED — the store owns it; never disposed here
             Line.PaintProperties               paint,
@@ -230,7 +230,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                 featureColors = colors;
                 featureWidths = widths;
-                return new LineLayerInput
+                return new LayerInput
                 {
                     Geometry          = geometry,
                     FeatureSelected   = selected,

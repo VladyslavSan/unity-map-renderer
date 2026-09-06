@@ -37,7 +37,7 @@ namespace MapRenderer.Unity.Text.Placement
         // Every array below is allocated at its EXACT final size: SymbolTileBlockBaker counts each pool
         // in a first pass (CountSizes) with the same per-symbol arithmetic the fill pass then uses, so each
         // array's own Length IS its element count. There are deliberately no `XXXCount` companion fields —
-        // eight of them existed, duplicated Length exactly, and had zero production readers (SymbolBlockView
+        // eight of them existed, duplicated Length exactly, and had zero production readers (BlockView
         // omits pool counts by design: the gather indexes only by a winner's LocalIndex/Detail/*Start). A
         // count that can disagree with Length is a bug waiting to happen; Length cannot disagree with itself.
 

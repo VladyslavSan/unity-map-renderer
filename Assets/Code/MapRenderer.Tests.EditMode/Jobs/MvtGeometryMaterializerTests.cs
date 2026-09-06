@@ -80,7 +80,7 @@ namespace MapRenderer.Tests.Jobs
     ///
     /// <para><c>RingCapacity</c> is exercised here rather than beside the other
     /// <c>TileGeometryBuffers</c> cases because it exists for this seam: once the sizing pre-pass moved into
-    /// the materializer, the capacity a fill mesher's own sizing stage needs (<c>FillSizingJob</c>, on the
+    /// the materializer, the capacity a fill mesher's own sizing stage needs (<c>SizingJob</c>, on the
     /// graph now — job-scheduling-design.md §8 stage 4 Group B retired the synchronous
     /// <c>FillMeshPipeline.Schedule</c> that used to size it) has to come back off the buffer.</para>
     /// </summary>

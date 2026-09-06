@@ -11,7 +11,7 @@ namespace MapRenderer.Jobs.Fill
     ///
     /// <para>The error flag itself is NOT a member here — it is <see cref="FillGraphOutput.Error"/>, a
     /// standalone <see cref="Unity.Collections.NativeReference{T}"/>: an <c>Error*</c> code below can be set
-    /// by a job (<see cref="FillSizingJob"/>, <see cref="FillAggregateJob"/>) that has no other reason to touch
+    /// by a job (<see cref="SizingJob"/>, <see cref="AggregateJob"/>) that has no other reason to touch
     /// this struct's scalars, so folding it in here would make every error-only writer also a writer of
     /// counts it never reports — one more hidden edge on the shared container, the exact hazard this split
     /// removes. A Burst job cannot propagate an exception to the caller, so the never-fired capacity
@@ -37,7 +37,7 @@ namespace MapRenderer.Jobs.Fill
         /// past its scratch, so this is defense-in-depth, not a live path.</summary>
         public const int ErrorEarcutMergedVertexCapacity = 3;
 
-        /// <summary>One of <see cref="FillSizingJob"/>'s four offset tables was not strictly increasing for
+        /// <summary>One of <see cref="SizingJob"/>'s four offset tables was not strictly increasing for
         /// some polygon — defence-in-depth, not the parallel earcut's bit-exactness precondition (that is
         /// structural: consecutive-entry slices over ANY table the sizing job can emit cannot overlap — see
         /// <see cref="EarcutBatchJob"/>'s own doc). What this catches instead: a non-monotonic table
@@ -49,7 +49,7 @@ namespace MapRenderer.Jobs.Fill
         public int PolygonCount;
 
         /// <summary>Total rings the derive/select-or-clip stage emitted — <c>RingOffsets.Length - 1</c>, a
-        /// value <see cref="FillSizingJob"/> already has on hand (it borrows the same offsets to size every
+        /// value <see cref="SizingJob"/> already has on hand (it borrows the same offsets to size every
         /// polygon's outer/hole vertex counts), so this needs no dedicated node.</summary>
         public int RingCount;
 

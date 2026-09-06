@@ -15,7 +15,7 @@ namespace MapRenderer.Jobs.Symbols
     /// bit-for-bit over adversarial inputs. It is ONE job, not a parallel fan-out: the greedy pass is inherently
     /// serial (each placement depends on all prior survivors); the grid keeps it ~O(n·k).
     ///
-    /// <para><b>The grid is PRE-SIZED by the caller</b> (<see cref="SymbolCollisionGridSizing"/>) because a Burst job
+    /// <para><b>The grid is PRE-SIZED by the caller</b> (<see cref="CollisionGridSizing"/>) because a Burst job
     /// cannot grow a <see cref="NativeArray{T}"/> mid-run: the managed grid resized its node arrays inside Insert,
     /// which is illegal here. The caller computes the grid dims on the main thread, fills <see cref="CellHead"/>
     /// with -1 (length <c>GridW*GridH</c>), and sizes <see cref="NodeBox"/>/<see cref="NodeNext"/> to the exact
@@ -23,7 +23,7 @@ namespace MapRenderer.Jobs.Symbols
     /// candidate wouldn't be blocked → wrong survivor set, so the sizing mirrors this job's cell mapping exactly.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    public struct SymbolCollisionJob : IJob
+    public struct CollisionJob : IJob
     {
         // ── Candidates (sorted IN PLACE into placement order) + boxes (read-only) ────────────────────────────
         public NativeArray<SymbolCandidate> Candidates; // [0..CandidateCount) — reordered by the placement sort
@@ -126,7 +126,7 @@ namespace MapRenderer.Jobs.Symbols
                 for (int cx = cx0; cx <= cx1; cx++)
                 {
                     // Last-resort bounds guard: the pool is pre-sized on the MAIN thread by
-                    // SymbolCollisionGridSizing (managed float) while THIS insert runs in Burst — the two can
+                    // CollisionGridSizing (managed float) while THIS insert runs in Burst — the two can
                     // truncate a cell-boundary coordinate differently, so a box may map one cell wider here
                     // than the sizing counted. NodeUpperBound now carries a ±1-cell margin that makes this
                     // branch unreachable in practice; keep it as a hard floor because a Burst job CANNOT grow
@@ -190,14 +190,14 @@ namespace MapRenderer.Jobs.Symbols
     }
 
     /// <summary>
-    /// Main-thread sizing for <see cref="SymbolCollisionJob"/>'s pre-allocated grid — computes the grid dimensions
+    /// Main-thread sizing for <see cref="CollisionJob"/>'s pre-allocated grid — computes the grid dimensions
     /// and the exact node-storage upper bound BEFORE the job is scheduled (a Burst job cannot grow its arrays).
-    /// The cell mapping here is BIT-IDENTICAL to <see cref="SymbolCollisionJob"/>'s (and to the managed
+    /// The cell mapping here is BIT-IDENTICAL to <see cref="CollisionJob"/>'s (and to the managed
     /// <c>SymbolCollisionGrid</c>) — TargetCellPx / MaxGridDim / the CellX/CellY clamp must stay in lockstep with
     /// both, or the node bound under-counts and inserts drop (the differential test over adversarial inputs — wide
     /// boxes, dense clusters at the grid-dim boundary — is the net that catches drift).
     /// </summary>
-    public static class SymbolCollisionGridSizing
+    public static class CollisionGridSizing
     {
         private const float TargetCellPx = 64f;
         private const int   MaxGridDim   = 512;
@@ -238,15 +238,15 @@ namespace MapRenderer.Jobs.Symbols
         }
 
         /// <summary>An upper bound on grid nodes: every box (whether or not it ends up inserted) covers
-        /// <c>(cellsX·cellsY)</c> cells — summed, this bounds <see cref="SymbolCollisionJob.NodeBox"/>'s length.
+        /// <c>(cellsX·cellsY)</c> cells — summed, this bounds <see cref="CollisionJob.NodeBox"/>'s length.
         /// <para><b>±1-cell margin (each axis, each side):</b> this runs on the MAIN thread (managed float)
-        /// while <see cref="SymbolCollisionJob.Insert"/> maps the SAME coords in Burst — a coordinate sitting
+        /// while <see cref="CollisionJob.Insert"/> maps the SAME coords in Burst — a coordinate sitting
         /// on a cell boundary can truncate one cell either way between the two, so the job may cover up to one
         /// extra cell per side that a tight bound would miss. A Burst job CANNOT grow its pre-sized
         /// <see cref="NativeArray{T}"/> mid-run (the retired managed grid could, so it never overflowed — this
         /// margin restores that safety), and an under-count is an out-of-range write. Widening each cell span
         /// by 2 (one cell per side) provably covers a ±1-cell truncation drift; the cost is a few extra ints
-        /// per box. <see cref="SymbolCollisionJob.Insert"/>'s bounds guard is the last-resort floor beneath
+        /// per box. <see cref="CollisionJob.Insert"/>'s bounds guard is the last-resort floor beneath
         /// this.</para></summary>
         public static int NodeUpperBound(NativeArray<SymbolBox> boxes, int count, in Dims d)
         {
@@ -261,7 +261,7 @@ namespace MapRenderer.Jobs.Symbols
             return total;
         }
 
-        /// <summary>The node upper bound counted the way <see cref="SymbolCollisionJob"/> actually INSERTS —
+        /// <summary>The node upper bound counted the way <see cref="CollisionJob"/> actually INSERTS —
         /// per CANDIDATE box-reference, not per unique box. <see cref="NodeUpperBound"/> sums each box in
         /// <c>[0,boxCount)</c> ONCE; this sums every box in every candidate's <c>[BoxStart, BoxStart+BoxCount)</c>
         /// range, exactly mirroring the job's insert loop. It equals the per-unique bound when the ranges tile

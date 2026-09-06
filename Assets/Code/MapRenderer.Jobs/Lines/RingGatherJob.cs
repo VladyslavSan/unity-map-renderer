@@ -23,10 +23,10 @@ namespace MapRenderer.Jobs.Lines
     /// <see cref="OutSrcTile"/>'s final length, so the two deferred nodes after it
     /// (<c>TileToGeoJob</c>/<c>ProjectionDispatch</c>) have their write targets correctly sized before they
     /// execute — the same "a length-authoritative node resizes ahead of its deferred consumers" contract
-    /// <c>FillAggregateJob</c> holds for <c>Geo</c> (<c>FillAggregateJob.cs:83-89</c>).</para>
+    /// <c>AggregateJob</c> holds for <c>Geo</c> (<c>AggregateJob.cs:83-89</c>).</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    internal struct LineRingGatherJob : IJob
+    internal struct RingGatherJob : IJob
     {
         // ── Input (borrowed — never written, never disposed here) ──────────────────────────────
         /// <summary>Flat tile-space ring vertices of the borrowed source layer.</summary>
@@ -51,7 +51,7 @@ namespace MapRenderer.Jobs.Lines
         /// through: read it, never re-derive it.</summary>
         [ReadOnly] public int RingCount;
 
-        /// <summary>This layer's per-feature membership column (<see cref="LineLayerInput.FeatureSelected"/>).</summary>
+        /// <summary>This layer's per-feature membership column (<see cref="LayerInput.FeatureSelected"/>).</summary>
         [ReadOnly] public NativeArray<bool> FeatureSelected;
 
         // ── Output ─────────────────────────────────────────────────────────────────────────────
@@ -76,7 +76,7 @@ namespace MapRenderer.Jobs.Lines
         public NativeList<double3> OutSrcWorld;
 
         /// <summary>Pre-sized (never written here) so <c>ProjectionDispatch.Schedule</c>'s deferred UP write
-        /// has a correctly sized target — the subdivision metric <see cref="LineSubdivideJob"/> reads.</summary>
+        /// has a correctly sized target — the subdivision metric <see cref="SubdivideJob"/> reads.</summary>
         public NativeList<double3> OutSrcUp;
 
         public void Execute()

@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         ///
         /// <para>One job, both projections. After the §3.7 output reshape the graph hands this job ONE
         /// column set regardless of arm, and the tangent is <c>(VertexEast[i], 1)</c> on both: the flat
-        /// arm's east is the constant <c>(1,0,0)</c> (<c>FillAggregateJob</c>'s write — see its own doc) —
+        /// arm's east is the constant <c>(1,0,0)</c> (<c>AggregateJob</c>'s write — see its own doc) —
         /// the retired managed writer's constant +X tangent, byte for byte; there is no curved twin here.</para>
         ///
         /// <para><b>Holds the whole <see cref="Md"/>, not four separate stream <c>NativeArray</c> fields</b>

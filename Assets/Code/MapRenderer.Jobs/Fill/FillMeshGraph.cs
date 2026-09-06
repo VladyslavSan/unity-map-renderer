@@ -42,18 +42,18 @@ namespace MapRenderer.Jobs.Fill
     /// must not dispose either before completing the returned <see cref="FillGraphOutput"/>.</para>
     ///
     /// <para><b>The capacity error flags are never-fired backstops here</b>, same posture as
-    /// <c>FillMeshPipeline.EnsureCapacity</c>: That bound makes <c>FillSizingJob</c>'s
+    /// <c>FillMeshPipeline.EnsureCapacity</c>: That bound makes <c>SizingJob</c>'s
     /// <c>MaxPolygons</c>/<c>MaxHoles</c> capacity check unreachable from THIS caller (only a test handing
-    /// <c>FillSizingJob</c> an artificially small capacity standalone can trip it). Downstream nodes do not
+    /// <c>SizingJob</c> an artificially small capacity standalone can trip it). Downstream nodes do not
     /// branch on the flag — the write graph (stage 2) is what reads it and settles a faulted layer as
     /// zero-vertex, mirroring the design doc's stated shape. A hypothetical trip through THIS file today
     /// reads NOTHING in every later node, not garbage-length flat lists: every node that holds a sizing-owned
-    /// buffer struct (<see cref="FillTriangulationBuffers"/>/<c>LineRibbonBuffers</c>) bounds its own loop —
+    /// buffer struct (<see cref="TriangulationBuffers"/>/<c>RibbonBuffers</c>) bounds its own loop —
     /// or its deferred count — by a column its sizing job resizes, never a borrowed count that job's early
     /// return does not touch. Nodes past the aggregate bound by columns the AGGREGATE sizes, and inherit
     /// emptiness through it (job-scheduling-design.md §7 rule 2).
     /// <c>FillSizingJobTests.SizingCapacityOverrun_LeavesGatherAndAggregate_WithNothingToDo</c> is the
-    /// observing tooth for <see cref="FillGatherJob{TComparer}"/> and <see cref="FillAggregateJob"/> — it
+    /// observing tooth for <see cref="FillGatherJob{TComparer}"/> and <see cref="AggregateJob"/> — it
     /// drives both over the same buffers and goes red if either re-introduces a borrowed count as its loop
     /// bound. <see cref="EarcutBatchJob"/> has no loop of its own to bound (it is deferred over
     /// <c>buffers.PerPolyOuterCount</c>); <c>FillMeshGraphStructureTests</c> pins that deferred-count source
@@ -180,9 +180,9 @@ namespace MapRenderer.Jobs.Fill
             // did. Depends on assembly directly; no join needed.
             var counts  = FillGraphOutput.AllocateCounts();
             var error   = FillGraphOutput.AllocateError();
-            var buffers = FillTriangulationBuffers.Allocate();
+            var buffers = TriangulationBuffers.Allocate();
 
-            JobHandle sized = new FillSizingJob
+            JobHandle sized = new SizingJob
             {
                 PolyOuterRingIdx = polys.PolyOuterRingIdx, PolyHoleListStart = polys.PolyHoleListStart, PolyHoleCount = polys.PolyHoleCount,
                 HoleRingIdxs = polys.HoleRingIdxs, PolyCountArr = polys.PolyCountArr, HoleCountArr = polys.HoleCountArr,
@@ -207,9 +207,9 @@ namespace MapRenderer.Jobs.Fill
             // ── Earcut batch, parallel over polygons (job-scheduling-design.md §8 stage 6, C.3/C.4):
             // EarcutJob's fields untouched — GetSubArray + Execute() inside. Count source is
             // buffers.PerPolyOuterCount — a WRITTEN list, not merely borrowed, but this job only READS it
-            // (FillSizingJob resizes it to exactly polyCount); a written list as the count source invites a
+            // (SizingJob resizes it to exactly polyCount); a written list as the count source invites a
             // question a read-only one does not, so it is called out here. A capacity early-return in
-            // FillSizingJob leaves PerPolyOuterCount at length 0, so this runs zero batches — strictly better
+            // SizingJob leaves PerPolyOuterCount at length 0, so this runs zero batches — strictly better
             // than reading garbage-length flat lists downstream (FillMeshGraph.cs's own doc, above). ────────
             JobHandle triangulated = new EarcutBatchJob
             {
@@ -253,7 +253,7 @@ namespace MapRenderer.Jobs.Fill
             }
             var geo = NewBuffer<GeoCoordinate>(1);
 
-            JobHandle aggregated = new FillAggregateJob
+            JobHandle aggregated = new AggregateJob
             {
                 Buffers = buffers,
                 TileVertices = tileVertices, WorldPositions = worldPositions, VertexUp = vertexUp, VertexEast = vertexEast,
@@ -264,7 +264,7 @@ namespace MapRenderer.Jobs.Fill
             // Every derived list, and the earcut buffers / polygon-descriptor GROUPS, are dead after
             // aggregate — they either fed it directly or fed a node it already transitively depends on. Each
             // group disposes its own containers via its own DisposeAfter — no hand-counted array, no forgotten
-            // increment (the confound a hand-counted array invites — see FillTriangulationBuffers's own doc).
+            // increment (the confound a hand-counted array invites — see TriangulationBuffers's own doc).
             JobHandle disposeListsAfterAggregate = ScheduleDispose(outVerts, aggregated);
             disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outOffsets, aggregated));
             disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outFeatIdx, aggregated));
@@ -298,7 +298,7 @@ namespace MapRenderer.Jobs.Fill
                 // TileVerts/TriangleIndices/VertexFeatureIdx and projects internally — it has no
                 // WorldPositions/VertexUp input to read, established by reading the job's field list.
                 //
-                // geo was pre-sized by FillAggregateJob (a field every caller of that job fills) but never
+                // geo was pre-sized by AggregateJob (a field every caller of that job fills) but never
                 // used on this arm — dispose after the job that last touched it, same rule as any buffer.
                 JobHandle disposeGeo = ScheduleDispose(geo, aggregated);
                 // worldPositions/vertexUp/vertexEast were likewise pre-sized but are dead buffers here — the

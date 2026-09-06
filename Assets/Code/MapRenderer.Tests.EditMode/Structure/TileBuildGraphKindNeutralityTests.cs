@@ -45,7 +45,7 @@ namespace MapRenderer.Tests.Structure
             "FillMeshGraph", "LineMeshGraph", "FillExtrusionMeshGraph",
             "FillGraphOutput", "LineGraphOutput", "FillExtrusionGraphOutput",
             "StyledFillTileBuilder", "StyledLineTileBuilder", "StyledFillExtrusionTileBuilder",
-            "WallColumns", "LineLayerInput",
+            "WallColumns", "LayerInput",
             // R2: the three this stage creates — without these the fence is blind to the reflex re-growth.
             "FillLayerBuild", "FillExtrusionLayerBuild", "LineLayerBuild",
         };

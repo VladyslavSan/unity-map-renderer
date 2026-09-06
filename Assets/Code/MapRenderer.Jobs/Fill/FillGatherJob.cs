@@ -29,9 +29,9 @@ namespace MapRenderer.Jobs.Fill
     ///
     /// <para><b>Bounds its own loop by <c>Buffers.PerPolyOuterCount.Length</c>, never a borrowed polygon
     /// count</b> — see <see cref="Execute"/>'s own comment for the mechanism, mirroring
-    /// <see cref="FillAggregateJob"/>'s own doc. This was a real, pre-existing bug found and fixed alongside
-    /// the identical defect in <see cref="FillAggregateJob"/>: a borrowed count does not shrink when
-    /// <see cref="FillSizingJob"/> returns early, so this job would otherwise write past a length-0
+    /// <see cref="AggregateJob"/>'s own doc. This was a real, pre-existing bug found and fixed alongside
+    /// the identical defect in <see cref="AggregateJob"/>: a borrowed count does not shrink when
+    /// <see cref="SizingJob"/> returns early, so this job would otherwise write past a length-0
     /// <c>PerPolyFeatureIndex</c>/<c>PerPolyOuterCount</c> — silent, since <see cref="NativeArray{T}"/>'s
     /// indexer bounds check is <c>[Conditional("ENABLE_UNITY_COLLECTIONS_CHECKS")]</c> and compiled OUT of a
     /// release player build.</para>
@@ -67,7 +67,7 @@ namespace MapRenderer.Jobs.Fill
         /// (<see cref="EarcutBatchJob"/> needs it alongside <see cref="PolyHoleCount"/> to populate
         /// <c>EarcutJob.OuterCount</c>; nothing upstream reports it per-polygon — only the outer ring INDEX,
         /// <see cref="PolyOuterRingIdx"/>).</summary>
-        public FillTriangulationBuffers Buffers;
+        public TriangulationBuffers Buffers;
 
         public void Execute()
         {
@@ -78,10 +78,10 @@ namespace MapRenderer.Jobs.Fill
             NativeArray<int>     perPolyFeatureIndex = Buffers.PerPolyFeatureIndex.AsArray();
             NativeArray<int>     perPolyOuterCount = Buffers.PerPolyOuterCount.AsArray();
 
-            // Bound by PerPolyOuterCount's OWN length, never a borrowed polygon count — FillSizingJob's own
+            // Bound by PerPolyOuterCount's OWN length, never a borrowed polygon count — SizingJob's own
             // capacity/monotonicity early returns leave every Buffers column at length 0 without touching a
             // borrowed count, so bounding by one here would still loop over a zero-length list (see
-            // FillSizingJob's and FillAggregateJob's own docs for the mechanism and history).
+            // SizingJob's and AggregateJob's own docs for the mechanism and history).
             int polyCount = perPolyOuterCount.Length;
 
             int maxHoleCount = 0;

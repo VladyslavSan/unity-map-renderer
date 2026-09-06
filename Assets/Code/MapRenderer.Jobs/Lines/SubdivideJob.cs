@@ -10,14 +10,14 @@ namespace MapRenderer.Jobs.Lines
     /// <summary>
     /// The line graph's curvature-subdivision node (job-scheduling-design.md §8 stage 5): per ring, the body
     /// of <c>StyledLineTileBuilder.SubdivideCenterline</c> (<c>:473-496</c>) over the flat columns
-    /// <see cref="LineRingGatherJob"/> produced — split count from
+    /// <see cref="RingGatherJob"/> produced — split count from
     /// <see cref="LineCurvatureSubdivision.SegmentSteps"/> over the per-point surface up
     /// (<see cref="SrcUp"/>), then linear interpolation in tile space. A flat projection's <c>∞</c> tolerance
     /// yields 1 step/segment, so the output is the original ring — the Mercator path is the degenerate value
     /// of the SAME code, no capability flag.
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
-    internal struct LineSubdivideJob : IJob
+    internal struct SubdivideJob : IJob
     {
         // ── Input (borrowed) ───────────────────────────────────────────────────────────────────
         [ReadOnly] public NativeList<double2> SrcTile;

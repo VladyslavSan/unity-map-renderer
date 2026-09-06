@@ -10,15 +10,15 @@ using MapRenderer.Jobs.Projection;
 namespace MapRenderer.Jobs.Lines
 {
     /// <summary>
-    /// Schedules the line measure graph over one <see cref="LineLayerInput"/>, returning an UNCOMPLETED
+    /// Schedules the line measure graph over one <see cref="LayerInput"/>, returning an UNCOMPLETED
     /// <see cref="LineGraphOutput"/> (job-scheduling-design.md §8 stage 5). Chain: gather the layer's
-    /// selected LineString rings (<see cref="LineRingGatherJob"/>) → project the ORIGINAL centerline to
+    /// selected LineString rings (<see cref="RingGatherJob"/>) → project the ORIGINAL centerline to
     /// per-point surface up (<c>TileToGeoJob</c> → <c>ProjectionDispatch</c>, the subdivision metric) →
-    /// curvature-subdivide in tile space (<see cref="LineSubdivideJob"/>) → project the SUBDIVIDED
+    /// curvature-subdivide in tile space (<see cref="SubdivideJob"/>) → project the SUBDIVIDED
     /// centerline to origin-relative render space (<c>TileToGeoJob</c> → <c>ProjectionDispatch</c> again) →
-    /// build the 3D ribbon: size (<see cref="LineRibbonSizingJob"/>) → per-ring parallel
-    /// (<see cref="LineRibbonBatchJob"/>) → aggregate, winding swap + rebase
-    /// (<see cref="LineRibbonAggregateJob"/>), job-scheduling-design.md §8 stage 6. Mirrors the managed line
+    /// build the 3D ribbon: size (<see cref="RibbonSizingJob"/>) → per-ring parallel
+    /// (<see cref="RibbonBatchJob"/>) → aggregate, winding swap + rebase
+    /// (<see cref="RibbonAggregateJob"/>), job-scheduling-design.md §8 stage 6. Mirrors the managed line
     /// builder's original "Subdivide → Project → Triangulate" ordering, scheduled instead of run (that
     /// managed ring loop retired with job-scheduling-design.md §8 stage 5 Group B — this graph is the sole
     /// mesher now).
@@ -39,14 +39,14 @@ namespace MapRenderer.Jobs.Lines
         /// before moving it.</summary>
         internal const int VertexBatch = 1024;
 
-        /// <summary>Rings per batch for <see cref="LineRibbonBatchJob"/> (job-scheduling-design.md §8 stage
+        /// <summary>Rings per batch for <see cref="RibbonBatchJob"/> (job-scheduling-design.md §8 stage
         /// 6). <c>1</c>: same reasoning as <see cref="FillMeshGraph.EarcutPolygonBatch"/> — a ring's ribbon
         /// cost varies with its join/cap decisions, not linearly with point count, so per-ring work is
         /// uneven; batch 1 lets the job system's work-stealing act as the load balancer.</summary>
         internal const int RibbonRingBatch = 1;
 
         /// <summary>Per-layer ribbon vertex ceiling (D2, job-scheduling-design.md §10). Threaded to
-        /// <see cref="LineRibbonBatchJob"/> through <see cref="LineLayerInput.MaxOutputVertices"/> — never
+        /// <see cref="RibbonBatchJob"/> through <see cref="LayerInput.MaxOutputVertices"/> — never
         /// read directly inside a job, so a test can drive its own ceiling with a synthetic ring without
         /// this constant changing what it observes.
         ///
@@ -63,7 +63,7 @@ namespace MapRenderer.Jobs.Lines
         /// Otherwise returns a <see cref="LineGraphOutput"/> whose <c>Handle</c> is UNCOMPLETED; the caller
         /// polls or completes it before reading any field.
         /// </summary>
-        /// <param name="input">By value, not <c>in</c> — <see cref="LineLayerInput"/> is a mutable struct,
+        /// <param name="input">By value, not <c>in</c> — <see cref="LayerInput"/> is a mutable struct,
         /// and the conventions gate is <c>in</c> ⟺ <c>readonly struct</c>.</param>
         /// <param name="deps">Upstream dependency this whole layer's chain must wait for.</param>
         /// <remarks><c>public</c> (not <c>internal</c> per the plan's literal wording): <c>MapRenderer.Jobs</c>
@@ -73,7 +73,7 @@ namespace MapRenderer.Jobs.Lines
         /// (<c>StyledLineTileBuilder</c>/<c>LineRenderLayer</c>/<c>TileBuildGraph</c>) live in that assembly
         /// and must reach both this method and <see cref="LineGraphOutput"/> across the assembly
         /// boundary.</remarks>
-        public static LineGraphOutput Schedule(LineLayerInput input, JobHandle deps = default)
+        public static LineGraphOutput Schedule(LayerInput input, JobHandle deps = default)
         {
             if (!input.Geometry.IsCreated || !input.FeatureSelected.IsCreated)
                 return default;
@@ -104,7 +104,7 @@ namespace MapRenderer.Jobs.Lines
         /// closed switch. Calls <see cref="ProjectionDispatch.ScheduleTyped{TProj}"/> directly, not
         /// <see cref="ProjectionDispatch.Schedule"/> — the same reason that method's own switch stays closed
         /// (A1.8's own doc).</summary>
-        internal static LineGraphOutput ScheduleTyped<TProj>(LineLayerInput input, TProj projection, JobHandle deps)
+        internal static LineGraphOutput ScheduleTyped<TProj>(LayerInput input, TProj projection, JobHandle deps)
             where TProj : struct, IProjection
         {
             TileGeometryBuffers source = input.Geometry;
@@ -117,7 +117,7 @@ namespace MapRenderer.Jobs.Lines
             var srcWorld       = NewBuffer<double3>(512);
             var srcUp          = NewBuffer<double3>(512);
 
-            JobHandle gathered = new LineRingGatherJob
+            JobHandle gathered = new RingGatherJob
             {
                 Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
                 FeatureGeometryType = source.FeatureGeometryType, RingCount = source.RingCount,
@@ -148,7 +148,7 @@ namespace MapRenderer.Jobs.Lines
             var subWorld      = NewBuffer<double3>(512);
             var subUp         = NewBuffer<double3>(512);
 
-            JobHandle subdivided = new LineSubdivideJob
+            JobHandle subdivided = new SubdivideJob
             {
                 SrcTile = srcTile, RingSrcOffsets = ringSrcOffsets, SrcUp = srcUp,
                 MaxRefineAngleRad = projection.MaxRefineAngleRad,
@@ -178,13 +178,13 @@ namespace MapRenderer.Jobs.Lines
             // ── Build the 3D ribbon per ring — sizing (serial) → ribbon (IJobParallelForDefer over rings) →
             // aggregate (serial), job-scheduling-design.md §8 stage 6, E.2. The earcut's sizing→parallel→
             // aggregate shape verbatim: a ring's true vertex/index count is not analytically predictable
-            // (it falls out of LineRibbonJob's join/cap decisions), exactly the earcut's own reason. ────────
+            // (it falls out of RibbonJob's join/cap decisions), exactly the earcut's own reason. ────────
             var vertices         = LineGraphOutput.AllocateOutputList<LineRibbonVertex>();
             var vertexFeatureIdx = LineGraphOutput.AllocateOutputList<int>();
             var indices          = LineGraphOutput.AllocateOutputList<int>();
             var error            = LineGraphOutput.AllocateError();
 
-            LineRibbonBuffers ribbonBuffers = LineRibbonBuffers.Allocate();
+            RibbonBuffers ribbonBuffers = RibbonBuffers.Allocate();
 
             // Sizing and aggregate SHARE `error` (not a separate reference): LineGraphOutput.AllocateError()
             // hands out a zero-initialised NativeReference<int> (Ok == 0), and neither node ever resets it —
@@ -192,17 +192,17 @@ namespace MapRenderer.Jobs.Lines
             // this is NOT "whichever fires first (if either)" — a naive reading would let aggregate's own
             // check overwrite a real sizing error (last-writer-wins). It cannot: a sizing failure returns
             // before its Resize calls, leaving PerRingVertexCount/PerRingIndexCount at length 0, and
-            // LineRibbonAggregateJob bounds its own loop by PerRingVertexCount.Length — so aggregate's error
+            // RibbonAggregateJob bounds its own loop by PerRingVertexCount.Length — so aggregate's error
             // condition structurally cannot evaluate true in the same run sizing's already did. The two
             // conditions are mutually exclusive by construction, not merely by scheduling order — mirrors
-            // FillGraphOutput's Error posture across FillSizingJob/FillAggregateJob exactly (same bound fix).
-            JobHandle sized = new LineRibbonSizingJob
+            // FillGraphOutput's Error posture across SizingJob/AggregateJob exactly (same bound fix).
+            JobHandle sized = new RibbonSizingJob
             {
                 RingSubOffsets = ringSubOffsets, RoundSegments = input.RoundSegments,
                 Buffers = ribbonBuffers, Error = error,
             }.Schedule(subdivided);
 
-            JobHandle ribboned = new LineRibbonBatchJob
+            JobHandle ribboned = new RibbonBatchJob
             {
                 SubWorld = subWorld, SubUp = subUp, RingSubOffsets = ringSubOffsets,
                 Join = input.Join, Cap = input.Cap, MiterLimit = input.MiterLimit,
@@ -210,7 +210,7 @@ namespace MapRenderer.Jobs.Lines
                 Buffers = ribbonBuffers,
             }.Schedule(ribbonBuffers.PerRingVertexCount, RibbonRingBatch, JobHandle.CombineDependencies(subProjected, sized));
 
-            JobHandle aggregated = new LineRibbonAggregateJob
+            JobHandle aggregated = new RibbonAggregateJob
             {
                 RingFeature = ringFeature,
                 Buffers = ribbonBuffers, MaxOutputVertices = input.MaxOutputVertices,

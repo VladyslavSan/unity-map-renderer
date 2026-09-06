@@ -268,7 +268,7 @@ namespace MapRenderer.Tests.Text.Placement
             var screenPath = new[] { new float2(0, 0), new float2(100, 0) };
             var depthPath  = new[] { 0.3f, 0.7f };            // mid vertex (index 1) → pathDepth 0.7
             var validPath  = new byte[] { 1, 1 };
-            // World path mirrors the screen path 1:1 (index-aligned, per SymbolStageJob's contract) — a flat
+            // World path mirrors the screen path 1:1 (index-aligned, per StageJob's contract) — a flat
             // east-only line at Y=Z=0, TileOriginRender left at its float3-zero default.
             var worldPath  = new[] { new double3(0, 0, 0), new double3(100, 0, 0) };
             var worldUpPath = new float3[worldPath.Length]; // P2: unread by this box/tangent tooth

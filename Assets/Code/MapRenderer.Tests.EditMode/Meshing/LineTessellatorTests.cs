@@ -816,7 +816,7 @@ namespace MapRenderer.Tests.Meshing
         /// and leaves that arc segment hard.</para>
         ///
         /// <para>Pinned on the managed side only, deliberately: <c>LineRibbonJobTests.AssertParity</c> holds
-        /// the Burst <c>LineRibbonJob</c> to this tessellator on EXACT <c>Side</c> for
+        /// the Burst <c>RibbonJob</c> to this tessellator on EXACT <c>Side</c> for
         /// <c>RoundCap_Parity</c> and <c>RoundCap_And_RoundJoin_Parity</c>, so the job inherits the guarantee
         /// differentially. Do not add a redundant copy on the job side.</para>
         /// </summary>
@@ -1048,7 +1048,7 @@ namespace MapRenderer.Tests.Meshing
         ///
         /// <para>Added in the IR C1 fix stage, when <c>Tools/core-tests/LineMiterHairpinTests.cs</c> — which
         /// caught this over real boundary tiles but had stopped compiling and stopped running — was retired.
-        /// Production's own mirror of this gate (<c>LineRibbonJob.NeedsBevel</c>) stays covered end-to-end by
+        /// Production's own mirror of this gate (<c>RibbonJob.NeedsBevel</c>) stays covered end-to-end by
         /// <c>BoundaryGlitchMeshTests</c> over the same three fixtures; this keeps the managed oracle, which
         /// has no production caller, pinned at a value that tells the two comparisons apart.</para>
         /// </summary>
