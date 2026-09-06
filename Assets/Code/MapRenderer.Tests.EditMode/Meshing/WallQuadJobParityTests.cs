@@ -245,84 +245,110 @@ namespace MapRenderer.Tests.Meshing
         }
 
         /// <summary>
-        /// Tooth (d) — stage-wall-job-plan.md §5(d): the walls have never honoured the tile-buffer clip
-        /// (KNOWN, SHIPPED BUG, UMR-93 — see <c>WriteWalls</c>'s own comment) and this is the observer that
-        /// stops a future reader "unifying" the wall gather with the roof's clipped one by accident, which
-        /// would silently start clipping wall geometry — a behaviour change nothing else here would catch.
+        /// The wall chain honours the tile-buffer clip (UMR-93): it takes the SAME select-or-clip branch on
+        /// <c>LayerInput.Clip</c> the roof takes, so a building crossing the tile-buffer window is extruded
+        /// from the CLIPPED footprint, not the full one. Before the fix the walls ran
+        /// <c>RingSelectJob</c> unconditionally, and with the shipped <c>FillTileBufferClip: 0</c> config —
+        /// which decodes to the ENABLED <c>KeepTileUnits(0.0)</c>, only a negative value disables — two
+        /// neighbouring tiles each raised a crossing building's whole wall set.
         ///
-        /// Fixture: a square straddling the tile-buffer window at <c>[0, 4096]</c> (the roof still emits 4
-        /// vertices — Sutherland–Hodgman swaps corners for intersection points on a convex quad, it does not
-        /// drop it) plus a SECOND square wholly OUTSIDE the window, whose ring <c>RingClipJob</c> drops
-        /// entirely on the enabled arm (<c>clippedLen == 0 ⇒ continue</c>) — the dropped ring is what moves a
-        /// COUNT, which no clipping arithmetic on the first square alone can (R2: the previous version of this
-        /// fixture, straddling square only, asserted a witness that was false — 20 vertices either way).
+        /// <para><b>Fixture and the arithmetic behind every number below.</b> Two squares at
+        /// <c>Extent = 4096</c>, window <c>[0, 4096]²</c> under <c>KeepTileUnits(0.0)</c>:
+        /// <c>straddling</c> at (3900,3900)+500 crosses the window's far corner; <c>whollyOutside</c> at
+        /// (5000,5000)+300 lies entirely beyond it. Clipped, <c>whollyOutside</c>'s ring is DROPPED
+        /// (<c>RingClipJob</c>: <c>clippedLen == 0 ⇒ continue</c>) and contributes no wall at all, while
+        /// <c>straddling</c> becomes (3900,3900) (4096,3900) (4096,4096) (3900,4096) — still 4 vertices,
+        /// hence 4 edges, since the wall job closes the ring with <c>(i+1) % len</c>. At 4 vertices +
+        /// 6 indices per edge that is <b>16 wall vertices / 24 wall indices</b>. Unclipped, both squares
+        /// survive at 4 edges each: <b>32 / 48</b>.</para>
         ///
-        /// <para><b>Which shape the simulation covers, and which it does not.</b> The injection moves VALUES
-        /// while the wall vertex COUNT stays equal between the two arms. But `RingClipJob`'s headline
-        /// behaviour is DROPPING rings, so the likelier presentation of the real regression is a count
-        /// change — and <c>wallVertexCount</c> is computed once above and reused to slice BOTH meshes, so a
-        /// genuine count divergence is the one shape this simulation cannot exercise. Both review arms judged
-        /// the tooth still catches that branch (unequal counts misalign the tail slices, which reds the same
-        /// Position assertion); what is NOT established is that it reds *cleanly* with the message shown
-        /// below rather than by reading across the roof/wall boundary. Assertion (1) is what keeps this
-        /// honest — it fails loudly if the fixture ever stops reaching the drop branch.</para>
-        /// RED-VERIFIED — SIMULATED PRESENTATION, NOT THE PRODUCTION DEFECT PATH (2026-09-04): the plan's own
-        /// recipe — route the wall gather through `RingClipJob` instead of `RingSelectJob` — needs a `clip`
-        /// window threaded into `WriteWalls`, a real production signature change too large to inject and
-        /// cleanly revert here. The `RingClipJob` route was NOT exercised. What WAS verified is the assertion
-        /// machinery, presented with ONE of the two shapes that defect could produce: shifted `roofDisabled` by +1
-        /// (misaligning the disabled arm's wall slice by one vertex — what a wall block that started reacting
-        /// to the clip would look like from this test's own vantage point) — reds on `wall Position[0]
-        /// diverges between the disabled and enabled clip arms`, exactly the assertion this tooth exists to
-        /// fire. Reverted; confirmed green with no injection immediately after. The reachability witness
-        /// above (assertion (1), the vertex-count precondition) is what keeps this simulation honest: it
-        /// fails loudly if the fixture ever stops reaching `RingClipJob`'s drop branch, so a false pass here
-        /// cannot hide behind an inert fixture the way an unexecuted RED elsewhere in this epic once did.
+        /// <para><b>Why 16 and not 8.</b> 8 would be the rejected alternative — walls suppressed along the
+        /// two edges the clip CUT. This renderer emits a wall for EVERY edge of the clipped ring, cut edges
+        /// included, because what is extruded is the clipped polygon; the cut quads are hidden inside the
+        /// opaque solid in steady state and are what keeps a building at the edge of the loaded cover CLOSED
+        /// rather than a hollow shell. The one condition that reopens the alternative is translucent
+        /// fill-extrusion (<c>depth-and-render-regimes-design.md</c> §6.E) — until then, a "simplification"
+        /// to 8 is a regression, and this number is what stops it landing silently.</para>
+        ///
+        /// <para><b>The disabled-arm control (32/48) is not decoration.</b> Without it assertion 1 would be a
+        /// statement about wall emission in general rather than about the clip: it is what pins that the
+        /// <c>RingSelectJob</c> arm did not move, inside the tooth that changes.</para>
+        ///
+        /// <para><b>Reachability witness.</b> The roof vertex counts of the two arms must differ — that is
+        /// what proves <c>whollyOutside</c>'s ring really reaches <c>RingClipJob</c>'s drop branch rather
+        /// than the fixture quietly ceasing to exercise it. Post-fix the roof and the walls now BOTH lose
+        /// that ring; the roof half is the independent half, since the wall counts are what the assertions
+        /// below are testing.</para>
         /// </summary>
         [Test]
-        public void Walls_IgnoreTheTileBufferClip()
+        public void Walls_HonourTheTileBufferClip()
         {
             var straddling = SquareFeature(3900, 3900, 500);
             var whollyOutside = SquareFeature(5000, 5000, 300);
             IReadOnlyList<IFeature> features = new[] { straddling, whollyOutside };
             FillExtrusion.PaintProperties paint = ConstantHeightPaint(50);
-
             IProjection projection = new WebMercatorProjection();
-            Mesh meshDisabled = TestTileMeshBuilder.BuildFillExtrusion(features, paint, 0.0, Extent, ModerateTile, projection, clip: TileBufferClip.Disabled);
-            Mesh meshEnabled = TestTileMeshBuilder.BuildFillExtrusion(features, paint, 0.0, Extent, ModerateTile, projection, clip: TileBufferClip.KeepTileUnits(0.0));
-            Assert.IsNotNull(meshDisabled, "disabled-clip build must produce geometry.");
-            Assert.IsNotNull(meshEnabled, "enabled-clip build must produce geometry.");
 
-            // (1) Reachability witness: the SECOND feature's ring is dropped on the enabled arm, so the roof
-            // loses vertices there while the walls (both arms) still emit all of them — the two total counts
-            // must differ, or this fixture is not entering the branch it exists to test (R2).
-            Assert.AreNotEqual(meshDisabled.vertexCount, meshEnabled.vertexCount,
-                "precondition (R2): the two builds' total vertex counts must differ — if they don't, the " +
-                "wholly-outside feature's ring was not dropped by RingClipJob, and this fixture is not " +
+            BuildCounts enabled = BuildWallCounts(features, paint, projection, TileBufferClip.KeepTileUnits(0.0));
+            BuildCounts disabled = BuildWallCounts(features, paint, projection, TileBufferClip.Disabled);
+
+            Assert.AreNotEqual(disabled.RoofVertexCount, enabled.RoofVertexCount,
+                "precondition: the two arms' ROOF vertex counts must differ — if they don't, the " +
+                "wholly-outside feature's ring was not dropped by RingClipJob and this fixture is not " +
                 "exercising the clip branch it exists to observe.");
 
-            // Wall vertex/index counts are clip-INDEPENDENT by construction (WriteWalls never reads `clip`) —
-            // get them once via BuildLayerInput, then slice each mesh's own tail with them.
+            // (1) The clipped arm: whollyOutside dropped entirely, straddling clipped to 4 edges.
+            Assert.AreEqual(16, enabled.WallVertexCount,
+                "clipped walls: whollyOutside's ring is dropped (0 walls) and straddling clips to a 4-vertex " +
+                "ring ⇒ 4 edges × 4 vertices = 16. 32 means the walls ignored the clip; 8 means the cut " +
+                "edges were suppressed (the rejected alternative — see this test's doc).");
+            Assert.AreEqual(24, enabled.WallIndexCount, "clipped walls: 4 edges × 6 indices = 24.");
+
+            // (2) The disabled-arm control: the RingSelectJob arm is untouched by this fix.
+            Assert.AreEqual(32, disabled.WallVertexCount,
+                "unclipped walls: both squares survive at 4 edges each ⇒ 8 edges × 4 vertices = 32.");
+            Assert.AreEqual(48, disabled.WallIndexCount, "unclipped walls: 8 edges × 6 indices = 48.");
+        }
+
+        /// <summary>Roof and wall counts of one <see cref="FillExtrusionMeshGraph.Schedule"/> build — the
+        /// per-arm measurement <see cref="Walls_HonourTheTileBufferClip"/> compares.</summary>
+        private struct BuildCounts
+        {
+            public int RoofVertexCount, WallVertexCount, WallIndexCount;
+        }
+
+        /// <summary>Runs the extrusion graph over one fixture at one clip setting and returns its counts.</summary>
+        /// <param name="features">Tile features to build.</param>
+        /// <param name="paint">The layer's fill-extrusion paint.</param>
+        /// <param name="projection">Projection to build under.</param>
+        /// <param name="clip">The tile-buffer clip the graph's roof AND wall chains both read.</param>
+        /// <returns>Roof vertex count plus wall vertex/index counts.</returns>
+        private static BuildCounts BuildWallCounts(
+            IReadOnlyList<IFeature> features, FillExtrusion.PaintProperties paint,
+            IProjection projection, TileBufferClip clip)
+        {
             IReadOnlyList<SelectedTileFeature> selected = TestTileMeshBuilder.Selection(features);
             double3 renderOrigin = TileRenderOrigin.Project(ModerateTile, projection);
             TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(features, ModerateTile, Extent);
             NativeArray<Vector4> colors = default; NativeArray<Vector2> bake = default;
             NativeArray<int> ringVisitOrder = default;
             FillExtrusionGraphOutput ext = default;
-            int wallVertexCount, wallIndexCount;
             try
             {
                 FillMeshPipeline.LayerInput input = StyledFillExtrusionTileBuilder.BuildLayerInput(
-                    selected, geometry, paint, 0.0, renderOrigin, out colors, out bake,
-                    projection, clip: default);
+                    selected, geometry, paint, 0.0, renderOrigin, out colors, out bake, projection, clip);
                 Assert.IsTrue(input.RingVisitOrder.IsCreated, "precondition: the fixture must select real work.");
                 // Capture it: BuildLayerInput hands ownership to the caller, so the finally below disposes
-                // nothing unless this assignment happens (the sibling method does the same at its own call).
+                // nothing unless this assignment happens.
                 ringVisitOrder = input.RingVisitOrder;
                 ext = FillExtrusionMeshGraph.Schedule(input, colors, bake);
                 ext.Handle.Complete();
-                wallVertexCount = ext.Walls.VertexCount;
-                wallIndexCount = ext.Walls.IndexCount;
+                return new BuildCounts
+                {
+                    RoofVertexCount = ext.Roof.TileVertices.Length,
+                    WallVertexCount = ext.Walls.VertexCount,
+                    WallIndexCount  = ext.Walls.IndexCount,
+                };
             }
             finally
             {
@@ -332,42 +358,6 @@ namespace MapRenderer.Tests.Meshing
                 ext.Dispose();
                 geometry.Dispose();
             }
-            Assert.Greater(wallVertexCount, 0, "precondition: expected wall geometry.");
-
-            // (2) The wall blocks themselves — last `wallVertexCount` vertices of each mesh, all four streams,
-            // plus indices rebased to wall-local — must be IDENTICAL between the two arms. Both meshes ran the
-            // exact same Burst wall computation (WriteWalls never reads `clip`), so this compares bit-for-bit,
-            // not within a tolerance — any difference here is the RED this tooth exists to catch.
-            int roofDisabled = meshDisabled.vertexCount - wallVertexCount;
-            int roofEnabled = meshEnabled.vertexCount - wallVertexCount;
-            Assert.GreaterOrEqual(roofDisabled, 0); Assert.GreaterOrEqual(roofEnabled, 0);
-
-            Vector3[] posD = meshDisabled.vertices, posE = meshEnabled.vertices;
-            Vector3[] normD = meshDisabled.normals, normE = meshEnabled.normals;
-            Vector4[] tanD = meshDisabled.tangents, tanE = meshEnabled.tangents;
-            UnityEngine.Color[] colD = meshDisabled.colors, colE = meshEnabled.colors;
-            var eutD = new List<Vector4>(); meshDisabled.GetUVs(3, eutD);
-            var eutE = new List<Vector4>(); meshEnabled.GetUVs(3, eutE);
-            int[] idxD = meshDisabled.triangles, idxE = meshEnabled.triangles;
-
-            for (int j = 0; j < wallVertexCount; j++)
-            {
-                int iD = roofDisabled + j, iE = roofEnabled + j;
-                Assert.AreEqual(posD[iD], posE[iE], $"wall Position[{j}] diverges between the disabled and enabled clip arms — WriteWalls must never read `clip`.");
-                Assert.AreEqual(normD[iD], normE[iE], $"wall Normal[{j}] diverges between the disabled and enabled clip arms.");
-                Assert.AreEqual(tanD[iD], tanE[iE], $"wall Tangent[{j}] diverges between the disabled and enabled clip arms.");
-                Assert.AreEqual((Vector4)colD[iD], (Vector4)colE[iE], $"wall Color[{j}] diverges between the disabled and enabled clip arms.");
-                Assert.AreEqual(eutD[iD], eutE[iE], $"wall ExtrudeUpAndT[{j}] diverges between the disabled and enabled clip arms.");
-            }
-            for (int j = 0; j < wallIndexCount; j++)
-            {
-                int rebasedD = idxD[idxD.Length - wallIndexCount + j] - roofDisabled;
-                int rebasedE = idxE[idxE.Length - wallIndexCount + j] - roofEnabled;
-                Assert.AreEqual(rebasedD, rebasedE, $"wall-local index[{j}] diverges between the disabled and enabled clip arms.");
-            }
-
-            UnityEngine.Object.DestroyImmediate(meshDisabled);
-            UnityEngine.Object.DestroyImmediate(meshEnabled);
         }
 
         private struct WallGolden

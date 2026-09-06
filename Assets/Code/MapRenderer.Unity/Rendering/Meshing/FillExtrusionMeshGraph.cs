@@ -13,23 +13,22 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// <summary>
     /// Schedules one fill-extrusion layer's roof + wall graph (job-scheduling-design.md §8 stage 5, the
     /// wall-job stage): the roof measure via <see cref="FillMeshGraph.Schedule"/>, composed UNCHANGED, plus
-    /// the wall chain — <see cref="RingSelectJob"/> (raw, pre-earcut ring vertices off the borrowed
-    /// geometry; NEVER <c>RingClipJob</c> — see the UMR-93 paragraph below) → <see cref="TileToGeoJob"/> →
+    /// the wall chain — <see cref="RingSelectJob"/> or <see cref="RingClipJob"/> (raw, pre-earcut ring
+    /// vertices off the borrowed geometry, on the same <c>input.Clip</c> branch the roof takes) →
+    /// <see cref="ProjectionColumnSizingJob"/> → <see cref="TileToGeoJob"/> →
     /// <see cref="ProjectionDispatch"/> → <see cref="StyledFillExtrusionTileBuilder.WallQuadJob"/>, one quad
     /// per boundary edge (both exterior AND hole rings). Both arms are scheduled on the SAME
     /// <paramref name="deps"/> a caller passes to <see cref="Schedule"/> — not the roof's own handle: roof
     /// and walls both read <c>input.Geometry</c>'s columns <c>[ReadOnly]</c> only, so they are independent
     /// and may run concurrently.
     ///
-    /// <para><b>KNOWN, SHIPPED BUG — RECORDED AND DELIBERATELY NOT FIXED HERE (UMR-93):</b> the walls have
-    /// never honoured the tile-buffer clip and still don't (<c>WallQuadJobParityTests.Walls_IgnoreTheTileBufferClip</c>
-    /// is the observer for this). On the production
-    /// config both demo scenes ship (<c>FillTileBufferClip: 0</c>, which <c>TileBufferClip.FromInspectorUnits</c>
-    /// decodes to the ENABLED <c>KeepTileUnits(0.0)</c>, not <c>Disabled</c> — only a negative value
-    /// disables), the roof is cut exactly at the tile boundary while the walls are not, so neighbouring tiles
-    /// draw the same overhanging wall twice. This is NOT the intended contract — it is this stage's
-    /// behaviour-preserving boundary (fixing it would move bytes the goldens captured from 74a9f604 pin, and
-    /// is out of scope here). UMR-93 is the follow-up that fixes it, with its own goldens.</para>
+    /// <para><b>Walls honour the tile-buffer clip</b> (UMR-93, fixed 2026-09-07 — the walls previously took
+    /// <c>RingSelectJob</c> unconditionally, so with the shipped <c>FillTileBufferClip: 0</c> config the roof
+    /// was cut at the tile boundary while the walls were not, and neighbouring tiles each raised a crossing
+    /// building's whole wall set). The wall chain reads the same <c>input.Clip</c> window the roof does, and a
+    /// wall is emitted for EVERY edge of the clipped ring — the cut edges introduced by the window included,
+    /// because what is extruded is the clipped polygon. Reasoning and the one condition that reopens the
+    /// alternative (translucent fill-extrusion): job-scheduling-design.md §8 stage 5's UMR-93 note.</para>
     ///
     /// <para><b>Byte-identical is NOT inherited at the managed-vs-Burst projection boundary</b> (this graph
     /// schedules Burst jobs the retired managed <c>WriteWalls</c> loop never touched): linear quantities are
@@ -98,53 +97,81 @@ namespace MapRenderer.Unity.Rendering.Meshing
             FillGraphOutput roof = FillMeshGraph.Schedule(input, deps);
 
             // ── Walls: raw (pre-earcut) ring vertices off the borrowed source — NOT earcut output
-            // (WallColumns' own doc) — via RingSelectJob, the walls' own UNCLIPPED pass (never RingClipJob;
-            // see the UMR-93 paragraph above). Then tile→geo→project, then WallQuadJob emits quads. ─────────
+            // (WallColumns' own doc) — via the SAME select-or-clip branch the roof takes on input.Clip.
+            // Then tile→geo→project, then WallQuadJob emits quads. ───────────────────────────────────────────
 
             // Main-thread pre-pass over BORROWED inputs only (visit/source.RingOffsets — never a job output,
-            // same legitimacy as FillMeshGraph.Schedule's own pre-pass). totalVerts is EXACTLY the post-
-            // Execute Length of flatTile below, not an upper bound, because RingSelectJob is a VERBATIM COPY
-            // with no filtering (its own doc) — it appends every visited ring's vertices, in order, and
-            // nothing else. That equality is what lets geo/world/up be sized correctly at schedule time,
-            // before RingSelectJob has actually run: a NativeList read through AsDeferredJobArray() resolves
-            // to the list's EXECUTE-time Length, and a list left at Length == 0 would give ProjectPointsJob an
-            // out-of-bounds write. Adding these three columns to RingSelectJob itself was rejected — its
-            // other two call sites (FillMeshGraph.cs, FillGraphBurstProbeTests.cs) would then have to carry
-            // three dead lists a job field cannot leave unassigned; a dedicated resize node would be a whole
-            // job for arithmetic the main thread already has in hand from source.RingOffsets.
+            // same legitimacy as FillMeshGraph.Schedule's own pre-pass). totalVerts is a CAPACITY HINT, not a
+            // length: on the clip arm the post-Execute Length of flatTile is not known here at all
+            // (Sutherland-Hodgman may add vertices to a ring and may drop a ring outright). The exact length
+            // is established at execute time by ProjectionColumnSizingJob, which resizes geo/world/up to
+            // flatTile's final Length before the deferred nodes that write them run. Adding those three
+            // columns to RingSelectJob/RingClipJob themselves was rejected — their other call sites
+            // (FillMeshGraph.cs, FillGraphBurstProbeTests.cs) would then have to carry three dead lists a job
+            // field cannot leave unassigned.
+            int maxRingLen = 0;
             int totalVerts = 0;
             for (int k = 0; k < visit.Length; k++)
             {
-                int ri = visit[k];
-                totalVerts += source.RingOffsets[ri + 1] - source.RingOffsets[ri];
+                int ri  = visit[k];
+                int len = source.RingOffsets[ri + 1] - source.RingOffsets[ri];
+                maxRingLen  = math.max(maxRingLen, len);
+                totalVerts += len;
             }
 
             var flatTile    = NewBuffer<double2>(math.max(1, totalVerts));
             var flatOffsets = NewBuffer<int>(visit.Length + 1);
             var flatFeatIdx = NewBuffer<int>(math.max(1, visit.Length));
 
-            JobHandle gathered = new RingSelectJob
+            JobHandle gathered;
+            JobHandle clipDisposeHandle = default;
+
+            if (input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax))
             {
-                Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
-                RingVisitOrder = visit,
-                OutVertices = flatTile, OutRingOffsets = flatOffsets, OutRingFeatureIdx = flatFeatIdx,
-            }.Schedule(deps);
+                // Raw NativeArrays, not NewBuffer: deliberate parity with the roof's own ping-pong buffers
+                // (FillMeshGraph.Schedule). The DebugBuffersAllocated/DebugBufferDisposeNodes pair counts the
+                // NativeLists this graph owns; these are not part of that pairing.
+                int bufferCap = math.max(1, maxRingLen * RingClipJob.BufferLengthMultiplier);
+                var bufferA = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                var bufferB = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+
+                gathered = new RingClipJob
+                {
+                    Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
+                    RingVisitOrder = visit, ClipMin = clipMin, ClipMax = clipMax,
+                    BufferA = bufferA, BufferB = bufferB,
+                    OutVertices = flatTile, OutRingOffsets = flatOffsets, OutRingFeatureIdx = flatFeatIdx,
+                }.Schedule(deps);
+
+                clipDisposeHandle = JobHandle.CombineDependencies(bufferA.Dispose(gathered), bufferB.Dispose(gathered));
+            }
+            else
+            {
+                gathered = new RingSelectJob
+                {
+                    Vertices = source.Vertices, RingOffsets = source.RingOffsets, RingFeatureIdx = source.RingFeatureIdx,
+                    RingVisitOrder = visit,
+                    OutVertices = flatTile, OutRingOffsets = flatOffsets, OutRingFeatureIdx = flatFeatIdx,
+                }.Schedule(deps);
+            }
 
             var geo   = NewBuffer<GeoCoordinate>(math.max(1, totalVerts));
             var world = NewBuffer<double3>(math.max(1, totalVerts));
             var up    = NewBuffer<double3>(math.max(1, totalVerts));
-            // math.max(1, ·) just above is a CAPACITY, not a length — sized here as totalVerts EXACTLY (the
-            // pre-pass's own guarantee); using max(1, ·) as the length too would make ProjectPointsJob iterate
-            // one uninitialized element.
-            geo.ResizeUninitialized(totalVerts);
-            world.ResizeUninitialized(totalVerts);
-            up.ResizeUninitialized(totalVerts);
+
+            // On the chain, not parallel to it, and on BOTH arms: an arm-dependent sizing path is exactly
+            // what would let one arm drift. On the select arm flatTile.Length == totalVerts by RingSelectJob's
+            // verbatim-copy contract, so this node computes the number the main thread used to.
+            JobHandle sized = new ProjectionColumnSizingJob
+            {
+                SourceTileCoords = flatTile, OutGeo = geo, OutWorld = world, OutUp = up,
+            }.Schedule(gathered);
 
             JobHandle geodetic = new TileToGeoJob
             {
                 Tile = source.Tile, Extent = source.Extent,
                 TileCoords = flatTile.AsDeferredJobArray(), OutGeo = geo.AsDeferredJobArray(),
-            }.Schedule(flatTile, VertexBatch, gathered);
+            }.Schedule(flatTile, VertexBatch, sized);
 
             // flatTile's last reader is TileToGeoJob (as TileCoords) — WallQuadJob never reads it, only the
             // columns TileToGeoJob/ProjectionDispatch derive from it.
@@ -173,9 +200,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
             JobHandle worldDisposed       = ScheduleDispose(world, walled);
             JobHandle upDisposed          = ScheduleDispose(up, walled);
 
+            // clipDisposeHandle folds in the clip arm's ping-pong buffers (default, and harmless, on the
+            // select arm) — without it their dispose nodes are unreachable from the returned handle and the
+            // Persistent arrays leak once per extrusion layer per tile.
             JobHandle scratchDisposed = JobHandle.CombineDependencies(
                 JobHandle.CombineDependencies(flatTileDisposed, flatOffsetsDisposed, flatFeatIdxDisposed),
-                JobHandle.CombineDependencies(geoDisposed, worldDisposed, upDisposed));
+                JobHandle.CombineDependencies(geoDisposed, worldDisposed, upDisposed),
+                clipDisposeHandle);
 
             JobHandle terminal = JobHandle.CombineDependencies(roof.Handle, walled, scratchDisposed);
 

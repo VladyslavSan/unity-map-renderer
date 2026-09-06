@@ -1310,6 +1310,33 @@ extrusion roof reuses `FillMeshGraph`.
 > `ProjectionManagedVersusBurstTests`, per R7) — measure the bound AT THE CALL SITE that will ship, not at a
 > zero-origin probe, and re-derive whether narrowing structurally erases it before asserting bit-exactness.
 
+> **Correction to a current-state claim — the extrusion walls now honour the tile-buffer clip (UMR-93,
+> 2026-09-07).** The wall-job stage shipped the wall chain on `RingSelectJob` **unconditionally**, so the roof
+> was cut at the tile-buffer window while the walls were not; with the shipped `FillTileBufferClip: 0` config
+> (which `TileBufferClip.FromInspectorUnits` decodes to the ENABLED `KeepTileUnits(0.0)` — only a negative
+> value disables) two neighbouring tiles each raised the whole wall set of every building crossing the seam.
+> That was a real defect, recorded at the time as this stage's behaviour-preserving boundary; it is now fixed.
+> `FillExtrusionMeshGraph.Schedule`'s wall chain takes the same select-or-clip branch on `input.Clip` the roof
+> takes, with one new node — `ProjectionColumnSizingJob` — because the clipped gather has no schedule-time
+> output length. **This does not rewrite what the wall-job stage did**: the stage genuinely deferred the fix,
+> and the goldens it captured are unmoved (the wall goldens run `clip: default`; the graphwrite goldens enable
+> the clip but their fixture lies wholly inside the window, where `RingClipJob`'s bbox fast path copies
+> verbatim).
+>
+> **Decision (a): a wall is emitted for EVERY edge of the clipped ring, cut edges included** — what is
+> extruded is the clipped polygon, and no per-edge "this edge is a cut" provenance is tracked anywhere. The
+> cut walls are invisible under the shipped opaque `fill-extrusion` regime (`ZWrite On`, `One/Zero` —
+> `depth-and-render-regimes-design.md` §6.E defers translucency): each faces into the other half of the
+> building and is back-face-culled or depth-rejected. They are *not* invisible where it matters — at the edge
+> of the loaded cover, and while a neighbour is still loading, (a) shows a closed truncated building where
+> suppressing the cut edges would show a hollow shell.
+>
+> **The one condition that reopens the alternative:** translucent fill-extrusion
+> (`depth-and-render-regimes-design.md` §6.E). Under alpha blending the hidden cut walls become a visible
+> seam band — the same defect class `TileBufferClip` exists to remove for flat fill. Suppressing them then
+> requires a new per-output-edge column out of `RingClipJob`, a contract change across all its call sites; do
+> not implement it speculatively before §6.E lands.
+
 **What shipped (Group A landed; folded in from the retired standalone `README-line-graph.md`, which
 duplicated this section once the graph existed — see this file's own "Files" table, now below).**
 `LineMeshGraph.Schedule` chains: `RingGatherJob` (the ring gate — selection + LineString kind + line's

@@ -44,9 +44,18 @@ namespace MapRenderer.Tests.Tiles
         /// monotonic statics, so in a batch run any earlier test that drove this graph already satisfies
         /// "allocated more than zero". This tooth's teeth come entirely from the RED-verify (delete one
         /// <c>ScheduleDispose</c> call in <c>FillExtrusionMeshGraph</c>, confirm this test fails), not from
-        /// the equality alone.</summary>
+        /// the equality alone.
+        ///
+        /// <para><b>What <paramref name="clipped"/> buys, stated honestly.</b> Not a new counter: the clip
+        /// arm adds NO <c>NewBuffer</c> allocation — its ping-pong buffers are raw <c>NativeArray</c>s,
+        /// uncounted, exactly as the roof's are. What the second case buys is that the clip arm is
+        /// EXECUTED and its dispose nodes reached, under the same disposal assertion; without it this tooth
+        /// had only ever scheduled the <c>RingSelectJob</c> arm. The fixture is wholly inside
+        /// <c>[0, 4096]</c>, so the clip takes <c>RingClipJob</c>'s verbatim fast path — intended: this
+        /// tooth is about node/dispose pairing, not clipping arithmetic.</para></summary>
+        /// <param name="clipped">Whether to schedule the clip arm (<c>true</c>) or the select arm.</param>
         [Test]
-        public void Dispose_BufferDisposeNodesPairWithAllocations()
+        public void Dispose_BufferDisposeNodesPairWithAllocations([Values(false, true)] bool clipped)
         {
             TileGeometryBuffers geometry = SingleTrianglePolygon(new TileId { Z = 0, X = 0, Y = 0 });
             NativeArray<int> visitOrder = default;
@@ -61,6 +70,7 @@ namespace MapRenderer.Tests.Tiles
                 {
                     Geometry = geometry, RingVisitOrder = visitOrder, OriginRender = double3.zero,
                     Projection = new WebMercatorProjection(),
+                    Clip = clipped ? TileBufferClip.KeepTileUnits(0.0) : TileBufferClip.Disabled,
                 };
 
                 long allocBefore    = FillExtrusionGraphOutput.DebugBuffersAllocated;
