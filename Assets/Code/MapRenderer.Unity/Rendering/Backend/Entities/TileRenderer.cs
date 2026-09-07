@@ -75,6 +75,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // aid: it names each layer entity after its style layer in the Entities Hierarchy (matching the old
         // GameObject backend) instead of the shared material name ("MapView_Fill"). Empty ⇒ fall back to name.
         private readonly List<string>               _layerNames     = new List<string>();
+        // Per-layer shadow-cast declaration, parallel to _layerMaterials — IRenderLayer.CastShadows, carried
+        // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off, identically in all three backends.
+        private readonly List<ShadowCastingMode>    _layerShadowModes = new List<ShadowCastingMode>();
         // internal (not private) for the same reason as ItemRec/RootRec — test-assembly observability.
         internal readonly Dictionary<int, ItemRec>    _items          = new Dictionary<int, ItemRec>();
         internal readonly Dictionary<TileId, RootRec> _tileRoots      = new Dictionary<TileId, RootRec>();
@@ -91,11 +94,17 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // prototype so they all share ONE archetype (no per-entity structural migration for the render set).
         private EntitiesGraphicsSystem                 _eg;             // from `using Unity.Rendering` — NOT qualified (Unity.Rendering collides with MapRenderer.Unity.Rendering)
         private BatchMaterialID[]                      _materialIds;   // one per layer material, registered once
-        private Entity                                 _layerPrototype; // Prefab-tagged; Instantiated per layer
-        private Mesh                                   _prototypeMesh;  // inert placeholder mesh for the prototype's RenderMeshArray
+        // Two Prefab-tagged prototypes, one per shadow-cast mode: RenderFilterSettings is shared-component
+        // data, so choosing at Instantiate time keeps AddTileLayer free of a per-entity SetSharedComponent
+        // (a structural change — the exact cost the ID route exists to avoid).
+        private Entity                                 _layerPrototypeNoCast; // Instantiated for ShadowCastingMode.Off slots
+        private Entity                                 _layerPrototypeCast;   // Instantiated for ShadowCastingMode.On slots
+        private Mesh                                   _prototypeMesh;  // inert placeholder mesh for the prototypes' RenderMeshArray
 
-        /// <summary>Stall #3 tooth: RenderMeshArray shared components created (the prototype's ONE). The old
-        /// path created one per AddTileLayer; this must stay ≤1 no matter how many layers are added.</summary>
+        /// <summary>Stall #3 tooth: distinct RenderMeshArray VALUES constructed (the prototypes share ONE).
+        /// The old path created one per AddTileLayer; this must stay ≤1 no matter how many layers are added,
+        /// and the two shadow-mode prototypes do not move it — RenderMeshArray equality is content-hashed, so
+        /// both resolve to the same shared-component index.</summary>
         internal int RenderMeshArraysCreated { get; private set; }
 
         /// <summary>Stall #3 tooth: live EG-registered meshes (inc on RegisterMesh in AddTileLayer, dec on
@@ -158,16 +167,27 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private SceneFrame _lastFrame;
         private bool       _hasSceneOrigin;
 
+        /// <param name="layerMaterials">The full-width per-layer material list, indexed by draw slot.</param>
         /// <param name="layerNames">
         /// Optional per-layer style ids parallel to <paramref name="layerMaterials"/>, used only to name the
         /// layer entities in the Editor's Entities Hierarchy. When null/short, the material name is used.
         /// </param>
-        public TileRenderer(IReadOnlyList<Material> layerMaterials, IReadOnlyList<string> layerNames = null)
+        /// <param name="layerShadowModes">
+        /// Optional per-layer <c>Style.IRenderLayer.CastShadows</c> declarations parallel to
+        /// <paramref name="layerMaterials"/>. When null/short, a slot falls back to
+        /// <see cref="ShadowCastingMode.Off"/> — see <see cref="ShadowModeFor"/>.
+        /// </param>
+        public TileRenderer(
+            IReadOnlyList<Material> layerMaterials,
+            IReadOnlyList<string> layerNames = null,
+            IReadOnlyList<ShadowCastingMode> layerShadowModes = null)
         {
             if (layerMaterials == null) throw new ArgumentNullException(nameof(layerMaterials));
             for (int i = 0; i < layerMaterials.Count; i++) _layerMaterials.Add(layerMaterials[i]);
             if (layerNames != null)
                 for (int i = 0; i < layerNames.Count; i++) _layerNames.Add(layerNames[i]);
+            if (layerShadowModes != null)
+                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
 
             _world           = DefaultWorldInitialization.Initialize("MapEntitiesWorld", editorWorld: false);
             _prevDefaultWorld = World.DefaultGameObjectInjectionWorld;
@@ -189,13 +209,20 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         }
 
         /// <summary>
-        /// Stall #3: builds the single layer-entity PROTOTYPE. <see cref="RenderMeshUtility.AddComponents"/>
+        /// Stall #3: builds the layer-entity PROTOTYPES — one per shadow-cast mode.
+        /// <see cref="RenderMeshUtility.AddComponents"/>
         /// stamps EG's full render component set (LocalToWorld, RenderBounds, MaterialMeshInfo, and the
         /// RenderMeshArray shared component); we add Parent/LocalTransform (the transform hierarchy) and Prefab
-        /// (so the prototype itself never renders and is skipped by EG's queries). Every AddTileLayer
-        /// Instantiates this — instances share the prototype's archetype AND its single (inert, ID-overridden)
-        /// RenderMeshArray, so no per-entity array or structural migration is created. The placeholder mesh is
+        /// (so the prototypes themselves never render and are skipped by EG's queries). Every AddTileLayer
+        /// Instantiates one of them — instances share that prototype's archetype AND the single (inert,
+        /// ID-overridden) RenderMeshArray VALUE both prototypes were built from, so no per-entity array or
+        /// structural migration is created. The placeholder mesh is
         /// empty and never drawn (Prefab); it exists only because AddComponents requires a RenderMeshArray.
+        ///
+        /// <para>Two prototypes rather than a per-entity <c>SetSharedComponent</c>: shadow casting lives in
+        /// <see cref="RenderFilterSettings"/>, which is <see cref="ISharedComponentData"/>, so writing it per
+        /// entity would be a structural change per layer — the measured <c>MapRenderer.Tile.AddLayer</c> spike
+        /// this whole path exists to avoid.</para>
         /// E1: seeds the RenderMeshArray with the first NON-null material — slot 0 may be a
         /// background layer (null Material, when unconfigured) or a symbol layer (non-null
         /// <c>WorldTextMaterial</c>, §0.2) that AddTileLayer is never called for either way; this is an
@@ -209,17 +236,40 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             if (seedIndex < 0) return; // no tile-mesh layers → AddTileLayer never called; no prototype needed
 
             _prototypeMesh = new Mesh { name = "MapLayerPrototype(inert)" };
-            var desc = new RenderMeshDescription(ShadowCastingMode.Off, receiveShadows: false);
-            var rma  = new RenderMeshArray(new Material[] { _layerMaterials[seedIndex] }, new Mesh[] { _prototypeMesh });
+            var rma = new RenderMeshArray(new Material[] { _layerMaterials[seedIndex] }, new Mesh[] { _prototypeMesh });
 
-            _layerPrototype = _em.CreateEntity();
-            RenderMeshUtility.AddComponents(
-                _layerPrototype, _em, desc, rma, MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
-            _em.AddComponent(_layerPrototype,
-                new ComponentTypeSet(ComponentType.ReadWrite<Parent>(), ComponentType.ReadWrite<LocalTransform>()));
-            _em.AddComponent<Prefab>(_layerPrototype); // exclude prototype from rendering/queries; Instantiate strips it
-            RenderMeshArraysCreated = 1; // ONLY the prototype's — instances share it, none created per layer
+            _layerPrototypeNoCast = NewLayerPrototype(rma, ShadowCastingMode.Off);
+            _layerPrototypeCast   = NewLayerPrototype(rma, ShadowCastingMode.On);
+            RenderMeshArraysCreated = 1; // ONE array VALUE, shared by both prototypes and every instance
         }
+
+        /// <summary>One Prefab-tagged layer prototype over the shared <paramref name="rma"/>, filtered to
+        /// <paramref name="cast"/>. Receiving is unconditional for tile geometry — building shadows landing on
+        /// roads and ground fills is the visible half of the feature.</summary>
+        /// <param name="rma">The single inert RenderMeshArray value both prototypes share.</param>
+        /// <param name="cast">This prototype's shadow-cast mode.</param>
+        /// <returns>The prototype entity to <c>Instantiate</c> per layer.</returns>
+        private Entity NewLayerPrototype(RenderMeshArray rma, ShadowCastingMode cast)
+        {
+            var desc = new RenderMeshDescription(cast, receiveShadows: true);
+            Entity prototype = _em.CreateEntity();
+            RenderMeshUtility.AddComponents(
+                prototype, _em, desc, rma, MaterialMeshInfo.FromRenderMeshArrayIndices(0, 0));
+            _em.AddComponent(prototype,
+                new ComponentTypeSet(ComponentType.ReadWrite<Parent>(), ComponentType.ReadWrite<LocalTransform>()));
+            _em.AddComponent<Prefab>(prototype); // exclude prototype from rendering/queries; Instantiate strips it
+            return prototype;
+        }
+
+        /// <summary>This backend's copy of the shared shadow-mode lookup: the declared mode for
+        /// <paramref name="materialIndex"/>, or <see cref="ShadowCastingMode.Off"/> when no list was supplied
+        /// or it is short. The fallback must read identically in all three backends
+        /// (<see cref="ITileRenderBackend"/>).</summary>
+        /// <param name="materialIndex">The layer's global draw slot.</param>
+        private ShadowCastingMode ShadowModeFor(int materialIndex)
+            => (uint)materialIndex < (uint)_layerShadowModes.Count
+                ? _layerShadowModes[materialIndex]
+                : ShadowCastingMode.Off;
 
         // ── Instrumentation counters ────────────────────────────────────────────────────────────
         // Read only by tests, but WRITTEN by the code below, so they stay on the class: they are state this
@@ -341,7 +391,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                 // RenderMeshArray shared component / batch registration per layer), register the mesh with EG,
                 // and point the entity at (meshId, materialId). This replaces the old per-entity
                 // CreateEntity + RenderMeshUtility.AddComponents(new RenderMeshArray(...)) — the "prime suspect".
-                e      = _em.Instantiate(_layerPrototype);
+                e      = _em.Instantiate(ShadowModeFor(materialIndex) == ShadowCastingMode.Off
+                    ? _layerPrototypeNoCast
+                    : _layerPrototypeCast);
                 meshId = _eg.RegisterMesh(mesh);
                 RegisteredMeshCount++;
                 // ID-based MaterialMeshInfo (ctor (materialID, meshID) in this EG version — no

@@ -23,6 +23,7 @@
 // production SIDE, where the names are written.
 
 using Unity.Entities;
+using Unity.Entities.Graphics;
 using Unity.Mathematics;
 using Unity.Rendering;
 using Unity.Transforms;
@@ -35,6 +36,17 @@ namespace MapRenderer.Tests
     {
         /// <summary>Number of currently registered draw items (layer entities).</summary>
         internal static int DrawItemCount(this EntitiesTileRenderer renderer) => renderer._items.Count;
+
+        /// <summary>The draw item entity's <see cref="RenderFilterSettings"/> shadow pair — the shared
+        /// component EG filters shadow-pass rendering by. This is the Entities arm of the cross-backend
+        /// shadow-transport tooth; it reads what the prototype chosen at <c>Instantiate</c> baked in.
+        /// Throws for an unknown handle, like the other post-dispose-strict readers here.</summary>
+        internal static (UnityEngine.Rendering.ShadowCastingMode cast, bool receive) GetShadowFilter(
+            this EntitiesTileRenderer renderer, int handle)
+        {
+            var f = renderer._em.GetSharedComponentManaged<RenderFilterSettings>(renderer._items[handle].Entity);
+            return (f.ShadowCastingMode, f.ReceiveShadows);
+        }
 
         /// <summary>Number of live tile root entities (one per tile that has ≥1 layer).</summary>
         internal static int TileRootCount(this EntitiesTileRenderer renderer) => renderer._tileRoots.Count;

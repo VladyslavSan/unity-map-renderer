@@ -11,6 +11,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
@@ -57,7 +58,7 @@ namespace MapRenderer.Tests.Rendering
                 int h2 = brg.AddTileLayer(Track(meshes), double3.zero, 0, new TileId { Z = 2, X = 0, Y = 0 });
 
                 brg.Rebuild(SceneFrame.Mercator(double2.zero));
-                Assert.AreEqual(3, brg.ComputeEmitOrder(scratch),
+                Assert.AreEqual(3, brg.ComputeEmitOrder(scratch, BatchCullingViewType.Camera),
                     "All three live items must be emitted after Rebuild.");
 
                 // ── The zoom eviction race ──────────────────────────────────────────────────────
@@ -66,19 +67,19 @@ namespace MapRenderer.Tests.Rendering
                 // "MeshID <null>"). The compaction fix must drop it.
                 brg.RemoveItem(h1);
 
-                Assert.AreEqual(2, brg.ComputeEmitOrder(scratch),
+                Assert.AreEqual(2, brg.ComputeEmitOrder(scratch, BatchCullingViewType.Camera),
                     "RemoveItem WITHOUT a Rebuild must NOT leave a phantom draw command for the evicted " +
                     "tile — exactly the two surviving items must be emitted (this is the null-mesh bug).");
                 Assert.AreEqual(2, brg.DrawItemCount(), "Two items remain registered.");
 
                 // After a Rebuild the sorted list resyncs and the count is still 2.
                 brg.Rebuild(SceneFrame.Mercator(double2.zero));
-                Assert.AreEqual(2, brg.ComputeEmitOrder(scratch), "After Rebuild, two items remain.");
+                Assert.AreEqual(2, brg.ComputeEmitOrder(scratch, BatchCullingViewType.Camera), "After Rebuild, two items remain.");
 
                 // Evict the rest without a Rebuild → nothing emitted (no zero-command range / no garbage).
                 brg.RemoveItem(h0);
                 brg.RemoveItem(h2);
-                Assert.AreEqual(0, brg.ComputeEmitOrder(scratch),
+                Assert.AreEqual(0, brg.ComputeEmitOrder(scratch, BatchCullingViewType.Camera),
                     "All items evicted → ComputeEmitOrder returns 0 (OnPerformCulling emits nothing).");
             }
             finally

@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Rendering;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
@@ -50,6 +51,7 @@ namespace MapRenderer.Unity.Rendering.Style
         public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
+        public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; }
 
         private LineRenderLayer(

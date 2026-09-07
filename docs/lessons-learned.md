@@ -7,6 +7,38 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
 
 ## Shaders & HLSL
 
+- **A vertex semantic index (`TEXCOORD3`) is a contract with the MESH's vertex layout, not with the
+  `Attributes` struct it is written in — so "the first free slot in this pass" is the wrong way to choose
+  one.** Unity binds a mesh's `VertexAttributeDescriptor` list to shader semantics by INDEX, globally: a
+  mesh that declares `VertexAttribute.TexCoord3` feeds `TEXCOORD3` in *every* pass, whatever else that pass
+  does or does not declare. **Why the wrong choice is tempting:** a forward pass mirroring stock URP Lit
+  already spends `TEXCOORD0-2` on base UV + static/dynamic lightmap UV, so its custom streams start at
+  `TEXCOORD3` — but the ShadowCaster / DepthOnly / DepthNormals passes carry no lightmap UVs, and there
+  `TEXCOORD1` looks like the first unused slot. It is not; it is a slot the mesh never fills.
+  **Why nothing catches it:** an unbound semantic is not a compile error — Unity zero-fills the stream, the
+  same behaviour a builder may *rely on* elsewhere for a deliberately-omitted attribute — so the shader
+  compiles, the draw is issued, and the geometry still appears. **The symptom shape is presence that reads
+  as success:** a vertex modifier driven by the missing stream contributes nothing, so the geometry renders
+  in its un-modified form and a debug view shows it there. **The check:** compare the builder's
+  `VertexAttributeDescriptor` list against the `Attributes` struct of *every* pass of the shaders that
+  consume it, not just the forward one. (Seen: 2026-09-07 — `StyledFillExtrusionTileBuilder` writes
+  `TexCoord3`/`TexCoord4`; forward/GBuffer/unlit read `TEXCOORD3`/`TEXCOORD4`; ShadowCaster, DepthOnly and
+  DepthNormals read `TEXCOORD1`/`TEXCOORD2`. `MapVertexModify` got zeroes, computed `elevation = 0`, and
+  drew every building at its floor — so buildings entered the shadow map as flat footprints lying in the
+  very ground they were meant to shadow, and cast nothing visible. Frame Debugger showed "buildings in the
+  shadow map", which was read as proof that casting worked, for hours. Depth-only and depth-normals were
+  wrong too, so SSAO also saw flat buildings. Fixed by moving three passes to `TEXCOORD3`/`TEXCOORD4` —
+  six characters.)
+
+  A regression tooth for this must be parameterised over **where the value comes from**, or it will not
+  discriminate: `ShadowReceiveBisectTests.FillExtrusionCaster_ShadowFollowsTheExtrudedSilhouette` runs a
+  baked-stream arm, a uniform-property arm and a mesh-geometry arm. Both of the first two red against the
+  old semantics — zeroing `TEXCOORD3` collapses the base/height `lerp` to its base *and* normalises the
+  extrude direction to zero, so the uniform path dies with the baked one — while the mesh-geometry arm,
+  whose height no vertex modifier touches, stays green. That green control is what makes the pair evidence
+  about a vertex channel rather than about shadows working at all. Every earlier fixture missed the bug
+  because it raised a primitive cube (height = real geometry) and `_ExtrusionHeight` defaults to 0.
+
 - **Editing a shared `.hlsl` CBUFFER/include can run STALE shader variants on the first headless batch
   run.** The GPU reads properties at the *old* CBUFFER offsets → garbage colors/lighting, while EditMode
   compiles clean. Tell-tale: a GPU-snapshot test fails in a way that's causally unrelated to your change

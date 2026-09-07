@@ -30,6 +30,12 @@ namespace MapRenderer.Tests
         /// <summary>Number of currently registered draw items.</summary>
         internal static int DrawItemCount(this BrgTileRenderer renderer) => renderer._items.Count;
 
+        /// <summary>The layer draw slot (<c>materialIndex</c>) of the draw item at sorted slot
+        /// <paramref name="sortedIndex"/> — the value a <c>ComputeEmitOrder</c> entry names. Lets a caller
+        /// map an emitted draw command back to the layer that produced it.</summary>
+        internal static int MaterialIndexAtSorted(this BrgTileRenderer renderer, int sortedIndex)
+            => renderer._items[renderer._sortedItems[sortedIndex].handle].MaterialIndex;
+
         /// <summary>True if the instance GraphicsBuffer is allocated.</summary>
         internal static bool HasBuffer(this BrgTileRenderer renderer) => renderer._instanceBuffer != null;
 

@@ -58,6 +58,7 @@ namespace MapRenderer.Tests.Tiles
             public DrawPersistence Persistence => DrawPersistence.Persistent;
             public int DrawIndex => 0;
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base; // mirrors FillRenderLayer (G7/D7)
+            public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material Material => null;
 
             public FakeFillTileMeshRenderLayer(StyleLayer styleLayer, Fill.PaintProperties paint)

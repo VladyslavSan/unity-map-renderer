@@ -13,6 +13,12 @@ namespace MapRenderer.Unity.Rendering.Backend
     /// Each registers one draw item per (tile, layer) mesh and is driven by a per-frame
     /// <see cref="Rebuild"/> that recomputes the floating-origin transforms. <c>TileManager</c> holds
     /// exactly one of these and treats them uniformly through this interface; only construction differs.
+    ///
+    /// <para>Construction carries the full-width, draw-slot-aligned per-layer lists — materials, style ids,
+    /// and each layer's <c>Style.IRenderLayer.CastShadows</c> declaration. All three implementations must
+    /// TRANSPORT the shadow list verbatim (indexed by <c>materialIndex</c>, absent or short slot ⇒
+    /// <see cref="UnityEngine.Rendering.ShadowCastingMode.Off"/>) and must never re-derive it from the layer
+    /// type or the material — re-deriving is how three backends drift apart.</para>
     /// </summary>
     internal interface ITileRenderBackend : IDisposable
     {

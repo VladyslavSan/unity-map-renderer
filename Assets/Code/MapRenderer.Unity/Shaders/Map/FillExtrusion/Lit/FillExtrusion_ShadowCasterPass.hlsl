@@ -33,8 +33,8 @@ struct Attributes
     float4 tangentOS    : TANGENT;    // [MAP DELTA] for MapVertexModify's tangent-plane frame
     float2 texcoord     : TEXCOORD0;
     // [MAP DELTA S23 I2b] D1 extrusion inputs — see StyledFillExtrusionTileBuilder's ExtrudeAndBake doc.
-    float4 extrudeUpAndT     : TEXCOORD1;
-    float2 bakedBaseHeight   : TEXCOORD2;
+    float4 extrudeUpAndT     : TEXCOORD3;
+    float2 bakedBaseHeight   : TEXCOORD4;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 

@@ -86,6 +86,14 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // in _items) for OnPerformCulling. Grown on demand, reused each cull → no per-frame managed alloc.
         private readonly List<int> _emitList = new List<int>(64);
 
+        // Reusable scratch holding the run-length-grouped draw ranges for OnPerformCulling (one per run of
+        // consecutive same-shadow-mode commands). Reused each cull → no per-frame managed alloc.
+        private readonly List<BatchDrawRange> _drawRanges = new List<BatchDrawRange>(8);
+
+        // Per-layer shadow-cast declaration, parallel to _layerMaterials — IRenderLayer.CastShadows, carried
+        // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off, identically in all three backends.
+        private readonly List<ShadowCastingMode> _layerShadowModes = new List<ShadowCastingMode>();
+
         // CPU-side instance data (SoA layout). Grown on demand, never shrunk — no per-frame alloc.
         internal float[] _cpuBuffer = Array.Empty<float>();
 
@@ -106,9 +114,20 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// full-width aligned; <see cref="AddTileLayer"/> is never called for that index (the tile produce
         /// path filters to <c>ITileMeshRenderLayer</c> slots), so no further guard is needed.
         /// </summary>
-        public TileRenderer(System.Collections.Generic.IReadOnlyList<Material> layerMaterials)
+        /// <param name="layerMaterials">The full-width per-layer material list, indexed by draw slot.</param>
+        /// <param name="layerShadowModes">
+        /// Optional per-layer <c>Style.IRenderLayer.CastShadows</c> declarations parallel to
+        /// <paramref name="layerMaterials"/>. When null/short, a slot falls back to
+        /// <see cref="ShadowCastingMode.Off"/> — see <see cref="ShadowModeFor"/>.
+        /// </param>
+        public TileRenderer(
+            System.Collections.Generic.IReadOnlyList<Material> layerMaterials,
+            System.Collections.Generic.IReadOnlyList<ShadowCastingMode> layerShadowModes = null)
         {
             _brg = new BatchRendererGroup(OnPerformCulling, IntPtr.Zero);
+
+            if (layerShadowModes != null)
+                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
 
             for (int i = 0; i < layerMaterials.Count; i++)
             {
@@ -449,7 +468,11 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         /// <summary>
         /// BRG culling callback. Emits one <see cref="BatchDrawCommand"/> per draw item in ascending
-        /// renderQueue order (painter's algorithm). Minimal culling: all draws are always emitted.
+        /// renderQueue order (painter's algorithm), grouped into run-length
+        /// <see cref="BatchDrawRange"/>s by declared shadow-cast mode
+        /// (<see cref="ComputeDrawRanges"/>). Minimal culling for a camera view: all draws are emitted. A
+        /// LIGHT view emits only the caster slots (<see cref="ComputeEmitOrder"/>), so "only fill-extrusion
+        /// casts" holds in code we own rather than depending on the engine honouring range filter settings.
         ///
         /// <c>unsafe</c> is required to fill <see cref="BatchCullingOutputDrawCommands"/> via raw
         /// pointers and <see cref="UnsafeUtility.Malloc"/>.
@@ -469,16 +492,20 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             // memory, so emitting one command per _sortedItems slot and skipping stale ones in place would
             // leave uninitialized garbage BatchDrawCommands (invalid batch/mesh/material id) — the source
             // of the "MeshID <null>" BRG error seen while zooming.
-            int emitted = ComputeEmitOrder(_emitList);
+            int emitted = ComputeEmitOrder(_emitList, cullingContext.viewType);
             if (emitted == 0 || !_batchRegistered) return default;
+
+            // One range per run of consecutive same-shadow-mode commands: BatchDrawCommand carries no shadow
+            // flag, so the RANGE's filterSettings is the only place the declaration can live.
+            int rangeCount = ComputeDrawRanges(_emitList, _drawRanges);
 
             // cullingOutput.drawCommands is a NativeArray<BatchCullingOutputDrawCommands> (length 1).
             var drawCommandsPtr = (BatchCullingOutputDrawCommands*)cullingOutput.drawCommands.GetUnsafePtr();
 
             // Allocate EXACTLY the compacted count — never _sortedItems.Count.
-            drawCommandsPtr->drawRangeCount = 1;
+            drawCommandsPtr->drawRangeCount = rangeCount;
             drawCommandsPtr->drawRanges = (BatchDrawRange*)UnsafeUtility.Malloc(
-                sizeof(BatchDrawRange) * 1,
+                (long)sizeof(BatchDrawRange) * rangeCount,
                 UnsafeUtility.AlignOf<BatchDrawRange>(),
                 Allocator.TempJob);
 
@@ -494,21 +521,10 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                 UnsafeUtility.AlignOf<int>(),
                 Allocator.TempJob);
 
-            drawCommandsPtr->drawRanges[0] = new BatchDrawRange
-            {
-                drawCommandsBegin = 0,
-                drawCommandsCount = (uint)emitted,
-                filterSettings    = new BatchFilterSettings
-                {
-                    renderingLayerMask = 0xFFFFFFFF,
-                    layer              = 0,
-                    motionMode         = MotionVectorGenerationMode.Camera,
-                    shadowCastingMode  = ShadowCastingMode.Off,
-                    receiveShadows     = false,
-                    staticShadowCaster = false,
-                    allDepthSorted     = false,
-                },
-            };
+            // ComputeDrawRanges wrote EVERY field of every range — Malloc does not zero (see the MeshID
+            // <null> note above), and a half-written BatchDrawRange fails as random shadow/layer-mask
+            // behaviour rather than cleanly.
+            for (int r = 0; r < rangeCount; r++) drawCommandsPtr->drawRanges[r] = _drawRanges[r];
 
             // Fill exactly `emitted` contiguous commands — no holes, by construction. _emitList[e] is
             // the packed instance-buffer slot (Rebuild packed instance i at sorted index i).
@@ -548,16 +564,84 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// Internal for white-box testing of the eviction/compaction invariant. Allocation-free in steady
         /// state (reuses <paramref name="dst"/>).
         /// </summary>
-        internal int ComputeEmitOrder(List<int> dst)
+        /// <param name="dst">Reused destination list; cleared first.</param>
+        /// <param name="viewType">The view being culled. <see cref="BatchCullingViewType.Light"/> is the
+        /// shadow pass, and drops every slot declared <see cref="ShadowCastingMode.Off"/> — see
+        /// <see cref="OnPerformCulling"/> for why the range's filter settings alone are not relied on.</param>
+        /// <returns>The number of items written.</returns>
+        internal int ComputeEmitOrder(List<int> dst, BatchCullingViewType viewType)
         {
+            bool shadowView = viewType == BatchCullingViewType.Light;
             dst.Clear();
             for (int i = 0; i < _sortedItems.Count; i++)
             {
-                if (_items.ContainsKey(_sortedItems[i].handle))
-                    dst.Add(i);
+                if (!_items.TryGetValue(_sortedItems[i].handle, out DrawItem item)) continue;
+                if (shadowView && ShadowModeFor(item.MaterialIndex) == ShadowCastingMode.Off) continue;
+                dst.Add(i);
             }
             return dst.Count;
         }
+
+        /// <summary>This backend's copy of the shared shadow-mode lookup: the declared mode for
+        /// <paramref name="materialIndex"/>, or <see cref="ShadowCastingMode.Off"/> when no list was supplied
+        /// or it is short. The fallback must read identically in all three backends
+        /// (<see cref="ITileRenderBackend"/>).</summary>
+        /// <param name="materialIndex">The layer's global draw slot.</param>
+        private ShadowCastingMode ShadowModeFor(int materialIndex)
+            => (uint)materialIndex < (uint)_layerShadowModes.Count
+                ? _layerShadowModes[materialIndex]
+                : ShadowCastingMode.Off;
+
+        /// <summary>
+        /// Run-length groups <paramref name="emitOrder"/> (already in emission order) by declared shadow-cast
+        /// mode into <paramref name="dst"/>, one <see cref="BatchDrawRange"/> per run. A range is the ONLY
+        /// place a shadow declaration can live — <see cref="BatchDrawCommand"/> carries no such field — so
+        /// per-layer variation costs one extra range per mode change, never a reorder: the ranges partition
+        /// the command array contiguously and in order, leaving the painter's ordering untouched.
+        /// <see cref="BatchFilterSettings"/> is written in FULL (see <see cref="OnPerformCulling"/>).
+        ///
+        /// Internal for the same reason <see cref="ComputeEmitOrder"/> is — it is the testable seam into
+        /// <see cref="OnPerformCulling"/>, which needs a live GPU otherwise. Allocation-free in steady state.
+        /// </summary>
+        /// <param name="emitOrder">Compacted emit order from <see cref="ComputeEmitOrder"/>.</param>
+        /// <param name="dst">Reused destination list; cleared first.</param>
+        /// <returns>The number of ranges written.</returns>
+        internal int ComputeDrawRanges(List<int> emitOrder, List<BatchDrawRange> dst)
+        {
+            dst.Clear();
+            int e = 0;
+            while (e < emitOrder.Count)
+            {
+                ShadowCastingMode cast = EmittedShadowMode(emitOrder[e]);
+                int begin = e;
+                do { e++; }
+                while (e < emitOrder.Count && EmittedShadowMode(emitOrder[e]) == cast);
+
+                dst.Add(new BatchDrawRange
+                {
+                    drawCommandsBegin = (uint)begin,
+                    drawCommandsCount = (uint)(e - begin),
+                    filterSettings    = new BatchFilterSettings
+                    {
+                        renderingLayerMask = 0xFFFFFFFF,
+                        layer              = 0,
+                        motionMode         = MotionVectorGenerationMode.Camera,
+                        shadowCastingMode  = cast,
+                        receiveShadows     = true,
+                        staticShadowCaster = false,
+                        allDepthSorted     = false,
+                    },
+                });
+            }
+            return dst.Count;
+        }
+
+        /// <summary>The declared shadow-cast mode of the draw item at sorted slot
+        /// <paramref name="sortedIndex"/>.</summary>
+        /// <param name="sortedIndex">An index into <see cref="_sortedItems"/>, as emitted by
+        /// <see cref="ComputeEmitOrder"/>.</param>
+        private ShadowCastingMode EmittedShadowMode(int sortedIndex)
+            => ShadowModeFor(_items[_sortedItems[sortedIndex].handle].MaterialIndex);
 
         // ── Dispose ───────────────────────────────────────────────────────────────────────────
 

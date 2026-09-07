@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Pool;
+using UnityEngine.Rendering;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.View;
 using MapRenderer.Core.Geo;
@@ -59,6 +60,10 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         // Per-layer style id (e.g. "water", "road-primary"), parallel to _layerMaterials. Names each layer
         // GameObject after its style layer in the Hierarchy; empty/short ⇒ fall back to the material name.
         private readonly List<string>   _layerNames     = new List<string>();
+        // Per-layer shadow-cast declaration, parallel to _layerMaterials — IRenderLayer.CastShadows, carried
+        // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off (never default(...), never throw);
+        // the same fallback the other two backends use, so a divergence is a test failure, not a silent drift.
+        private readonly List<ShadowCastingMode> _layerShadowModes = new List<ShadowCastingMode>();
         // internal (not private): the test assembly's GameObjectTileRendererTestExtensions reads these
         // for observability that used to sit on this class as public members.
         internal readonly Dictionary<int, ItemRec> _items = new Dictionary<int, ItemRec>();
@@ -83,29 +88,44 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         private GameObject _poolRoot;
         private readonly ObjectPool<MeshNode> _layerPool;
 
-        /// <summary>A layer child's per-node settings, applied once at CREATION (not per rent): map geometry
-        /// casts and receives no shadows, and DontSave keeps this runtime-built object out of the saved
-        /// scene. MeshNode decides none of it — see its header.</summary>
+        /// <summary>A layer child's per-node settings, applied once at CREATION (not per rent): DontSave keeps
+        /// this runtime-built object out of the saved scene. The shadow flags are deliberately NOT here — a
+        /// pooled node outlives one layer's tenancy and can serve a different slot next rent, so
+        /// <see cref="AddTileLayer"/> binds them per rent alongside mesh and material. MeshNode decides none
+        /// of it — see its header.</summary>
         private static MeshNode NewLayerNode()
         {
             var node = new MeshNode(PooledLayerName);
             node.GameObject.hideFlags       = HideFlags.DontSave;
-            node.Renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            node.Renderer.receiveShadows    = false;
             node.Renderer.enabled           = false; // AddTileLayer enables once mesh + material are bound
             return node;
         }
+
+        /// <summary>This backend's copy of the shared shadow-mode lookup: the declared mode for
+        /// <paramref name="materialIndex"/>, or <see cref="ShadowCastingMode.Off"/> when no list was supplied
+        /// or it is short. The fallback must read identically in all three backends
+        /// (<see cref="ITileRenderBackend"/>).</summary>
+        /// <param name="materialIndex">The layer's global draw slot.</param>
+        private ShadowCastingMode ShadowModeFor(int materialIndex)
+            => (uint)materialIndex < (uint)_layerShadowModes.Count
+                ? _layerShadowModes[materialIndex]
+                : ShadowCastingMode.Off;
 
         // Placeholder name for a freshly built node; AttachAt renames it per style layer on every rent.
         private const string PooledLayerName = "tile-layer";
         private int _nextHandle;
 
-        public TileRenderer(IReadOnlyList<Material> layerMaterials, IReadOnlyList<string> layerNames = null)
+        public TileRenderer(
+            IReadOnlyList<Material> layerMaterials,
+            IReadOnlyList<string> layerNames = null,
+            IReadOnlyList<ShadowCastingMode> layerShadowModes = null)
         {
             if (layerMaterials == null) throw new ArgumentNullException(nameof(layerMaterials));
             for (int i = 0; i < layerMaterials.Count; i++) _layerMaterials.Add(layerMaterials[i]);
             if (layerNames != null)
                 for (int i = 0; i < layerNames.Count; i++) _layerNames.Add(layerNames[i]);
+            if (layerShadowModes != null)
+                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
 
             _tree     = new SceneTileTree("MapTiles (GameObject backend)");
             _poolRoot = new GameObject("(layer pool)") { hideFlags = HideFlags.DontSave };
@@ -173,6 +193,9 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             node.AttachAt(container, layerName);
             node.Filter.sharedMesh       = mesh;  // sharedMesh: assign, do not clone
             node.Renderer.sharedMaterial = mat;   // sharedMaterial: reference the live layer material
+            // Per rent, not per node: the pool recycles a node across layers with different declarations.
+            node.Renderer.shadowCastingMode = ShadowModeFor(materialIndex);
+            node.Renderer.receiveShadows    = true;
             node.Renderer.enabled        = true;  // MeshNode builds and releases disabled
 
             _tree.AddChild(tileId);

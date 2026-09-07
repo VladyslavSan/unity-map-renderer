@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.Rendering;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
 
@@ -10,9 +11,10 @@ namespace MapRenderer.Unity.Rendering.Style
     /// painted layer kind (fill, line, symbol, background, and later fill-extrusion/raster), not just the
     /// static-geometry ones (the render-layer model). Every layer declares
     /// its lifetime class (<see cref="Build"/>), who re-draws it each render (<see cref="Persistence"/>),
-    /// and its global slot in the painter's chain (<see cref="DrawIndex"/>) — three orthogonal axes, never
-    /// collapsed. The static-geometry contract (mesh-from-features build) now lives on the capability
-    /// interface <see cref="ITileMeshRenderLayer"/>, not here.
+    /// its global slot in the painter's chain (<see cref="DrawIndex"/>), and whether it casts shadows
+    /// (<see cref="CastShadows"/>) — four orthogonal axes, never collapsed. The static-geometry contract
+    /// (mesh-from-features build) now lives on the capability interface
+    /// <see cref="ITileMeshRenderLayer"/>, not here.
     ///
     /// <para>Replaces the fill-vs-line split (the retired <c>StyledLayerSet._fills</c>/<c>_lines</c>):
     /// render layers now live in ONE ordered <see cref="RenderLayerSet"/> where
@@ -36,6 +38,19 @@ namespace MapRenderer.Unity.Rendering.Style
         /// afterwards. This layer's queue band is <c>LayerDrawOrder.QueueFor(DrawIndex, subSlot)</c> for each
         /// sub-slot it uses (G7/D7) — NOT a bare <c>TransparentQueue + DrawIndex</c> any more.</summary>
         int DrawIndex { get; }
+
+        /// <summary>Whether this layer's geometry is drawn into the shadow map. A per-render-KIND decision,
+        /// not a style property: only <c>fill-extrusion</c> returns <see cref="ShadowCastingMode.On"/>,
+        /// because ground-draped kinds (fill, line, background) are coplanar with the surface they would
+        /// shadow — casting there is an acne source and buys nothing — and symbols are camera-facing
+        /// billboards whose cast shadow would be a floating dark quad. Receiving is unconditional for tile
+        /// geometry and is not part of this axis.
+        ///
+        /// <para>Non-local invariant: <see cref="Backend.ITileRenderBackend"/>'s three implementations
+        /// TRANSPORT this value verbatim, indexed by <see cref="DrawIndex"/>, and must never re-derive it
+        /// from the layer type or the material — that is what keeps the three backends from drifting
+        /// apart.</para></summary>
+        ShadowCastingMode CastShadows { get; }
 
         /// <summary>Which sub-slot of this layer's queue band (see <see cref="DrawIndex"/>) its primary
         /// <see cref="Material"/> occupies — <see cref="LayerSubSlot.Base"/> for a single-material layer

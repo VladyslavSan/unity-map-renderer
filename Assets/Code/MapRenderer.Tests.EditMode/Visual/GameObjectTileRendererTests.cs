@@ -177,8 +177,8 @@ namespace MapRenderer.Tests.Visual
                 Assert.AreSame(mesh, mf.sharedMesh, "MeshFilter must reference the shared mesh (no clone).");
                 Assert.AreSame(mat, mr.sharedMaterial, "MeshRenderer must reference the live shared material (no clone).");
                 Assert.AreEqual(UnityEngine.Rendering.ShadowCastingMode.Off, mr.shadowCastingMode,
-                    "Map geometry casts no shadows.");
-                Assert.IsFalse(mr.receiveShadows, "Map geometry receives no shadows.");
+                    "A layer with no declared cast mode falls back to Off.");
+                Assert.IsTrue(mr.receiveShadows, "Every map layer receives shadows.");
             }
             finally { r.Dispose(); }
         }

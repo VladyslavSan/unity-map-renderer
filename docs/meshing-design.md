@@ -8,7 +8,7 @@ layer a uniform place. Read this before touching `FillMeshPipeline`, `StyledFill
 1. **[Mesh pipeline](#1-mesh-pipeline)** — how MVT bytes become a mesh, per geometry kind (fill vs line orderings, the build/consume loop).
 2. **[Line antialiasing](#2-line-antialiasing)** — why there is no edge AA, the trilemma, the single-pass-cased-line path forward.
 3. **[Lit rendering](#3-lit-rendering)** — the shared URP-Lit (PBR) shader convention: mirror-copy structure, multi-pass, styling as material properties.
-4. **[Render-layer model](#4-render-layer-model)** — `IRenderLayer`/`RenderLayerSet`: every painted kind first-class along three orthogonal axes.
+4. **[Render-layer model](#4-render-layer-model)** — `IRenderLayer`/`RenderLayerSet`: every painted kind first-class along four orthogonal axes.
 
 ---
 
@@ -311,7 +311,8 @@ include/macro for vertex-moving shaders.
 
 **Pass set** (mandatory minimum for a lit, shadowing, depth-participating map):
 - `UniversalForward` (ForwardLit) — the visible lit pixels. **Mandatory.**
-- `ShadowCaster` — casts shadows. **Mandatory** if the feature casts shadows.
+- `ShadowCaster` — casts shadows. **Mandatory** if the feature casts shadows. *Who actually casts is a
+  render-kind decision — see §4 "Locked decisions → Shadows".*
 - `DepthOnly` — camera depth prepass / `_CameraDepthTexture`. Needed when depth texture is on.
 - `DepthNormals` — depth+normals prepass. Needed for SSAO.
 - `UniversalGBuffer` — carried by **both Fill and Line as capability**. The line's GBuffer pass is
@@ -487,16 +488,16 @@ with an Unlit analogue of `ShaderStructureTests` + a headless snapshot test.
 
 `ARCHITECTURE.md` §"Layer ordering": *"the style is an ordered list of layers, composited in order."* The
 `IRenderLayer`/`RenderLayerSet` model makes that true for **everything the style can paint**: every painted layer
-gets a uniform place along three orthogonal axes — **build/lifetime** (how its geometry comes to exist), **draw
-order** (its slot in the global painter's chain), and **presence** (whether a backend redraws it by itself or an
-orchestrator must re-issue it). The axes are named and kept separate; the model does NOT pretend symbols build
-like fills.
+gets a uniform place along four orthogonal axes — **build/lifetime** (how its geometry comes to exist), **draw
+order** (its slot in the global painter's chain), **presence** (whether a backend redraws it by itself or an
+orchestrator must re-issue it), and **shadow casting** (whether it is drawn into the shadow map). The axes are
+named and kept separate; the model does NOT pretend symbols build like fills.
 
-**Status:** fill, line, symbol, and background are all first-class in the one ordered model (shipped). Raster and
-fill-extrusion are **reserved seats** — one class + one factory arm each, unscheduled (payload of the tile-
+**Status:** fill, line, symbol, background and fill-extrusion are all first-class in the one ordered model
+(shipped). Raster is a **reserved seat** — one class + one factory arm, unscheduled (payload of the tile-
 pipeline unification epic, `docs/per-layer-tile-processing-design.md`).
 
-## The three axes, pinned per kind
+## The four axes, pinned per kind
 
 Every painted layer declares:
 - **build kind** — `TileMesh` (built once per tile, Burst pipeline, backend-registered) / `FramePlaced` (rebuilt
@@ -505,6 +506,8 @@ Every painted layer declares:
 - **draw persistence** — `Persistent` (a backend redraws it every render on its own) / `Immediate` (an
   orchestrator must re-issue it every camera render).
 - **global draw index** — its slot in the one ordered painter chain.
+- **shadow casting** — `IRenderLayer.CastShadows`, a `ShadowCastingMode` the backends transport verbatim
+  (see "Locked decisions → Shadows").
 
 | Layer kind | Build (lifetime) | Presence | Draw slot | State |
 |---|---|---|---|---|
@@ -513,7 +516,7 @@ Every painted layer declares:
 | **Symbol/text** | `FramePlaced` — global collision → per-slot billboard mesh rebuilt every `Tick` | `Persistent` — a persistent per-slot `MeshRenderer` (`LabelSlotPresenter`) swaps its mesh each `Tick`, so the backend redraws it with no orchestrator | global index **per symbol layer** | shipped |
 | **Background** | `TileMesh` — per-covered-tile, source-less (`BackgroundQuad` + `TileBuildGraph`) | `Persistent` — one quad per covered tile, same as fill/line | global index | shipped |
 | **Raster** *(future)* | `TileMesh` — per-tile textured quad | `Persistent` | global index | reserved seat |
-| **Fill-extrusion** *(future)* | `TileMesh` (+ ZWrite on) | `Persistent` | global index | reserved seat |
+| **Fill-extrusion** | `TileMesh` (+ ZWrite on) — `FillExtrusionRenderLayer` / `StyledFillExtrusionTileBuilder` | `Persistent` | global index | shipped |
 
 The build kinds genuinely differ and the model **names** the difference: `TileMesh` layers participate in the
 tile produce/consume loop and the `ITileRenderBackend`; `FramePlaced` layers participate in the per-frame
@@ -582,6 +585,31 @@ not the concrete types).
 - **Per-layer materials live on the layer object, one owner.** `SymbolRenderLayer` owns its material clone (halo
   bind included); the label subsystem consumes the layer set's materials instead of cloning its own. Fill/line
   already work this way.
+- **Shadows: `fill-extrusion` casts; everything else only receives.** Scope is per-render-KIND and global —
+  per-style-layer control is deliberately NOT here (UMR-98), and neither is a `_CastShadows` material toggle
+  (a per-material switch whose only job is to turn casting off IS per-layer control).
+
+  | Geometry | Casts | Receives | Why |
+  |---|---|---|---|
+  | `fill-extrusion` (buildings) | **On** | yes | Has volume; the shadow is meaningful, and it is the point. |
+  | `fill` (ground-draped) | Off | **yes** | Coplanar with the ground ⇒ casting is a known acne source and buys nothing. Receiving is what makes building shadows land on parks/water. |
+  | `line` (roads) | Off | **yes** | Same reasoning. Receiving is the visible payoff — building shadows crossing roads. |
+  | `background` | Off | yes | A ground quad; same class as fill. |
+  | symbols / text | Off | **no** | Camera-facing billboards at a fixed offset above ground: a cast shadow would be a floating dark quad, and a received one would darken the glyphs it exists to make legible. |
+
+  The declaration lives on `IRenderLayer.CastShadows`, is collected by `TileManager.LayerShadowModes` into a
+  full-width per-slot list beside the material list, and is TRANSPORTED by all three backends — never
+  re-derived from the layer type or material, which is how three backends drift apart. Backends express it
+  differently and must agree: the GameObjects backend binds the two renderer flags **per rent** (a pooled node
+  outlives one layer's tenancy), Entities keeps **two Prefab prototypes** over one `RenderMeshArray` value
+  (`RenderFilterSettings` is shared-component data, so a per-entity write would be a structural change),
+  and BRG run-length groups its already-ordered draw commands into one `BatchDrawRange` per cast mode AND
+  drops non-casters from the emit order on a `BatchCullingViewType.Light` pass — that filter is what makes
+  "only fill-extrusion casts" assertable in EditMode without a GPU.
+
+  **Known, accepted limitation:** a shadow-casting material in the transparent queue casts a **fully opaque**
+  shadow regardless of `fill-extrusion-opacity` — the `ShadowCaster` pass is opaque. Not a bug; the fix would
+  be dithered/transparent shadows, which is not in scope.
 - **Layer-kind dispatch has exactly one registry.** `RenderLayerFactory` is the only type-switch;
   `MapView.BuildSourceSpecs` ("which sources to fetch") and the label subsystem ("which layers are mine") derive
   from the built `RenderLayerSet`, not from re-walking `style.Layers` with their own `is` checks.

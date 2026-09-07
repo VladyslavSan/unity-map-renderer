@@ -171,9 +171,15 @@ namespace MapRenderer.Unity.Text.Placement
                 defaultCapacity: 32,
                 maxSize: 512);
 
-        /// <summary>A leaf's per-node settings, applied once at CREATION (not per rent): map geometry casts
-        /// and receives no shadows, and DontSave keeps these out of the saved scene. MeshNode deliberately
-        /// decides none of this — see its header.</summary>
+        /// <summary>A leaf's per-node settings, applied once at CREATION (not per rent): symbols neither cast
+        /// nor receive shadows, and DontSave keeps these out of the saved scene. MeshNode deliberately
+        /// decides none of this — see its header.
+        ///
+        /// <para>The shadow flags are a DECISION, not an oversight, and unlike tile geometry they are
+        /// per-node rather than per-rent because every leaf answers the same way: a symbol is a camera-facing
+        /// billboard held a fixed offset above the ground, so a cast shadow would be a floating dark quad and
+        /// a received one would darken the glyphs it is there to make legible. See
+        /// <c>Style.IRenderLayer.CastShadows</c> for the tile-geometry half of the same decision.</para></summary>
         private static MeshNode NewLeaf(string name)
         {
             var node = new MeshNode(name);

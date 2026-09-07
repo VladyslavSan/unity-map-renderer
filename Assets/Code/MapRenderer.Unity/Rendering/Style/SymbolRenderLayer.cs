@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.View;
 using MapRenderer.Unity.Rendering.Materials;
@@ -49,6 +50,8 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <see cref="WorldIconMaterial"/> (at <see cref="LayerSubSlot.Base"/>) — otherwise the badge paints
         /// out the number it frames (G7/D7).</summary>
         public LayerSubSlot MaterialSubSlot => LayerSubSlot.Above;
+
+        public ShadowCastingMode CastShadows => ShadowCastingMode.Off;
 
         /// <summary>The layer's primary drawn material — <see cref="WorldTextMaterial"/>. <c>null</c> iff
         /// <c>MapMaterialSet.SymbolTextWorld</c> is unassigned (the slot↔subsystem-ordinal 1:1 mapping still

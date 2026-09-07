@@ -887,10 +887,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             _instanced?.Dispose();
             _instanced = backend switch
             {
-                Map.RenderBackend.Brg => new BRGBackend.TileRenderer(LayerMaterials(_layers)),
+                Map.RenderBackend.Brg =>
+                    new BRGBackend.TileRenderer(LayerMaterials(_layers), LayerShadowModes(_layers)),
                 Map.RenderBackend.GameObject =>
-                    new GOBackend.TileRenderer(LayerMaterials(_layers), LayerNames(_layers)),
-                _ => new EntBackend.TileRenderer(LayerMaterials(_layers), LayerNames(_layers)),
+                    new GOBackend.TileRenderer(LayerMaterials(_layers), LayerNames(_layers), LayerShadowModes(_layers)),
+                _ => new EntBackend.TileRenderer(LayerMaterials(_layers), LayerNames(_layers), LayerShadowModes(_layers)),
             };
         }
 
@@ -918,6 +919,19 @@ namespace MapRenderer.Unity.Rendering.Tile
             var names = new List<string>(layers.Count);
             for (int i = 0; i < layers.Count; i++) names.Add(layers[i].StyleLayer?.Id);
             return names;
+        }
+
+        /// <summary>The per-layer shadow-cast declaration in the same declared order as
+        /// <see cref="LayerMaterials"/>, so every backend transports one list rather than re-deriving the
+        /// answer from the layer kind (which is how three backends drift apart). The value is the layer's
+        /// own <see cref="Style.IRenderLayer.CastShadows"/> — only <c>fill-extrusion</c> casts today.</summary>
+        /// <remarks>Test seam: <c>internal</c> (not <c>private</c>) so the derivation tooth can call it
+        /// without constructing a backend.</remarks>
+        internal static List<UnityEngine.Rendering.ShadowCastingMode> LayerShadowModes(Style.RenderLayerSet layers)
+        {
+            var modes = new List<UnityEngine.Rendering.ShadowCastingMode>(layers.Count);
+            for (int i = 0; i < layers.Count; i++) modes.Add(layers[i].CastShadows);
+            return modes;
         }
 
         // ── Test observability (internal; surfaced to tests through MapViewTestExtensions, not the

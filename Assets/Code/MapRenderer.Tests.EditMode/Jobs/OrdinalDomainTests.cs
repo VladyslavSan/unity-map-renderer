@@ -335,6 +335,7 @@ namespace MapRenderer.Tests.Jobs
             public DrawPersistence  Persistence     => DrawPersistence.Persistent;
             public int              DrawIndex       => 0;
             public LayerSubSlot     MaterialSubSlot => LayerSubSlot.Base;
+            public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material         Material        => null;
             public void ApplyZoom(double zoom, double devicePixelRatio) { }
             public void Dispose() { }

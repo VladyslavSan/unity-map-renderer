@@ -374,6 +374,11 @@ namespace MapRenderer.App
             var light   = lightGo.AddComponent<Light>();
             light.type                 = LightType.Directional;
             light.intensity            = 1.0f;
+            // Explicit, not left to the component default: buildings cast shadows (UMR-92), and a light that
+            // never enables them makes every backend's declaration invisible. Only the BOOTSTRAP light — the
+            // early return above hands a host-supplied light back untouched, same "don't clobber the host's
+            // lighting" stance as EnsureEnvironmentLighting, so that host owns enabling shadows on its own.
+            light.shadows              = LightShadows.Soft;
             lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
             Debug.Log("[MapHost] Created directional light (none found in scene).");
         }
