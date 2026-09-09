@@ -22,6 +22,61 @@ namespace MapRenderer.Jobs.Fill
         public int     Feature; // → per-feature color index
     }
 
+    /// <summary>Bitwise vertex key for <see cref="GlobeFillSubdivideJob{TProj}.Emit"/>: two emitted vertices
+    /// with an equal key would write IDENTICAL <see cref="GlobeFillVertex"/> bytes, so the second may reuse
+    /// the first's index instead of allocating storage.
+    ///
+    /// <para>Stated as a PREDICATE, not a fixed field list: <b>any attribute a downstream shader reads that
+    /// can differ between two vertices sharing a tile coordinate participates in identity.</b> Keying the
+    /// WHOLE struct — rather than hand-picking <c>Tile</c>/<c>Feature</c> and treating <c>World</c>/<c>Up</c>/
+    /// <c>East</c> as redundant functions of <c>Tile</c> — satisfies that predicate automatically and stays
+    /// correct when a column is added (e.g. the per-vertex band/side attribute on the parked
+    /// <c>feat/fill-boundary-antialiasing</c> branch, absent on <c>main</c>): a hand-picked key silently
+    /// omits a new column at rebase time, a whole-struct key cannot. <c>Mid()</c> is exactly order-symmetric
+    /// ((a+b)*0.5 commutes bit-for-bit) and marking is per-edge from the two endpoints alone (no
+    /// connectivity), so two triangles sharing a split edge compute bit-identical derived fields for it —
+    /// the whole-struct key merges exactly what a canonical-input key would, with no under-merge risk
+    /// (T-C5 is the tooth that would catch this reasoning being wrong).</para></summary>
+    internal readonly struct GlobeFillVertexKey : IEquatable<GlobeFillVertexKey>
+    {
+        private readonly ulong _worldX, _worldY, _worldZ;
+        private readonly ulong _upX, _upY, _upZ;
+        private readonly ulong _eastX, _eastY, _eastZ;
+        private readonly ulong _tileX, _tileY;
+        private readonly int   _feature;
+
+        public GlobeFillVertexKey(in GlobeFillVertex v)
+        {
+            _worldX = math.asulong(v.World.x); _worldY = math.asulong(v.World.y); _worldZ = math.asulong(v.World.z);
+            _upX = math.asulong(v.Up.x);       _upY = math.asulong(v.Up.y);       _upZ = math.asulong(v.Up.z);
+            _eastX = math.asulong(v.East.x);   _eastY = math.asulong(v.East.y);   _eastZ = math.asulong(v.East.z);
+            _tileX = math.asulong(v.Tile.x);   _tileY = math.asulong(v.Tile.y);
+            _feature = v.Feature;
+        }
+
+        public bool Equals(GlobeFillVertexKey other) =>
+            _worldX == other._worldX && _worldY == other._worldY && _worldZ == other._worldZ &&
+            _upX == other._upX && _upY == other._upY && _upZ == other._upZ &&
+            _eastX == other._eastX && _eastY == other._eastY && _eastZ == other._eastZ &&
+            _tileX == other._tileX && _tileY == other._tileY && _feature == other._feature;
+
+        public override bool Equals(object obj) => obj is GlobeFillVertexKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            unchecked
+            {
+                long h = (long)_worldX;
+                h = h * -1521134295L + (long)_worldY; h = h * -1521134295L + (long)_worldZ;
+                h = h * -1521134295L + (long)_upX;    h = h * -1521134295L + (long)_upY;    h = h * -1521134295L + (long)_upZ;
+                h = h * -1521134295L + (long)_eastX;  h = h * -1521134295L + (long)_eastY;  h = h * -1521134295L + (long)_eastZ;
+                h = h * -1521134295L + (long)_tileX;  h = h * -1521134295L + (long)_tileY;
+                h = h * -1521134295L + _feature;
+                return (int)(h ^ (h >> 32));
+            }
+        }
+    }
+
     /// <summary>
     /// S91-C (C-3): adaptive curvature subdivision for globe fills, as a Burst job. Earcut triangulates in flat
     /// tile space; on a curved projection the straight triangle edges chord THROUGH the sphere (fills sink /
@@ -34,6 +89,11 @@ namespace MapRenderer.Jobs.Fill
     /// per-tile <c>Budget</c> so a whole-globe z0 tile can't explode. A flat projection (constant up) never
     /// splits — it passes straight through.
     ///
+    /// <para><b>Emitted vertices are SHARED</b> (<see cref="GlobeFillVertexKey"/>): <see cref="Emit"/> reuses an
+    /// existing <c>OutVerts</c> slot for a bit-identical vertex instead of tripling every leaf triangle's
+    /// corners, so <c>OutVerts</c> is the UNIQUE count and <c>OutIndices</c> the EMITTED count — a
+    /// representation-only change, the split path and every emitted vertex's bytes are unaffected.</para>
+    ///
     /// <para>OUTPUT WINDING: each refined triangle preserves its parent's vertex order, so the output stays CCW —
     /// the pipeline's single canonical winding (inherited from <c>Earcut</c>), reversed once to Unity-front at the
     /// mesh-write boundary (<c>StyledFillTileBuilder</c>) for stock Cull Back; see <c>docs §7.1</c>.</para>
@@ -42,7 +102,8 @@ namespace MapRenderer.Jobs.Fill
     /// <see cref="ProjectPointsJob{TProj}"/> pattern) so Burst devirtualises + inlines <c>ProjectPoint</c> /
     /// <c>TangentBasisAt</c> — no managed call. The recursion is an EXPLICIT stack (Burst does not reliably
     /// support real recursion); the stack is DFS-bounded (~<c>3·MaxDepth</c> entries), a Temp allocation freed
-    /// at job end. Managed dispatch by projection type lives in <see cref="GlobeFillSubdivideDispatch"/>.</para>
+    /// at job end, same as the vertex-key map. Managed dispatch by projection type lives in
+    /// <see cref="GlobeFillSubdivideDispatch"/>.</para>
     ///
     /// <para><b>Residuals (known, not hit by the corpus/z2-quad teeth — both are depth-1 or uniformly-curved,
     /// so every triangle reaches its stop test in lockstep).</b> A per-triangle FORCED stop — either the
@@ -87,6 +148,16 @@ namespace MapRenderer.Jobs.Fill
             int srcIndexCount = TriangleIndices.Length;
 
             var stack = new NativeList<Tri>(64, Allocator.Temp);
+            // Job-local, freed at Execute's end (job-scheduling-design.md §3.6: an Allocator.Temp container
+            // is only valid as a LOCAL, never a field — this job is .Schedule()'d, matching `stack` above).
+            // Keyed on the bit patterns a shared vertex WOULD write (GlobeFillVertexKey) so two split paths
+            // that reach the same tile coordinate — the same feature's shared triangle edge, the shared
+            // diagonal between two earcut roots — share one OutVerts slot instead of tripling it. Seeded
+            // from srcIndexCount (a sound lower bound on the emitted vertex count) rather than a small
+            // constant — this map can grow to ~45k entries on a real z0 tile, and a small seed means ~10
+            // reallocate-and-rehash passes, each copying every entry inserted so far, inside the hot path
+            // this whole change exists to speed up.
+            var indexByVertex = new NativeHashMap<GlobeFillVertexKey, int>(srcIndexCount, Allocator.Temp);
             for (int t = 0; t + 2 < srcIndexCount; t += 3)
             {
                 int i0 = TriangleIndices[t], i1 = TriangleIndices[t + 1], i2 = TriangleIndices[t + 2];
@@ -103,14 +174,18 @@ namespace MapRenderer.Jobs.Fill
                     // the identical mark — conforming without connectivity. Force 0 marks at the depth cap or
                     // once the budget is exhausted (emit flat, same as the old per-triangle stop test).
                     // MUST match SubdivisionCoverageValidator.RunMirror byte-for-byte (parity tooth).
-                    bool overBudget = OutVerts.Length >= Budget;
+                    //
+                    // Budget counts EMITTED vertices (OutIndices, one Add per Emit call), not unique storage
+                    // (OutVerts) — sharing only changes storage, so every split decision stays byte-identical to
+                    // the pre-sharing job regardless of how much sharing the tile happens to have.
+                    bool overBudget = OutIndices.Length >= Budget;
                     bool canSplit = w.Depth < MaxDepth && !overBudget;
                     bool markAB = canSplit && math.dot(w.A.Up, w.B.Up) < CosThresh;
                     bool markBC = canSplit && math.dot(w.B.Up, w.C.Up) < CosThresh;
                     bool markCA = canSplit && math.dot(w.C.Up, w.A.Up) < CosThresh;
                     int markCount = (markAB ? 1 : 0) + (markBC ? 1 : 0) + (markCA ? 1 : 0);
 
-                    if (markCount == 0) { Emit(w.A, w.Feat); Emit(w.B, w.Feat); Emit(w.C, w.Feat); continue; }
+                    if (markCount == 0) { Emit(w.A, w.Feat, ref indexByVertex); Emit(w.B, w.Feat, ref indexByVertex); Emit(w.C, w.Feat, ref indexByVertex); continue; }
 
                     V mAB = markAB ? Project(Mid(w.A.Tile, w.B.Tile)) : default;
                     V mBC = markBC ? Project(Mid(w.B.Tile, w.C.Tile)) : default;
@@ -172,13 +247,29 @@ namespace MapRenderer.Jobs.Fill
                     }
                 }
             }
+            indexByVertex.Dispose();
             stack.Dispose();
         }
 
-        private void Emit(in V v, int feat)
+        /// <summary>Emits one triangle-corner vertex: a bit-identical vertex already in <see cref="OutVerts"/>
+        /// (<see cref="GlobeFillVertexKey"/> — the whole emitted struct) is reused by index; otherwise a new
+        /// one is appended. Every call adds exactly one <see cref="OutIndices"/> entry regardless of which
+        /// branch runs, so <c>OutIndices.Length</c> is always the emitted count and <c>OutVerts.Length</c> is
+        /// always the unique count — the split apart the caller's budget check relies on.</summary>
+        private void Emit(in V v, int feat, ref NativeHashMap<GlobeFillVertexKey, int> indexByVertex)
         {
-            OutVerts.Add(new GlobeFillVertex { World = v.World, Up = v.Up, East = v.East, Tile = v.Tile, Feature = feat });
-            OutIndices.Add(OutVerts.Length - 1); // no dedup: sequential indices
+            var vertex = new GlobeFillVertex { World = v.World, Up = v.Up, East = v.East, Tile = v.Tile, Feature = feat };
+            var key = new GlobeFillVertexKey(vertex);
+            if (indexByVertex.TryGetValue(key, out int existing))
+            {
+                OutIndices.Add(existing);
+                return;
+            }
+
+            int index = OutVerts.Length;
+            OutVerts.Add(vertex);
+            OutIndices.Add(index);
+            indexByVertex.Add(key, index);
         }
 
         private V Project(double2 tile)

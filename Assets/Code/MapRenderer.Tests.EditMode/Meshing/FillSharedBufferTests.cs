@@ -201,10 +201,21 @@ namespace MapRenderer.Tests.Meshing
                 Assert.IsNotNull(flat, "precondition: the flat arm must produce geometry");
                 Assert.IsNotNull(globe, "precondition: the globe arm must produce geometry");
 
-                // Non-vacuity: the two arms really are different code paths, not the same one twice — the
-                // globe path subdivides, so it has strictly more vertices.
-                Assert.Greater(globe.vertexCount, flat.vertexCount,
-                    "precondition: the globe arm must actually have gone through the subdivided write");
+                // Non-vacuity: the two arms really are different code paths, not the same one twice.
+                // vertex sharing: was asserted as "globe.vertexCount > flat.vertexCount
+                // ⇒ subdivision happened" — a false signal even before sharing: these squares are too small to
+                // mark any edge (every edge subtends well under the 3° threshold), so NOTHING subdivides on
+                // this fixture, on either code path. The old assertion passed only because pre-sharing every
+                // leaf triangle emitted 3 unshared corners regardless of whether anything split; sharing
+                // removed that inflation (measured: dropped to exactly 12, matching flat) and exposed the
+                // fixture never subdivided at all — an index-count re-expression (Assert.Greater(globe.
+                // triangles.Length, flat.triangles.Length)) fails for the identical reason, since triangle
+                // count is equally unaffected by sharing and equally unmoved by a split that never happens.
+                // The real non-vacuity signal here is PROJECTION, not subdivision: WebMercatorProjection's
+                // Up is the literal constant (0,1,0) (WebMercatorProjection.cs:38); the spherical arm's real
+                // geodetic Up at this position is not — that distinguishes the two code paths where no count can.
+                Assert.AreNotEqual(new Vector3(0f, 1f, 0f), globe.normals[0],
+                    "precondition: the globe arm must actually use real geodetic Up, not the flat plane's constant (0,1,0)");
 
                 List<Color> flatRuns  = PaintOrderColorRuns(flat);
                 List<Color> globeRuns = PaintOrderColorRuns(globe);

@@ -303,14 +303,24 @@ namespace MapRenderer.Tests.Tiles
         // frozen regression pin — same reasoning as R6/B.7, same per-stream granularity as N1.
         //
         // RED: flip `w` to -1f in the tangent write, drop the Normal assignment, or un-reverse the index
-        // 2nd/3rd swap — each reddens a named stream below.
+        // 2nd/3rd swap — each reddens a named stream below. The 2nd/3rd-swap recipe reddens the SEPARATE
+        // `Indices=` digest (raw index buffer values, unaffected by the change below) — that is the stream
+        // that pins the winding recipe, not Stream0-3.
+        //
+        // vertex sharing: Stream0-3 walk the INDEX buffer and dereference (de-indexed),
+        // not the vertex columns straight through — this is representation-independent of how much storage
+        // GlobeFillSubdivideJob's sharing changes, and MEASURED to still hold: captured on the pre-sharing tree
+        // (GlobeFillSubdivider.cs stashed) and again on the post-sharing tree, byte-identical both arms. Both
+        // constants below moved from their PRE-de-indexing values regardless of sharing — this write step
+        // reverses index 2nd/3rd unconditionally (StyledFillTileBuilder.WriteJob.cs), so the index buffer is
+        // never the identity permutation of storage order, on either arm, subdivided fixture or not.
         private const string FrozenGoldensFlat =
-            "Stream0=DP8+lbaDnqnXo32FewHCvd56e5FR2172oWesZmac3I0= Stream1=ycx4JigRdmfDwxwHaeX4v7o3nJZToxUkEf1l5+erqP0= " +
+            "Stream0=e9hMmM82whfC3XFd3T6B00cKXrJeyIKPeCzUtruR/ps= Stream1=PT/rx8GUBqq/p/FTk4NwPZ4Dr5G6zXZQLdlO3z5TyDI= " +
             "Stream2=1RQ/sTquk3Cj4XlWFjd4hAT1L/dHby/JBckr7B8o5EA= Stream3=BqV3NujaZBIyhp8mGaJomHgLaTtc8qtEO5G+atpnKDA= " +
             "Indices=vj5j3bGOJy3YqLoQJ3LmWF5nLYcjDgBIY19HQFkmEJ8= Bounds=Cdbs9HaYIDzj0sqYENY9VmlRQjWy7EScMyRVMFObTr8=";
         private const string FrozenGoldensSpherical =
-            "Stream0=nb1J+NsjJ4eZoKrXrFnxHV5mLD2q8dHfOYrelF0pm1Y= Stream1=ycx4JigRdmfDwxwHaeX4v7o3nJZToxUkEf1l5+erqP0= " +
-            "Stream2=2JNye5+EaLy+vNY2MijWmE9aiunN9dm7SOJ5WPxbMvc= Stream3=BqV3NujaZBIyhp8mGaJomHgLaTtc8qtEO5G+atpnKDA= " +
+            "Stream0=ShkxI1ZctSVcCLSlrB/p+1qYpsHxLbdStLHJAVkL1ys= Stream1=PT/rx8GUBqq/p/FTk4NwPZ4Dr5G6zXZQLdlO3z5TyDI= " +
+            "Stream2=Hj4K+YMlVJ05pm250M/C9MPshQuvvRyGBB/dP/t1PxA= Stream3=BqV3NujaZBIyhp8mGaJomHgLaTtc8qtEO5G+atpnKDA= " +
             "Indices=vj5j3bGOJy3YqLoQJ3LmWF5nLYcjDgBIY19HQFkmEJ8= Bounds=Wu+l0hNvh4iI1J63SzYxcI29CAwAKW1iUgUmW8k63kc=";
 
         [Test]
@@ -351,18 +361,31 @@ namespace MapRenderer.Tests.Tiles
                 var b3 = b.GetVertexData<Vector4>(3);
                 NativeArray<int> bi = b.GetIndexData<int>();
 
+                // De-indexed (vertex sharing, earcut-sdf-vertex-cost.md §6/§7, T-C1):
+                // walk the INDEX buffer and dereference, rather than assume VertexCount == IndexCount and
+                // read the vertex columns straight through — this is what a triangle-by-triangle reader (the
+                // mesh write step, the GPU) actually sees, and is representation-independent of how much
+                // storage the subdivider's sharing changes. MEASURED, not assumed: on this single-triangle
+                // fixture (which cannot sharing — 3 corners in, 3 unique out, either way) de-indexing moved
+                // BOTH goldens below, flat included, which never enters the subdivider at all — proof this
+                // changed what the digest MEASURES (triangle order vs. raw vertex-storage order: the write
+                // step reverses index 2nd/3rd unconditionally, StyledFillTileBuilder.WriteJob.cs, so the
+                // index buffer is never the identity permutation of storage order), not a sharing regression.
+                // Re-captured via the stash-production/ordinal-zero protocol: the constants below were
+                // verified byte-identical whether GlobeFillSubdivider.cs's sharing was stashed out or present.
                 var s0 = new List<byte>(); var s1 = new List<byte>(); var s2 = new List<byte>(); var s3 = new List<byte>();
-                for (int i = 0; i < graphWrite.VertexCount; i++)
+                for (int i = 0; i < bi.Length; i++)
                 {
-                    Vector3 p = b0[i].Position, n = b0[i].Normal;
+                    int vi = bi[i];
+                    Vector3 p = b0[vi].Position, n = b0[vi].Normal;
                     s0.AddRange(BitConverter.GetBytes(p.x)); s0.AddRange(BitConverter.GetBytes(p.y)); s0.AddRange(BitConverter.GetBytes(p.z));
                     s0.AddRange(BitConverter.GetBytes(n.x)); s0.AddRange(BitConverter.GetBytes(n.y)); s0.AddRange(BitConverter.GetBytes(n.z));
-                    Vector2 pc = b1[i];
+                    Vector2 pc = b1[vi];
                     s1.AddRange(BitConverter.GetBytes(pc.x)); s1.AddRange(BitConverter.GetBytes(pc.y));
-                    Vector4 tan = b2[i];
+                    Vector4 tan = b2[vi];
                     s2.AddRange(BitConverter.GetBytes(tan.x)); s2.AddRange(BitConverter.GetBytes(tan.y));
                     s2.AddRange(BitConverter.GetBytes(tan.z)); s2.AddRange(BitConverter.GetBytes(tan.w));
-                    Vector4 col = b3[i];
+                    Vector4 col = b3[vi];
                     s3.AddRange(BitConverter.GetBytes(col.x)); s3.AddRange(BitConverter.GetBytes(col.y));
                     s3.AddRange(BitConverter.GetBytes(col.z)); s3.AddRange(BitConverter.GetBytes(col.w));
                 }

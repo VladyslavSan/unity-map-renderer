@@ -85,10 +85,14 @@ namespace MapRenderer.Tests.Globe
             Mesh globe = TestTileMeshBuilder.BuildFillFromLayer(layer, selection, paint, 0.0, FixtureTile, new SphericalProjection());
             Assert.IsNotNull(flat); Assert.IsNotNull(globe);
 
-            // C-3 refines flat earcut triangles onto the sphere → strictly more vertices than the flat build,
-            // while Mercator stays exactly the un-subdivided earcut output.
-            Assert.Greater(globe.vertexCount, flat.vertexCount * 2,
-                "globe fill must subdivide for curvature (many more verts than the flat Mercator build)");
+            // C-3 refines flat earcut triangles onto the sphere → strictly more TRIANGLES than the flat
+            // build, while Mercator stays exactly the un-subdivided earcut output.
+            // vertex sharing: was asserted on vertexCount, which sharing now shrinks
+            // (fewer unique vertices for the same triangle set) — triangle/index count is what subdivision
+            // actually grows, and sharing never touches it (every leaf triangle still emits exactly 3 indices,
+            // shared storage or not), so it stays the right, sharing-invariant signal for "did it subdivide".
+            Assert.Greater(globe.triangles.Length, flat.triangles.Length * 2,
+                "globe fill must subdivide for curvature (many more triangles than the flat Mercator build)");
             Object.DestroyImmediate(flat);
             Object.DestroyImmediate(globe);
         }

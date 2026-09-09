@@ -222,14 +222,22 @@ namespace MapRenderer.Tests.Meshing
         // the COLOR stream — it rides the _BaseColor uniform and the vertex carries the white identity. The
         // digest therefore pins the OPPOSITE fact it used to (see its assertion below). Stream0/1/2, Indices
         // and Bounds are untouched, which is what confines that change to the colour path.
+        //
+        // vertex sharing (Spherical only — WebMercator never enters the subdivider):
+        // GlobeFillSubdivideJob shares the roof's shared vertices, so its storage layout shrank
+        // (roofVertexCount 30→12, totalVertexCount 78→60 — see extrusion-graphwrite-golden-Spherical.json)
+        // and Stream0/1/2/3/Indices moved with it (Bounds did not — a min/max reduction is invariant to
+        // which duplicate of a shared coordinate survives sharing, confirmed unmoved by the same capture).
+        // Trustworthiness of these new numbers rests on RoofDeindexedStream_MatchesFrozenDigest_Spherical
+        // (below), not on this capture alone — see that test's doc.
         private const string FrozenGoldensFlat =
             "Stream0=/BSPNaJt/vKUH5jnoGe18XG++7De4CQ5CaAkGo5/8cA= Stream1=5yoGCdWnImZda9zBFM2lMZ4cZpoio+676rYaTQc6Tj4= " +
             "Stream2=RZIb0svnW8ClUJy19C/CWEwcYrSRiGcuVrCU8pAINPM= Stream3=mTU6yDV37mWN86QXk22ebkLiBzEWq1ZAV/SCMCedDyQ= " +
             "Indices=UDPCPGXJU3OsWoNjbMg2T3AYq8M+lCd4AJOThHpv+uk= Bounds=U2c5vKyQgtfxmbjk+DwMuZ6m8SWFVpA+FZdtEiShrRs=";
         private const string FrozenGoldensSpherical =
-            "Stream0=tJUK4zwrNyoRLVMZ+hBHegLaOsgS/SBC4P9HN4cNWlg= Stream1=PmL8WSDRfMIQhUwAFA6DbTEesrJelbEBdNV8mPqbSG4= " +
-            "Stream2=fJ1cviXi13njRn06G3/8YgQWBtN9fXHB8Ix1v4wlYSI= Stream3=EL8YztRwmznMbgfEldRzqHhoVfQn7RZNzHAJLd94WUk= " +
-            "Indices=jj1DDkisMtRSPuwxHLzATezR/ALcqfGn793kcQCqpkQ= Bounds=gokodWKrmk2WSnB0etMqXgtn1CTMRDmjLL82v96b+oE=";
+            "Stream0=9sMgYPrYFR94lXLoVJDxijo6Bs3AYfbsdqlK3MWQ+R4= Stream1=ucir7tIjYxm9UiBL4GkqayK2I7hiB5hw4DCCGZfnQoI= " +
+            "Stream2=eXX7a9tjYp/WC1KRsmKGg+/hW+jTh+hfTF93KqI353A= Stream3=jujmGM1QiI66NmIvsgG6bNN2zuISOIHEKZU+Q6CN02U= " +
+            "Indices=nKqdVPkofLl5PE9XkvXfc3w1AAP8eddsf9IYEORH8Rc= Bounds=gokodWKrmk2WSnB0etMqXgtn1CTMRDmjLL82v96b+oE=";
 
         // Measured 2026-09-04 (wall-job stage): per-component max ULP delta between the retired managed
         // WriteWalls loop and the new Burst WallQuadJob chain, on THIS fixture's wall tail, plus a stated +2
@@ -295,6 +303,111 @@ namespace MapRenderer.Tests.Meshing
         /// re-verified after the fix that the roof-prefix RED now fires the bit-exact assertion, not the
         /// bounded one.</para>
         /// </summary>
+        // vertex sharing: the permanent de-indexed tooth item 6 asks for, standing in
+        // for the deleted managed WriteWalls oracle. What it certifies: walking the INDEX buffer and
+        // expanding each index to its full vertex tuple (Position/Normal/Tangent/ExtrudeAndBake/Colour) is
+        // representation-independent of how much storage GlobeFillSubdivideJob's sharing changes — i.e. sharing
+        // changes the roof's storage LAYOUT (fewer unique vertices, so ScheduleWrite_MatchesSplitGoldens_
+        // StreamForStream's storage-order golden legitimately moves), never its de-indexed CONTENT (this
+        // digest does not). Empirically verified once, ordinal-zero: stashed GlobeFillSubdivider.cs (only),
+        // captured this exact digest on the pre-sharing tree, popped the stash, captured it again — Stream0,
+        // Stream1, Stream2, Stream3, Bounds, roofIndexCount and streamLength were BYTE-IDENTICAL; only the
+        // raw Indices= hash (literal index integers, not part of this claim — they shift because the roof's
+        // vertex count the wall half rebases against shrank) differed, as expected. That equality is what
+        // lets ScheduleWrite_MatchesSplitGoldens_StreamForStream's freshly re-captured storage-order golden
+        // inherit the retired managed oracle's provenance instead of resting on this stage's own say-so.
+        [Test]
+        public void RoofDeindexedStream_MatchesFrozenDigest_Spherical()
+        {
+            IProjection projection = new SphericalProjection();
+            IReadOnlyList<IFeature> features = Fixture();
+            IReadOnlyList<SelectedTileFeature> selected = TestTileMeshBuilder.Selection(features);
+            FillExtrusion.PaintProperties paint = Paint();
+            double3 renderOrigin = TileRenderOrigin.Project(ModerateTile, projection);
+            TileBufferClip clip = TileBufferClip.KeepTileUnits(0.0);
+            TileGeometryBuffers geometry = TestTileMeshBuilder.Materialize(features, ModerateTile, Extent);
+
+            MeshWriteOutput graphWrite = default;
+            NativeArray<Vector4> colors = default;
+            NativeArray<Vector2> bake = default;
+            NativeArray<int> ringVisitOrder = default;
+            FillExtrusionGraphOutput ext = default;
+            try
+            {
+                FillMeshPipeline.LayerInput input = StyledFillExtrusionTileBuilder.BuildLayerInput(
+                    selected, geometry, paint, 0.0, renderOrigin, out colors, out bake, projection, clip);
+                ringVisitOrder = input.RingVisitOrder;
+
+                ext = FillExtrusionMeshGraph.Schedule(input, colors, bake);
+                ext.Handle.Complete();
+                graphWrite = StyledFillExtrusionTileBuilder.ScheduleWrite(
+                    ext.Roof, colors, bake, ext.Walls, projection, ModerateTile, Extent);
+                graphWrite.Handle.Complete();
+
+                Mesh.MeshData b = graphWrite.Mda[0];
+                var b0 = b.GetVertexData<StyledFillExtrusionTileBuilder.PositionNormal>(0);
+                var b1 = b.GetVertexData<StyledFillExtrusionTileBuilder.ExtrudeAndBake>(1);
+                var b2 = b.GetVertexData<Vector4>(2);
+                var b3 = b.GetVertexData<Vector4>(3);
+                NativeArray<int> bi = b.GetIndexData<int>();
+                int roofIndexCount = ext.Roof.TriangleIndices.Length;
+
+                var s0 = new List<byte>(); var s1 = new List<byte>(); var s2 = new List<byte>(); var s3 = new List<byte>();
+                for (int i = 0; i < bi.Length; i++)
+                {
+                    int vi = bi[i];
+                    Vector3 p = b0[vi].Position, n = b0[vi].Normal;
+                    Vector4 tan = b2[vi];
+                    Vector4 eut = b1[vi].ExtrudeUpAndT; Vector2 bbh = b1[vi].BakedBaseHeight;
+                    s0.AddRange(BitConverter.GetBytes(p.x)); s0.AddRange(BitConverter.GetBytes(p.y)); s0.AddRange(BitConverter.GetBytes(p.z));
+                    s0.AddRange(BitConverter.GetBytes(n.x)); s0.AddRange(BitConverter.GetBytes(n.y)); s0.AddRange(BitConverter.GetBytes(n.z));
+                    s1.AddRange(BitConverter.GetBytes(eut.x)); s1.AddRange(BitConverter.GetBytes(eut.y));
+                    s1.AddRange(BitConverter.GetBytes(eut.z)); s1.AddRange(BitConverter.GetBytes(eut.w));
+                    s1.AddRange(BitConverter.GetBytes(bbh.x)); s1.AddRange(BitConverter.GetBytes(bbh.y));
+                    s2.AddRange(BitConverter.GetBytes(tan.x)); s2.AddRange(BitConverter.GetBytes(tan.y)); s2.AddRange(BitConverter.GetBytes(tan.z)); s2.AddRange(BitConverter.GetBytes(tan.w));
+                    Vector4 col = b3[vi];
+                    s3.AddRange(BitConverter.GetBytes(col.x)); s3.AddRange(BitConverter.GetBytes(col.y));
+                    s3.AddRange(BitConverter.GetBytes(col.z)); s3.AddRange(BitConverter.GetBytes(col.w));
+                }
+
+                float3x2 gb = graphWrite.Bounds[0];
+                float3 boundsCenter = (gb.c0 + gb.c1) * 0.5f;
+                float3 boundsSize = gb.c1 - gb.c0;
+                var boundsBytes = new List<byte>();
+                boundsBytes.AddRange(BitConverter.GetBytes(boundsCenter.x)); boundsBytes.AddRange(BitConverter.GetBytes(boundsCenter.y)); boundsBytes.AddRange(BitConverter.GetBytes(boundsCenter.z));
+                boundsBytes.AddRange(BitConverter.GetBytes(boundsSize.x)); boundsBytes.AddRange(BitConverter.GetBytes(boundsSize.y)); boundsBytes.AddRange(BitConverter.GetBytes(boundsSize.z));
+
+                Assert.AreEqual(FrozenDeindexedRoofIndexCount, roofIndexCount,
+                    "roof/wall split (emitted index count) moved — a topology change, not a sharing-representation question.");
+                Assert.AreEqual(FrozenDeindexedStreamLength, bi.Length,
+                    "de-indexed triangle-stream length moved — a topology change, not a sharing-representation question.");
+                Assert.AreEqual(FrozenDeindexedStream0, Sha256(s0), "de-indexed Position+Normal diverges — a real regression.");
+                Assert.AreEqual(FrozenDeindexedStream1, Sha256(s1), "de-indexed ExtrudeUpAndT+Bake diverges — a real regression.");
+                Assert.AreEqual(FrozenDeindexedStream2, Sha256(s2), "de-indexed Tangent diverges — a real regression.");
+                Assert.AreEqual(FrozenDeindexedStream3, Sha256(s3), "de-indexed colour diverges — a real regression.");
+                Assert.AreEqual(FrozenDeindexedBounds, Sha256(boundsBytes), "de-indexed Bounds diverges — a real regression.");
+            }
+            finally
+            {
+                graphWrite.Dispose();
+                if (colors.IsCreated) colors.Dispose();
+                if (bake.IsCreated) bake.Dispose();
+                if (ringVisitOrder.IsCreated) ringVisitOrder.Dispose();
+                ext.Dispose();
+                geometry.Dispose();
+            }
+        }
+
+        // Frozen de-indexed digests (vertex sharing) — captured once, verified identical
+        // pre- and post-sharing by the ordinal-zero stash protocol described on the test above.
+        private const int FrozenDeindexedRoofIndexCount = 30;
+        private const int FrozenDeindexedStreamLength = 102;
+        private const string FrozenDeindexedStream0 = "7ICFr669P/x2IHqVJ5T023SWd1v90P8WMj2DItamSOk=";
+        private const string FrozenDeindexedStream1 = "ezdw3k30Z4SXZi+Cl7BMLml1g6AA0p9C9HOBhMBo/GU=";
+        private const string FrozenDeindexedStream2 = "F9ebvG8+LKB7EXhnPGhjYThVKcO6hZr4LI+BoI4jiuA=";
+        private const string FrozenDeindexedStream3 = "v1RlA1kuuUf4NeACVRLaRb4cxUkaXgeCYNDTMeI6/1I=";
+        private const string FrozenDeindexedBounds = "gokodWKrmk2WSnB0etMqXgtn1CTMRDmjLL82v96b+oE=";
+
         [Test]
         public void ScheduleWrite_MatchesSplitGoldens_StreamForStream(
             [Values(false, true)] bool spherical)
@@ -344,6 +457,13 @@ namespace MapRenderer.Tests.Meshing
                 var b3 = b.GetVertexData<Vector4>(3);
                 NativeArray<int> bi = b.GetIndexData<int>();
 
+                // vertex sharing: STORAGE order, deliberately — this whole-stream golden
+                // pins what the write step actually PUT in the buffer (the same reason TileBuildGraphTests
+                // stays storage-order). The de-indexed representation lives separately, as its own permanent
+                // tooth (RoofDeindexedStream_MatchesFrozenDigest_Spherical, below) — that is what certifies
+                // these freshly-captured storage-order numbers are representation-equivalent to what the
+                // (now-retired) managed oracle originally validated, without conflating two different
+                // questions ("what got written" vs "is it still the same geometry") in one digest.
                 var s1 = new List<byte>(); var s3 = new List<byte>();
                 bool anyBaked = false;
                 bool anySecPhi = false;
@@ -466,7 +586,17 @@ namespace MapRenderer.Tests.Meshing
 
         /// <summary>Loads a per-vertex Stream0/Stream2 golden written by the reconstruction capture harness
         /// (deleted after use — see the file header) — hex IEEE-754 bit patterns, comma-separated, read back
-        /// via <see cref="math.asfloat(uint)"/>.</summary>
+        /// via <see cref="math.asfloat(uint)"/>.
+        ///
+        /// <para>vertex sharing (the Spherical file only — WebMercator never enters the
+        /// subdivider, unaffected): re-captured in STORAGE order (unchanged framing) once sharing shrank the
+        /// roof's real unique vertex count — <c>roofVertexCount</c>/<c>totalVertexCount</c> are the new,
+        /// smaller counts. Trustworthiness of the new numbers rests on
+        /// <see cref="RoofDeindexedStream_MatchesFrozenDigest_Spherical"/>, a separate permanent tooth that
+        /// proves the roof's DE-INDEXED triangle-stream content is bit-identical to the pre-sharing tree —
+        /// i.e. sharing only changed storage layout, never geometry — which is what lets this storage-order
+        /// capture inherit the retired managed oracle's provenance instead of being trusted on its own
+        /// say-so.</para></summary>
         private static (uint[] posHex, uint[] normHex, uint[] tanHex, int roofVertexCount, int totalVertexCount)
             LoadGraphWriteGolden(string projectionLabel)
         {

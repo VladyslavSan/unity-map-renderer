@@ -220,8 +220,11 @@ namespace MapRenderer.Jobs.Fill
             // ── The arm split (job-scheduling-design.md §3.7): picks the AGGREGATE targets. Exactly
             // WriteGeometry's predicate. No null test — the guard at the top of this method already threw,
             // so Projection is non-null here. "Always subdivide" would be wrong: on a flat projection every
-            // edge mark is false, so a flat layer's markCount==0 path emits 3 unshared vertices per triangle
-            // with no dedup — V would become 3x triangles, not stay V.
+            // edge mark is false, so a flat layer would only ever take GlobeFillSubdivideJob's markCount==0
+            // pass-through path — paying its per-vertex Project()/tangent-basis + vertex-key map overhead for
+            // no split at all, instead of streaming earcut's already-minimal merged vertex array straight
+            // through (vertex sharing: sharing narrows, but does not remove, this cost —
+            // it does not restore the flat arm's O(1) vertex reuse, which needs no hash lookup at all).
             bool curved = !double.IsInfinity(input.Projection.MaxRefineAngleRad);
 
             // ── Aggregate (exact sizing). Flat arm: these five ARE the graph's final output columns. Curved

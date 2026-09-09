@@ -46,8 +46,16 @@ namespace MapRenderer.Tests.Tiles
         // Frozen golden (R6-shaped): captured from GlobeFillSubdivideDispatch.Run over
         // FillMeshPipeline.Schedule's output — exactly WriteGlobeSubdivided's own call — before Group B
         // deleted both. Commit f5e13c19; see docs/stage4-groupb-goldens-capture-f5e13c19.txt's SITE2 lines.
-        private const string FrozenGoldens =
-            "Vertex=AcGbVDk4/mSwr5eI+Cc8ayWxBemQB203q8UtpuRbBo8= Indices=btY5MlGiZZ+zg4jLxLT6c7aVaVtqQUzZgBA8dcb8iWM=";
+        //
+        // vertex sharing (earcut-sdf-vertex-cost.md §6/§7, T-C1): re-expressed as a
+        // DE-INDEXED digest — walk TriangleIndices, dereference the vertex columns, hash the resulting
+        // per-triangle-vertex tuple stream — instead of separately hashing the raw vertex array (in storage
+        // order) and the raw index array (in value). Sharing changes STORAGE, so the raw vertex array's order
+        // and the raw index array's values both legitimately change; the de-indexed reconstruction — what a
+        // reader actually sees walking the mesh triangle by triangle — does not. Re-captured from THIS
+        // representation on the pre-sharing tree (ordinal zero), so this is a representation change against
+        // the frozen pre-change oracle, not a re-bake: the underlying rendered geometry is unchanged.
+        private const string FrozenGoldens = "TriangleStream=AcGbVDk4/mSwr5eI+Cc8ayWxBemQB203q8UtpuRbBo8=";
 
         [Test]
         public void Schedule_MatchesFrozenSubdivideGoldens_AcrossCorpus()
@@ -61,8 +69,7 @@ namespace MapRenderer.Tests.Tiles
             var fixturesCovered = new HashSet<string>();
             int layersChecked = 0;
             bool anySplitFired = false;
-            var vertBytes = new List<byte>();
-            var idxBytes  = new List<byte>();
+            var streamBytes = new List<byte>();
 
             foreach (string path in allPaths)
             {
@@ -97,7 +104,7 @@ namespace MapRenderer.Tests.Tiles
 
                     // Arm 1: clip disabled (default) — what this sweep drove before.
                     input.Clip = default;
-                    if (Accumulate(input, vertBytes, idxBytes))
+                    if (Accumulate(input, streamBytes))
                         anySplitFired = true;
 
                     // Arm 2: clip ENABLED — the arm production actually takes on a curved projection
@@ -111,7 +118,7 @@ namespace MapRenderer.Tests.Tiles
                     input.Clip = TileBufferClip.KeepTileUnits(64.0);
                     Assert.IsTrue(input.Clip.TryWindow(geometry.Extent, out _, out _),
                         $"precondition: [{fileName}/{layer.Name}] the enabled clip arm must actually enter TryWindow");
-                    if (Accumulate(input, vertBytes, idxBytes))
+                    if (Accumulate(input, streamBytes))
                         anySplitFired = true;
 
                     visitOrder.Dispose();
@@ -123,30 +130,37 @@ namespace MapRenderer.Tests.Tiles
             Assert.Greater(layersChecked, 0, "precondition: the enumerated (fixture, layer) set is non-empty");
             Assert.IsTrue(anySplitFired,
                 "at least one layer must genuinely subdivide (subdivided triangle count exceeds source " +
-                "triangle count) — the pass-through path already emits 3 verts/triangle with no dedup, so a " +
-                "sweep that never exceeds that ratio would be measuring the no-op path only");
+                "triangle count) — the pass-through path already emits 3 verts/triangle, so a sweep that " +
+                "never exceeds that ratio would be measuring the no-op path only");
 
-            string result = $"Vertex={Sha256(vertBytes)} Indices={Sha256(idxBytes)}";
+            string result = $"TriangleStream={Sha256(streamBytes)}";
             Assert.AreEqual(FrozenGoldens, result,
                 "the graph's curved-arm subdivided output across the corpus no longer matches the frozen " +
                 "GlobeFillSubdivideDispatch.Run/FillMeshPipeline.Schedule goldens — a real regression, not a re-bake candidate.");
         }
 
-        /// <summary>Schedules the graph over <paramref name="input"/> (curved arm), appends its subdivided
-        /// World/Up/East/Tile/Feature vertex columns + triangle indices into the running accumulators (same
-        /// fixed corpus order the caller iterates in — the golden is a digest over that order), and returns
-        /// whether this layer's subdivided triangle count exceeded its SOURCE (pre-subdivision) triangle
-        /// count — a genuine split. The source count comes from a second, flat-arm Schedule call over the
-        /// SAME geometry: triangulation runs identically before the arm split
+        /// <summary>Schedules the graph over <paramref name="input"/> (curved arm) and appends its
+        /// DE-INDEXED subdivided triangle stream — for each triangle, in order, its three
+        /// World/Up/East/Tile/Feature tuples, resolved through <c>TriangleIndices</c> rather than read
+        /// straight off the vertex columns — into the running accumulator (same fixed corpus order the
+        /// caller iterates in — the golden is a digest over that order). De-indexing is what makes this
+        /// digest a REPRESENTATION-independent oracle after vertex sharing: sharing changes
+        /// storage between vertices with identical bytes, so the raw vertex-column order and the raw index
+        /// VALUES both legitimately move; the de-indexed reconstruction — what a triangle-by-triangle reader
+        /// (the mesh write step, the GPU) actually sees — does not (earcut-sdf-vertex-cost.md §6, T-C1).
+        ///
+        /// <para>Also returns whether this layer's subdivided triangle count exceeded its SOURCE
+        /// (pre-subdivision) triangle count — a genuine split. The source count comes from a second, flat-arm
+        /// Schedule call over the SAME geometry: triangulation runs identically before the arm split
         /// (job-scheduling-design.md §3.7), so the flat arm's TriangleIndices.Length IS the curved arm's
-        /// pre-subdivision count, with no need for the retired synchronous pipeline as a witness.
+        /// pre-subdivision count, with no need for the retired synchronous pipeline as a witness.</para>
         ///
         /// <para>The extra schedule is <b>deliberate, not an oversight</b>: neither <see cref="FillGraphOutput"/>
         /// nor <see cref="FillGraphCounts"/> carries a pre-subdivision triangle count on the curved arm (Counts'
         /// four fields stop at Polygon/Ring/Hole/ForceClip — see <c>FillMeshGraphParityTests</c>'s header), so
         /// there is no cheaper read of that quantity than re-deriving it from a second, flat-projection
         /// Schedule over the identical input.</para></summary>
-        private static bool Accumulate(FillMeshPipeline.LayerInput input, List<byte> vertBytes, List<byte> idxBytes)
+        private static bool Accumulate(FillMeshPipeline.LayerInput input, List<byte> streamBytes)
         {
             FillMeshPipeline.LayerInput flatInput = input;
             flatInput.Projection = new WebMercatorProjection();
@@ -164,19 +178,17 @@ namespace MapRenderer.Tests.Tiles
                 int subdividedTriCount = graphOutput.TriangleIndices.Length / 3;
                 bool split = subdividedTriCount > sourceTriCount;
 
-                int n = graphOutput.WorldPositions.Length;
-                for (int i = 0; i < n; i++)
-                {
-                    double3 world = graphOutput.WorldPositions[i], up = graphOutput.VertexUp[i], east = graphOutput.VertexEast[i];
-                    double2 tile  = graphOutput.TileVertices[i];
-                    vertBytes.AddRange(BitConverter.GetBytes(world.x)); vertBytes.AddRange(BitConverter.GetBytes(world.y)); vertBytes.AddRange(BitConverter.GetBytes(world.z));
-                    vertBytes.AddRange(BitConverter.GetBytes(up.x));    vertBytes.AddRange(BitConverter.GetBytes(up.y));    vertBytes.AddRange(BitConverter.GetBytes(up.z));
-                    vertBytes.AddRange(BitConverter.GetBytes(east.x));  vertBytes.AddRange(BitConverter.GetBytes(east.y));  vertBytes.AddRange(BitConverter.GetBytes(east.z));
-                    vertBytes.AddRange(BitConverter.GetBytes(tile.x));  vertBytes.AddRange(BitConverter.GetBytes(tile.y));
-                    vertBytes.AddRange(BitConverter.GetBytes(graphOutput.VertexFeatureIdx[i]));
-                }
                 for (int i = 0; i < graphOutput.TriangleIndices.Length; i++)
-                    idxBytes.AddRange(BitConverter.GetBytes(graphOutput.TriangleIndices[i]));
+                {
+                    int vi = graphOutput.TriangleIndices[i];
+                    double3 world = graphOutput.WorldPositions[vi], up = graphOutput.VertexUp[vi], east = graphOutput.VertexEast[vi];
+                    double2 tile  = graphOutput.TileVertices[vi];
+                    streamBytes.AddRange(BitConverter.GetBytes(world.x)); streamBytes.AddRange(BitConverter.GetBytes(world.y)); streamBytes.AddRange(BitConverter.GetBytes(world.z));
+                    streamBytes.AddRange(BitConverter.GetBytes(up.x));    streamBytes.AddRange(BitConverter.GetBytes(up.y));    streamBytes.AddRange(BitConverter.GetBytes(up.z));
+                    streamBytes.AddRange(BitConverter.GetBytes(east.x));  streamBytes.AddRange(BitConverter.GetBytes(east.y));  streamBytes.AddRange(BitConverter.GetBytes(east.z));
+                    streamBytes.AddRange(BitConverter.GetBytes(tile.x));  streamBytes.AddRange(BitConverter.GetBytes(tile.y));
+                    streamBytes.AddRange(BitConverter.GetBytes(graphOutput.VertexFeatureIdx[vi]));
+                }
 
                 return split;
             }
@@ -219,7 +231,10 @@ namespace MapRenderer.Tests.Tiles
                 JobHandle.ScheduleBatchedJobs();
                 handle.Complete();
 
-                Assert.Less(outVerts.Length, 20000, "the vertex budget must prevent the low-zoom subdivision explosion");
+                // vertex sharing: budget counts EMITTED vertices (outIndices.Length) —
+                // outVerts.Length (unique) is always <= that, so pin the bound against outIndices, the
+                // quantity the budget actually caps (see GlobeFillSubdivider.cs's Emit doc).
+                Assert.Less(outIndices.Length, 20000, "the vertex budget must prevent the low-zoom subdivision explosion");
                 Assert.Greater(outVerts.Length, 0, "the layer must still produce output even when bounded");
             }
             finally

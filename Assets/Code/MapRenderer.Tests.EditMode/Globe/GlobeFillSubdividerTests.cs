@@ -44,7 +44,11 @@ namespace MapRenderer.Tests.Globe
             try
             {
                 Assert.Greater(v.Length, 3, "a 45° globe triangle must subdivide past the single flat triangle");
-                Assert.AreEqual(v.Length, idx.Length, "no dedup ⇒ sequential indices, one per emitted vertex");
+                // vertex sharing: OutVerts (v) is now the UNIQUE count and OutIndices
+                // (idx) the EMITTED count — every 1→4 split's 3 midpoints are each shared by 3 of its 4
+                // children (GlobeFillVertexKey), so a single-triangle subdivision this deep MUST show real
+                // sharing, not just "no more than" the emitted count.
+                Assert.Less(v.Length, idx.Length, "a multi-level split must produce SOME shared split-edge vertices");
                 Assert.AreEqual(0, idx.Length % 3, "indices form whole triangles");
 
                 double R = EarthConstants.A;
@@ -75,7 +79,14 @@ namespace MapRenderer.Tests.Globe
         {
             // depth 8 unbounded ≈ 4^8·3 ≈ 196k verts for ONE whole-globe triangle; the 2 000 budget must cap it.
             Run(new SphericalProjection(), new TileId { Z = 0, X = 0, Y = 0 }, 8, 2000, out var v, out var idx);
-            try { Assert.Less(v.Length, 20000, "the vertex budget must prevent the low-zoom subdivision explosion"); }
+            try
+            {
+                // vertex sharing: the budget counts EMITTED vertices (idx.Length, one
+                // OutIndices.Add per Emit call) — v (OutVerts, the unique count) is always <= idx.Length, so
+                // asserting on v no longer pins the bound that actually exists: sharing made it strictly
+                // easier to pass without the budget doing any more work. Assert on idx.Length instead.
+                Assert.Less(idx.Length, 20000, "the vertex budget must prevent the low-zoom subdivision explosion");
+            }
             finally { v.Dispose(); idx.Dispose(); }
         }
     }

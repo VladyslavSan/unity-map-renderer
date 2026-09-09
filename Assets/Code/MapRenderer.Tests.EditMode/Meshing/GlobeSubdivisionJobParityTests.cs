@@ -56,15 +56,21 @@ namespace MapRenderer.Tests.Meshing
             public readonly bool BudgetFired;
             public readonly double3[] RealWorld;
             public readonly double2[] RealTile;
+            // Vertex sharing: OutIndices.Length is the EMITTED count
+            // (every Emit call adds exactly one), OutVerts.Length is the UNIQUE count (a hit reuses an
+            // index). Captured here so a caller can assert sharing actually happened without re-scheduling.
+            public readonly int EmittedCount;
+            public readonly int UniqueVertexCount;
 
             public ParityRun(
                 List<SubdivisionCoverageValidator.RootTri> roots, List<SubdivisionCoverageValidator.LeafRef> mirrorLeaves,
                 int maxDepthReached, bool budgetFired,
-                double3[] realWorld, double2[] realTile)
+                double3[] realWorld, double2[] realTile, int emittedCount, int uniqueVertexCount)
             {
                 Roots = roots; MirrorLeaves = mirrorLeaves;
                 MaxDepthReached = maxDepthReached; BudgetFired = budgetFired;
                 RealWorld = realWorld; RealTile = realTile;
+                EmittedCount = emittedCount; UniqueVertexCount = uniqueVertexCount;
             }
         }
 
@@ -99,17 +105,35 @@ namespace MapRenderer.Tests.Meshing
                     roots, id, proj, extent, origin, maxEdgeAngleRad, maxDepth, maxOutputVertices,
                     out var mirrorLeaves, out int maxDepthReached, out bool budgetFired);
 
-                Assert.AreEqual(mirrorLeaves.Count, outVerts.Length, "vertex count must match (same LIFO traversal)");
-                Assert.AreEqual(outVerts.Length, outIndices.Length, "no dedup ⇒ one sequential index per vertex");
+                // T-C1 (de-indexed stream identity): the job now shares vertices
+                // storage — OutVerts.Length (unique) can be LESS than OutIndices.Length (emitted) — but the
+                // EMITTED count must still match the mirror's leaf stream 1:1 (same LIFO traversal), and every
+                // index must resolve to a real, in-range vertex. De-indexing (outVerts[outIndices[i]]) below
+                // reconstructs the emitted stream regardless of how much storage sharing happened.
+                Assert.AreEqual(mirrorLeaves.Count, outIndices.Length,
+                    "emitted-vertex count must match (same LIFO traversal) — sharing changes STORAGE, not emission");
+                Assert.LessOrEqual(outVerts.Length, outIndices.Length,
+                    "sharing can only reduce or preserve unique storage, never exceed the emitted count");
+                var referenced = new bool[outVerts.Length];
                 for (int i = 0; i < outIndices.Length; i++)
-                    Assert.AreEqual(i, outIndices[i], $"OutIndices[{i}]: sequential, no dedup");
+                {
+                    int idx = outIndices[i];
+                    Assert.GreaterOrEqual(idx, 0, $"OutIndices[{i}]: must reference a valid vertex");
+                    Assert.Less(idx, outVerts.Length, $"OutIndices[{i}]: must reference a valid vertex");
+                    referenced[idx] = true;
+                }
+                // T-C3 (no orphan slots): every unique vertex slot allocated must be referenced by at least
+                // one emitted index — a bug that allocates a new slot without recording it in the map (or
+                // recording the wrong index) would leave a slot no triangle ever points at.
+                for (int k = 0; k < referenced.Length; k++)
+                    Assert.IsTrue(referenced[k], $"OutVerts[{k}]: unreferenced — every unique slot must be used");
 
-                var realWorld = new double3[outVerts.Length];
-                var realTile = new double2[outVerts.Length];
+                var realWorld = new double3[outIndices.Length];
+                var realTile = new double2[outIndices.Length];
                 for (int i = 0; i < mirrorLeaves.Count; i++)
                 {
                     SubdivisionCoverageValidator.LeafRef m = mirrorLeaves[i];
-                    GlobeFillVertex real = outVerts[i];
+                    GlobeFillVertex real = outVerts[outIndices[i]]; // de-indexed: the vertex THIS emitted position resolves to
                     realWorld[i] = real.World;
                     realTile[i] = real.Tile;
 
@@ -130,7 +154,9 @@ namespace MapRenderer.Tests.Meshing
                     Assert.AreEqual(m.East.z, real.East.z, 1e-9, $"vertex {i}: East.z");
                 }
 
-                return new ParityRun(roots, mirrorLeaves, maxDepthReached, budgetFired, realWorld, realTile);
+                return new ParityRun(
+                    roots, mirrorLeaves, maxDepthReached, budgetFired, realWorld, realTile,
+                    emittedCount: outIndices.Length, uniqueVertexCount: outVerts.Length);
             }
             finally
             {
@@ -195,6 +221,86 @@ namespace MapRenderer.Tests.Meshing
 
             Assert.AreEqual(mirrorReport.MaxGapMeters, hybridReport.MaxGapMeters, mirrorReport.MaxGapMeters * 1e-6 + 1e-6,
                 $"real job's own gap analysis must match the mirror's: mirror={mirrorReport.Summary} hybrid={hybridReport.Summary}");
+        }
+
+        // -----------------------------------------------------------------------------------------------
+        // T-C4 (vertex sharing, earcut-sdf-vertex-cost.md §6): the z0 "countries" fixture
+        // is the plan's own vertex-sharing measurement corpus. The plan's headline 346,542 → 75,733 is the BANDED
+        // scenario — it assumes the per-vertex band/side column that lives only on the parked
+        // feat/fill-boundary-antialiasing branch (off `main`, no Band field). THIS branch realises the
+        // plan's NO-BAND row instead: 161,676 emitted → 44,915 unique. The banded 75,733 figure only becomes
+        // reachable if/when the band branch rebases onto this change and extends GlobeFillVertexKey.
+        // Same ordered-parity + gap-corollary treatment as the water tile above, so the
+        // SubdivisionCoverageValidator report (gap/coverage/quality) is proven unchanged on the SAME real-job
+        // run T-C2 measures the sharing ratio from.
+        // -----------------------------------------------------------------------------------------------
+
+        [Test]
+        public void Corpus_Countries_Z0_Globe_OrderedParityAndGapCorollaryAndVertexSharingRatio()
+        {
+            var id = new TileId { Z = 0, X = 0, Y = 0 };
+            var proj = new SphericalProjection();
+            var layer = MvtFixtureStreams.ReadLayer(LoadFixture("sample-tile.bytes"), "countries");
+            Assert.IsNotNull(layer);
+            double extent = layer.Extent;
+
+            var verts = new List<double2>();
+            var featureIdx = new List<int>();
+            var indices = new List<int>();
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
+            {
+                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
+                foreach (var poly in PolygonAssembler.Assemble(MvtGeometry.Decode(layer.Commands[fi])))
+                {
+                    var res = Earcut.Triangulate(poly.Outer, poly.Holes);
+                    int baseIdx = verts.Count;
+                    verts.AddRange(res.Vertices);
+                    // T-C3 (vertex sharing): REAL per-source-feature indices, not a
+                    // single constant 0 — a fixture where every vertex reads feature 0 makes "drop Feature
+                    // from the key" a no-op (nothing to wrongly merge), which would make T-C3's RED recipe
+                    // ("hash on Tile only ⇒ two features share an index") untestable here.
+                    for (int k = 0; k < res.Vertices.Length; k++) featureIdx.Add(fi);
+                    for (int i = 0; i < res.Indices.Length; i++) indices.Add(baseIdx + res.Indices[i]);
+                }
+            }
+            double2[] tileVerts = verts.ToArray();
+            int[] triangleIndices = indices.ToArray();
+            int[] vertexFeatureIdx = featureIdx.ToArray();
+
+            ParityRun run = AssertOrderedParity(
+                proj, id, extent, new double3(0, 0, 0), tileVerts, triangleIndices, vertexFeatureIdx,
+                tileVerts.Length, triangleIndices.Length,
+                GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
+                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices);
+
+            var hybridLeaves = new List<SubdivisionCoverageValidator.LeafRef>(run.MirrorLeaves.Count);
+            for (int i = 0; i < run.MirrorLeaves.Count; i++)
+            {
+                SubdivisionCoverageValidator.LeafRef m = run.MirrorLeaves[i];
+                hybridLeaves.Add(new SubdivisionCoverageValidator.LeafRef(
+                    run.RealWorld[i], m.Up, m.East, run.RealTile[i], m.Feature, m.RootIndex, m.Depth));
+            }
+
+            var hybridReport = SubdivisionCoverageValidator.AnalyzeLeafStream(
+                run.Roots, hybridLeaves, run.MaxDepthReached, run.BudgetFired, id, proj, extent);
+            var mirrorReport = SubdivisionCoverageValidator.AnalyzeLeafStream(
+                run.Roots, run.MirrorLeaves, run.MaxDepthReached, run.BudgetFired, id, proj, extent);
+
+            Assert.AreEqual(mirrorReport.MaxGapMeters, hybridReport.MaxGapMeters, mirrorReport.MaxGapMeters * 1e-6 + 1e-6,
+                $"real job's own gap analysis must match the mirror's: mirror={mirrorReport.Summary} hybrid={hybridReport.Summary}");
+
+            // T-C2 ("it actually shares"): a fence with headroom bracketing the measured value (earcut-sdf-
+            // vertex-cost.md §4: mirror-measured 44,915 unique of 161,676 emitted, no band, on this fixture).
+            // RED-verified: reverting Emit to sequential indices (git stash the production edit) makes
+            // UniqueVertexCount == EmittedCount == 161,676, well outside this fence.
+            Assert.Less(run.UniqueVertexCount, 55_000,
+                $"sharing must collapse the countries z0 tile's unique vertex count well below its emitted " +
+                $"count: emitted={run.EmittedCount} unique={run.UniqueVertexCount}");
+            Assert.Greater(run.UniqueVertexCount, 35_000,
+                $"the fence's lower bound guards a vertex key that over-merges (e.g. dropping Feature): " +
+                $"emitted={run.EmittedCount} unique={run.UniqueVertexCount}");
+            Assert.Less(run.UniqueVertexCount, run.EmittedCount,
+                "a genuinely curved z0 tile must have SOME shared conforming split-edge midpoints");
         }
 
         // -----------------------------------------------------------------------------------------------
@@ -264,6 +370,55 @@ namespace MapRenderer.Tests.Meshing
                 tileVerts, triangleIndices, vertexFeatureIdx, tileVerts.Length, triangleIndices.Length,
                 GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
                 GlobeFillSubdivideDispatch.DefaultMaxOutputVertices);
+        }
+
+        // -----------------------------------------------------------------------------------------------
+        // T-C5 (vertex sharing): conforming split-edge midpoints must actually merge.
+        // -----------------------------------------------------------------------------------------------
+
+        [Test]
+        public void Discriminating_ConformingMidpointsMerge_Z2Quad_UniqueCountMatchesMirrorsDistinctTileFeatureCount()
+        {
+            // Same whole-tile square + tile as GlobeSubdivisionTests.Synthetic_Deep_Z2_Quad_..._IsConforming
+            // (z2/0/0 — top of the globe, strong curvature, reaches depth 5): earcut into 2 triangles along
+            // the diagonal, so a correct vertex key must merge every conforming split-edge midpoint the two
+            // root triangles compute — Mid() is exactly order-symmetric ((a+b)*0.5 commutes bit-for-bit), so
+            // every genuine shared-edge midpoint is bit-identical on both sides.
+            var outer = new List<double2>
+            {
+                new double2(0, 0), new double2(Extent, 0), new double2(Extent, Extent), new double2(0, Extent),
+            };
+            var res = Earcut.Triangulate(outer, new List<List<double2>>());
+            double2[] tileVerts = res.Vertices;
+            int[] triangleIndices = res.Indices;
+            int[] vertexFeatureIdx = new int[tileVerts.Length];
+
+            var id = new TileId { Z = 2, X = 0, Y = 0 };
+            ParityRun run = AssertOrderedParity(
+                new SphericalProjection(), id, Extent, new double3(0, 0, 0),
+                tileVerts, triangleIndices, vertexFeatureIdx, tileVerts.Length, triangleIndices.Length,
+                GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
+                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices);
+
+            // The mirror's own leaf stream is an INDEPENDENT oracle for "how many distinct (Tile, Feature)
+            // bit-patterns should exist" — counted directly, with no dependency on the job's own hash map or
+            // GlobeFillVertexKey (which keys the WHOLE emitted struct, not just Tile/Feature — see that
+            // struct's doc). Tile/Feature alone is still the right oracle here: World/Up/East are pure
+            // functions of Tile (Project()), so two vertices with equal (Tile,Feature) are bit-identical on
+            // every field the whole-struct key also reads — the two counts must coincide. A correct sharing
+            // must therefore produce exactly this many unique vertices: fewer would mean two DIFFERENT
+            // tuples wrongly collided, more would mean a genuine conforming duplicate was missed. This is now
+            // CONFIRMING a derived property (Mid() is exactly order-symmetric, marking is per-edge with no
+            // connectivity, so a shared split edge's derived fields are bit-identical on both sides) rather
+            // than discovering one — if it goes red, that reasoning is what's wrong, not this test.
+            var distinct = new HashSet<(ulong, ulong, int)>();
+            foreach (SubdivisionCoverageValidator.LeafRef leaf in run.MirrorLeaves)
+                distinct.Add((math.asulong(leaf.Tile.x), math.asulong(leaf.Tile.y), leaf.Feature));
+
+            Assert.AreEqual(distinct.Count, run.UniqueVertexCount,
+                $"unique emitted vertices ({run.UniqueVertexCount}) must equal the distinct (Tile,Feature) " +
+                $"bit-patterns the mirror's own leaf stream carries ({distinct.Count}) — every conforming " +
+                "split-edge midpoint must actually merge");
         }
     }
 }
