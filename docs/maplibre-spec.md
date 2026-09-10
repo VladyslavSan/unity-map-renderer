@@ -59,7 +59,7 @@ nothing.
 | Layer type | Status | Notes |
 |---|:---:|---|
 | background | ❌ | recognized; no typed parse, no render (no background quad exists) |
-| fill | ✅ | color/opacity data-driven; pattern, sort-key, translate(+anchor) all real (with zoom caveats). Only fill-outline-color / fill-antialias remain unimplemented |
+| fill | ✅ | color/opacity data-driven; pattern, sort-key, translate(+anchor), antialias all real (with zoom caveats). Only fill-outline-color remains unimplemented |
 | line | ✅ | color/opacity/width data-driven; caps at 4 dash entries; several props constant/zoom-only |
 | symbol — text | 🟡 | SDF text, halo, collision, BiDi/RTL, Arabic all work; placement/transform features missing |
 | symbol — icon | ❌ | text-only; zero icon support; sprite loader absent |
@@ -105,14 +105,14 @@ Parse: `Style/Fill/{PaintProperties,LayoutProperties,FillPattern}.cs`. Consume: 
 | fill-color | ✅ | baked per-feature into COLOR stream; **data-driven** ✔ |
 | fill-opacity | 🟡 | constant/zoom → `_Opacity` uniform (re-pushed per frame); **data-driven** → baked into COLOR alpha with `_Opacity` pinned to 1 so it cannot double-apply. Caveat: a **Composite** (zoom+feature) expression takes the bake branch, so it is frozen at the tile's build zoom — `ApplyZoom` pushes uniforms, it does not re-mesh |
 | fill-outline-color | 🟠 | parsed + bound to `_FillOutlineColor`, but no outline pass/geometry reads it |
-| fill-antialias | 🟠 | parsed + bound to `_FillAntialias`, unused in shader. **Not separable from fill-outline-color** — the spec only draws the outline when this is true, so both wait on the one boundary-geometry epic (`docs/fill-parity-design.md` §P7) |
+| fill-antialias | ✅ | fill silhouettes carry a one-device-pixel antialiasing band grown OUTWARD from the polygon boundary (`docs/fill-boundary-antialiasing-design.md`); `false` suppresses that band for the layer, in geometry, which is what keeps the property per-layer implementable where MSAA would not be. Consumed in C# at `StyledFillTileBuilder.BuildLayerInput` — the `_FillAntialias` uniform stays bound and read by no pass, deliberately. Resolved at the tile's **build zoom**, so a zoom-dependent value does not re-mesh as the user zooms |
 | fill-translate | 🟡 | real screen-pixel offset, measured px→world **per axis** in `Fill_VertexModify` (was inert: applied in object units, so it scaled with the tile transform). **Constant only** — parsed as a literal `[x, y]` array, so a zoom expression silently yields `[0, 0]` |
 | fill-translate-anchor | 🟡 | both paths implemented — `map` uses the mesh normal+tangent frame, `viewport` the camera basis. **Constant only** (parsed as a literal string) |
 | fill-pattern | ✅ | resolved against the style sprite sheet and sampled (`SAMPLE_TEXTURE2D_GRAD`, `frac` tiling); an unresolvable pattern **clips** rather than falling back to `fill-color`'s opaque-black default |
 | fill-sort-key | 🟡 | parsed into `Fill/LayoutProperties`; features stably sorted ascending before meshing, so a higher key rasterizes later and lands on top. Evaluated at the tile's **build zoom**, so a zoom-dependent key does not re-sort as the user zooms (no re-mesh on zoom) |
 
-Remaining fill gaps: `fill-outline-color` and `fill-antialias` (each needs new geometry or a new AA path
-rather than plumbing — see `docs/fill-parity-design.md` P6/P7), plus the 🟡 caveats above. The recurring one
+Remaining fill gap: `fill-outline-color` (it needs real boundary-line geometry rather than plumbing — see
+`docs/fill-parity-design.md` P6), plus the 🟡 caveats above. The recurring one
 is that anything evaluated per feature at build time is frozen at the tile's build zoom, because `ApplyZoom`
 pushes uniforms and never re-meshes — that is a pipeline-wide property, not a fill one.
 
@@ -249,8 +249,10 @@ These parse today and just need to be threaded/consumed — the value already re
 
 1. **line-miter-limit / line-round-limit** — parsed, dropped before the ribbon job (hardcoded 2.0 / 4 seg).
 2. **Per-layer minzoom/maxzoom + layout `visibility`** — parsed/omitted but never gate the render.
-3. **fill-outline-color / fill-antialias, *-translate-anchor, fill-pattern/line-pattern flags** — bound to
-   uniforms no pass reads (some need a whole feature: outline pass, sprite loader).
+3. **fill-outline-color, *-translate-anchor, fill-pattern/line-pattern flags** — bound to uniforms no pass
+   reads (some need a whole feature: outline pass, sprite loader). `_FillAntialias` is bound and read by no
+   pass too, but it is **not** in this list: the property is implemented in geometry, and the uniform is
+   inert by decision rather than pending.
 
 (Symbol layout options — text-anchor/-offset/-justify/-max-width + line-height/letter-spacing/radial-offset —
 were the original first trap; **done** via `TextLayoutOptionsBuilder`. text-offset remains constant-only.)

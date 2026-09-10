@@ -136,7 +136,11 @@ namespace MapRenderer.Jobs.Fill
             JobHandle derived;
             JobHandle clipDisposeHandle = default;
 
-            if (input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax))
+            // Kept as a local as well as consumed here: the boundary-band node below needs to know
+            // whether a window exists at all, and the window's own value cannot say so — an unset
+            // double2 is (0,0), the tile's origin corner.
+            bool clipEnabled = input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax);
+            if (clipEnabled)
             {
                 int bufferCap = math.max(1, maxRingLen * RingClipJob.BufferLengthMultiplier);
                 var bufferA = new NativeArray<double2>(bufferCap, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -234,6 +238,7 @@ namespace MapRenderer.Jobs.Fill
             NativeList<double3> worldPositions;
             NativeList<double3> vertexUp;
             NativeList<double3> vertexEast;
+            NativeList<float3>  vertexBand;
             NativeList<int>     vertexFeatureIdx;
             NativeList<int>     triangleIndices;
             if (curved)
@@ -242,6 +247,7 @@ namespace MapRenderer.Jobs.Fill
                 worldPositions   = NewBuffer<double3>(1);
                 vertexUp         = NewBuffer<double3>(1);
                 vertexEast       = NewBuffer<double3>(1);
+                vertexBand       = NewBuffer<float3>(1);
                 vertexFeatureIdx = NewBuffer<int>(1);
                 triangleIndices  = NewBuffer<int>(1);
             }
@@ -251,6 +257,7 @@ namespace MapRenderer.Jobs.Fill
                 worldPositions   = FillGraphOutput.AllocateOutputList<double3>();
                 vertexUp         = FillGraphOutput.AllocateOutputList<double3>();
                 vertexEast       = FillGraphOutput.AllocateOutputList<double3>();
+                vertexBand       = FillGraphOutput.AllocateOutputList<float3>();
                 vertexFeatureIdx = FillGraphOutput.AllocateOutputList<int>();
                 triangleIndices  = FillGraphOutput.AllocateOutputList<int>();
             }
@@ -260,20 +267,55 @@ namespace MapRenderer.Jobs.Fill
             {
                 Buffers = buffers,
                 TileVertices = tileVertices, WorldPositions = worldPositions, VertexUp = vertexUp, VertexEast = vertexEast,
+                VertexBand = vertexBand,
                 VertexFeatureIdx = vertexFeatureIdx, TriangleIndices = triangleIndices, Geo = geo,
                 Counts = counts, Error = error,
             }.Schedule(triangulated);
+
+            // ── The boundary band, BOTH ARMS. It appends outward-band quads to the aggregate's own columns,
+            // so it must run after the node that owns the interior's vertex count, and after the clip/select
+            // (the boundary) and ring assembly (which ring is an outer, which a hole) it reads.
+            //
+            // On the curved arm it runs HERE, upstream of subdivision, not after it. A band quad is
+            // degenerate in tile space (its outer vertices share their inner twin's coordinate), so its long
+            // edges have the SAME two endpoints as the interior boundary edge they abut — and a subdivision
+            // mark is a function of an edge's endpoints alone, so the two compute the identical mark and stay
+            // conforming. The quad's diagonal shares that same tile-space pair and is conforming for the same
+            // reason; only the zero-length radial edges are different, and they subtend no angle. Emitting the band after subdivision instead would leave its inner ring on the flat
+            // chord while the interior's boundary bulges onto the sphere: a visible gap at low zoom, which is
+            // exactly where the shipped globe scene lives.
+            JobHandle banded = aggregated;
+            if (!input.SuppressBoundaryBand)
+            {
+                banded = new FillBandJob
+                {
+                    RingVertices = outVerts.AsDeferredJobArray(), RingOffsets = outOffsets.AsDeferredJobArray(),
+                    RingFeatureIdx = outFeatIdx.AsDeferredJobArray(),
+                    PolyOuterRingIdx = polys.PolyOuterRingIdx, PolyHoleListStart = polys.PolyHoleListStart,
+                    PolyHoleCount = polys.PolyHoleCount, HoleRingIdxs = polys.HoleRingIdxs,
+                    PolyCountArr = polys.PolyCountArr,
+                    ClipEnabled = clipEnabled, ClipMin = clipMin, ClipMax = clipMax,
+                    TileVertices = tileVertices, VertexBand = vertexBand, VertexFeatureIdx = vertexFeatureIdx,
+                    TriangleIndices = triangleIndices, VertexEast = vertexEast,
+                    WorldPositions = worldPositions, VertexUp = vertexUp, Geo = geo,
+                    Counts = counts,
+                }.Schedule(aggregated);
+            }
 
             // Every derived list, and the earcut buffers / polygon-descriptor GROUPS, are dead after
             // aggregate — they either fed it directly or fed a node it already transitively depends on. Each
             // group disposes its own containers via its own DisposeAfter — no hand-counted array, no forgotten
             // increment (the confound a hand-counted array invites — see TriangulationBuffers's own doc).
-            JobHandle disposeListsAfterAggregate = ScheduleDispose(outVerts, aggregated);
-            disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outOffsets, aggregated));
-            disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outFeatIdx, aggregated));
+            // The three ring columns and the polygon descriptors outlive the aggregate by one node on both
+            // arms: FillBandJob reads both. `banded` IS `aggregated` only when the layer suppresses the band.
+            // The triangulation buffers are NOT re-pointed — the band node reads none of them; it recovers
+            // each triangle's feature from VertexFeatureIdx instead.
+            JobHandle disposeListsAfterAggregate = ScheduleDispose(outVerts, banded);
+            disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outOffsets, banded));
+            disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outFeatIdx, banded));
             disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, buffers.DisposeAfter(aggregated));
 
-            JobHandle disposeAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, polys.DisposeAfter(aggregated));
+            JobHandle disposeAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, polys.DisposeAfter(banded));
 
             // ── Flat arm: tile → geodetic → project, straight into the final output columns. Curved arm:
             // NEITHER node is scheduled — GlobeFillSubdivideJob projects internally and never reads
@@ -287,7 +329,7 @@ namespace MapRenderer.Jobs.Fill
                 {
                     Tile = tile, Extent = extent,
                     TileCoords = tileVertices.AsDeferredJobArray(), OutGeo = geo.AsDeferredJobArray(),
-                }.Schedule(tileVertices, VertexBatch, aggregated);
+                }.Schedule(tileVertices, VertexBatch, banded);
 
                 JobHandle projected = ProjectionDispatch.Schedule(
                     input.Projection, input.OriginRender, geo, worldPositions, vertexUp, geodetic);
@@ -301,32 +343,39 @@ namespace MapRenderer.Jobs.Fill
                 // TileVerts/TriangleIndices/VertexFeatureIdx and projects internally — it has no
                 // WorldPositions/VertexUp input to read, established by reading the job's field list.
                 //
-                // geo was pre-sized by AggregateJob (a field every caller of that job fills) but never
-                // used on this arm — dispose after the job that last touched it, same rule as any buffer.
-                JobHandle disposeGeo = ScheduleDispose(geo, aggregated);
-                // worldPositions/vertexUp/vertexEast were likewise pre-sized but are dead buffers here — the
+                // geo was pre-sized by AggregateJob and re-sized by the band node (fields every caller of
+                // those jobs fills) but never READ on this arm — dispose after the last job that touched it,
+                // which is the band node, not the aggregate. Same rule as any buffer.
+                JobHandle disposeGeo = ScheduleDispose(geo, banded);
+                // worldPositions/vertexUp/vertexEast were likewise written but are dead buffers here — the
                 // scattered lists below become the graph's actual world/up/east columns on this arm.
+                // vertexBand is NOT among them: it is a live subdivision INPUT, disposed with the other two
+                // below once the subdivide node has read it.
                 JobHandle deadAggregateColumnsDispose = JobHandle.CombineDependencies(
-                    ScheduleDispose(worldPositions, aggregated), ScheduleDispose(vertexUp, aggregated), ScheduleDispose(vertexEast, aggregated));
+                    ScheduleDispose(worldPositions, banded), ScheduleDispose(vertexUp, banded), ScheduleDispose(vertexEast, banded));
 
                 var subdividedVertices = NewBuffer<GlobeFillVertex>(1);
                 var subdividedIndices  = NewBuffer<int>(1);
 
                 JobHandle subdivideHandle = GlobeFillSubdivideDispatch.Schedule(
-                    input.Projection, tileVertices, triangleIndices, vertexFeatureIdx,
+                    input.Projection, tileVertices, triangleIndices, vertexFeatureIdx, vertexBand,
                     tile, extent, input.OriginRender,
                     GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
-                    GlobeFillSubdivideDispatch.DefaultMaxOutputVertices,
+                    GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices,
+                    GlobeFillSubdivideDispatch.DefaultMaxTotalVertices,
                     subdividedVertices, subdividedIndices,
-                    aggregated);
+                    banded);
 
                 JobHandle subdivisionSourceDispose = JobHandle.CombineDependencies(
-                    ScheduleDispose(tileVertices, subdivideHandle),
-                    ScheduleDispose(triangleIndices, subdivideHandle), ScheduleDispose(vertexFeatureIdx, subdivideHandle));
+                    JobHandle.CombineDependencies(
+                        ScheduleDispose(tileVertices, subdivideHandle), ScheduleDispose(triangleIndices, subdivideHandle)),
+                    JobHandle.CombineDependencies(
+                        ScheduleDispose(vertexFeatureIdx, subdivideHandle), ScheduleDispose(vertexBand, subdivideHandle)));
 
                 var scatteredWorldPositions   = FillGraphOutput.AllocateOutputList<double3>();
                 var scatteredVertexUp         = FillGraphOutput.AllocateOutputList<double3>();
                 var scatteredVertexEast       = FillGraphOutput.AllocateOutputList<double3>();
+                var scatteredVertexBand       = FillGraphOutput.AllocateOutputList<float3>();
                 var scatteredTileVertices     = FillGraphOutput.AllocateOutputList<double2>();
                 var scatteredVertexFeatureIdx = FillGraphOutput.AllocateOutputList<int>();
                 var scatteredTriangleIndices  = FillGraphOutput.AllocateOutputList<int>();
@@ -335,8 +384,10 @@ namespace MapRenderer.Jobs.Fill
                 {
                     Vertices = subdividedVertices, Indices = subdividedIndices,
                     OutWorldPositions = scatteredWorldPositions, OutVertexUp = scatteredVertexUp, OutVertexEast = scatteredVertexEast,
+                    OutVertexBand = scatteredVertexBand,
                     OutTileVertices = scatteredTileVertices, OutVertexFeatureIdx = scatteredVertexFeatureIdx,
                     OutTriangleIndices = scatteredTriangleIndices,
+                    Counts = counts,
                 }.Schedule(subdivideHandle);
 
                 JobHandle disposeSubdivided = JobHandle.CombineDependencies(
@@ -345,6 +396,7 @@ namespace MapRenderer.Jobs.Fill
                 // The pre-subdivision buffers are superseded — reassign so the returned
                 // FillGraphOutput reads the same six names regardless of arm.
                 worldPositions = scatteredWorldPositions; vertexUp = scatteredVertexUp; vertexEast = scatteredVertexEast;
+                vertexBand = scatteredVertexBand;
                 tileVertices = scatteredTileVertices; vertexFeatureIdx = scatteredVertexFeatureIdx; triangleIndices = scatteredTriangleIndices;
 
                 terminalGeometry = scattered;
@@ -358,6 +410,7 @@ namespace MapRenderer.Jobs.Fill
             return new FillGraphOutput
             {
                 TileVertices = tileVertices, WorldPositions = worldPositions, VertexUp = vertexUp, VertexEast = vertexEast,
+                VertexBand = vertexBand,
                 VertexFeatureIdx = vertexFeatureIdx, TriangleIndices = triangleIndices,
                 Counts = counts, Error = error,
                 Handle = terminal,

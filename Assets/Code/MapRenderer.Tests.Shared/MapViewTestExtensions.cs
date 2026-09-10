@@ -17,6 +17,9 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapView;
 using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
+// Alias, not the bare name: UnityEngine.RenderMode (Canvas) collides with it under this file's
+// UnityEngine import, and the bare token is CS0104-ambiguous.
+using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 
 namespace MapRenderer.Tests
 {
@@ -261,14 +264,19 @@ namespace MapRenderer.Tests
         public static GameObjectTileRenderer GameObjectRenderer(this MapViewComponent view) => view.TileManager?.GameObjectRenderer;
 
         /// <summary>
-        /// Assigns the committed production <see cref="MapMaterialSet"/> so the view can build per-layer
+        /// Assigns a committed production <see cref="MapMaterialSet"/> so the view can build per-layer
         /// materials. Required since S58 retired the <c>Shader.Find</c> fallback — without a config the
         /// factory returns null and <see cref="RenderLayerSet"/> builds zero layers. Returns the view for
         /// chaining: <c>go.AddComponent&lt;MapView&gt;().WithTestMaterials()</c>.
         /// </summary>
-        public static MapViewComponent WithTestMaterials(this MapViewComponent view)
+        /// <param name="mode">Which committed set to assign, and therefore whether the view renders lit or
+        /// unlit — render mode is a property of the SET, not a separate flag
+        /// (<c>RenderModeMaterialSelectionTests</c>). Defaults to <c>Lit</c>, the product default and the
+        /// mode every caller predating the parameter asked for implicitly.</param>
+        public static MapViewComponent WithTestMaterials(
+            this MapViewComponent view, RenderMode mode = RenderMode.Lit)
         {
-            view.Config.MaterialSet = MapMaterialSetTestUtil.Load();
+            view.Config.MaterialSet = MapMaterialSetTestUtil.Load(mode);
             return view;
         }
     }

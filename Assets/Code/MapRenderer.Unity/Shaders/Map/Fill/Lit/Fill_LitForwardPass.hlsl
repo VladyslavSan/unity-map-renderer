@@ -30,6 +30,10 @@
 
 // keep this file in sync with Fill_LitGBufferPass.hlsl
 
+// The fill boundary band's coverage ramp, shared with the Unlit twin (the depth-writing passes clip the
+// band out instead of shading it, so they do not include this).
+#include "../Fill_BandCoverage.hlsl"
+
 struct Attributes
 {
     float4 positionOS   : POSITION;
@@ -38,6 +42,10 @@ struct Attributes
     float2 texcoord     : TEXCOORD0;
     float2 staticLightmapUV   : TEXCOORD1;
     float2 dynamicLightmapUV  : TEXCOORD2;
+    // [MAP DELTA] boundary band (dirEast, dirNorth, side). TEXCOORD3 and no lower slot: 1 and 2 are
+    // already claimed by the lightmap UVs above, and a TEXCOORDn semantic binds to the MESH's attribute
+    // index, so a mis-slotted stream would silently feed one of those instead of failing to compile.
+    float3 band         : TEXCOORD3;
     // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
     float4 color        : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -82,6 +90,9 @@ struct Varyings
     // [MAP DELTA S12] Per-vertex baked color (data-driven dimension).
     // TEXCOORD11 is free in this pass; avoids collisions with TEXCOORD0-10 above.
     half4 vColor                    : TEXCOORD11;
+
+    // [MAP DELTA] Outward boundary band coordinate; TEXCOORD12 is free in this pass.
+    float side                      : TEXCOORD12;
 
     float4 positionCS               : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -196,7 +207,7 @@ Varyings LitPassVertex(Attributes input)
 
     // [MAP DELTA] Apply per-layer vertex modification before position transform.
     // Fill: no-op. Line: lateral extrusion. See Fill_Input.hlsl / Line_Input.hlsl.
-    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS);
+    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS, input.band, output.side);
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
 
@@ -302,6 +313,11 @@ void LitPassFragment(
         surfaceData.albedo = patternTexel.rgb;
         surfaceData.alpha  = patternTexel.a * _Opacity;
     }
+
+    // [MAP DELTA] Boundary antialiasing, applied AFTER the pattern branch — that branch REPLACES alpha
+    // rather than modulating it, so coverage folded in any earlier would be discarded on a patterned
+    // fill and its boundary would silently stay hard.
+    surfaceData.alpha *= MapFillBandCoverage(input.side);
 
 #ifdef LOD_FADE_CROSSFADE
     LODFadeCrossFade(input.positionCS);

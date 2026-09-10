@@ -66,6 +66,8 @@ namespace MapRenderer.Tests
         private CameraProperties _cameraProperties;
         private bool _cameraSet;
         private RenderBackend _backend = RenderBackend.Entities;   // the product default; the suite validates the shipping path
+        private MapRenderer.Unity.Rendering.Materials.RenderMode _renderMode =
+            MapRenderer.Unity.Rendering.Materials.RenderMode.Lit;   // the product default
 
         /// <summary>Set via <see cref="Glyphs"/>; null ⇒ no override, the production
         /// <c>GlyphSourceFactory.Create</c> path runs unchanged (fill-only scenes never touch this).</summary>
@@ -126,6 +128,19 @@ namespace MapRenderer.Tests
         public VisualScene Backend(RenderBackend backend)
         {
             _backend = backend;
+            return this;
+        }
+
+        /// <summary>Selects which committed <c>MapMaterialSet</c> this scene renders through, and therefore
+        /// whether the frame is lit or unlit (render mode is a property of the SET — see
+        /// <c>RenderModeMaterialSelectionTests</c>; there is no separate config flag). Default
+        /// <c>RenderMode.Lit</c>, the product default. Unlit is the arm that separates "the geometry is
+        /// wrong" from "two materials shade the same colour differently": under it a colour is exactly its
+        /// own albedo, so two overlapping draws of one colour are byte-identical by construction.</summary>
+        /// <param name="mode">The render mode to load the committed material set for.</param>
+        public VisualScene RenderMode(MapRenderer.Unity.Rendering.Materials.RenderMode mode)
+        {
+            _renderMode = mode;
             return this;
         }
 
@@ -221,7 +236,7 @@ namespace MapRenderer.Tests
 
             // ── MapView (WithTestMaterials, tile-selection clamped to this scene's zoom — plan §7). ────────
             _mapGo   = new GameObject("VisualScene_MapView");
-            _mapView = _mapGo.AddComponent<MapViewComponent>().WithTestMaterials();
+            _mapView = _mapGo.AddComponent<MapViewComponent>().WithTestMaterials(_renderMode);
             int tileZoom = _cameraProperties.IntegerZoom;
             _mapView.Config.TileSelection.MinZoom = tileZoom;
             _mapView.Config.TileSelection.MaxZoom = tileZoom;

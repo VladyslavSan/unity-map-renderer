@@ -57,6 +57,7 @@ namespace MapRenderer.Tests.Jobs
         {
             var vertexBytes = new List<byte>(); var worldBytes = new List<byte>(); var upBytes = new List<byte>();
             var eastBytes = new List<byte>(); var featBytes = new List<byte>(); var idxBytes = new List<byte>();
+            var bandBytes = new List<byte>();
             var polyBytes = new List<byte>(); var ringBytes = new List<byte>(); var holeBytes = new List<byte>(); var fcBytes = new List<byte>();
 
             int maxPolygonCount = 0;
@@ -91,6 +92,37 @@ namespace MapRenderer.Tests.Jobs
                     // compared to any golden (assertion 2's format excludes them). `curved` only matters at
                     // the golden-format branch below.
                     int ic = output.TriangleIndices.Length;
+
+                    // Assertion 2's golden format digests the INTERIOR PREFIX only, exactly as
+                    // FillMeshGraphParityTests does — the boundary band appends to these same columns and its
+                    // bytes were never in the frozen capture. Assertion 1's determinism claim keeps the FULL
+                    // column set: everything the band added goes into bandBytes below, which is appended to
+                    // the full-column digest and to nothing else.
+                    int interiorCount = vc - c.BandVertexCount;
+                    for (int i = interiorCount; i < vc; i++)
+                    {
+                        bandBytes.AddRange(BitConverter.GetBytes(output.TileVertices[i].x));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.TileVertices[i].y));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.WorldPositions[i].x));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.WorldPositions[i].y));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.WorldPositions[i].z));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexUp[i].x));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexUp[i].y));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexUp[i].z));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexEast[i].x));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexEast[i].y));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexEast[i].z));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexFeatureIdx[i]));
+                    }
+                    for (int i = 0; i < vc; i++)
+                    {
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexBand[i].x));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexBand[i].y));
+                        bandBytes.AddRange(BitConverter.GetBytes(output.VertexBand[i].z));
+                    }
+                    for (int i = 0; i < ic; i++) bandBytes.AddRange(BitConverter.GetBytes(output.TriangleIndices[i]));
+
+                    vc = interiorCount;
                     for (int i = 0; i < vc; i++)
                     {
                         vertexBytes.AddRange(BitConverter.GetBytes(output.TileVertices[i].x));
@@ -106,7 +138,14 @@ namespace MapRenderer.Tests.Jobs
                         eastBytes.AddRange(BitConverter.GetBytes(output.VertexEast[i].z));
                         featBytes.AddRange(BitConverter.GetBytes(output.VertexFeatureIdx[i]));
                     }
-                    for (int i = 0; i < ic; i++) idxBytes.AddRange(BitConverter.GetBytes(output.TriangleIndices[i]));
+                    for (int i = 0; i + 2 < ic; i += 3)
+                    {
+                        if (output.TriangleIndices[i] >= vc || output.TriangleIndices[i + 1] >= vc || output.TriangleIndices[i + 2] >= vc)
+                            continue;
+                        idxBytes.AddRange(BitConverter.GetBytes(output.TriangleIndices[i]));
+                        idxBytes.AddRange(BitConverter.GetBytes(output.TriangleIndices[i + 1]));
+                        idxBytes.AddRange(BitConverter.GetBytes(output.TriangleIndices[i + 2]));
+                    }
                 }
                 finally { output.Dispose(); }
             }
@@ -127,7 +166,8 @@ namespace MapRenderer.Tests.Jobs
                   $"Indices={MapRenderer.Tests.Tiles.FillMeshGraphParityTests.Sha256(idxBytes)} {countsResult}";
 
             string fullColumnDigest =
-                $"{goldenFormat} East={MapRenderer.Tests.Tiles.FillMeshGraphParityTests.Sha256(eastBytes)}";
+                $"{goldenFormat} East={MapRenderer.Tests.Tiles.FillMeshGraphParityTests.Sha256(eastBytes)}" +
+                $" Band={MapRenderer.Tests.Tiles.FillMeshGraphParityTests.Sha256(bandBytes)}";
 
             return new PassResult
             {

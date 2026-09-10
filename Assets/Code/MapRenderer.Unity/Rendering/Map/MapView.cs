@@ -212,7 +212,7 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             var           loader = DocumentLoaderOverride ?? StyleDocumentLoader.LoadTextAsync;
             string        json   = await loader(styleUri, ct);
-            StyleDocument style  = StyleParser.Parse(json);
+            StyleDocument style  = StyleParser.Parse(json, _config.FillAntialiasing);
             await SetStyle(style, styleUri, ct);
         }
 

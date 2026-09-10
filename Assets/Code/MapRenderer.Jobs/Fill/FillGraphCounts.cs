@@ -1,10 +1,12 @@
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// Blittable per-layer counts the fill graph's nodes report through — the four scalars a surviving output
-    /// list's length cannot give (job-scheduling-design.md §3.2): vertex/index counts are read off
-    /// <see cref="FillGraphOutput.TileVertices"/>/<see cref="FillGraphOutput.TriangleIndices"/> directly once
-    /// <see cref="FillGraphOutput.Handle"/> is completed, so they need no field here. One
+    /// Blittable per-layer counts the fill graph's nodes report through — the scalars a surviving output
+    /// list's length cannot give (job-scheduling-design.md §3.2): the layer's TOTAL vertex/index counts are
+    /// read off <see cref="FillGraphOutput.TileVertices"/>/<see cref="FillGraphOutput.TriangleIndices"/>
+    /// directly once <see cref="FillGraphOutput.Handle"/> is completed, so they need no field here — but the
+    /// boundary band's SHARE of those totals does, because nothing else separates the interior prefix from
+    /// the band that <see cref="FillBandJob"/> appends to the same columns. One
     /// <see cref="Unity.Collections.NativeArray{T}"/> allocation shared by its (now few) writers, in place of
     /// the half-dozen 1-element arrays the synchronous <see cref="FillMeshPipeline"/> allocates
     /// (<c>FillMeshPipeline.cs:242</c>'s "count written by a job" idiom, widened to one struct).
@@ -58,5 +60,21 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>Total clean-drop ("force clip") loci across every polygon's earcut.</summary>
         public int ForceClipCount;
+
+        /// <summary>Vertices <see cref="FillBandJob"/> appended for the boundary band — two per ring vertex,
+        /// zero when that node did not run or found no ring to follow. The interior's own vertices are
+        /// therefore <c>TileVertices.Length - BandVertexCount</c>, and they are the array's PREFIX: the band
+        /// only ever appends.
+        /// <para><b>ZERO on the curved arm, and that is not "no band".</b>
+        /// <see cref="GlobeFillScatterJob"/> clears both band scalars because subdivision re-emits every
+        /// vertex in traversal order — band and interior interleave and no prefix split survives. Band-ness
+        /// there is the per-vertex <see cref="FillGraphOutput.VertexBand"/> attribute.</para></summary>
+        public int BandVertexCount;
+
+        /// <summary>Indices <see cref="FillBandJob"/> appended — six per ring edge. Unlike the vertices these
+        /// are NOT a suffix even on the flat arm: band triangles are interleaved after their own feature's
+        /// interior triangles (see that job's doc), so a reader separating the two filters by vertex index,
+        /// not by position. Zeroed on the curved arm for the reason above.</summary>
+        public int BandIndexCount;
     }
 }

@@ -119,6 +119,80 @@ namespace MapRenderer.Tests.Visual
                 $"(ratio={clippedBand / clippedInterior:F4}).");
         }
 
+        // ── The outward boundary band at a seam ───────────────────────────────────────────────────
+
+        // World x = 0 lands on the boundary between columns 255 and 256, so these two columns are exactly the
+        // pixels a one-device-pixel band from each neighbour would reach into.
+        private const int SeamRimX0 = 255, SeamRimX1 = 257;
+
+        // Clipped at the tile boundary, the two neighbours ABUT: one paints full coverage where the other
+        // stops. An outward band drawn along that cut is therefore ink over a fill that is already there —
+        // f(1-f) relative, worst on the translucent layers, which is why this measures at alpha 0.3 rather
+        // than at T3's 0.5.
+        //
+        // RED, measured against real production code rather than an injected defect: on the tree carrying
+        // the band but not clip-edge suppression, this fixture read rim=0.0892 interior=0.0662, ratio
+        // 1.3467 — with the per-column profile flat at 0.0662 everywhere except columns 255 and 256, which
+        // read 0.0896 and 0.0888. Two pixels, one from each neighbour's band, each about half covered:
+        // 0.5 x f(1-f) / f = 0.35 at f = 0.3, which is what those columns measure. That is 17x this
+        // assertion's tolerance, so the tooth discriminates by a wide margin rather than by calibration.
+        //
+        // WHAT THIS FIXTURE CANNOT ALSO WITNESS, stated so nobody reads it as the whole claim: both tiles are
+        // full-extent quads, so EVERY edge of both rings lies on a window line and the entire band is
+        // suppressed here. Deleting the band node outright would pass this test. That a real feature edge
+        // KEEPS its band is FillBandJobTests' job at the fix site, and
+        // FillBoundaryBandRenderTests.ASquareFillHasGradedBoundaryPixels_AndAnUngradedInterior's on a frame.
+        [Test]
+        public void TwoNeighbours_TranslucentFill_ClippedAtTheTileBoundary_LeaveNoBandRimOnTheSeam()
+        {
+            var (rim, interior) = MeasureSeamRim(alpha: 0.3f, "tile-seam-band-rim-a03.png");
+
+            if (interior < 0.01)
+            {
+                Assert.Inconclusive(
+                    "The interior reference is ~black — the tiles did not render. Likely no GPU context in " +
+                    "batch EditMode; re-run as PlayMode: ./Tools/run-tests.sh PlayMode");
+                return;
+            }
+
+            // Two-sided on purpose. Above 1 is the band rim this stage removes; BELOW 1 is a background
+            // trench, which is the artefact that rejected every inset placement — one bound catches both.
+            Assert.LessOrEqual(math.abs(rim / interior - 1.0), 0.02,
+                $"the two abutting tiles' seam must read the same as their interiors. Measured rim={rim:F4}, " +
+                $"interior={interior:F4} (ratio={rim / interior:F4}). Above 1 is a boundary band painted " +
+                "along the tile cut, over a neighbour that already abuts there; below 1 is background " +
+                "showing through, which no placement in this mechanism may produce.");
+        }
+
+        /// <summary>Renders the clipped two-tile seam and returns the seam columns' mean linear luminance
+        /// against the mean of the two interior references, logging the per-column profile across the seam so
+        /// a red says WHERE the ink sits rather than only that a ratio moved.</summary>
+        /// <param name="alpha">The fill layer's opacity.</param>
+        /// <param name="pngName">Snapshot file name.</param>
+        /// <returns>The seam strip's luminance and the interior reference's; both 0 with no GPU context.</returns>
+        private static (double rim, double interior) MeasureSeamRim(float alpha, string pngName)
+        {
+            var scene = new SeamScene(TileBufferClip.KeepTileUnits(0.0), alpha, BandBackground, BandViewHalfWidth);
+            try
+            {
+                byte[] px = scene.Render(pngName);
+                if (px == null) return (0.0, 0.0);
+
+                double interior = 0.5 * (MeanLuminance(px, LeftRefX0, LeftRefX1)
+                                       + MeanLuminance(px, RightRefX0, RightRefX1));
+                double rim = MeanLuminance(px, SeamRimX0, SeamRimX1);
+
+                var profile = new System.Text.StringBuilder();
+                for (int x = SnapW / 2 - 6; x < SnapW / 2 + 6; x++)
+                    profile.Append($" {x}:{MeanLuminance(px, x, x + 1):F4}");
+                Debug.Log($"[TileSeam rim] alpha={alpha} rim={rim:F4} interior={interior:F4} " +
+                          $"ratio={rim / math.max(interior, 1e-9):F4} profile:{profile}");
+
+                return (rim, interior);
+            }
+            finally { scene.Dispose(); }
+        }
+
         // ── T5: the crack ─────────────────────────────────────────────────────────────────────────
 
         // Columns scanned for a background-coloured gap, centred on the seam (world x = 0 projects to the

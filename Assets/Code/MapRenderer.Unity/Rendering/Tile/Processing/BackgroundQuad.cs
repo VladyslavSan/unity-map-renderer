@@ -114,6 +114,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                 OriginRender   = ctx.TileOriginRender,
                 Projection     = ctx.Projection,
                 Clip           = ctx.BufferClip,
+                // Every edge of a full-tile quad is a tile seam abutting the neighbour's identical quad, so a
+                // boundary band here would only lay a 1 px double-composited rim along every seam — there is
+                // no silhouette to antialias.
+                SuppressBoundaryBand = true,
             };
         }
     }

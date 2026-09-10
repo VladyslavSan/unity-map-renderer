@@ -96,11 +96,11 @@ namespace MapRenderer.Tests.Materials
         public void FillUnlitForwardPass_AttributesSemantics_AreSubsetOfBuilderEmittedStreams()
         {
             // The mesh-emitted semantic set — StyledFillTileBuilder's FillVertexDescriptors
-            // (StyledFillTileBuilder.cs): Position, Normal, Tangent, Color, TexCoord0. Background reuses
-            // this same builder (BackgroundQuad), so the same set covers both.
+            // (StyledFillTileBuilder.cs): Position, Normal, Tangent, Color, TexCoord0, TexCoord3.
+            // Background reuses this same builder (BackgroundQuad), so the same set covers both.
             var emittedByBuilder = new HashSet<string>(System.StringComparer.Ordinal)
             {
-                "POSITION", "NORMAL", "TANGENT", "COLOR", "TEXCOORD0",
+                "POSITION", "NORMAL", "TANGENT", "COLOR", "TEXCOORD0", "TEXCOORD3",
             };
 
             string path = ShaderPropertyParser.MapShaderPath("Fill_UnlitForwardPass.hlsl");

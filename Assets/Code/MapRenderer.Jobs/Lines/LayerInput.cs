@@ -54,7 +54,7 @@ namespace MapRenderer.Jobs.Lines
         /// <summary>The always-bound-loops ceiling on this layer's total ribbon vertex count
         /// (job-scheduling-design.md §10; <see cref="LineMeshGraph.DefaultMaxOutputVertices"/> is the
         /// production value). A FIELD, not a constant read inside a job — the same shape
-        /// <c>GlobeFillSubdivideDispatch.Schedule</c> takes <c>DefaultMaxOutputVertices</c> as an argument
+        /// <c>GlobeFillSubdivideDispatch.Schedule</c> takes <c>DefaultMaxInteriorVertices</c> as an argument
         /// (<c>FillMeshGraph.cs:287-291</c>) — so a test can drive its own ceiling with a synthetic ring
         /// without the production constant changing what it observes.</summary>
         public int MaxOutputVertices;

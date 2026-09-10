@@ -23,11 +23,13 @@ namespace MapRenderer.Core.Style
         public static readonly double[] DefaultBounds = { -180.0, -85.051129, 180.0, 85.051129 };
 
         /// <summary>Parse from a JSON string.</summary>
-        public static StyleDocument Parse(string json)
-            => Parse(JsonParser.Parse(json));
+        /// <param name="fillAntialiasDefault">What <c>fill-antialias</c> means for a fill layer that omits
+        /// it (<c>MapViewConfig.FillAntialiasing</c>). The Style Spec's own default is <c>true</c>.</param>
+        public static StyleDocument Parse(string json, bool fillAntialiasDefault = true)
+            => Parse(JsonParser.Parse(json), fillAntialiasDefault);
 
         /// <summary>Parse from an already-parsed JSON DOM root.</summary>
-        public static StyleDocument Parse(JsonValue root)
+        public static StyleDocument Parse(JsonValue root, bool fillAntialiasDefault = true)
         {
             var doc = new StyleDocument { Root = root };
             if (root == null || !root.IsObject)
@@ -47,7 +49,7 @@ namespace MapRenderer.Core.Style
             if (root.TryGet("layers", out var layers) && layers.IsArray)
             {
                 foreach (var layerJson in layers.Items)
-                    doc.Layers.Add(ParseLayer(layerJson));
+                    doc.Layers.Add(ParseLayer(layerJson, fillAntialiasDefault));
             }
 
             return doc;
@@ -91,7 +93,7 @@ namespace MapRenderer.Core.Style
             }
         }
 
-        private static StyleLayer ParseLayer(JsonValue json)
+        private static StyleLayer ParseLayer(JsonValue json, bool fillAntialiasDefault)
         {
             if (json == null || !json.IsObject)
                 return new StyleLayer { Raw = json };
@@ -106,7 +108,7 @@ namespace MapRenderer.Core.Style
             switch (layerType)
             {
                 case StyleLayerType.Line:          layer = new Line.StyleLayer();          break;
-                case StyleLayerType.Fill:          layer = new Fill.StyleLayer();          break;
+                case StyleLayerType.Fill:          layer = new Fill.StyleLayer { AntialiasDefault = fillAntialiasDefault }; break;
                 case StyleLayerType.Symbol:        layer = new Symbol.StyleLayer();        break;
                 case StyleLayerType.Background:    layer = new Background.StyleLayer();    break;
                 case StyleLayerType.FillExtrusion: layer = new FillExtrusion.StyleLayer(); break;

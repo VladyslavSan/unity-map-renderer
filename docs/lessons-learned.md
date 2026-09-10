@@ -105,6 +105,19 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   — a horizontal-fixture tooth cannot see it (`fwidth` is exact when one derivative is zero), and **"we
   already know why that failed" deserves re-checking when the fix reuses the failed code.**
 
+- **A fixture that drives a named shader pass directly gets the FALLBACK shader unless URP is the active
+  pipeline at query time — and nothing about it looks broken.** `Material.FindPass` + `SetPass` /
+  `DrawMeshNow` resolves against whichever SubShader the active render pipeline selects. Our fill/line
+  SubShaders are tagged `"RenderPipeline" = "UniversalPipeline"`, so outside URP the only match is
+  `Fill.shader`'s `FallBack "Hidden/Universal Render Pipeline/FallbackError"`, which has exactly one unnamed
+  pass. **The signature:** `passCount = 1`, `passes = [0:<Unnamed Pass 0>]`, `shaderHasError = False`, and
+  `FindPass` returning **−1 for every name, ForwardLit included**. No exception, no error log — a `-1` reads
+  as "that pass does not exist", which is the wrong conclusion. `ShaderData` is how to tell the two apart:
+  it shows the real multi-pass SubShader alongside the fallback ones, so a `ShaderData` dump that *has*
+  ForwardLit while `FindPass` says −1 names the cause exactly. **Fix:** set
+  `Shader.globalRenderPipeline = "UniversalPipeline"` for the duration of the fixture, restored in a
+  `finally`. *(2026-09-08, during the fill boundary band's pass-level probes.)*
+
 ## Rendering loop & camera
 
 - **Under camera-relative rendering a pure PAN never moves the camera — so tile/label frame-coherence is a
@@ -428,6 +441,33 @@ on a launch-time or per-scene switch, the audit row has as many entries as the s
 default encoded in two places — here `?? DefaultProjection` in one arm and `case null` in another — is worth
 collapsing to one, because it is exactly what lets two arms disagree without any test noticing. Related:
 [[unset-field-drives-the-wrong-arm]], [[test-quality-audit-catalogued]].
+
+### Four of the fill shader's six passes never rasterise a fill fragment in the shipped configuration
+
+The entry above says to name the configuration. This is the worked example that cost the most: an assumption
+made twice during the fill-antialiasing epic — that a change to the fill shader's depth-writing passes was
+observable in a rendered frame — when none of them runs. Measured 2026-09-08, not inferred:
+
+| pass | why it never rasterises a fill fragment |
+|---|---|
+| DepthOnly | URP builds the depth prepass with `RenderQueueRange.opaque` — `UniversalRenderer.cs:356` |
+| DepthNormals | same — `UniversalRenderer.cs:357` |
+| ShadowCaster | `FillRenderLayer.cs:57` is `CastShadows => Off`, and the BRG backend drops those slots |
+| GBuffer | the renderer asset is `m_RenderingMode: 2` (Forward+), so deferred never runs |
+
+Fills render at custom render queue 3000, outside the ≤ 2500 opaque range those two prepasses filter on.
+**And note the sub-claim that is NOT true**, because it is the one a reader supplies for themselves:
+DepthOnly is *not* disabled on the committed fill materials — both carry `disabledShaderPasses: []`. The
+`BaseShaderGUI.cs:1142` call that would disable it runs in the **Inspector GUI**, not at runtime, and the
+committed asset state is what ships.
+
+**How to apply.** Two consequences, and the second is the one worth carrying. First: a change to those
+passes cannot be RED-verified against a frame — the instrument has to be structural (a source-level fence),
+and a rendered tooth for it is only buildable once a fill becomes opaque-mode or casts shadows, at which
+point whoever lands that owns the tooth. Second: **every row here is a configuration, not a construction.**
+Flip `CastShadows`, move a fill into the opaque queue, or switch the renderer to deferred, and the pass goes
+live with whatever was written under the assumption nobody would run it. Related:
+[[recorded-limitation-needs-an-observing-tooth]].
 
 ### A source-text fence must match the IDENTIFIER, not the syntax around it
 

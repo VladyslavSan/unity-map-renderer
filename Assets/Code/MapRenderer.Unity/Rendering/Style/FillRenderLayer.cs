@@ -40,6 +40,7 @@ namespace MapRenderer.Unity.Rendering.Style
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.ApplyZoomFills);
 
         private readonly Fill.PaintProperties  _paint;
+
         private readonly Fill.LayoutProperties _layout;
         private readonly ZoomStyleApplier      _applier;
 

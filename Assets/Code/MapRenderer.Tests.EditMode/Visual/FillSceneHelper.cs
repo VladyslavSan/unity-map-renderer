@@ -49,8 +49,11 @@ namespace MapRenderer.Tests
             float viewSize = DefaultViewSize,
             string layerName = "countries",
             IProjection projection = null, // null ⇒ WebMercator; pass a SphericalProjection for a globe
-            bool fitToView = true)         // false ⇒ leave the transform at identity so the caller can place
+            bool fitToView = true,         // false ⇒ leave the transform at identity so the caller can place
                                            //          the GO itself (e.g. the real ENU-rebase placement, S91-C)
+            // Test-only oracle knob — see SyncMeshWrite.Fill. Production never sets it; a fixture that
+            // measures the boundary band's own contribution renders the same scene with and without it.
+            bool suppressBoundaryBand = false)
         {
             byte[] bytes = SampleTileFixture.Bytes();
             using MvtTile mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
@@ -77,7 +80,8 @@ namespace MapRenderer.Tests
             // to the ECEF corner, Mercator relative to the SW-corner (mercX, 0, mercZ). No caller-side origin.
             // IR C1 P3: the LAYER's own buffer, borrowed; the decode above used the same id.
             Mesh mesh = TestTileMeshBuilder.BuildFillFromLayer(
-                mvtLayer, selected, paint, styleZoom, new TileId { Z = 0, X = 0, Y = 0 }, projection);
+                mvtLayer, selected, paint, styleZoom, new TileId { Z = 0, X = 0, Y = 0 }, projection,
+                suppressBoundaryBand: suppressBoundaryBand);
 
             var mapGo = new GameObject("FillSceneHelper");
             var mf = mapGo.AddComponent<MeshFilter>();

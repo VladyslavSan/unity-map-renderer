@@ -75,8 +75,9 @@ namespace MapRenderer.Unity.Rendering.Materials
                 applier.BindColor(paint.OutlineColor, ShaderProperties.Fill.PropertyId.FillOutlineColor);
 
             // fill-antialias.
-            if (!paint.Antialias.DependsOnFeature)
-                applier.BindFloat(paint.Antialias, ShaderProperties.Fill.PropertyId.FillAntialias);
+            // fill-antialias is NOT bound: it is a bool now, and the _FillAntialias uniform it used to
+            // feed is read by no pass (docs/fill-parity-design.md §68). The property stays declared in the
+            // CBUFFER — MapFillUnlitMaterialTests pins that — but writing it bought nothing.
 
             // fill-translate: a px offset consumed through Fill_VertexModify's MapPixelsToWorld — the same
             // device-px space line-translate lives in (S107), so it takes the same conversion. Also parsed

@@ -94,6 +94,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
             NativeArray<int>    visit  = input.RingVisitOrder;
 
             // ── Roof: the flat fill's own earcut+project chain, composed unchanged. ─────────────────────
+            // The roof rides the extrusion mesh's own vertex layout, which carries no band attribute, and an
+            // extruded building keeps a hard silhouette by design.
+            input.SuppressBoundaryBand = true;
             FillGraphOutput roof = FillMeshGraph.Schedule(input, deps);
 
             // ── Walls: raw (pre-earcut) ring vertices off the borrowed source — NOT earcut output

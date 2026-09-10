@@ -191,6 +191,7 @@ namespace MapRenderer.Tests.Jobs
             var worldPositions   = new NativeList<double3>(Allocator.Persistent);
             var vertexUp         = new NativeList<double3>(Allocator.Persistent);
             var vertexEast       = new NativeList<double3>(Allocator.Persistent);
+            var vertexBand       = new NativeList<float3>(Allocator.Persistent);
             var vertexFeatureIdx = new NativeList<int>(Allocator.Persistent);
             var triangleIndices  = new NativeList<int>(Allocator.Persistent);
             var geo              = new NativeList<GeoCoordinate>(Allocator.Persistent);
@@ -226,6 +227,7 @@ namespace MapRenderer.Tests.Jobs
                 {
                     Buffers = buffers,
                     TileVertices = tileVertices, WorldPositions = worldPositions, VertexUp = vertexUp, VertexEast = vertexEast,
+                    VertexBand = vertexBand,
                     VertexFeatureIdx = vertexFeatureIdx, TriangleIndices = triangleIndices, Geo = geo,
                     Counts = counts, Error = error,
                 }.Run();
@@ -256,6 +258,7 @@ namespace MapRenderer.Tests.Jobs
                 Assert.AreEqual(0, worldPositions.Length);
                 Assert.AreEqual(0, vertexUp.Length);
                 Assert.AreEqual(0, vertexEast.Length);
+                Assert.AreEqual(0, vertexBand.Length);
                 Assert.AreEqual(0, vertexFeatureIdx.Length);
                 Assert.AreEqual(0, triangleIndices.Length, "AggregateJob must produce no indices");
                 Assert.AreEqual(0, geo.Length);
@@ -271,7 +274,7 @@ namespace MapRenderer.Tests.Jobs
                 vertices.Dispose(); ringFeatureIdx.Dispose();
                 buffers.DisposeAfter(default(JobHandle)).Complete();
                 counts.Dispose(); error.Dispose();
-                tileVertices.Dispose(); worldPositions.Dispose(); vertexUp.Dispose(); vertexEast.Dispose();
+                tileVertices.Dispose(); worldPositions.Dispose(); vertexUp.Dispose(); vertexEast.Dispose(); vertexBand.Dispose();
                 vertexFeatureIdx.Dispose(); triangleIndices.Dispose(); geo.Dispose();
             }
         }

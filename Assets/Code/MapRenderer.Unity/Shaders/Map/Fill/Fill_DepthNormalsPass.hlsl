@@ -40,6 +40,7 @@ struct Attributes
     float4 tangentOS    : TANGENT;
     float2 texcoord     : TEXCOORD0;
     float3 normal       : NORMAL;
+    float3 band         : TEXCOORD3;  // [MAP DELTA] boundary band (dirEast, dirNorth, side)
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -56,6 +57,8 @@ struct Varyings
     #endif
 
     half3 viewDirWS    : TEXCOORD5;
+
+    float side         : TEXCOORD9;    // [MAP DELTA] band coordinate for the clip below; next free slot here
 
     #if defined(REQUIRES_TANGENT_SPACE_VIEW_DIR_INTERPOLATOR)
     half3 viewDirTS    : TEXCOORD8;
@@ -78,7 +81,7 @@ Varyings DepthNormalsVertex(Attributes input)
     #endif
 
     // [MAP DELTA] Apply per-layer vertex modification before clip-space transform.
-    MapVertexModify(input.positionOS.xyz, input.normal, input.tangentOS);
+    MapVertexModify(input.positionOS.xyz, input.normal, input.tangentOS, input.band, output.side);
 
     output.positionCS = TransformObjectToHClip(input.positionOS.xyz);
 
@@ -114,6 +117,12 @@ void DepthNormalsFragment(
 {
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+    // [MAP DELTA] The outward boundary band is clipped OUT of every depth-writing pass. A coverage-0 band
+    // fragment under this pass's hardcoded ZWrite On would still write depth and cast a shadow, so the
+    // depth prepass and the shadow silhouette stay exactly the hard geometry's — not a screen-space skirt
+    // half a pixel wide. Clipping on `side` rather than on coverage is what keeps that bit-exact.
+    clip(input.side > 0.0 ? -1.0 : 1.0);
 
     #if defined(_ALPHATEST_ON)
         Alpha(SampleAlbedoAlpha(input.uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap)).a, _BaseColor, _Cutoff);

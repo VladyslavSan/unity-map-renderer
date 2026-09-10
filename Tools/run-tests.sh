@@ -145,7 +145,10 @@ run_unity() { # $1 = testResults path, $2 = logFile path
 # unchanged runs (the common case) pay nothing. Opt out with UMR_SKIP_SHADER_WARMUP=1. See
 # docs/lessons-learned.md.
 SHADER_CACHE="$ROOT/Library/ShaderCache"
-WARM_STAMP="$ROOT/Library/.umr-shader-warm-stamp"
+# Per-filter stamp. A filtered run warms only its own subset, so it may not claim the FULL set is
+# warm — but it may claim ITS OWN subset is, which is what lets repeated filtered iteration skip the
+# warm-up instead of paying it forever. Unfiltered runs keep the unsuffixed stamp.
+WARM_STAMP="$ROOT/Library/.umr-shader-warm-stamp${FILTER:+-$(printf '%s' "$FILTER" | cksum | cut -d' ' -f1)}"
 shaders_need_warmup() {
   [ -d "$SHADER_CACHE" ] || return 0                          # cache absent  => cold
   [ -z "$(ls -A "$SHADER_CACHE" 2>/dev/null)" ] && return 0   # cache empty   => cold
@@ -166,9 +169,11 @@ run_unity "$RESULTS" "$LOG"
 CODE=$?
 
 # Stamp the cache as warm-for-the-current-shaders, so the next run skips the warm-up unless a shader
-# changes. Only a FULL (unfiltered) run exercises every variant, so only it may claim the whole set is
-# warm; a filtered run warms just its subset and must not stamp the full set as current.
-if [ -z "$FILTER" ] && [ -d "$SHADER_CACHE" ] && [ -n "$(ls -A "$SHADER_CACHE" 2>/dev/null)" ]; then
+# changes. The stamp is per-filter (see WARM_STAMP above): an unfiltered run claims the whole set,
+# a filtered run claims only its own subset. Before this was per-filter, a filtered run never
+# stamped at all, so every filtered iteration after a shader edit paid a full warm-up forever —
+# which made the fast path slower than the slow one.
+if [ -d "$SHADER_CACHE" ] && [ -n "$(ls -A "$SHADER_CACHE" 2>/dev/null)" ]; then
   touch "$WARM_STAMP"
 fi
 

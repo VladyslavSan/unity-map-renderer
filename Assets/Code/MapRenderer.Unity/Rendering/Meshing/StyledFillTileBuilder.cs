@@ -38,7 +38,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
     ///
     /// Stream layout (4 streams, matching Unity's max-4-stream cap):
     ///   Stream 0 — Position (Float32x3) + Normal (Float32x3) interleaved via <see cref="FillPositionNormal"/>.
-    ///   Stream 1 — TexCoord0 UV (Float32x2).
+    ///   Stream 1 — TexCoord0 UV (Float32x2) + TexCoord3 band (Float32x3) interleaved via
+    ///              <see cref="FillPatternUvBand"/>, 20 B. The band attribute shares a stream because all
+    ///              four are already spoken for — Unity's cap — so it could not have one of its own.
     ///   Stream 2 — Tangent (Float32x4).
     ///   Stream 3 — Color (Float32x4, linearized sRGB).
     ///   Index buffer — UInt32.
@@ -91,6 +93,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             new VertexAttributeDescriptor(VertexAttribute.Tangent,   VertexAttributeFormat.Float32, 4, stream: 2),
             new VertexAttributeDescriptor(VertexAttribute.Color,     VertexAttributeFormat.Float32, 4, stream: 3),
             new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float32, 2, stream: 1),
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord3, VertexAttributeFormat.Float32, 3, stream: 1),
         };
 
         // S91-A: the projection the geometry is built with. Launch-time config (the host) threads a
@@ -109,6 +112,26 @@ namespace MapRenderer.Unity.Rendering.Meshing
         {
             public Vector3 Position;
             public Vector3 Normal;
+        }
+
+        /// <summary>
+        /// Tightly-packed pattern UV + boundary-band attribute struct for stream 1.
+        /// Stride = 5 × 4 = 20 bytes, matching the descriptors (TexCoord0 float2 + TexCoord3 float3).
+        ///
+        /// <para><see cref="Band"/> reaches the shaders as TEXCOORD3 as <c>(dirEast, dirNorth, side)</c> in
+        /// the vertex's own surface frame — the <c>up</c>/<c>east</c>/<c>north</c> frame the mesh already
+        /// supplies through NORMAL and TANGENT, which is what makes it correct on the globe as well as flat.
+        /// <c>(0,0,0)</c> on an interior vertex (coverage 1, nothing displaced); an outward miter with
+        /// <c>side = 1</c> on a boundary-band outer vertex, which <c>Fill_VertexModify.hlsl</c> turns into a
+        /// one-device-pixel displacement and <c>Fill_BandCoverage.hlsl</c> into a coverage ramp. Produced by
+        /// <c>FillBandJob</c> on BOTH arms; the curved arm carries it through subdivision, which lerps
+        /// it at every split midpoint — so <c>side</c> takes intermediate values there, never only 0 or 1.</para>
+        /// </summary>
+        [StructLayout(LayoutKind.Sequential)]
+        public struct FillPatternUvBand
+        {
+            public Vector2 PatternUv;
+            public Vector3 Band;
         }
 
         /// <summary>
@@ -327,6 +350,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     OriginRender   = tileOriginRender,
                     Projection     = projection ?? DefaultProjection, // exactly as WriteGeometry passes it
                     Clip           = clip,
+                    // fill-antialias: the ONLY consumer of the parsed property. Encoded 1.0 = true, and the
+                    // parse rejects a data-driven expression, but a ZOOM expression survives — so this is a
+                    // threshold, not an equality, and it resolves at the BUILD zoom (a zoom-varying value
+                    // only takes effect when the tile is re-meshed).
+                    // The `_FillAntialias` uniform is deliberately NOT the consumer: it stays declared,
+                    // instanced and bound, and is read by no pass.
+                    // fill-antialias, already resolved: a layer that omitted it was parsed against the
+                    // project default (MapViewConfig.FillAntialiasing, via StyleParser), so there is nothing
+                    // left to decide here. A ZOOM expression survives the parse, so this resolves at the
+                    // BUILD zoom — a zoom-varying value only takes effect when the tile is re-meshed.
+                    SuppressBoundaryBand = !paint.Antialias.Evaluate(zoom),
                 };
             }
             catch
@@ -440,6 +474,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             JobHandle handle = new FillStreamWriteJob
             {
                 WorldPositions = output.WorldPositions, VertexUp = output.VertexUp, VertexEast = output.VertexEast,
+                VertexBand = output.VertexBand,
                 TileVertices = output.TileVertices, VertexFeatureIdx = output.VertexFeatureIdx,
                 TriangleIndices = output.TriangleIndices,
                 FeatureColors = featureColors,

@@ -118,6 +118,10 @@ namespace MapRenderer.Tests.Visual
         /// hue differences (reddish vs bluish vs gray).
         /// bitsPerChannel=4 → 4096 buckets; minPixels should be tuned to image fill fraction.
         /// </summary>
+        /// <summary>Chebyshev radius, in pixels, of the antialiased silhouette rim
+        /// <see cref="CountColorClusters"/> excludes — see its body for why 2 and not 1.</summary>
+        private const int RimRadius = 2;
+
         private static int CountColorClusters(
             byte[] pixels, int width, int height,
             byte bgR, byte bgG, byte bgB,
@@ -128,6 +132,13 @@ namespace MapRenderer.Tests.Visual
             int buckets = (1 << bitsPerChannel);
             var hist = new int[buckets * buckets * buckets];
 
+            bool IsBackground(int x, int y)
+            {
+                int b = (y * width + x) * 4;
+                return Math.Abs(pixels[b] - bgR) + Math.Abs(pixels[b + 1] - bgG) + Math.Abs(pixels[b + 2] - bgB)
+                       <= SnapshotCoverage.Tolerance;
+            }
+
             int totalPx = width * height;
             for (int i = 0; i < totalPx; i++)
             {
@@ -137,6 +148,22 @@ namespace MapRenderer.Tests.Visual
                 // Skip background pixels.
                 int dist = Math.Abs(r - bgR) + Math.Abs(g - bgG) + Math.Abs(bl - bgB);
                 if (dist <= SnapshotCoverage.Tolerance) continue;
+
+                // Skip the silhouette rim. A fill boundary is antialiased now, so pixels NEAR the background
+                // are BLENDS of a fill colour and the background — not colours the expression produced, which
+                // is the only thing this function counts. Without this a single uniform hue reads as several
+                // clusters purely because its outline is soft. The radius is 2, not 1: the band is one DEVICE
+                // pixel measured perpendicular to the edge, which spans two pixels of a diagonal silhouette,
+                // and a corpus coastline is diagonal nearly everywhere.
+                int px = i % width, py = i / width;
+                bool nearBackground = false;
+                for (int dy = -RimRadius; dy <= RimRadius && !nearBackground; dy++)
+                for (int dx = -RimRadius; dx <= RimRadius && !nearBackground; dx++)
+                {
+                    int nx = px + dx, ny = py + dy;
+                    nearBackground = nx < 0 || ny < 0 || nx >= width || ny >= height || IsBackground(nx, ny);
+                }
+                if (nearBackground) continue;
 
                 int ri = r >> shift, gi = g >> shift, bi = bl >> shift;
                 hist[ri * buckets * buckets + gi * buckets + bi]++;

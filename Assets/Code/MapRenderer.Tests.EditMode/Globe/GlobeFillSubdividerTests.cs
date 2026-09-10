@@ -23,23 +23,26 @@ namespace MapRenderer.Tests.Globe
             tileVerts.Add(new double2(0, 0)); tileVerts.Add(new double2(Extent, 0)); tileVerts.Add(new double2(0, Extent));
             var tris = new NativeList<int>(3, Allocator.Persistent); tris.Add(0); tris.Add(1); tris.Add(2);
             var feat = new NativeList<int>(3, Allocator.Persistent); feat.Add(0); feat.Add(0); feat.Add(0);
+            var band = new NativeList<float3>(3, Allocator.Persistent);
+            band.Add(float3.zero); band.Add(float3.zero); band.Add(float3.zero);
 
             verts = new NativeList<GlobeFillVertex>(64, Allocator.Persistent);
             idx   = new NativeList<int>(64, Allocator.Persistent);
             JobHandle handle = GlobeFillSubdivideDispatch.Schedule(
-                proj, tileVerts, tris, feat, id, Extent, new double3(0, 0, 0),
-                GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, maxDepth, budget, verts, idx, default);
+                proj, tileVerts, tris, feat, band, id, Extent, new double3(0, 0, 0),
+                GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, maxDepth, budget,
+                GlobeFillSubdivideDispatch.DefaultMaxTotalVertices, verts, idx, default);
             JobHandle.ScheduleBatchedJobs();
             handle.Complete();
 
-            tileVerts.Dispose(); tris.Dispose(); feat.Dispose();
+            tileVerts.Dispose(); tris.Dispose(); feat.Dispose(); band.Dispose();
         }
 
         [Test]
         public void Globe_Subdivides_AndKeepsEveryVertexOnTheSphere()
         {
             Run(new SphericalProjection(), new TileId { Z = 3, X = 3, Y = 3 },
-                GlobeFillSubdivideDispatch.DefaultMaxDepth, GlobeFillSubdivideDispatch.DefaultMaxOutputVertices,
+                GlobeFillSubdivideDispatch.DefaultMaxDepth, GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices,
                 out var v, out var idx);
             try
             {
@@ -68,7 +71,7 @@ namespace MapRenderer.Tests.Globe
         public void Mercator_IsFlat_PassesThroughWithoutSubdivision()
         {
             Run(new WebMercatorProjection(), new TileId { Z = 0, X = 0, Y = 0 },
-                GlobeFillSubdivideDispatch.DefaultMaxDepth, GlobeFillSubdivideDispatch.DefaultMaxOutputVertices,
+                GlobeFillSubdivideDispatch.DefaultMaxDepth, GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices,
                 out var v, out var idx);
             try { Assert.AreEqual(3, v.Length, "a flat projection (constant up) must NOT subdivide"); }
             finally { v.Dispose(); idx.Dispose(); }

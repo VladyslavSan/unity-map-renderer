@@ -172,6 +172,13 @@ namespace MapRenderer.Tests.Visual
         // ── G-VR: golden reference-image regression (change detector, layered ALONGSIDE the analytic
         // teeth above — those stay the correctness oracle; this only catches "different from last bake") ──
 
+        // Reference re-baked 2026-09-08 for the fill boundary band, on the maintainer's authorisation and
+        // only after the direction was verified. Measured against the previous bake: 1236 differing px in
+        // bbox [101,101]-[410,410] — a ~310 px square whose perimeter is ~1240 px, so the changed pixels ARE a
+        // one-pixel ring on the silhouette. All 1236 moved TOWARD the fill colour and none away, and none sits
+        // farther than 1.5 px from the boundary, leaving the ~96,000 px interior untouched. That is softened
+        // edges, not displaced geometry — had geometry moved, the count would be in the tens of thousands.
+        // Recorded because a re-baked golden with no reason is indistinguishable from one re-baked to go green.
         [Test]
         public void Golden_Gv0Fill_MatchesBakedReference()
         {

@@ -114,6 +114,15 @@ namespace MapRenderer.Tests.GeoJsons
         /// <summary>The world-space (x, z) the authored tile-local corner projects to, RELATIVE to the tile's
         /// render origin — which is what a tile mesh's vertices are expressed in. Computed through the same
         /// public chain the pipeline uses (tile-local → geodetic → Mercator), never copied from a run.</summary>
+        /// <summary>Groups a flat index buffer into triangles.</summary>
+        /// <param name="indices">The flat index buffer.</param>
+        /// <returns>One three-element array per triangle.</returns>
+        private static IEnumerable<int[]> Triples(int[] indices)
+        {
+            for (int i = 0; i + 2 < indices.Length; i += 3)
+                yield return new[] { indices[i], indices[i + 1], indices[i + 2] };
+        }
+
         private static double2 ExpectedWorldXZ(double tileLocalX, double tileLocalY)
         {
             double2 lonLat = WorldTile.ToLonLat(tileLocalX, tileLocalY, GeoJsonSliceOptions.DefaultExtent);
@@ -189,8 +198,14 @@ namespace MapRenderer.Tests.GeoJsons
                 Assert.IsNotNull(meshes, "the inline geojson source must have produced a tile mesh");
                 Assert.AreEqual(1, meshes.Length, "one fill layer ⇒ one layer mesh");
                 Assert.IsNotNull(meshes[0]);
-                Assert.AreEqual(4, meshes[0].vertexCount,
-                    "the authored rectangle triangulates to a 4-vertex quad (Mercator, no subdivision)");
+                // 4 interior + 8 band: the rectangle triangulates to a 4-vertex quad (Mercator, no
+                // subdivision), and the outward boundary band appends two vertices per ring vertex AFTER it.
+                // Every claim below is about the INTERIOR quad, so each reads the prefix — a band vertex sits
+                // at a ring corner too and would exhaust the one-to-one corner pool.
+                const int interiorVertexCount = 4;
+                Assert.AreEqual(interiorVertexCount + 2 * interiorVertexCount, meshes[0].vertexCount,
+                    "the authored rectangle triangulates to a 4-vertex quad (Mercator, no subdivision), " +
+                    "plus the outward boundary band's two vertices per ring vertex");
 
                 // One tile unit at this extent, in world metres — the quantization bound, derived rather
                 // than guessed, and multiplied by 2 to cover the round trip through geodetic.
@@ -212,12 +227,12 @@ namespace MapRenderer.Tests.GeoJsons
                 // slot claimed is recorded, because the topology arm below has to read the index buffer in
                 // terms of AUTHORED corners rather than of mesh slots.
                 Vector3[] meshVertices = meshes[0].vertices;
-                var authoredCornerOf   = new int[meshVertices.Length];
+                var authoredCornerOf   = new int[interiorVertexCount];
                 var unclaimed          = new List<double2>(expected);
                 var unclaimedCorner    = new List<int>();
                 for (int c = 0; c < expected.Count; c++) unclaimedCorner.Add(c);
 
-                for (int v = 0; v < meshVertices.Length; v++)
+                for (int v = 0; v < interiorVertexCount; v++)
                 {
                     Vector3 vertex  = meshVertices[v];
                     int     claimed = -1;
@@ -247,10 +262,19 @@ namespace MapRenderer.Tests.GeoJsons
                 // Both triples emitted as the SAME three-corner half leaves every vertex present, every
                 // corner consumed one-to-one, and two half-area triangles summing to exactly the whole —
                 // while rendering half the polygon, twice. Only the index TOPOLOGY distinguishes it.
-                int[] meshIndices = meshes[0].triangles;
+                // The INTERIOR triangles only — a band triangle is one with a vertex past the interior
+                // prefix, and it has no authored corner to name.
+                var interiorIndices = new List<int>();
+                foreach (int[] triangle in Triples(meshes[0].triangles))
+                    if (triangle[0] < interiorVertexCount && triangle[1] < interiorVertexCount && triangle[2] < interiorVertexCount)
+                        interiorIndices.AddRange(triangle);
+                int[] meshIndices = interiorIndices.ToArray();
                 Assert.AreEqual(6, meshIndices.Length,
                     "a quad is two triangles, so six indices — asserted before the topology arms read them, " +
                     "or a fan of some other length would make those arms mean something else");
+                Assert.AreEqual(6 + 6 * interiorVertexCount, meshes[0].triangles.Length,
+                    "…and the band contributes six indices per ring edge on top, which is what makes the " +
+                    "filter above a filter rather than a no-op");
 
                 var referencedCorners = new HashSet<int>();
                 var triangleCorners   = new List<HashSet<int>>();
@@ -666,7 +690,8 @@ namespace MapRenderer.Tests.GeoJsons
 
                 Mesh[] meshes = view.GetTileMeshes(WorldTile);
                 Assert.IsNotNull(meshes, "the restyled source must render too");
-                Assert.AreEqual(4, meshes[0].vertexCount);
+                // 4 interior + 8 band (the outward boundary band appends two per ring vertex).
+                Assert.AreEqual(12, meshes[0].vertexCount);
 
                 double tolerance = 4.0 * WebMercator.WorldExtent / GeoJsonSliceOptions.DefaultExtent;
                 double2 expectedNw = ExpectedWorldXZ(OtherMin, OtherMin);

@@ -36,6 +36,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             [ReadOnly] public NativeList<double3> WorldPositions;
             [ReadOnly] public NativeList<double3> VertexUp;
             [ReadOnly] public NativeList<double3> VertexEast;
+            [ReadOnly] public NativeList<float3>  VertexBand;
             [ReadOnly] public NativeList<double2> TileVertices;
             [ReadOnly] public NativeList<int>     VertexFeatureIdx;
             [ReadOnly] public NativeList<int>     TriangleIndices;
@@ -58,12 +59,13 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 NativeArray<double3> worldPositions   = WorldPositions.AsArray();
                 NativeArray<double3> vertexUp         = VertexUp.AsArray();
                 NativeArray<double3> vertexEast       = VertexEast.AsArray();
+                NativeArray<float3>  vertexBand       = VertexBand.AsArray();
                 NativeArray<double2> tileVertices     = TileVertices.AsArray();
                 NativeArray<int>     vertexFeatureIdx = VertexFeatureIdx.AsArray();
                 NativeArray<int>     triangleIndices  = TriangleIndices.AsArray();
 
                 NativeArray<FillPositionNormal> stream0 = Md.GetVertexData<FillPositionNormal>(0);
-                NativeArray<Vector2> stream1 = Md.GetVertexData<Vector2>(1);
+                NativeArray<FillPatternUvBand> stream1 = Md.GetVertexData<FillPatternUvBand>(1);
                 NativeArray<Vector4> stream2 = Md.GetVertexData<Vector4>(2);
                 NativeArray<Vector4> stream3 = Md.GetVertexData<Vector4>(3);
                 NativeArray<int>     indices = Md.GetIndexData<int>();
@@ -83,7 +85,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         Normal   = new Vector3(up.x, up.y, up.z),
                     };
 
-                    stream1[i] = PatternCoord(tileVertices[i], ExtentInv, TileSpanWorldUnits);
+                    // (dirEast, dirNorth, side) straight from the graph's own column — zero on every interior
+                    // vertex and on the band's inner ring, an outward miter with side 1 on its outer ring.
+                    // Writing it unconditionally is what covers the interior: a Mesh.MeshData vertex buffer is
+                    // not guaranteed zero-initialised, so a skipped write leaves `side` reading whatever the
+                    // allocator handed back, and only on the runs where that memory happens to be dirty.
+                    float3 band = vertexBand[i];
+                    stream1[i] = new FillPatternUvBand
+                    {
+                        PatternUv = PatternCoord(tileVertices[i], ExtentInv, TileSpanWorldUnits),
+                        Band      = new Vector3(band.x, band.y, band.z),
+                    };
 
                     float3 east = (float3)vertexEast[i];
                     stream2[i] = new Vector4(east.x, east.y, east.z, 1f); // w=+1: same TBN handedness both arms

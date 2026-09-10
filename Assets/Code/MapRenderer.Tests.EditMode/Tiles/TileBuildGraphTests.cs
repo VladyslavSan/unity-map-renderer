@@ -273,7 +273,10 @@ namespace MapRenderer.Tests.Tiles
                 StringAssert.Contains("Complete()", ex.Message,
                     "the safety system must say a Complete() is missing — that is the whole claim of this " +
                     "tooth: the output is unreadable until the caller completes the handle.");
-                StringAssert.Contains("AggregateJob", ex.Message,
+                // Re-captured when FillBandJob became the flat arm's last writer of TileVertices (it appends
+                // the boundary band to AggregateJob's own columns). Re-capture on the same terms if the graph
+                // reshapes again — never weaken the assertion to a type-only check.
+                StringAssert.Contains("FillBandJob", ex.Message,
                     "it must name the job still writing TileVertices. If a future graph reshape makes some " +
                     "other node the last writer, this fails loudly and the recorded string above is stale — " +
                     "which is the signal to re-capture it, not to weaken the assertion.");
@@ -303,24 +306,14 @@ namespace MapRenderer.Tests.Tiles
         // frozen regression pin — same reasoning as R6/B.7, same per-stream granularity as N1.
         //
         // RED: flip `w` to -1f in the tangent write, drop the Normal assignment, or un-reverse the index
-        // 2nd/3rd swap — each reddens a named stream below. The 2nd/3rd-swap recipe reddens the SEPARATE
-        // `Indices=` digest (raw index buffer values, unaffected by the change below) — that is the stream
-        // that pins the winding recipe, not Stream0-3.
-        //
-        // vertex sharing: Stream0-3 walk the INDEX buffer and dereference (de-indexed),
-        // not the vertex columns straight through — this is representation-independent of how much storage
-        // GlobeFillSubdivideJob's sharing changes, and MEASURED to still hold: captured on the pre-sharing tree
-        // (GlobeFillSubdivider.cs stashed) and again on the post-sharing tree, byte-identical both arms. Both
-        // constants below moved from their PRE-de-indexing values regardless of sharing — this write step
-        // reverses index 2nd/3rd unconditionally (StyledFillTileBuilder.WriteJob.cs), so the index buffer is
-        // never the identity permutation of storage order, on either arm, subdivided fixture or not.
+        // 2nd/3rd swap — each reddens a named stream below.
         private const string FrozenGoldensFlat =
-            "Stream0=e9hMmM82whfC3XFd3T6B00cKXrJeyIKPeCzUtruR/ps= Stream1=PT/rx8GUBqq/p/FTk4NwPZ4Dr5G6zXZQLdlO3z5TyDI= " +
+            "Stream0=DP8+lbaDnqnXo32FewHCvd56e5FR2172oWesZmac3I0= Stream1=ycx4JigRdmfDwxwHaeX4v7o3nJZToxUkEf1l5+erqP0= " +
             "Stream2=1RQ/sTquk3Cj4XlWFjd4hAT1L/dHby/JBckr7B8o5EA= Stream3=BqV3NujaZBIyhp8mGaJomHgLaTtc8qtEO5G+atpnKDA= " +
             "Indices=vj5j3bGOJy3YqLoQJ3LmWF5nLYcjDgBIY19HQFkmEJ8= Bounds=Cdbs9HaYIDzj0sqYENY9VmlRQjWy7EScMyRVMFObTr8=";
         private const string FrozenGoldensSpherical =
-            "Stream0=ShkxI1ZctSVcCLSlrB/p+1qYpsHxLbdStLHJAVkL1ys= Stream1=PT/rx8GUBqq/p/FTk4NwPZ4Dr5G6zXZQLdlO3z5TyDI= " +
-            "Stream2=Hj4K+YMlVJ05pm250M/C9MPshQuvvRyGBB/dP/t1PxA= Stream3=BqV3NujaZBIyhp8mGaJomHgLaTtc8qtEO5G+atpnKDA= " +
+            "Stream0=nb1J+NsjJ4eZoKrXrFnxHV5mLD2q8dHfOYrelF0pm1Y= Stream1=ycx4JigRdmfDwxwHaeX4v7o3nJZToxUkEf1l5+erqP0= " +
+            "Stream2=2JNye5+EaLy+vNY2MijWmE9aiunN9dm7SOJ5WPxbMvc= Stream3=BqV3NujaZBIyhp8mGaJomHgLaTtc8qtEO5G+atpnKDA= " +
             "Indices=vj5j3bGOJy3YqLoQJ3LmWF5nLYcjDgBIY19HQFkmEJ8= Bounds=Wu+l0hNvh4iI1J63SzYxcI29CAwAKW1iUgUmW8k63kc=";
 
         [Test]
@@ -356,42 +349,91 @@ namespace MapRenderer.Tests.Tiles
 
                 Mesh.MeshData b = graphWrite.Mda[0];
                 var b0 = b.GetVertexData<StyledFillTileBuilder.FillPositionNormal>(0);
-                var b1 = b.GetVertexData<Vector2>(1);
+                var b1 = b.GetVertexData<StyledFillTileBuilder.FillPatternUvBand>(1);
                 var b2 = b.GetVertexData<Vector4>(2);
                 var b3 = b.GetVertexData<Vector4>(3);
                 NativeArray<int> bi = b.GetIndexData<int>();
 
-                // De-indexed (vertex sharing, earcut-sdf-vertex-cost.md §6/§7, T-C1):
-                // walk the INDEX buffer and dereference, rather than assume VertexCount == IndexCount and
-                // read the vertex columns straight through — this is what a triangle-by-triangle reader (the
-                // mesh write step, the GPU) actually sees, and is representation-independent of how much
-                // storage the subdivider's sharing changes. MEASURED, not assumed: on this single-triangle
-                // fixture (which cannot sharing — 3 corners in, 3 unique out, either way) de-indexing moved
-                // BOTH goldens below, flat included, which never enters the subdivider at all — proof this
-                // changed what the digest MEASURES (triangle order vs. raw vertex-storage order: the write
-                // step reverses index 2nd/3rd unconditionally, StyledFillTileBuilder.WriteJob.cs, so the
-                // index buffer is never the identity permutation of storage order), not a sharing regression.
-                // Re-captured via the stash-production/ordinal-zero protocol: the constants below were
-                // verified byte-identical whether GlobeFillSubdivider.cs's sharing was stashed out or present.
-                var s0 = new List<byte>(); var s1 = new List<byte>(); var s2 = new List<byte>(); var s3 = new List<byte>();
-                for (int i = 0; i < bi.Length; i++)
+                // The INTERIOR only — FillBandJob appends the outward boundary band to the same mesh, and
+                // these goldens are the digest of what the independent WriteGeometry arm produced. See
+                // FillMeshGraphParityTests' twin note: narrowing keeps the frozen constants byte-identical and
+                // makes the claim stronger (the band perturbed nothing interior), where a re-bake would retire
+                // a long-lived pin for a number nobody can review.
+                //
+                // TWO WAYS TO SAY "INTERIOR", because the two arms have different structure. On the flat arm
+                // the band is a vertex SUFFIX and BandVertexCount measures it. On the curved arm subdivision
+                // re-emits every vertex in traversal order, so band and interior interleave, no suffix
+                // survives, and GlobeFillScatterJob clears the count rather than ship one that lies. The
+                // discriminator there is the per-vertex attribute: a triangle is interior iff all three of
+                // its vertices carry side 0. That is EXACT, not a tolerance — `side` is affine over a source
+                // triangle, so its zero set is a line, and a sub-triangle with all three vertices on one line
+                // has zero area and is never emitted.
+                //
+                // The digest is then taken over the interior vertices in ascending index order, with indices
+                // renumbered to their rank among them. On the flat arm rank == index (the interior is the
+                // prefix) and the triangle filter is the same "all three interior" test the index-range
+                // comparison already was, so this is byte-identical to the form that captured the goldens.
+                // Selected by the ARM, never by the data: a flat build that emitted no band would take the
+                // curved filter, which drops index-unreferenced vertices from the digest and so moves a
+                // frozen golden for a reason nobody would think to look for.
+                int bandVertexSuffix = output.Counts[0].BandVertexCount;
+                var isInterior = new bool[graphWrite.VertexCount];
+                if (!spherical)
                 {
-                    int vi = bi[i];
-                    Vector3 p = b0[vi].Position, n = b0[vi].Normal;
+                    for (int i = 0; i < graphWrite.VertexCount - bandVertexSuffix; i++) isInterior[i] = true;
+                }
+                else
+                {
+                    for (int i = 0; i + 2 < bi.Length; i += 3)
+                    {
+                        int ta = bi[i], tb = bi[i + 1], tc = bi[i + 2];
+                        if (b1[ta].Band.z != 0f || b1[tb].Band.z != 0f || b1[tc].Band.z != 0f) continue;
+                        isInterior[ta] = true; isInterior[tb] = true; isInterior[tc] = true;
+                    }
+                }
+
+                var interiorRank = new int[graphWrite.VertexCount];
+                var interiorIndices = new List<int>(graphWrite.VertexCount);
+                for (int i = 0; i < graphWrite.VertexCount; i++)
+                {
+                    interiorRank[i] = interiorIndices.Count;
+                    if (isInterior[i]) interiorIndices.Add(i);
+                }
+                Assert.Greater(interiorIndices.Count, 0,
+                    "precondition: the interior must be non-empty, or every digest below is vacuous.");
+                Assert.Less(interiorIndices.Count, graphWrite.VertexCount,
+                    "precondition: the band must actually be present and excluded, or this tooth is hashing " +
+                    "the whole mesh and calling it the interior.");
+
+                var s0 = new List<byte>(); var s1 = new List<byte>(); var s2 = new List<byte>(); var s3 = new List<byte>();
+                foreach (int i in interiorIndices)
+                {
+                    Vector3 p = b0[i].Position, n = b0[i].Normal;
                     s0.AddRange(BitConverter.GetBytes(p.x)); s0.AddRange(BitConverter.GetBytes(p.y)); s0.AddRange(BitConverter.GetBytes(p.z));
                     s0.AddRange(BitConverter.GetBytes(n.x)); s0.AddRange(BitConverter.GetBytes(n.y)); s0.AddRange(BitConverter.GetBytes(n.z));
-                    Vector2 pc = b1[vi];
+                    // Only the UV half is hashed, deliberately: stream 1 gained the band attribute
+                    // alongside it, and the frozen golden must stay the pattern coordinates' own digest so
+                    // this tooth still says whether THEY changed.
+                    Vector2 pc = b1[i].PatternUv;
                     s1.AddRange(BitConverter.GetBytes(pc.x)); s1.AddRange(BitConverter.GetBytes(pc.y));
-                    Vector4 tan = b2[vi];
+                    Vector4 tan = b2[i];
                     s2.AddRange(BitConverter.GetBytes(tan.x)); s2.AddRange(BitConverter.GetBytes(tan.y));
                     s2.AddRange(BitConverter.GetBytes(tan.z)); s2.AddRange(BitConverter.GetBytes(tan.w));
-                    Vector4 col = b3[vi];
+                    Vector4 col = b3[i];
                     s3.AddRange(BitConverter.GetBytes(col.x)); s3.AddRange(BitConverter.GetBytes(col.y));
                     s3.AddRange(BitConverter.GetBytes(col.z)); s3.AddRange(BitConverter.GetBytes(col.w));
                 }
 
+                // Band triangles are interleaved after their own feature's interior triangles, so the filter
+                // is on vertex index, not on position.
                 var idxBytes = new List<byte>();
-                for (int i = 0; i < bi.Length; i++) idxBytes.AddRange(BitConverter.GetBytes(bi[i]));
+                for (int i = 0; i + 2 < bi.Length; i += 3)
+                {
+                    if (!isInterior[bi[i]] || !isInterior[bi[i + 1]] || !isInterior[bi[i + 2]]) continue;
+                    idxBytes.AddRange(BitConverter.GetBytes(interiorRank[bi[i]]));
+                    idxBytes.AddRange(BitConverter.GetBytes(interiorRank[bi[i + 1]]));
+                    idxBytes.AddRange(BitConverter.GetBytes(interiorRank[bi[i + 2]]));
+                }
 
                 // Center/size (not raw min/max c0/c1) — matches the captured oracle's Bounds struct, which
                 // stores (min+max)*0.5 / max-min, a different float bit pattern than the raw endpoints.
@@ -409,6 +451,119 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreEqual(expected, result,
                     $"[spherical={spherical}] the fill write graph's output no longer matches the frozen " +
                     "managed-WriteGeometry goldens — a real regression, not a re-bake candidate.");
+            }
+            finally
+            {
+                graphWrite.Dispose();
+                output.Dispose();
+                featureColors.Dispose();
+                visitOrder.Dispose();
+                geometry.Dispose();
+            }
+        }
+
+        // ── The built mesh is sized for interior + band ────────────────────────────────────────────────
+        //
+        // ScheduleStreamWrite sizes the Mesh.MeshData off the COMPLETED graph output's list lengths, not off
+        // a kick-time bound, which is what makes the band's appended vertices counted automatically. If that
+        // ever regresses to an interior-only total, SetVertexBufferParams undersizes and the write job runs
+        // past the end of the mesh — silently in a release player, where NativeList's indexer bounds check is
+        // compiled out. This is the standing check for that.
+        //
+        // RED: size the MeshData from (output.TileVertices.Length - Counts[0].BandVertexCount).
+        [Test]
+        public void ScheduleWrite_SizesTheMeshForTheBandAsWellAsTheInterior(
+            [Values(false, true)] bool spherical)
+        {
+            var tile = new TileId { Z = 0, X = 0, Y = 0 };
+            IProjection projection = spherical
+                ? (IProjection)new SphericalProjection()
+                : new WebMercatorProjection();
+
+            TileGeometryBuffers geometry = SingleTrianglePolygon(tile);
+            NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
+            var featureColors = new NativeArray<Vector4>(1, Allocator.Persistent) { [0] = new Vector4(0.25f, 0.5f, 0.75f, 1f) };
+
+            var input = new FillMeshPipeline.LayerInput
+            {
+                Geometry = geometry, RingVisitOrder = visitOrder, OriginRender = double3.zero,
+                Projection = projection, Clip = TileBufferClip.KeepTileUnits(0.0),
+            };
+
+            FillGraphOutput output = default;
+            MeshWriteOutput graphWrite = default;
+            try
+            {
+                output = FillMeshGraph.Schedule(input);
+                output.Handle.Complete();
+                graphWrite = StyledFillTileBuilder.ScheduleWrite(output, featureColors, tile, geometry.Extent);
+                graphWrite.Handle.Complete();
+
+                int bandVertices = output.Counts[0].BandVertexCount;
+                int bandIndices  = output.Counts[0].BandIndexCount;
+
+                if (spherical)
+                {
+                    // The two scalars are ZERO on this arm and that is NOT "no band". They count a
+                    // contiguous suffix, which subdivision destroys: GlobeFillSubdivideJob re-emits every
+                    // vertex in traversal order, so band and interior interleave and GlobeFillScatterJob
+                    // clears them rather than ship a suffix count that lies. Band-ness here is the
+                    // per-vertex attribute, asserted directly below.
+                    Assert.AreEqual(0, bandVertices,
+                        "the curved arm reports no band SUFFIX — subdivision leaves none to report");
+                    Assert.AreEqual(0, bandIndices, "and no band index suffix, for the same reason");
+                }
+                else
+                {
+                    // One ring of 3 vertices ⇒ 6 band vertices, and 6 band indices per edge that KEEPS its
+                    // quad. This fixture runs at KeepTileUnits(0.0), so its window is [0,0]..[4096,4096] and
+                    // the ring's (0,0)->(10,0) edge lies wholly on the y = 0 window line: the band stops
+                    // there, as it does at every tile seam. (The ring is small enough to take RingClipJob's
+                    // wholly-inside fast path, so that edge was never actually cut — the predicate is "both
+                    // endpoints on one window line", which is deliberately the wider of the two readings.)
+                    Assert.AreEqual(6, bandVertices,
+                        "two band vertices per ring vertex, over the fixture's one 3-vertex ring — suppression " +
+                        "drops a QUAD, never a vertex pair, so this count does not move with it");
+                    Assert.AreEqual(12, bandIndices,
+                        "six band indices for each of the two edges that keep their quad; the third runs along " +
+                        "the window line");
+                }
+
+                Assert.AreEqual(output.TileVertices.Length, graphWrite.VertexCount,
+                    "the mesh must be sized for every vertex the graph produced, band included — sizing it " +
+                    "from the interior total writes past the end of the vertex buffer.");
+
+                Mesh.MeshData md = graphWrite.Mda[0];
+                Assert.AreEqual(output.TriangleIndices.Length, md.GetIndexData<int>().Length,
+                    "and for every index, band triangles included.");
+
+                // The write-job plumbing between the graph's band column and stream 1 — the gap the frozen
+                // PatternUv digest deliberately does not cover. Two assertions instead of a digest: they name
+                // what broke, which a hash never does.
+                var stream1 = md.GetVertexData<StyledFillTileBuilder.FillPatternUvBand>(1);
+                Assert.AreEqual(Vector3.zero, stream1[0].Band,
+                    "an interior vertex's band bytes must be exactly zero in the MESH, not merely in the column " +
+                    "— a Mesh.MeshData vertex buffer is not guaranteed zero-initialised.");
+                for (int i = 0; i < output.VertexBand.Length; i++)
+                {
+                    float3 expected = output.VertexBand[i];
+                    Assert.AreEqual(new Vector3(expected.x, expected.y, expected.z), stream1[i].Band,
+                        $"vertex {i}'s band attribute did not reach stream 1 — the shader reads THIS, not the column.");
+                }
+                // Non-vacuity, and on the curved arm it is also the ONLY statement that the band reached the
+                // mesh at all — there is no suffix count to read it off. The flat arm can say WHERE (the
+                // band is the suffix, so the last vertex is a band vertex); the curved arm can only say
+                // THAT, because subdivision interleaves them.
+                int nonZeroBand = 0;
+                for (int i = 0; i < graphWrite.VertexCount; i++)
+                    if (stream1[i].Band != Vector3.zero) nonZeroBand++;
+                Assert.Greater(nonZeroBand, 0,
+                    "no vertex carries a non-zero band attribute, so the whole band is inert and every " +
+                    "assertion above passes over zeros.");
+                if (!spherical)
+                    Assert.AreNotEqual(Vector3.zero, stream1[graphWrite.VertexCount - 1].Band,
+                        "on the flat arm the band is the vertex suffix, so the LAST vertex must be one of " +
+                        "its outer vertices.");
             }
             finally
             {

@@ -136,11 +136,14 @@ namespace MapRenderer.Tests.Tiles
 
                 Assert.AreEqual(1, payloads.Length);
                 Assert.IsNotNull(payloads[0], "the worker pass must settle a payload even under the fake decoder.");
-                Assert.AreEqual(4, payloads[0].VertexCount,
+                // 4 interior + 8 band. Unlike BackgroundQuad's synthesized full-tile quad, this is a real
+                // fill layer, so it carries the outward boundary band: two vertices per ring vertex appended
+                // after the interior quad.
+                Assert.AreEqual(12, payloads[0].VertexCount,
                     "the injected non-MvtDecoder decoder's feature must flow through StyledFillTileBuilder " +
-                    "unchanged and produce the flat 4-vertex quad (Mercator, no subdivision) — the same oracle " +
-                    "TileBackgroundQuadProjectionTests.BackgroundQuad_FlatOnMercator_NoSubdivision asserts. Zero " +
-                    "or a fault here means the fan-out ignored the injected decoder.");
+                    "unchanged and produce the flat 4-vertex quad (Mercator, no subdivision) plus its " +
+                    "8-vertex boundary band. Zero or a fault here means the fan-out ignored the injected " +
+                    "decoder.");
 
                 mesh = payloads[0].Upload();
             }
@@ -149,7 +152,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 Assert.IsNotNull(mesh, "a non-zero-vertex payload must upload a real mesh.");
-                Assert.AreEqual(4, mesh.vertexCount);
+                Assert.AreEqual(12, mesh.vertexCount);
             }
             finally
             {

@@ -22,6 +22,12 @@ namespace MapRenderer.Jobs.Fill
     /// <c>AsDeferredJobArray()</c> views have the right length the moment those nodes execute, without this
     /// node needing to know their content.</para>
     ///
+    /// <para><b>This node sizes the INTERIOR, not the layer.</b> On both arms <see cref="FillBandJob"/>
+    /// runs after it and grows every column above by the boundary band's own vertices, re-sizing the three
+    /// pre-sized ones with them; on the flat arm the tile→geo and projection nodes then cover the whole
+    /// extended length, and on the curved arm the subdivide/scatter pair replaces the columns outright.
+    /// Nothing downstream may take a vertex total off this job.</para>
+    ///
     /// <para><b>Bounds its own loop by <c>PerPolyMergedVertexCount.Length</c>, never the borrowed
     /// <c>PolyCountArr[0]</c></b> — see <see cref="Execute"/>'s own comment for the mechanism. This was a real
     /// bug found and fixed during job-scheduling-design.md §8 stage 6's review, PRE-EXISTING and reachable
@@ -62,6 +68,10 @@ namespace MapRenderer.Jobs.Fill
         /// dedicated node would be a whole job for one constant. On the curved arm this write is scratch —
         /// <see cref="GlobeFillScatterJob"/> overwrites it with the real per-vertex east.</summary>
         public NativeList<double3> VertexEast;
+
+        /// <summary>Filled here with <c>(0,0,0)</c> — every interior vertex is outside the boundary band, and
+        /// the explicit zero is what makes its <c>side</c> read exactly 0 and its coverage exactly 1.</summary>
+        public NativeList<float3>  VertexBand;
 
         public NativeList<int>     VertexFeatureIdx;
         public NativeList<int>     TriangleIndices;
@@ -107,12 +117,16 @@ namespace MapRenderer.Jobs.Fill
             WorldPositions.Resize(totalMergedVerts, NativeArrayOptions.UninitializedMemory);
             VertexUp.Resize(totalMergedVerts, NativeArrayOptions.UninitializedMemory);
             VertexEast.Resize(totalMergedVerts, NativeArrayOptions.UninitializedMemory);
+            VertexBand.Resize(totalMergedVerts, NativeArrayOptions.UninitializedMemory);
             VertexFeatureIdx.Resize(totalMergedVerts, NativeArrayOptions.UninitializedMemory);
             TriangleIndices.Resize(totalIdxCount, NativeArrayOptions.UninitializedMemory);
             Geo.Resize(totalMergedVerts, NativeArrayOptions.UninitializedMemory);
 
             for (int i = 0; i < totalMergedVerts; i++)
+            {
                 VertexEast[i] = new double3(1, 0, 0);
+                VertexBand[i] = float3.zero;
+            }
 
             int globalVertBase = 0;
             int globalIdxBase  = 0;

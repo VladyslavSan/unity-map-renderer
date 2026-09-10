@@ -7,7 +7,11 @@ against `docs/maplibre-spec.md` — whose fill rows carried stale *reasons* (see
 **Status:** P1–P5 landed on `feat/fill-parity` (`766b5efb`, `55d6418e`, `fab420cb`), each RED-verified and
 gated. `fill-pattern`, `fill-sort-key`, data-driven `fill-opacity`, `fill-translate` and
 `fill-translate-anchor` are all real. `fill-outline-color` has been moved OUT of this epic (it is polygon-boundary line
-geometry, not fill paint — see the stage table); P7 (`fill-antialias`) is DEFERRED INTO P6 — the spec draws the outline only when fill-antialias is true, so they are one mechanism (§P7). Pattern sizing is maintainer-verified in the demo (continuous zoom across the overzoom
+geometry, not fill paint — see the stage table). **P7 (`fill-antialias`) is no longer deferred and is no
+longer tied to P6** — fill silhouettes are antialiased by an outward one-device-pixel band grown from the
+polygon boundary, and `fill-antialias: false` suppresses that band for the layer. The 2026-07-29 reasoning
+that deferred it rested on a claim that had already been retracted; §P7 keeps the record and the correction.
+Pattern sizing is maintainer-verified in the demo (continuous zoom across the overzoom
 range, 2026-07-28). Still unverified visually: `FilterMode.Point` on a tiled ground fill, and P5's
 `fill-translate` under tilt/bearing — the snapshot camera is top-down ortho and never asks that question.
 
@@ -178,9 +182,17 @@ Each stage is one revertible commit on `feat/fill-parity`, gated on `./Tools/run
 | **P4** | `fill-opacity` data-driven | Multiply the evaluated per-feature opacity into the baked COLOR stream alpha; colour is already baked per-feature, so this is the same loop. **Must set `_Opacity = 1` on the material when baking** — the fragment does `alpha *= vColor.a * _Opacity`, so leaving the uniform bound double-applies. Exactly the precedent `BindLinePaintToApplier` sets for data-driven `Width` (`MaterialFactory.cs:168-169`). |
 | **P5** | `fill-translate` correctness | Screen-pixel offset measured **per axis** in the vertex shader (a single scalar skews under tilt, where the north axis foreshortens and east barely does) + the `viewport` anchor branch the shader lacked entirely. |
 | ~~P6~~ | `fill-outline-color` | **MOVED OUT of this epic** (maintainer call). It is not a paint-plumbing property at all: it means generating real LINE geometry along the polygon boundary — the thing style authors have long faked with a second `line` layer drawn after the `fill`. That makes it a geometry feature sharing the line tessellator, not a fill-paint one, so it gets its own epic rather than a stage here. |
-| **P7** | `fill-antialias` | **DEFERRED to the P6 outline epic (maintainer call, 2026-07-29)** — it is not independent of P6. See below. |
+| **P7** | `fill-antialias` | ✅ **BUILT** as the outward boundary band (`docs/fill-boundary-antialiasing-design.md`), independently of P6. The 2026-07-29 deferral below is kept as a record, with its false premise corrected in place. |
 
-### P7 deferred — `fill-antialias` is not separable from `fill-outline-color`
+### P7 deferred, 2026-07-29 — ~~`fill-antialias` is not separable from `fill-outline-color`~~ (SUPERSEDED)
+
+> **CORRECTED 2026-09-09 — the deferral below was wrong, and this is the record of why.** `fill-antialias`
+> shipped as an outward one-device-pixel band grown from the polygon boundary, with no outline geometry and
+> no MSAA. Its load-bearing premise — the `meshing-design.md` quote in the second bullet — **had already
+> been retracted in that same file, seven lines below the sentence quoted**, before this section was
+> written. The bullets are kept verbatim with their corrections attached, because a stale citation keeping a
+> feature unbuilt for two months is the lesson; the mechanism is
+> `docs/fill-boundary-antialiasing-design.md`.
 
 Investigated 2026-07-29 and deferred rather than built, because the two properties are **one mechanism**:
 
@@ -188,34 +200,60 @@ Investigated 2026-07-29 and deferred rather than built, because the two properti
   both are served by the same outline draw along the polygon boundary — outline-color merely recolours it.
   So the MapLibre-faithful implementation of P7 *is* the boundary-line-geometry work that P6 was moved out
   for. Building P7 "first" would build most of P6 under a different name.
-- **The obvious shortcut is already ruled out by our own SSOT.** `docs/meshing-design.md` §2 — written when
+  **The spec coupling is real, but ONE-DIRECTIONAL, and the inference does not follow.** The outline
+  requires antialiasing to be on; antialiasing does not require the outline. What the spec couples is the
+  outline's *visibility*, not the mechanism that antialiases a silhouette — and a silhouette can be
+  antialiased with no outline draw at all, which is what shipped.
+- ~~**The obvious shortcut is already ruled out by our own SSOT.** `docs/meshing-design.md` §2 — written when
   line edge AA was **removed** — argues a shader alpha-fade cannot work: *"alpha-fade AA does not compose
   when transparent layers stack"*. That now binds harder for fills than when it was written, because
   `4c41545d` (this epic) made `MapFill.mat` transparent (queue 3000, `ZWrite Off`). A fade skirt would let
-  the layer beneath bleed through every shared edge between adjacent polygons.
-- **The remaining candidate is MSAA**, which §2 itself endorses as the right complement once no shader fade
+  the layer beneath bleed through every shared edge between adjacent polygons.~~
+  **FALSE PREMISE.** The quoted sentence is `meshing-design.md`'s, and its *retraction* sits seven lines
+  below it in the same file: the generalisation was too strong — it is true of an **inset** fade, not of one
+  placed outside the boundary. `docs/lessons-learned.md` carries the same correction and notes it "is why AA
+  stayed removed longer than it needed to". What replaces the argument: the shipped band is not a fade
+  *inside* the styled region at all. It grows **outward**, so every pixel the layer is meant to paint keeps
+  coverage exactly 1, and `dst = src·a + dst·(1−a)` cannot show anything through at `a == 1`. The bleed this
+  bullet feared is the defect that rejected three inset placements — it is the reason for the mechanism, not
+  an objection to it.
+- ~~**The remaining candidate is MSAA**, which §2 itself endorses as the right complement once no shader fade
   is in play, and fill edges are already hard. It needs no new geometry. Its costs: it is a global
   render-target setting, so per-layer `fill-antialias: false` becomes *unimplementable* rather than merely
-  unimplemented; it costs bandwidth (mobile); and it is currently off (`RPAsset.asset: m_MSAA: 1`).
+  unimplemented; it costs bandwidth (mobile); and it is currently off (`RPAsset.asset: m_MSAA: 1`).~~
+  **Downstream of the withdrawn claim** — MSAA was "remaining" only because the fade was believed dead. It
+  is not the answer, and the one true observation in this bullet is the reason: a render-target setting
+  cannot be switched off for a single layer, so an MSAA answer would have made `fill-antialias: false`
+  permanently unimplementable. The band makes it implementable, and implements it.
 
-**Unverified, and must be checked before MSAA is chosen later:** that MSAA actually antialiases the fill
-silhouette *with `ZWrite Off` on a transparent queue*. The reasoning is that MSAA blends per-sample and
-resolves afterwards, which is what would let it escape §2's trilemma where a shader fade cannot — but that
-was never rendered and confirmed. Cheap check: set `m_MSAA: 4`, render any existing fill snapshot, and count
-partial-alpha pixels along a diagonal boundary. Zero intermediate values ⇒ the approach is dead.
+**The MSAA question is moot, and the cheap check it prescribed could never have answered it.** The recipe
+was: set `m_MSAA: 4` in the RPAsset, render any existing fill snapshot, count partial-alpha pixels along a
+diagonal boundary, and read zero intermediates as "MSAA is dead". It cannot fire. URP takes the MSAA sample
+count from `camera.targetTexture.antiAliasing` whenever a target texture is set, in preference to the asset
+(`UniversalRenderPipelineCore.cs:1553-1567`), and the visual suite's single `camera.Render()`
+(`Visual/SnapshotRenderer.cs:89`) always assigns one, built with `antiAliasing = 1`. The RPAsset's `m_MSAA`
+never reaches that render, so the recipe would have produced an unchanged frame and read it as a dead
+approach. Anyone who does want to measure MSAA must set `antiAliasing` on the **render texture** the
+snapshot renderer builds. *(Recipe corrected 2026-09-09; it was never run.)*
 
-**De-risked for whoever picks this up:** no visual test in the repo hashes pixels exactly — they are all
+~~**De-risked for whoever picks this up:** no visual test in the repo hashes pixels exactly — they are all
 tolerance/classification based (`SnapshotCoverage.Tolerance`, `IsBackground`, coverage ratios, centroid
-rows). So enabling MSAA globally should not force a mass snapshot re-bake, which was the main feared cost.
+rows). So enabling MSAA globally should not force a mass snapshot re-bake, which was the main feared cost.~~
+**INACCURATE.** `Visual/GoldenImage.cs` compares **per pixel** against a committed PNG, with
+`MaxChannelDelta = 4` and `MaxDifferingFraction = 0.002` — used by `GeoJsonFillVisualProofTests` and
+`GeoJsonPointSymbolFixtureTests`. A global render-target change would have to be checked against those two,
+not waved past. *(Corrected 2026-09-09.)*
 
 Prior art worth reading first: the unmerged local stash `line AA experiments — outset/straddle/pure-outset
 + _LINE_AA_OUTSET toggle`.
 
-**Consequence for `_FillAntialias`:** it stays parsed, bound (`MaterialFactory:75`), and present in the
-CBUFFER, the DOTS bridge and `MapInstanceData` — read by no pass. Under an eventual MSAA answer it would be
-permanently *unimplementable per-layer*, not merely unimplemented; under the outline answer it becomes the
-on/off switch for the outline draw. Its comment should not claim a "future MSAA/AA variant" will consume
-it until that is decided.
+**Consequence for `_FillAntialias`, as settled:** the parsed property has a real consumer and the **uniform
+stays inert, permanently**. `StyledFillTileBuilder.BuildLayerInput` resolves `fill-antialias` at build zoom
+and suppresses the layer's band geometry when it is false, which is what keeps the property per-layer
+implementable at all. The uniform stays declared, instanced (`MapInstanceData.cs:97`), bound
+(`MaterialFactory.cs:79`) and read by no pass — deliberately, and not pending: giving it a shader reader
+would fake a consumer for a property that is answered in geometry. Its declaration comment
+(`Fill_LitInput.hlsl`) said "Used by future MSAA/AA variant"; that is corrected to say what it is.
 
 P1–P5 are the parity work proper, plus the alpha-compositing fix below. Both P6 and P7 were flagged to the
 maintainer as separately epic-sized before this doc was written; P6 has since been moved out entirely and P7

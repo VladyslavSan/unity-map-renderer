@@ -130,27 +130,30 @@ namespace MapRenderer.Tests.Structure
         }
 
         [Test]
-        public void MapKindRoots_HoldOnlyTheSharedThree()
+        public void MapKindRoots_HoldOnlyGenuinelySharedIncludes()
         {
             // The unlit epic's Lit/Unlit split: the two .shader entry points and their mode-specific .hlsl
-            // moved into Lit/ and Unlit/; the kind ROOT (Map/<Kind>/, top level only) must now hold EXACTLY
-            // the three genuinely-shared includes — the vertex hook + the two depth passes both twins reuse.
-            // This is the structural contract the split created; without this tooth someone could drop an
-            // unlit input back into the kind root and nothing would notice. RED-verify by moving any file up
-            // one level.
-            (string kindDir, string vertex)[] kinds =
+            // moved into Lit/ and Unlit/; the kind ROOT (Map/<Kind>/, top level only) must hold EXACTLY the
+            // includes BOTH twins reuse — the vertex hook + the two depth passes, plus whatever else a kind
+            // genuinely shares (Fill also shares its boundary-band coverage between the Lit and Unlit
+            // forward passes). This is the structural contract the split created; without this tooth
+            // someone could drop an unlit input back into the kind root and nothing would notice. Every
+            // entry is named, so admitting a shared file is a deliberate edit here, not a widened wildcard.
+            // RED-verify by moving any file up one level.
+            (string kindDir, string vertex, string[] alsoShared)[] kinds =
             {
-                (MapFillDir,      "Fill_VertexModify.hlsl"),
-                (MapLineDir,      "Line_VertexExtrude.hlsl"),
-                (MapExtrusionDir, "FillExtrusion_VertexModify.hlsl"),
+                (MapFillDir,      "Fill_VertexModify.hlsl",          new[] { "Fill_BandCoverage.hlsl" }),
+                (MapLineDir,      "Line_VertexExtrude.hlsl",         new string[0]),
+                (MapExtrusionDir, "FillExtrusion_VertexModify.hlsl", new string[0]),
             };
-            foreach (var (kindDir, vertex) in kinds)
+            foreach (var (kindDir, vertex, alsoShared) in kinds)
             {
                 string kind = Path.GetFileName(kindDir);
                 var expected = new HashSet<string>(StringComparer.Ordinal)
                 {
                     vertex, kind + "_DepthOnlyPass.hlsl", kind + "_DepthNormalsPass.hlsl",
                 };
+                expected.UnionWith(alsoShared);
                 var actual = new HashSet<string>(
                     Directory.EnumerateFiles(kindDir, "*.*", SearchOption.TopDirectoryOnly)
                         .Select(Path.GetFileName)
@@ -159,7 +162,7 @@ namespace MapRenderer.Tests.Structure
                     StringComparer.Ordinal);
 
                 Assert.That(actual, Is.EquivalentTo(expected),
-                    $"Map/{kind}/ (top level) must hold EXACTLY the shared three includes " +
+                    $"Map/{kind}/ (top level) must hold EXACTLY the genuinely-shared includes " +
                     $"[{string.Join(", ", expected)}]; found [{string.Join(", ", actual)}]. Lit/Unlit-only " +
                     "files belong in the Lit/ or Unlit/ subfolder, not the kind root.");
             }
@@ -575,6 +578,26 @@ namespace MapRenderer.Tests.Structure
                     $"{file} must NOT locally re-define MapPixelsToWorld — it is shared via " +
                     "../PixelsToWorld.hlsl now; a local re-definition would silently re-duplicate it.");
             }
+        }
+
+        // ── The fill vertex hook has no early exit ────────────────────────────
+
+        [Test]
+        public void FillVertexModify_ContainsNoReturn()
+        {
+            // Fill_VertexModify.hlsl's fill-translate guard used to be an early `return`. fill-translate is
+            // [0,0] on every shipped layer, so that branch is taken for essentially every vertex drawn —
+            // which made "below the return" a place where code looks correct, compiles, and never runs in
+            // production. The boundary band's displacement is exactly the code that would go there. The
+            // guard is an `if` block now, and this forbids the shape from returning; a forbidden-token
+            // check fails CLOSED, so it cannot pass by matching nothing.
+            string code = ShaderPropertyParser.StripHlslComments(
+                File.ReadAllText(ShaderPropertyParser.MapShaderPath("Fill_VertexModify.hlsl"), Encoding.UTF8));
+
+            Assert.That(Regex.IsMatch(code, @"\breturn\b"), Is.False,
+                "Fill_VertexModify.hlsl contains a `return`. The hook must have no early exit: with " +
+                "fill-translate [0,0] on every shipped layer, anything placed after one is dead in the " +
+                "only case that ships. Use an `if` block instead.");
         }
 
         // ── MapEdgeAA deleted ─────────────────────────────────────────────────

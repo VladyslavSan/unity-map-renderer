@@ -61,7 +61,11 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 //                   the SRP Batcher CBUFFER shape is stable across all passes from day one.
 // _FillTranslate  — fill-translate (S13): xy = pixel offset (world-space or viewport-space per
 //                   _FillTranslateAnchor). zw unused; packed as float4 to avoid half-alignment issues.
-// _FillAntialias  — fill-antialias (S13): 1=AA on (default), 0=off. Used by future MSAA/AA variant.
+// _FillAntialias  — fill-antialias: 1=AA on (default), 0=off. Declared, instanced and bound, and read
+//                   by NO pass — deliberately, and not pending. Fill antialiasing is geometry: the
+//                   property is consumed in C# at mesh-build time, by emitting no boundary band for a
+//                   layer that opts out (docs/fill-boundary-antialiasing-design.md). Do not give this
+//                   uniform a shader reader to make it look consumed.
 // _FillTranslateAnchor — fill-translate-anchor (S13): 0=map world-space, 1=viewport screen-space.
 // _FillPattern    — fill-pattern: 0 = solid (the fill-color path), 1 = this is a pattern layer.
 // _PatternRect    — xy = sprite top-left in sheet px, zw = sprite size in sheet px. A ZERO-AREA rect

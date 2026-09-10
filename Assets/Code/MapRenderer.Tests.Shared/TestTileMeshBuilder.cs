@@ -104,7 +104,9 @@ namespace MapRenderer.Tests
             TileBufferClip clip = default,
             // perf/gc-elimination: null ⇒ the original allocating path; a caller measuring the pooled path's
             // steady-state GC footprint passes its own TileBuildBuffers and reuses it across calls.
-            MapRenderer.Unity.Rendering.Tile.Processing.TileBuildBuffers buffers = null)
+            MapRenderer.Unity.Rendering.Tile.Processing.TileBuildBuffers buffers = null,
+            // Test-only oracle knob — see SyncMeshWrite.Fill. Production never sets it.
+            bool suppressBoundaryBand = false)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
             // S91-C: the builder bakes relative to the tile's SW corner projected through the SAME projection —
@@ -115,7 +117,8 @@ namespace MapRenderer.Tests
             try
             {
                 SyncMeshWrite.Fill(mda[0], Selection(features), geometry, paint, zoom,
-                    renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip, buffers);
+                    renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip, buffers,
+                    suppressBoundaryBand);
                 return Finish(mda, vertexCount, bounds, "TestFill");
             }
             finally { geometry.Dispose(); }
@@ -259,13 +262,16 @@ namespace MapRenderer.Tests
         public static Mesh BuildFillFromLayer(
             ITileLayer layer, IReadOnlyList<SelectedTileFeature> selection, Fill.PaintProperties paint,
             double zoom, TileId id, IProjection projection = null,
-            Fill.LayoutProperties layout = null, TileBufferClip clip = default)
+            Fill.LayoutProperties layout = null, TileBufferClip clip = default,
+            // Test-only oracle knob — see SyncMeshWrite.Fill. Production never sets it.
+            bool suppressBoundaryBand = false)
         {
             AssertLayerPairing(layer, id);
             var mda = Mesh.AllocateWritableMeshData(1);
             double3 renderOrigin = TileRenderOrigin.Project(id, projection);
             SyncMeshWrite.Fill(mda[0], selection, layer.Geometry, paint, zoom,
-                renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip);
+                renderOrigin, out int vertexCount, out Bounds bounds, projection, layout, clip,
+                suppressBoundaryBand: suppressBoundaryBand);
             return Finish(mda, vertexCount, bounds, "TestFill");
         }
 

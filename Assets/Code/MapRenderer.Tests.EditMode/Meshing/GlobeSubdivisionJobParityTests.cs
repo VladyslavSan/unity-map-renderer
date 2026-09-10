@@ -85,6 +85,8 @@ namespace MapRenderer.Tests.Meshing
             nativeTris.CopyFrom(triangleIndices);
             var nativeFeat = new NativeList<int>(vertexFeatureIdx.Length, Allocator.Persistent);
             nativeFeat.CopyFrom(vertexFeatureIdx);
+            var nativeBand = new NativeList<float3>(tileVerts.Length, Allocator.Persistent);
+            nativeBand.Resize(tileVerts.Length, NativeArrayOptions.ClearMemory);
             var outVerts = new NativeList<GlobeFillVertex>(64, Allocator.Persistent);
             var outIndices = new NativeList<int>(64, Allocator.Persistent);
             try
@@ -94,8 +96,9 @@ namespace MapRenderer.Tests.Meshing
                 // retired — srcVertCount/srcIndexCount are unused by the scheduled form (it reads the lists'
                 // own lengths) but stay as parameters, still read by the mirror/roots build below.
                 JobHandle handle = GlobeFillSubdivideDispatch.Schedule(
-                    proj, nativeVerts, nativeTris, nativeFeat, id, extent, origin,
-                    maxEdgeAngleRad, maxDepth, maxOutputVertices, outVerts, outIndices, default);
+                    proj, nativeVerts, nativeTris, nativeFeat, nativeBand, id, extent, origin,
+                    maxEdgeAngleRad, maxDepth, maxOutputVertices,
+                    GlobeFillSubdivideDispatch.DefaultMaxTotalVertices, outVerts, outIndices, default);
                 JobHandle.ScheduleBatchedJobs();
                 handle.Complete();
 
@@ -203,7 +206,7 @@ namespace MapRenderer.Tests.Meshing
                 proj, id, extent, new double3(0, 0, 0), tileVerts, triangleIndices, vertexFeatureIdx,
                 tileVerts.Length, triangleIndices.Length,
                 GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
-                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices);
+                GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices);
 
             // Hybrid stream: real job's World/Tile, mirror's lineage (reconstructed by ordered pairing).
             var hybridLeaves = new List<SubdivisionCoverageValidator.LeafRef>(run.MirrorLeaves.Count);
@@ -271,7 +274,7 @@ namespace MapRenderer.Tests.Meshing
                 proj, id, extent, new double3(0, 0, 0), tileVerts, triangleIndices, vertexFeatureIdx,
                 tileVerts.Length, triangleIndices.Length,
                 GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
-                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices);
+                GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices);
 
             var hybridLeaves = new List<SubdivisionCoverageValidator.LeafRef>(run.MirrorLeaves.Count);
             for (int i = 0; i < run.MirrorLeaves.Count; i++)
@@ -319,7 +322,7 @@ namespace MapRenderer.Tests.Meshing
                 new SphericalProjection(), new TileId { Z = 0, X = 0, Y = 0 }, Extent, new double3(0, 0, 0),
                 tileVerts, triangleIndices, vertexFeatureIdx, 3, 3,
                 GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
-                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices);
+                GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices);
         }
 
         [Test]
@@ -349,7 +352,7 @@ namespace MapRenderer.Tests.Meshing
                 new SphericalProjection(), new TileId { Z = 3, X = 3, Y = 3 }, Extent, origin,
                 tileVerts, triangleIndices, vertexFeatureIdx, 3, 3,
                 GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
-                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices);
+                GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices);
         }
 
         [Test]
@@ -369,7 +372,7 @@ namespace MapRenderer.Tests.Meshing
                 new SphericalProjection(), new TileId { Z = 4, X = 5, Y = 5 }, Extent, new double3(0, 0, 0),
                 tileVerts, triangleIndices, vertexFeatureIdx, tileVerts.Length, triangleIndices.Length,
                 GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
-                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices);
+                GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices);
         }
 
         // -----------------------------------------------------------------------------------------------
@@ -398,7 +401,7 @@ namespace MapRenderer.Tests.Meshing
                 new SphericalProjection(), id, Extent, new double3(0, 0, 0),
                 tileVerts, triangleIndices, vertexFeatureIdx, tileVerts.Length, triangleIndices.Length,
                 GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad, GlobeFillSubdivideDispatch.DefaultMaxDepth,
-                GlobeFillSubdivideDispatch.DefaultMaxOutputVertices);
+                GlobeFillSubdivideDispatch.DefaultMaxInteriorVertices);
 
             // The mirror's own leaf stream is an INDEPENDENT oracle for "how many distinct (Tile, Feature)
             // bit-patterns should exist" — counted directly, with no dependency on the job's own hash map or

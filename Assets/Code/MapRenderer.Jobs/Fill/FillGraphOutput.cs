@@ -41,6 +41,18 @@ namespace MapRenderer.Jobs.Fill
         /// <see cref="GlobeFillVertex.East"/>, scattered by <see cref="GlobeFillScatterJob"/>.</summary>
         public NativeList<double3> VertexEast;
 
+        /// <summary>The boundary band's per-vertex attribute — <c>(dirEast, dirNorth, side)</c> in the
+        /// vertex's own surface frame, one per <see cref="TileVertices"/> entry, reaching the shaders as
+        /// TEXCOORD3. Exactly <c>(0,0,0)</c> on every interior vertex and on the band's inner ring;
+        /// <c>side = 1</c> with an outward miter on the band's outer ring. Written by
+        /// <see cref="AggregateJob"/> (zeros) then <see cref="FillBandJob"/> (the band's own slots). On the
+        /// curved arm the same values are carried through subdivision on <see cref="GlobeFillVertex.Band"/>,
+        /// so a midpoint vertex can hold an INTERPOLATED band — <c>side</c> strictly between 0 and 1, with a
+        /// proportionally shortened miter. The two halves are independent: <c>dirEast/dirNorth</c> is the
+        /// displacement, <c>side</c> only the coverage coordinate, and the shader never multiplies one by the
+        /// other (<c>Fill_VertexModify.hlsl</c>).</summary>
+        public NativeList<float3> VertexBand;
+
         /// <summary>Feature index of each vertex (into the caller's selected-feature list), one per
         /// <see cref="TileVertices"/> entry.</summary>
         public NativeList<int> VertexFeatureIdx;
@@ -75,7 +87,7 @@ namespace MapRenderer.Jobs.Fill
         private static long _buffersAllocated;
         private static long _bufferDisposeNodes;
 
-        /// <summary>Net live OUTPUT containers (the eight fields above, <see cref="Error"/> included)
+        /// <summary>Net live OUTPUT containers (the nine fields above, <see cref="Error"/> included)
         /// allocated by <see cref="FillMeshGraph.Schedule"/> but not yet freed by <see cref="Dispose"/>.</summary>
         public static long DebugLiveCount => Interlocked.Read(ref _liveCount);
 
@@ -132,6 +144,7 @@ namespace MapRenderer.Jobs.Fill
             WorldPositions.Dispose();       Interlocked.Decrement(ref _liveCount);
             VertexUp.Dispose();             Interlocked.Decrement(ref _liveCount);
             VertexEast.Dispose();           Interlocked.Decrement(ref _liveCount);
+            VertexBand.Dispose();           Interlocked.Decrement(ref _liveCount);
             VertexFeatureIdx.Dispose();     Interlocked.Decrement(ref _liveCount);
             TriangleIndices.Dispose();      Interlocked.Decrement(ref _liveCount);
             Counts.Dispose();               Interlocked.Decrement(ref _liveCount);

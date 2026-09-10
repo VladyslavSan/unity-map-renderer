@@ -29,12 +29,18 @@
     #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/LODCrossFade.hlsl"
 #endif
 
+// The fill boundary band's coverage ramp, shared with the Lit twin.
+#include "../Fill_BandCoverage.hlsl"
+
 struct Attributes
 {
     float4 positionOS   : POSITION;
     float3 normalOS     : NORMAL;
     float4 tangentOS    : TANGENT;
     float2 texcoord     : TEXCOORD0;
+    // [MAP DELTA] boundary band (dirEast, dirNorth, side). The slot is the MESH's attribute index, so it
+    // is TEXCOORD3 here too even though this pass declares no TEXCOORD1/2 of its own.
+    float3 band         : TEXCOORD3;
     // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
     float4 color        : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -46,6 +52,8 @@ struct Varyings
     // [MAP DELTA S12] Per-vertex baked color (data-driven dimension), passed through untouched.
     half4  vColor      : TEXCOORD1;
     float  fogCoord    : TEXCOORD2;
+    // [MAP DELTA] Outward boundary band coordinate; next free slot in this pass.
+    float  side        : TEXCOORD3;
     float4 positionCS  : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
@@ -75,7 +83,7 @@ Varyings UnlitPassVertex(Attributes input)
 
     // [MAP DELTA] Apply per-layer vertex modification before position transform — IDENTICAL call to the
     // Lit twin's LitPassVertex. Fill: fill-translate. See Fill_VertexModify.hlsl.
-    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS);
+    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS, input.band, output.side);
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
 
@@ -119,6 +127,10 @@ void UnlitPassFragment(
         albedo = patternTexel.rgb;
         alpha  = patternTexel.a * _Opacity;
     }
+
+    // [MAP DELTA] Boundary antialiasing, applied AFTER the pattern branch (which REPLACES alpha) and
+    // before AlphaDiscard/AlphaModulate, so a premultiplied composite carries the coverage too.
+    alpha *= MapFillBandCoverage(input.side);
 
     alpha = AlphaDiscard(alpha, _Cutoff);
     albedo = AlphaModulate(albedo, alpha);

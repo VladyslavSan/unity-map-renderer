@@ -24,6 +24,7 @@ struct Attributes
     float3 normalOS     : NORMAL;     // [MAP DELTA] for MapVertexModify's tangent-plane frame
     float4 tangentOS    : TANGENT;    // [MAP DELTA] for MapVertexModify's tangent-plane frame
     float2 texcoord     : TEXCOORD0;
+    float3 band         : TEXCOORD3;  // [MAP DELTA] boundary band (dirEast, dirNorth, side)
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -32,6 +33,7 @@ struct Varyings
     #if defined(_ALPHATEST_ON)
         float2 uv       : TEXCOORD0;
     #endif
+    float  side         : TEXCOORD1;  // [MAP DELTA] band coordinate for the clip below; next free slot here
     float4 positionCS   : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
     UNITY_VERTEX_OUTPUT_STEREO
@@ -49,7 +51,7 @@ Varyings DepthOnlyVertex(Attributes input)
     #endif
 
     // [MAP DELTA] Apply per-layer vertex modification before clip-space transform.
-    MapVertexModify(input.position.xyz, input.normalOS, input.tangentOS);
+    MapVertexModify(input.position.xyz, input.normalOS, input.tangentOS, input.band, output.side);
 
     output.positionCS = TransformObjectToHClip(input.position.xyz);
     return output;
@@ -59,6 +61,12 @@ half DepthOnlyFragment(Varyings input) : SV_TARGET
 {
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+    // [MAP DELTA] The outward boundary band is clipped OUT of every depth-writing pass. A coverage-0 band
+    // fragment under this pass's hardcoded ZWrite On would still write depth and cast a shadow, so the
+    // depth prepass and the shadow silhouette stay exactly the hard geometry's — not a screen-space skirt
+    // half a pixel wide. Clipping on `side` rather than on coverage is what keeps that bit-exact.
+    clip(input.side > 0.0 ? -1.0 : 1.0);
 
     #if defined(_ALPHATEST_ON)
         Alpha(SampleAlbedoAlpha(input.uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap)).a, _BaseColor, _Cutoff);

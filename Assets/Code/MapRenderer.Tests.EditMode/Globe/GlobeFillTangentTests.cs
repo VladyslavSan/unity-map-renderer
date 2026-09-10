@@ -81,8 +81,12 @@ namespace MapRenderer.Tests.Globe
         {
             var (layer, selection, paint) = Setup(); // z0 tile spans the globe → heavy chording without C-3
 
-            Mesh flat  = TestTileMeshBuilder.BuildFillFromLayer(layer, selection, paint, 0.0, FixtureTile, null);
-            Mesh globe = TestTileMeshBuilder.BuildFillFromLayer(layer, selection, paint, 0.0, FixtureTile, new SphericalProjection());
+            // Band-free on BOTH arms: this comparison is about SUBDIVISION, and both arms now emit an
+            // outward boundary band whose vertex counts would otherwise contribute to the ratio below.
+            Mesh flat  = TestTileMeshBuilder.BuildFillFromLayer(
+                layer, selection, paint, 0.0, FixtureTile, null, suppressBoundaryBand: true);
+            Mesh globe = TestTileMeshBuilder.BuildFillFromLayer(
+                layer, selection, paint, 0.0, FixtureTile, new SphericalProjection(), suppressBoundaryBand: true);
             Assert.IsNotNull(flat); Assert.IsNotNull(globe);
 
             // C-3 refines flat earcut triangles onto the sphere → strictly more TRIANGLES than the flat

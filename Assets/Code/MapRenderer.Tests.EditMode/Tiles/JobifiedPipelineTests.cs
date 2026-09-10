@@ -268,6 +268,9 @@ namespace MapRenderer.Tests.Tiles
                 RingVisitOrder = visitOrder,
                 OriginRender   = new double3(originX, 0.0, originY), // == TileRenderOrigin.Project bit-for-bit for Mercator
                 Projection     = new WebMercatorProjection(), // was implicit (null ⇒ Mercator); now explicit
+                // The managed reference this is hashed against predates the outward boundary band and emits
+                // none; the claim here is about earcut's merged-vertex ORDER, so both arms must be band-free.
+                SuppressBoundaryBand = true,
             };
 
             FillGraphOutput buffers = FillMeshGraph.Schedule(pipelineInput);
@@ -334,6 +337,9 @@ namespace MapRenderer.Tests.Tiles
                 RingVisitOrder = visitOrder,
                 OriginRender   = new double3(bMin.x, 0.0, bMin.y),
                 Projection     = new WebMercatorProjection(), // was implicit (null ⇒ Mercator); now explicit
+                // The managed reference this is hashed against predates the outward boundary band and emits
+                // none; the claim here is about earcut's merged-vertex ORDER, so both arms must be band-free.
+                SuppressBoundaryBand = true,
             };
 
             // Get single-tile reference.

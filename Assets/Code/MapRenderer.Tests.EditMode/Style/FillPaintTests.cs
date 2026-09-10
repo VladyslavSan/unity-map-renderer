@@ -397,5 +397,34 @@ namespace MapRenderer.Tests.Style
             Assert.IsNull(mvtLayer,
                 "SourceLayerResolver must return null when SourceLayer is null (background layers).");
         }
+
+        // ── fill-antialias: the boolean the Style Spec declares ─────────────────
+
+        /// <summary>
+        /// <c>fill-antialias</c> is a JSON boolean, and <c>false</c> must survive the parse as 0.
+        /// It once did not: the converter projected the value through <c>Value.AsNumber()</c>, which
+        /// throws on a boolean, and the property's own <c>try</c>/<c>catch</c> swallowed that into the
+        /// default 1 — so the ONE value anybody writes the property to say was the one it could not
+        /// express. Everything that is not a boolean still falls to the default, which is the same
+        /// <c>catch</c> doing its intended job.
+        /// </summary>
+        /// <param name="paintJson">The layer's paint block.</param>
+        /// <param name="expected">The value <c>Antialias</c> must evaluate to.</param>
+        [TestCase("{\"fill-antialias\":false}", false)]
+        [TestCase("{\"fill-antialias\":true}", true)]
+        [TestCase("{\"fill-color\":\"#fff\"}", true)]
+        [TestCase("{\"fill-antialias\":0}", true)]
+        [TestCase("{\"fill-antialias\":[\"get\",\"aa\"]}", true)]
+        public void FillPaint_Antialias_ParsesAsABoolean(string paintJson, bool expected)
+        {
+            // The no-argument ctor keeps the Style Spec's own default (true), so the cases that fall back
+            // land on true exactly as before. The project default is exercised by FillAntialiasBandTests.
+            var fp = new Fill.PaintProperties(MakeFillLayer(paintJson));
+
+            Assert.AreEqual(expected, fp.Antialias.Evaluate(0.0),
+                $"fill-antialias in {paintJson} must evaluate to {expected}.");
+            Assert.IsFalse(fp.Antialias.DependsOnFeature,
+                "fill-antialias must never be data-driven — a feature-dependent value falls to the default.");
+        }
     }
 }

@@ -141,6 +141,17 @@ namespace MapRenderer.Jobs.Fill
             /// its second run re-read as a fresh exterior with a fresh sign.</para></summary>
             public NativeArray<int> RingVisitOrder;
 
+            /// <summary>Suppresses the outward boundary band for this layer — <c>false</c> (the default a
+            /// caller gets for free) emits it, which is what every real fill layer wants. Set by the two
+            /// callers whose geometry has no silhouette to antialias: <c>FillExtrusionMeshGraph</c>'s roof,
+            /// whose mesh layout carries no band attribute and whose buildings keep hard edges, and
+            /// <c>BackgroundQuad</c>, a full-tile quad whose every edge is a tile seam abutting the
+            /// neighbour's identical quad — a band there is a double-composited rim, never antialiasing.
+            /// <para>It is also where the style's <c>fill-antialias</c> lands: a layer that opts out emits no
+            /// band geometry at all, which is what keeps the property per-layer implementable —
+            /// <c>StyledFillTileBuilder.BuildLayerInput</c> is the site that resolves it.</para></summary>
+            public bool SuppressBoundaryBand;
+
             /// <summary>S91-C: the RTC render-space origin (docs §5) the mesh vertices are baked relative to —
             /// the tile's SW corner projected through <see cref="Projection"/>. The single source of the
             /// bake origin, shared with the tile transform (Mercator: <c>(mercX, 0, mercZ)</c>; globe: the

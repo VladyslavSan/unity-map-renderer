@@ -19,6 +19,7 @@ namespace MapRenderer.Jobs.Fill
         public double3 Up;      // geodetic surface up            (→ Normal)
         public double3 East;    // geodetic surface east          (→ Tangent.xyz)
         public double2 Tile;    // tile-space coord               (→ UV via ×1/extent)
+        public float3  Band;    // boundary-band attribute        (→ TEXCOORD3)
         public int     Feature; // → per-feature color index
     }
 
@@ -32,7 +33,10 @@ namespace MapRenderer.Jobs.Fill
     /// <c>East</c> as redundant functions of <c>Tile</c> — satisfies that predicate automatically and stays
     /// correct when a column is added (e.g. the per-vertex band/side attribute on the parked
     /// <c>feat/fill-boundary-antialiasing</c> branch, absent on <c>main</c>): a hand-picked key silently
-    /// omits a new column at rebase time, a whole-struct key cannot. <c>Mid()</c> is exactly order-symmetric
+    /// omits a new column at rebase time. NOTE the key is still enumerated FIELD BY FIELD below, so adding a
+    /// column to <see cref="GlobeFillVertex"/> does NOT extend it automatically — <c>Band</c> had to be added
+    /// here by hand when this branch rebased. GlobeFillVertexKeySizeTests is the guard that makes the next
+    /// added column fail loudly instead of silently merging distinct vertices. <c>Mid()</c> is exactly order-symmetric
     /// ((a+b)*0.5 commutes bit-for-bit) and marking is per-edge from the two endpoints alone (no
     /// connectivity), so two triangles sharing a split edge compute bit-identical derived fields for it —
     /// the whole-struct key merges exactly what a canonical-input key would, with no under-merge risk
@@ -43,6 +47,7 @@ namespace MapRenderer.Jobs.Fill
         private readonly ulong _upX, _upY, _upZ;
         private readonly ulong _eastX, _eastY, _eastZ;
         private readonly ulong _tileX, _tileY;
+        private readonly uint  _bandX, _bandY, _bandZ;
         private readonly int   _feature;
 
         public GlobeFillVertexKey(in GlobeFillVertex v)
@@ -51,6 +56,7 @@ namespace MapRenderer.Jobs.Fill
             _upX = math.asulong(v.Up.x);       _upY = math.asulong(v.Up.y);       _upZ = math.asulong(v.Up.z);
             _eastX = math.asulong(v.East.x);   _eastY = math.asulong(v.East.y);   _eastZ = math.asulong(v.East.z);
             _tileX = math.asulong(v.Tile.x);   _tileY = math.asulong(v.Tile.y);
+            _bandX = math.asuint(v.Band.x);    _bandY = math.asuint(v.Band.y);    _bandZ = math.asuint(v.Band.z);
             _feature = v.Feature;
         }
 
@@ -58,7 +64,9 @@ namespace MapRenderer.Jobs.Fill
             _worldX == other._worldX && _worldY == other._worldY && _worldZ == other._worldZ &&
             _upX == other._upX && _upY == other._upY && _upZ == other._upZ &&
             _eastX == other._eastX && _eastY == other._eastY && _eastZ == other._eastZ &&
-            _tileX == other._tileX && _tileY == other._tileY && _feature == other._feature;
+            _tileX == other._tileX && _tileY == other._tileY &&
+            _bandX == other._bandX && _bandY == other._bandY && _bandZ == other._bandZ &&
+            _feature == other._feature;
 
         public override bool Equals(object obj) => obj is GlobeFillVertexKey other && Equals(other);
 
@@ -71,6 +79,7 @@ namespace MapRenderer.Jobs.Fill
                 h = h * -1521134295L + (long)_upX;    h = h * -1521134295L + (long)_upY;    h = h * -1521134295L + (long)_upZ;
                 h = h * -1521134295L + (long)_eastX;  h = h * -1521134295L + (long)_eastY;  h = h * -1521134295L + (long)_eastZ;
                 h = h * -1521134295L + (long)_tileX;  h = h * -1521134295L + (long)_tileY;
+                h = h * -1521134295L + _bandX;        h = h * -1521134295L + _bandY;        h = h * -1521134295L + _bandZ;
                 h = h * -1521134295L + _feature;
                 return (int)(h ^ (h >> 32));
             }
@@ -85,9 +94,9 @@ namespace MapRenderer.Jobs.Fill
     /// mark count (0 emit / 1 bisect / 2 the "1→3" split / 3 the "1→4" split, at edge midpoints in tile space,
     /// re-projected onto the sphere): a mark is a function of an edge's two endpoints alone, so two triangles
     /// sharing an edge compute the identical mark — conforming without connectivity, no T-junctions at any
-    /// depth (mesh-triangulation-robustness-design.md §6.2, fix candidate A). Bounded by <c>MaxDepth</c> and a
-    /// per-tile <c>Budget</c> so a whole-globe z0 tile can't explode. A flat projection (constant up) never
-    /// splits — it passes straight through.
+    /// depth (mesh-triangulation-robustness-design.md §6.2, fix candidate A). Bounded by <c>MaxDepth</c> and
+    /// the per-tile <see cref="InteriorBudget"/> so a whole-globe z0 tile can't explode. A flat projection
+    /// (constant up) never splits — it passes straight through.
     ///
     /// <para><b>Emitted vertices are SHARED</b> (<see cref="GlobeFillVertexKey"/>): <see cref="Emit"/> reuses an
     /// existing <c>OutVerts</c> slot for a bit-identical vertex instead of tripling every leaf triangle's
@@ -107,8 +116,9 @@ namespace MapRenderer.Jobs.Fill
     ///
     /// <para><b>Residuals (known, not hit by the corpus/z2-quad teeth — both are depth-1 or uniformly-curved,
     /// so every triangle reaches its stop test in lockstep).</b> A per-triangle FORCED stop — either the
-    /// <see cref="MaxDepth"/> cap or the <see cref="Budget"/> cutoff — makes that ONE triangle emit flat
-    /// regardless of its own marks, INCLUDING a still-marked edge it shares with a neighbour that has not
+    /// <see cref="MaxDepth"/> cap or either vertex budget (<see cref="InteriorBudget"/> /
+    /// <see cref="TotalBudget"/>) — makes that ONE triangle emit flat regardless of its own marks,
+    /// INCLUDING a still-marked edge it shares with a neighbour that has not
     /// (yet) been forced to stop: on a tile with genuinely NON-uniform curvature (real-world geometry, unlike
     /// the z2-quad's single flat square), the two triangles sharing that edge can reach depth 5 at different
     /// times — one side keeps splitting the marked edge, the other is capped and leaves it whole — a
@@ -125,15 +135,16 @@ namespace MapRenderer.Jobs.Fill
         [ReadOnly] public NativeArray<double2>   TileVerts;         // earcut vertices (tile space)
         [ReadOnly] public NativeArray<int>       TriangleIndices;   // earcut triangles into TileVerts
         [ReadOnly] public NativeArray<int>       VertexFeatureIdx;  // feature index per TileVert
+        [ReadOnly] public NativeArray<float3>    VertexBand;        // boundary-band attribute per TileVert
         public TileId  Id;
         public double  Extent, CosThresh;
         public double3 Origin;
-        public int     MaxDepth, Budget;
+        public int     MaxDepth, InteriorBudget, TotalBudget;
 
         public NativeList<GlobeFillVertex> OutVerts;
         public NativeList<int>             OutIndices;
 
-        private struct V   { public double3 World, Up, East; public double2 Tile; }
+        private struct V   { public double3 World, Up, East; public float3 Band; public double2 Tile; }
         private struct Tri { public V A, B, C; public int Depth, Feat; }
 
         /// <summary>job-scheduling-design.md §8 stage 4 Group B: the count rule — <see cref="TileVerts"/>/
@@ -147,6 +158,7 @@ namespace MapRenderer.Jobs.Fill
             int srcVertCount  = TileVerts.Length;
             int srcIndexCount = TriangleIndices.Length;
 
+            int interiorVerts = 0;
             var stack = new NativeList<Tri>(64, Allocator.Temp);
             // Job-local, freed at Execute's end (job-scheduling-design.md §3.6: an Allocator.Temp container
             // is only valid as a LOCAL, never a field — this job is .Schedule()'d, matching `stack` above).
@@ -162,7 +174,17 @@ namespace MapRenderer.Jobs.Fill
             {
                 int i0 = TriangleIndices[t], i1 = TriangleIndices[t + 1], i2 = TriangleIndices[t + 2];
                 int feat = i0 < srcVertCount ? VertexFeatureIdx[i0] : 0;
-                stack.Add(new Tri { A = Project(TileVerts[i0]), B = Project(TileVerts[i1]), C = Project(TileVerts[i2]), Depth = 0, Feat = feat });
+
+                // A band quad's two triangles each carry at least one outer vertex (side 1); an interior
+                // triangle carries none. The distinction drives the budget below and nothing else.
+                bool bandTri = VertexBand[i0].z != 0f || VertexBand[i1].z != 0f || VertexBand[i2].z != 0f;
+                stack.Add(new Tri
+                {
+                    A = Project(TileVerts[i0], VertexBand[i0]),
+                    B = Project(TileVerts[i1], VertexBand[i1]),
+                    C = Project(TileVerts[i2], VertexBand[i2]),
+                    Depth = 0, Feat = feat,
+                });
 
                 while (stack.Length > 0)
                 {
@@ -175,21 +197,41 @@ namespace MapRenderer.Jobs.Fill
                     // once the budget is exhausted (emit flat, same as the old per-triangle stop test).
                     // MUST match SubdivisionCoverageValidator.RunMirror byte-for-byte (parity tooth).
                     //
-                    // Budget counts EMITTED vertices (OutIndices, one Add per Emit call), not unique storage
-                    // (OutVerts) — sharing only changes storage, so every split decision stays byte-identical to
-                    // the pre-sharing job regardless of how much sharing the tile happens to have.
-                    bool overBudget = OutIndices.Length >= Budget;
+                    // TWO bounds, two different jobs. InteriorBudget is the SUBDIVISION guard and counts only
+                    // interior vertices: the band adds ~2 triangles per ring vertex, enough on a boundary-heavy
+                    // layer to exhaust a shared budget and force the INTERIOR to emit flat — the band degrading
+                    // geometry that is not its own. Measured on z0 countries: one shared budget emitted 313 953
+                    // vertices, split it emits 349 401, so 35 448 vertices of interior subdivision were being
+                    // suppressed by the band. TotalBudget is the ALLOCATION backstop.
+                    //
+                    // BOTH count EMITTED vertices, never unique storage: vertex sharing must not move a split
+                    // decision, or the job stops being representation-only and diverges from the mirror. That is
+                    // also what keeps the mirror's single budget a valid collapse of these two under the parity
+                    // fixture's all-zero VertexBand, where every triangle is interior and interiorVerts tracks
+                    // OutIndices.Length exactly. TotalBudget therefore reads the emitted count and is
+                    // conservative for an allocation guard (emitted >= unique) — deliberately, since a backstop
+                    // that fires early is safe and one that depends on sharing is not.
+                    //
+                    // Both feed ONE overBudget, deliberately: a band quad's long edges duplicate the interior
+                    // boundary edge, so the two must stop splitting at the same moment or the band keeps refining
+                    // an edge the interior has been forced to leave whole — a T-junction between fill and band.
+                    bool overBudget = interiorVerts >= InteriorBudget || OutIndices.Length >= TotalBudget;
                     bool canSplit = w.Depth < MaxDepth && !overBudget;
                     bool markAB = canSplit && math.dot(w.A.Up, w.B.Up) < CosThresh;
                     bool markBC = canSplit && math.dot(w.B.Up, w.C.Up) < CosThresh;
                     bool markCA = canSplit && math.dot(w.C.Up, w.A.Up) < CosThresh;
                     int markCount = (markAB ? 1 : 0) + (markBC ? 1 : 0) + (markCA ? 1 : 0);
 
-                    if (markCount == 0) { Emit(w.A, w.Feat, ref indexByVertex); Emit(w.B, w.Feat, ref indexByVertex); Emit(w.C, w.Feat, ref indexByVertex); continue; }
+                    if (markCount == 0)
+                    {
+                        Emit(w.A, w.Feat, ref indexByVertex); Emit(w.B, w.Feat, ref indexByVertex); Emit(w.C, w.Feat, ref indexByVertex);
+                        if (!bandTri) interiorVerts += 3;
+                        continue;
+                    }
 
-                    V mAB = markAB ? Project(Mid(w.A.Tile, w.B.Tile)) : default;
-                    V mBC = markBC ? Project(Mid(w.B.Tile, w.C.Tile)) : default;
-                    V mCA = markCA ? Project(Mid(w.C.Tile, w.A.Tile)) : default;
+                    V mAB = markAB ? Split(w.A, w.B) : default;
+                    V mBC = markBC ? Split(w.B, w.C) : default;
+                    V mCA = markCA ? Split(w.C, w.A) : default;
                     int childDepth = w.Depth + 1;
 
                     if (markCount == 3)
@@ -258,7 +300,7 @@ namespace MapRenderer.Jobs.Fill
         /// always the unique count — the split apart the caller's budget check relies on.</summary>
         private void Emit(in V v, int feat, ref NativeHashMap<GlobeFillVertexKey, int> indexByVertex)
         {
-            var vertex = new GlobeFillVertex { World = v.World, Up = v.Up, East = v.East, Tile = v.Tile, Feature = feat };
+            var vertex = new GlobeFillVertex { World = v.World, Up = v.Up, East = v.East, Tile = v.Tile, Band = v.Band, Feature = feat };
             var key = new GlobeFillVertexKey(vertex);
             if (indexByVertex.TryGetValue(key, out int existing))
             {
@@ -272,14 +314,26 @@ namespace MapRenderer.Jobs.Fill
             indexByVertex.Add(key, index);
         }
 
-        private V Project(double2 tile)
+        /// <summary>Splits one edge at its tile-space midpoint — the position half is
+        /// <see cref="Project"/>'s, the band half is the plain average of the endpoints'.</summary>
+        /// <param name="a">The edge's first endpoint.</param>
+        /// <param name="b">The edge's second endpoint.</param>
+        /// <returns>The re-projected midpoint carrying the interpolated band attribute.</returns>
+        private V Split(in V a, in V b) => Project(Mid(a.Tile, b.Tile), (a.Band + b.Band) * 0.5f);
+
+        /// <summary>Projects one tile-space point onto the surface, carrying the band attribute through
+        /// unchanged.</summary>
+        /// <param name="tile">The tile-space coordinate.</param>
+        /// <param name="band">The boundary-band attribute this vertex carries.</param>
+        /// <returns>The projected vertex.</returns>
+        private V Project(double2 tile, float3 band)
         {
             double2 ll = Id.ToLonLat(tile.x, tile.y, Extent);       // (lon, lat)
             var geo = new GeoCoordinate { Latitude = ll.y, Longitude = ll.x };
             ProjectedPoint pp = Projection.ProjectPoint(geo);
             float3 e = Projection.TangentBasisAt(geo).c0;
             double3 world = new double3(pp.World.x - Origin.x, pp.World.y - Origin.y, pp.World.z - Origin.z);
-            return new V { World = world, Up = pp.Up, East = new double3(e.x, e.y, e.z), Tile = tile };
+            return new V { World = world, Up = pp.Up, East = new double3(e.x, e.y, e.z), Tile = tile, Band = band };
         }
 
         private static double2 Mid(double2 a, double2 b) => new double2((a.x + b.x) * 0.5, (a.y + b.y) * 0.5);
@@ -296,8 +350,25 @@ namespace MapRenderer.Jobs.Fill
         public const double DefaultMaxEdgeAngleRad   = 0.05236;   // 3 degrees
         /// <summary>Hard recursion cap (4^depth worst-case fan-out) — the low-zoom runaway backstop.</summary>
         public const int    DefaultMaxDepth          = 5;
-        /// <summary>Per-tile vertex budget; once reached, remaining triangles emit flat (no deeper split).</summary>
-        public const int    DefaultMaxOutputVertices = 200_000;
+        /// <summary>Per-tile budget for the INTERIOR's subdivided vertices; once reached, remaining triangles
+        /// emit flat (no deeper split). The boundary band's own vertices do not count against it — see
+        /// <see cref="GlobeFillSubdivideJob{TProj}.InteriorBudget"/> for why the two are separate.
+        /// <para><b>Not a headroom claim.</b> This used to be documented as never reached in production. It is
+        /// not: the shipped z0 countries fixture measures 164 535 interior vertices, 82% of this value, with
+        /// no band at all. <c>GlobeFillBandTests.TheCurvedArmsInteriorKeepsHeadroomUnderItsBudget</c> is the
+        /// tooth that stops that going unnoticed again.</para></summary>
+        public const int    DefaultMaxInteriorVertices = 200_000;
+
+        /// <summary>Per-tile ceiling on TOTAL emitted vertices (interior + boundary band) — the ALLOCATION
+        /// backstop, a different job from <see cref="DefaultMaxInteriorVertices"/>. That one bounds how far
+        /// the interior may SUBDIVIDE, which is the exponential low-zoom case; this one bounds how much
+        /// memory one tile may take, which the band makes linear-but-large rather than exponential.
+        /// <para><b>Derivation.</b> The shipped z0 countries fixture measures 349 401 total vertices
+        /// (164 535 interior + the band). 600 000 is 1.72x that — margin for a more boundary-heavy layer
+        /// than any in the fixture corpus — and 3x the interior budget, so the two constants stay legible
+        /// against each other. Round, and deliberately so: it is a backstop nobody should reach, not a
+        /// working limit, and a value derived to more precision would imply otherwise.</para></summary>
+        public const int    DefaultMaxTotalVertices = 600_000;
 
         /// <summary>The fill graph's curved-arm subdivide node (job-scheduling-design.md §3.2).
         /// <paramref name="tileVerts"/>/<paramref name="triangleIndices"/>/<paramref name="vertexFeatureIdx"/>
@@ -309,16 +380,17 @@ namespace MapRenderer.Jobs.Fill
         public static JobHandle Schedule(
             IProjection projection,
             NativeList<double2> tileVerts, NativeList<int> triangleIndices, NativeList<int> vertexFeatureIdx,
+            NativeList<float3> vertexBand,
             in TileId id, double extent, double3 originRender,
-            double maxEdgeAngleRad, int maxDepth, int maxOutputVertices,
+            double maxEdgeAngleRad, int maxDepth, int maxInteriorVertices, int maxTotalVertices,
             NativeList<GlobeFillVertex> outVerts, NativeList<int> outIndices,
             JobHandle deps)
         {
             switch (projection)
             {
-                case SphericalProjection sp:   return ScheduleTyped(sp, tileVerts, triangleIndices, vertexFeatureIdx, id, extent, originRender, maxEdgeAngleRad, maxDepth, maxOutputVertices, outVerts, outIndices, deps);
-                case WebMercatorProjection wm: return ScheduleTyped(wm, tileVerts, triangleIndices, vertexFeatureIdx, id, extent, originRender, maxEdgeAngleRad, maxDepth, maxOutputVertices, outVerts, outIndices, deps);
-                case null:                     return ScheduleTyped(new WebMercatorProjection(), tileVerts, triangleIndices, vertexFeatureIdx, id, extent, originRender, maxEdgeAngleRad, maxDepth, maxOutputVertices, outVerts, outIndices, deps); // default planar — dead on the production path
+                case SphericalProjection sp:   return ScheduleTyped(sp, tileVerts, triangleIndices, vertexFeatureIdx, vertexBand, id, extent, originRender, maxEdgeAngleRad, maxDepth, maxInteriorVertices, maxTotalVertices, outVerts, outIndices, deps);
+                case WebMercatorProjection wm: return ScheduleTyped(wm, tileVerts, triangleIndices, vertexFeatureIdx, vertexBand, id, extent, originRender, maxEdgeAngleRad, maxDepth, maxInteriorVertices, maxTotalVertices, outVerts, outIndices, deps);
+                case null:                     return ScheduleTyped(new WebMercatorProjection(), tileVerts, triangleIndices, vertexFeatureIdx, vertexBand, id, extent, originRender, maxEdgeAngleRad, maxDepth, maxInteriorVertices, maxTotalVertices, outVerts, outIndices, deps); // default planar — dead on the production path
                 default:
                     throw new NotSupportedException(
                         $"No GlobeFillSubdivideJob dispatch for projection type {projection.GetType().Name}. " +
@@ -329,8 +401,9 @@ namespace MapRenderer.Jobs.Fill
         private static JobHandle ScheduleTyped<TProj>(
             TProj projection,
             NativeList<double2> tileVerts, NativeList<int> triangleIndices, NativeList<int> vertexFeatureIdx,
+            NativeList<float3> vertexBand,
             in TileId id, double extent, double3 originRender,
-            double maxEdgeAngleRad, int maxDepth, int maxOutputVertices,
+            double maxEdgeAngleRad, int maxDepth, int maxInteriorVertices, int maxTotalVertices,
             NativeList<GlobeFillVertex> outVerts, NativeList<int> outIndices,
             JobHandle deps)
             where TProj : struct, IProjection
@@ -339,8 +412,10 @@ namespace MapRenderer.Jobs.Fill
                 Projection = projection,
                 TileVerts = tileVerts.AsDeferredJobArray(), TriangleIndices = triangleIndices.AsDeferredJobArray(),
                 VertexFeatureIdx = vertexFeatureIdx.AsDeferredJobArray(),
+                VertexBand = vertexBand.AsDeferredJobArray(),
                 Id = id, Extent = extent, Origin = originRender,
-                CosThresh = math.cos(maxEdgeAngleRad), MaxDepth = maxDepth, Budget = maxOutputVertices,
+                CosThresh = math.cos(maxEdgeAngleRad), MaxDepth = maxDepth,
+                InteriorBudget = maxInteriorVertices, TotalBudget = maxTotalVertices,
                 OutVerts = outVerts, OutIndices = outIndices,
             }.Schedule(deps);
     }

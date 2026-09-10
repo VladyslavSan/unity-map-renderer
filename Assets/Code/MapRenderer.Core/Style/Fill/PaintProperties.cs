@@ -42,10 +42,14 @@ namespace MapRenderer.Core.Style.Fill
         public StyleProperty<Color> OutlineColor { get; }
 
         /// <summary>
-        /// fill-antialias: whether fill edges are anti-aliased. Encoded as float: 1.0 = true (default),
-        /// 0.0 = false. Constant only; data-driven or malformed values fall back to 1.0 (true).
+        /// fill-antialias: whether fill edges are anti-aliased. A JSON boolean, so a bool — it used to be
+        /// float-encoded only to feed the <c>_FillAntialias</c> uniform, which no pass reads.
+        /// Constant or zoom-varying only. ABSENT, data-driven or malformed ⇒ the project default the ctor
+        /// was given (<c>MapViewConfig.FillAntialiasing</c>; the Style Spec's own default is true).
         /// </summary>
-        public StyleProperty<float> Antialias { get; }
+        public StyleProperty<bool> Antialias { get; }
+
+
 
         /// <summary>
         /// fill-translate: pixel-space [x, y] translation offset. Default [0, 0].
@@ -108,7 +112,7 @@ namespace MapRenderer.Core.Style.Fill
 
         /// <summary>Parse and classify all fill paint properties from the layer's <c>paint</c> sub-tree
         /// (may be null → all spec defaults).</summary>
-        public PaintProperties(JsonValue paint)
+        public PaintProperties(JsonValue paint, bool antialiasDefault = true)
         {
             bool anyPresent = false;
 
@@ -143,20 +147,26 @@ namespace MapRenderer.Core.Style.Fill
             {
                 try
                 {
-                    var candidate = new StyleProperty<float>(antialiasJson, 1f, v => (float)v.AsNumber());
+                    // fill-antialias is a JSON BOOLEAN. Projecting it through AsNumber() threw
+                    // ExpressionEvaluationException into the catch below, so `false` silently became the
+                    // default 1 — the property parsed as its own opposite.
+                    var candidate = new StyleProperty<bool>(antialiasJson, antialiasDefault, v => v.AsBool());
                     // fill-antialias must not be data-driven (Feature/Composite → default 1.0)
+                    // fill-antialias must not be data-driven (Feature/Composite → the project default)
                     Antialias = candidate.DependsOnFeature
-                        ? new StyleProperty<float>(1f)
+                        ? new StyleProperty<bool>(antialiasDefault)
                         : candidate;
                 }
                 catch
                 {
-                    Antialias = new StyleProperty<float>(1f);
+                    Antialias = new StyleProperty<bool>(antialiasDefault);
                 }
             }
             else
             {
-                Antialias = new StyleProperty<float>(1f);
+                // The layer said nothing — this is the case the project default exists for, and in the
+                // shipped Liberty style it is 12 of 16 fill layers.
+                Antialias = new StyleProperty<bool>(antialiasDefault);
             }
 
             // fill-translate: [x, y] — collapse to StyleProperty<double2>

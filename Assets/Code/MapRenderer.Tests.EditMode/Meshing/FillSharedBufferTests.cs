@@ -194,7 +194,10 @@ namespace MapRenderer.Tests.Meshing
             Mesh flat = null, globe = null;
             try
             {
-                flat  = TestTileMeshBuilder.BuildFill(features, paint, 0.0, Extent, Tile, null, layout);
+                // Band-free flat arm: the non-vacuity claim below is about SUBDIVISION, and the flat build's
+                // outward boundary band (which the curved arm does not carry) would otherwise inflate it.
+                flat  = TestTileMeshBuilder.BuildFill(
+                    features, paint, 0.0, Extent, Tile, null, layout, suppressBoundaryBand: true);
                 globe = TestTileMeshBuilder.BuildFill(
                     features, paint, 0.0, Extent, Tile, new SphericalProjection(), layout);
 

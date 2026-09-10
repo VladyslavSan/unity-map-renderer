@@ -31,6 +31,7 @@ struct Attributes
     float3 normalOS     : NORMAL;
     float4 tangentOS    : TANGENT;    // [MAP DELTA] for MapVertexModify's tangent-plane frame
     float2 texcoord     : TEXCOORD0;
+    float3 band         : TEXCOORD3;  // [MAP DELTA] boundary band (dirEast, dirNorth, side)
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
@@ -39,14 +40,15 @@ struct Varyings
     #if defined(_ALPHATEST_ON)
         float2 uv       : TEXCOORD0;
     #endif
+    float  side         : TEXCOORD1;  // [MAP DELTA] band coordinate for the clip below; next free slot here
     float4 positionCS   : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
-float4 GetShadowPositionHClip(Attributes input)
+float4 GetShadowPositionHClip(Attributes input, out float side)
 {
     // [MAP DELTA] Apply per-layer vertex modification before world-space transform.
-    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS);
+    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS, input.band, side);
 
     float3 positionWS = TransformObjectToWorld(input.positionOS.xyz);
     float3 normalWS = TransformObjectToWorldNormal(input.normalOS);
@@ -72,13 +74,19 @@ Varyings ShadowPassVertex(Attributes input)
     output.uv = TRANSFORM_TEX(input.texcoord, _BaseMap);
     #endif
 
-    output.positionCS = GetShadowPositionHClip(input);
+    output.positionCS = GetShadowPositionHClip(input, output.side);
     return output;
 }
 
 half4 ShadowPassFragment(Varyings input) : SV_TARGET
 {
     UNITY_SETUP_INSTANCE_ID(input);
+
+    // [MAP DELTA] The outward boundary band is clipped OUT of every depth-writing pass. A coverage-0 band
+    // fragment under this pass's hardcoded ZWrite On would still write depth and cast a shadow, so the
+    // depth prepass and the shadow silhouette stay exactly the hard geometry's — not a screen-space skirt
+    // half a pixel wide. Clipping on `side` rather than on coverage is what keeps that bit-exact.
+    clip(input.side > 0.0 ? -1.0 : 1.0);
 
     #if defined(_ALPHATEST_ON)
         Alpha(SampleAlbedoAlpha(input.uv, TEXTURE2D_ARGS(_BaseMap, sampler_BaseMap)).a, _BaseColor, _Cutoff);

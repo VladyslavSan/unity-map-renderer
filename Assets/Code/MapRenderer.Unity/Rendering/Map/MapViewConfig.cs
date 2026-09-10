@@ -90,6 +90,13 @@ namespace MapRenderer.Unity.Rendering.Map
                  "the new value. A tuning knob, not a live toggle.")]
         public double FillTileBufferClip = 0.0;
 
+        [Tooltip("Default for fill antialiasing (the outward boundary band), applied to every fill layer " +
+                 "whose style does NOT set fill-antialias. ON by default, matching the style spec. A layer " +
+                 "that DOES set fill-antialias always wins - false stays band-free with this ON, true keeps " +
+                 "its band with this OFF. The band is baked into the mesh, so a change takes effect on the " +
+                 "next tile build, not on tiles already in cover.")]
+        public bool FillAntialiasing = true;
+
         [Header("Symbols")]
         [Tooltip("Tile-coverage label pre-cull: a tile whose on-screen area this frame is LESS than this " +
                  "fraction of the viewport has ALL its labels skipped (before project/collide/build). Trims the " +

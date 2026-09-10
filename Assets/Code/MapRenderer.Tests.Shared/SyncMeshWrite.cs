@@ -51,7 +51,10 @@ namespace MapRenderer.Tests
             IProjection                        projection = null, // null ⇒ WebMercator (launch-time config threads this in)
             Fill.LayoutProperties              layout     = null, // null ⇒ no fill-sort-key (declared feature order)
             TileBufferClip                     clip       = default, // default ⇒ disabled ⇒ the whole tile buffer is drawn
-            TileBuildBuffers                   buffers    = null) // null ⇒ allocate (non-pooled caller)
+            TileBuildBuffers                   buffers    = null, // null ⇒ allocate (non-pooled caller)
+            // A test-only oracle knob: true builds WITHOUT the outward boundary band, which is what a
+            // comparison against a band-free reference has to compare against. Production never sets it.
+            bool                               suppressBoundaryBand = false)
         {
             vertexCount = 0;
             bounds      = default;
@@ -65,8 +68,12 @@ namespace MapRenderer.Tests
 
             using var ringVisitOrder = input.RingVisitOrder;
             using var colors         = featureColors;
+            // OR, not overwrite: FillGeometry rebuilds the LayerInput from loose arguments, so the value
+            // BuildLayerInput derived from fill-antialias would be silently discarded here — and this helper
+            // would band a layer that production leaves hard.
             FillGeometry(md, geometry, ringVisitOrder, colors,
-                tileOriginRender, projection, clip, out vertexCount, out bounds);
+                tileOriginRender, projection, clip, out vertexCount, out bounds,
+                suppressBoundaryBand || input.SuppressBoundaryBand);
         }
 
         /// <summary>Verbatim lift of <c>StyledFillTileBuilder.WriteGeometry</c> — the geometry half
@@ -81,7 +88,8 @@ namespace MapRenderer.Tests
             IProjection                 projection,
             TileBufferClip              clip,
             out int                     vertexCount,
-            out Bounds                  bounds)
+            out Bounds                  bounds,
+            bool                        suppressBoundaryBand = false)
         {
             vertexCount = 0;
             bounds      = default;
@@ -93,6 +101,7 @@ namespace MapRenderer.Tests
                 OriginRender      = tileOriginRender,
                 Projection        = projection ?? StyledFillTileBuilder.DefaultProjection,
                 Clip              = clip,
+                SuppressBoundaryBand = suppressBoundaryBand,
             };
 
             // job-scheduling-design.md §8 stage 4 Group B: the graph is the only mesher — schedule it and

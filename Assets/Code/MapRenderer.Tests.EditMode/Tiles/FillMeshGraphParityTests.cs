@@ -198,8 +198,16 @@ namespace MapRenderer.Tests.Tiles
                     if (curved) return; // §3.7: the curved arm's five geometry arrays are POST-subdivision —
                                          // not the same quantity FillMeshPipeline.Schedule returned; never pinned here.
 
-                    int vc = output.TileVertices.Length;
+                    // The INTERIOR prefix only, never the whole column set. FillBandJob appends the outward
+                    // boundary band to these same columns, and the frozen goldens below are the digest of what
+                    // the retired synchronous pipeline produced — the interior. Narrowing keeps every constant
+                    // byte-identical (a digest is the one artifact a re-bake cannot be reviewed), and turns
+                    // this tooth into the stronger claim: the band perturbed NOTHING the interior owns.
+                    // Band vertices are always the suffix; band triangles are interleaved per feature, so
+                    // they are filtered by vertex index rather than by position.
+                    int vc = output.TileVertices.Length - output.Counts[0].BandVertexCount;
                     int ic = output.TriangleIndices.Length;
+                    Assert.GreaterOrEqual(vc, 0, "the band cannot claim more vertices than the layer has");
                     for (int i = 0; i < vc; i++)
                     {
                         vertexBytes.AddRange(BitConverter.GetBytes(output.TileVertices[i].x));
@@ -212,7 +220,14 @@ namespace MapRenderer.Tests.Tiles
                         upBytes.AddRange(BitConverter.GetBytes(output.VertexUp[i].z));
                         featBytes.AddRange(BitConverter.GetBytes(output.VertexFeatureIdx[i]));
                     }
-                    for (int i = 0; i < ic; i++) idxBytes.AddRange(BitConverter.GetBytes(output.TriangleIndices[i]));
+                    for (int i = 0; i + 2 < ic; i += 3)
+                    {
+                        if (output.TriangleIndices[i] >= vc || output.TriangleIndices[i + 1] >= vc || output.TriangleIndices[i + 2] >= vc)
+                            continue;
+                        idxBytes.AddRange(BitConverter.GetBytes(output.TriangleIndices[i]));
+                        idxBytes.AddRange(BitConverter.GetBytes(output.TriangleIndices[i + 1]));
+                        idxBytes.AddRange(BitConverter.GetBytes(output.TriangleIndices[i + 2]));
+                    }
                 }
                 finally { output.Dispose(); }
             }

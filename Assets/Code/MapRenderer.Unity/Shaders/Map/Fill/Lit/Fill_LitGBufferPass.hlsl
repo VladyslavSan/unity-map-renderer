@@ -36,6 +36,10 @@ struct Attributes
     float2 texcoord     : TEXCOORD0;
     float2 staticLightmapUV   : TEXCOORD1;
     float2 dynamicLightmapUV  : TEXCOORD2;
+    // [MAP DELTA] boundary band (dirEast, dirNorth, side). TEXCOORD3 and no lower slot: 1 and 2 are
+    // already claimed by the lightmap UVs above, and a TEXCOORDn semantic binds to the MESH's attribute
+    // index, so a mis-slotted stream would silently feed one of those instead of failing to compile.
+    float3 band         : TEXCOORD3;
     // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
     float4 color        : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -77,6 +81,9 @@ struct Varyings
     // [MAP DELTA S12] Per-vertex baked color (data-driven dimension).
     // TEXCOORD11 is free in this pass; TEXCOORD10 is unused but skip it to avoid potential collisions.
     half4 vColor                    : TEXCOORD11;
+
+    // [MAP DELTA] Outward boundary band coordinate; TEXCOORD12 is free in this pass.
+    float side                      : TEXCOORD12;
 
     float4 positionCS               : SV_POSITION;
     UNITY_VERTEX_INPUT_INSTANCE_ID
@@ -158,7 +165,7 @@ Varyings LitGBufferPassVertex(Attributes input)
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
     // [MAP DELTA] Apply per-layer vertex modification before position transform.
-    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS);
+    MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS, input.band, output.side);
 
     VertexPositionInputs vertexInput = GetVertexPositionInputs(input.positionOS.xyz);
 
@@ -216,6 +223,15 @@ GBufferFragOutput LitGBufferPassFragment(Varyings input)
 {
     UNITY_SETUP_INSTANCE_ID(input);
     UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(input);
+
+    // [MAP DELTA] The outward boundary band is clipped OUT of every depth-writing pass. A coverage-0 band
+    // fragment under this pass's hardcoded ZWrite On would still write depth and cast a shadow, so the
+    // depth prepass and the shadow silhouette stay exactly the hard geometry's — not a screen-space skirt
+    // half a pixel wide. Clipping on `side` rather than on coverage is what keeps that bit-exact.
+    // Consequence, recorded: a fill shaded through the DEFERRED GBuffer path therefore gets no boundary
+    // antialiasing. Inert in the shipped configuration (Renderer.asset is Forward+, so this pass does not
+    // run); the discriminator for whoever changes it is exactly that setting.
+    clip(input.side > 0.0 ? -1.0 : 1.0);
 
 #if defined(_PARALLAXMAP)
     #if defined(REQUIRES_TANGENT_SPACE_VIEW_DIR_INTERPOLATOR)
