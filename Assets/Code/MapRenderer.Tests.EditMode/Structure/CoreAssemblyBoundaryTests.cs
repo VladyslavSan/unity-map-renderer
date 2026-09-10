@@ -67,9 +67,17 @@ namespace MapRenderer.Tests.Structure
             // ── Clause 2: no source file under Core uses Unity.Collections in CODE.
             string coreRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Core");
             string[] coreFiles = Directory.GetFiles(coreRoot, "*.cs", SearchOption.AllDirectories);
-            Assert.Greater(coreFiles.Length, 100,
-                "precondition: the Core scan must visit a real corpus (>100 .cs files); a scan that visited " +
-                "none would report 'no offenders' just as loudly");
+            // Not a file-count floor: Core is a legacy assembly the roadmap is deliberately shrinking
+            // (ARCHITECTURE.md §2), so a threshold here would eventually fail a SUCCESSFUL migration and
+            // invite lowering the number, which quietly weakens this fence. Non-vacuity only needs "the
+            // scan actually visited files" — the Jobs positive control below already proves the matcher
+            // can see Unity.Collections when it's really there; this precondition covers the one hazard
+            // that control cannot: coreRoot resolving to an empty (or wrong) directory, which would make
+            // the "no offenders" result below true for the wrong reason.
+            Assert.IsNotEmpty(coreFiles,
+                "precondition: the Core scan must have visited at least one .cs file — a scan that visited " +
+                "none would report 'no offenders' just as loudly, and the Jobs positive control does not " +
+                "cover this (it scans a different directory)");
 
             var offenders = new List<string>();
             foreach (string file in coreFiles)
