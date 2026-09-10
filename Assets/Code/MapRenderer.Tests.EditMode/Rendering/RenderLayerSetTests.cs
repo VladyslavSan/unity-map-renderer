@@ -276,7 +276,7 @@ namespace MapRenderer.Tests.Rendering
             int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
-                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex);
+                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex, out _);
                 if (sl.LayerType == StyleLayerType.Raster)
                 {
                     Assert.IsNull(layer, $"'{sl.Id}' (raster) is genuinely unpainted — no slot.");
@@ -300,7 +300,7 @@ namespace MapRenderer.Tests.Rendering
             int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
-                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex);
+                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, 0.0, drawIndex, out _);
                 switch (sl)
                 {
                     case Symbol.StyleLayer:

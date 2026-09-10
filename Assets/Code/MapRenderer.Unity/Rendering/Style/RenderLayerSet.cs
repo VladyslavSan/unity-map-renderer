@@ -33,6 +33,12 @@ namespace MapRenderer.Unity.Rendering.Style
     {
         private readonly List<IRenderLayer> _layers = new List<IRenderLayer>(16);
 
+        /// <summary>Style layers the last <see cref="Build"/> skipped, with why (UMR-116). Bounded to style
+        /// load exactly like <see cref="_layers"/> — control-plane, not data-plane (rebuilt once per
+        /// restyle, never touched per tile or per frame) — so a plain managed list is correct here; see
+        /// docs/conventions-short.md, "New data-plane code is born native", for the discriminator.</summary>
+        private readonly List<SkippedLayer> _skippedLayers = new List<SkippedLayer>();
+
         /// <summary>The shared Hierarchy parent for the layers' scene GameObjects (the symbol presenters and
         /// the background quad). Visible + inspectable, but <see cref="HideFlags.DontSave"/> — a runtime
         /// artifact, never serialised into a scene or build — mirroring the GameObject tile backend's
@@ -63,6 +69,11 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>Snapshot copy for an async mesh-build task (so the list can't mutate mid-flight).</summary>
         public IRenderLayer[] SnapshotLayers() => _layers.ToArray();
 
+        /// <summary>The style-load compatibility summary (UMR-116): every layer the last <see cref="Build"/>
+        /// skipped, with its reason. Rebuilt from scratch on every <see cref="Build"/>, including a
+        /// restyle — an old style's skips stop applying the moment a new style replaces it.</summary>
+        public IReadOnlyList<SkippedLayer> SkippedLayers => _skippedLayers;
+
         /// <summary>
         /// Builds the render layers from <paramref name="style"/>. Draw order IS the style's declared layer
         /// order (MapLibre painter's algorithm): walk <c>style.Layers</c> ONCE and assign each a queue BAND
@@ -75,12 +86,13 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <see cref="SymbolRenderLayer.Create"/>, since the icon has no Build-time free ride).
         /// The list contains ALL painted layers — fill, line, symbol, background — with
         /// <c>index == DrawIndex == draw order == material index</c>; every slot is material-bearing when
-        /// its base material is configured (symbol as of E2/D11, background as of E3). Only genuinely
-        /// unpainted/unsupported types (raster, circle, unknown) and layers whose material set is
-        /// unconfigured take no slot. Disposes
-        /// any previously-built layers first (via
-        /// <see cref="ClearLayers"/> — NOT <see cref="Dispose"/>: a restyle calls this repeatedly over the
-        /// object's life, so the teardown must not be gated by the once-only disposed guard).
+        /// its base material is configured (symbol as of E2/D11, background as of E3). A layer that takes no
+        /// slot — an unsupported kind, an unconfigured material, or a by-design skip (a source-less symbol
+        /// layer) — is recorded in <see cref="SkippedLayers"/> with which, instead of silently dropped
+        /// (UMR-116; see <see cref="LayerSkipReason"/> for the three reasons). Disposes any previously-built
+        /// layers AND clears the previous compatibility summary first (via <see cref="ClearLayers"/> — NOT
+        /// <see cref="Dispose"/>: a restyle calls this repeatedly over the object's life, so the teardown
+        /// must not be gated by the once-only disposed guard).
         /// </summary>
         public void Build(StyleDocument style, double initialZoom, Materials.MapMaterialSet settings = null)
         {
@@ -93,8 +105,15 @@ namespace MapRenderer.Unity.Rendering.Style
             int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
-                IRenderLayer layer = RenderLayerFactory.Create(sl, settings, initialZoom, drawIndex, _root.transform);
-                if (layer == null) continue; // genuinely unpainted, or unconfigured material — no slot
+                IRenderLayer layer = RenderLayerFactory.Create(
+                    sl, settings, initialZoom, drawIndex, out LayerSkipReason skipReason, _root.transform);
+                if (layer == null)
+                {
+                    // Unsupported kind, unconfigured material, or genuinely unpainted by design — no slot;
+                    // recorded instead of silently dropped (UMR-116).
+                    _skippedLayers.Add(new SkippedLayer { Id = sl.Id, RawType = sl.RawType, Reason = skipReason });
+                    continue;
+                }
 
                 if (layer.Material != null) // null only when that slot's own base material is unconfigured — skip the queue write
                     layer.Material.renderQueue = LayerDrawOrder.QueueFor(drawIndex, layer.MaterialSubSlot);
@@ -163,6 +182,7 @@ namespace MapRenderer.Unity.Rendering.Style
             for (int i = 0; i < _layers.Count; i++)
                 _layers[i].Dispose();
             _layers.Clear();
+            _skippedLayers.Clear(); // the compatibility summary belongs to the CURRENT style only
             // Drop the memo with the layers it described: the replacements start unresolved, so a sheet that
             // arrived before this restyle must be pushed again rather than compared away as "unchanged".
             _spriteAtlas   = null;
@@ -180,5 +200,22 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>Destroys a per-layer <see cref="Material"/> instance (play → Destroy, edit → DestroyImmediate).
         /// Shared by the <see cref="IRenderLayer"/> implementations, which own their materials.</summary>
         internal static void DestroyMaterialInstance(Material mat) => mat.DestroySafely();
+    }
+
+    /// <summary>One entry of <see cref="RenderLayerSet.SkippedLayers"/> — a style layer that took no draw
+    /// slot, and why (UMR-116).</summary>
+    internal readonly struct SkippedLayer
+    {
+        /// <summary>The skipped layer's <see cref="StyleLayer.Id"/> (Style Spec <c>id</c>; may be null — see
+        /// that field's doc).</summary>
+        public string Id { get; init; }
+
+        /// <summary>The skipped layer's raw <c>type</c> string (<see cref="StyleLayer.RawType"/>), e.g.
+        /// <c>"circle"</c> — reported verbatim rather than <see cref="StyleLayerType"/> so an unrecognized
+        /// type still names itself instead of reading as <c>Unknown</c>.</summary>
+        public string RawType { get; init; }
+
+        /// <summary>Why <see cref="RenderLayerFactory"/> returned no layer for this entry.</summary>
+        public LayerSkipReason Reason { get; init; }
     }
 }

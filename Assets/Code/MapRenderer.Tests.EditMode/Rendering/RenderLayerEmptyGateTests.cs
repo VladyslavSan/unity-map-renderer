@@ -109,7 +109,7 @@ namespace MapRenderer.Tests.Rendering
                 ""layers"": [ { ""id"": ""f"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""sl"",
                                 ""paint"": { ""fill-color"": ""#ff0000"" } } ]
             }");
-            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0);
+            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _);
             try { AssertEmptyThenRealGate((ITileMeshRenderLayer)created, SquareFeature()); }
             finally { created?.Dispose(); }
         }
@@ -123,7 +123,7 @@ namespace MapRenderer.Tests.Rendering
                 ""layers"": [ { ""id"": ""fe"", ""type"": ""fill-extrusion"", ""source"": ""s"", ""source-layer"": ""sl"",
                                 ""paint"": { ""fill-extrusion-height"": 30 } } ]
             }");
-            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0);
+            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _);
             try { AssertEmptyThenRealGate((ITileMeshRenderLayer)created, SquareFeature()); }
             finally { created?.Dispose(); }
         }
@@ -140,7 +140,7 @@ namespace MapRenderer.Tests.Rendering
                 ""layers"": [ { ""id"": ""l"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""sl"",
                                 ""paint"": { ""line-color"": ""#000000"" } } ]
             }");
-            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0);
+            var created = RenderLayerFactory.Create(style.Layers[0], Settings(), 0.0, drawIndex: 0, reason: out _);
             try { AssertEmptyThenRealGate((ITileMeshRenderLayer)created, LineFeature()); }
             finally { created?.Dispose(); }
         }

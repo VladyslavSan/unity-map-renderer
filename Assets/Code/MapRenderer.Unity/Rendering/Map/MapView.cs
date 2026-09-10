@@ -263,6 +263,7 @@ namespace MapRenderer.Unity.Rendering.Map
             TileManager.CurrentStyle = new Tile.StyleToken(StyleId);
 
             Layers.Build(_style, Camera.CurrentProperties.Zoom, materialSet);
+            LogSkippedLayers(Layers.SkippedLayers); // UMR-116: once per style load, never per tile/frame
             // S107: Build seeds every layer's px uniforms at dpr 1. SetStyle is async — its continuation can
             // resume AFTER this frame's LateUpdate has already run — and on a RESTYLE the previous tiles are
             // still loaded, so the newly-built layers would draw them once at the seeded ratio (roads and
@@ -288,6 +289,26 @@ namespace MapRenderer.Unity.Rendering.Map
                 _symbolStyleLayers); // S105: group symbol layers + (re)build the shared glyph pipeline
 
             TileManager.SetSources(specs, _config.Backend);
+        }
+
+        /// <summary>UMR-116: warns once, naming every layer <see cref="Style.RenderLayerSet.Build"/> skipped
+        /// for an actual compatibility reason (unsupported kind / unconfigured material). A layer skipped as
+        /// <see cref="Style.LayerSkipReason.GenuinelyUnpainted"/> (e.g. a source-less symbol layer) is
+        /// by-design, not a gap, and stays silent — see that enum member's own doc. Internal (not private):
+        /// a test-assembly caller exercises the GenuinelyUnpainted suppression directly, via
+        /// InternalsVisibleTo (no production caller besides <c>SetStyle</c>).</summary>
+        internal static void LogSkippedLayers(IReadOnlyList<Style.SkippedLayer> skipped)
+        {
+            var problems = new List<string>();
+            for (int i = 0; i < skipped.Count; i++)
+            {
+                Style.SkippedLayer s = skipped[i];
+                if (s.Reason == Style.LayerSkipReason.GenuinelyUnpainted) continue;
+                problems.Add($"'{s.Id}' ({s.RawType}): {s.Reason}");
+            }
+            if (problems.Count > 0)
+                Debug.LogWarning(
+                    $"[MapView.SetStyle] {problems.Count} style layer(s) not rendered: {string.Join(", ", problems)}");
         }
 
         /// <summary>

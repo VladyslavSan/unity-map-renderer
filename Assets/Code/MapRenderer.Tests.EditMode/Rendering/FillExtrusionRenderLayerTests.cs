@@ -65,7 +65,7 @@ namespace MapRenderer.Tests.Rendering
             StyleLayer layer = style.Layers[0];
 
             const int drawIndex = 3;
-            IRenderLayer created = RenderLayerFactory.Create(layer, settings, 0.0, drawIndex);
+            IRenderLayer created = RenderLayerFactory.Create(layer, settings, 0.0, drawIndex, out _);
             try
             {
                 Assert.IsNotNull(created, "a fill-extrusion layer with a configured material set must produce a render layer.");
