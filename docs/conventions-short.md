@@ -191,18 +191,36 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
 
 ## Documentation & tests
 
-- **A short XML doc on EVERY member; nothing that restates the body.**
-  - Floor (not optional): a one/two-line `<summary>` + a `<param>` per parameter, plus `<returns>` when the
-    summary does not answer it.
-  - That floor is normally also the ceiling — past it, write prose only for a **non-local invariant**
-    (a protocol/lifetime/ordering fact no single body reveals), a **non-obvious why**, or a **limitation no
-    tooth can observe**.
+- **A short XML doc on EVERY member; nothing that restates the body. Hard line limits below.**
+  - **Write in [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/).** One idea per
+    sentence, active voice, present tense, a plain approved word over a clever one. No words that perform
+    rigour instead of delivering it — *deliberately, by construction, precisely, exactly as much, surfaced
+    loudly, note that*. Delete any sentence a reader would lose no FACT by losing.
+  - **Class/method `<summary>`: 5 lines MAX.** Exceptions allowed, but must be **highly justified** — and
+    in most cases the detail belongs in `docs/*-design.md` instead, with at most a pointer here.
+  - **`<param>`/`<returns>`: 2 lines MAX each.**
+  - **Inline `//` comments: 2 lines MAX.** Same exception rule, same remark: over two lines is nearly always
+    narrating the code below, recounting history, or arguing a decision that belongs in a design doc.
+  - Every member gets a `<summary>`. Add `<param>`/`<returns>` when the name and type do not already answer
+    it — not as ceremony on every signature.
+  - Past the limits, prose is allowed only for a **non-local invariant** (a protocol/lifetime/ordering fact
+    no single body reveals), a **non-obvious why**, or a **limitation no tooth can observe** — and the
+    exemption must be stated in **ONE plain sentence**. The exemption licenses the FACT, never the verbosity.
   - **`<see cref>` points OUTWARD** — counterpart, matching release site, the caller that establishes the
     precondition — **never at a callee the body already names** (use `<c>Name</c>` for an incidental mention,
     which creates no reference).
   - Design narrative, rationale and rejected alternatives live in `docs/*-design.md`, not in the file.
-  - **Gate:** past summary+params, a doc longer than its member must name which of the three reasons applies,
-    or be cut back to the floor.
+  - **Gate:** any block over its limit must name which of the three reasons applies, in one sentence, or be
+    cut back. A block being exempt from CUTTING never exempts it from being READABLE.
+  - Two anti-patterns worth naming: a **self-cancelling contrast** ("X has this hazard; Y does not, but Y
+    is just as bad") resolves to nothing — state the hazard once; and **prose restating a `<param>` or
+    `<exception>` tag** that is already present is pure duplication.
+  - **No repo-wide boilerplate in a file-level doc.** A provenance note earns its place ONLY when it names a
+    source the reader would otherwise have to guess — `ArabicJoining`'s "from PUBLIC Unicode data files",
+    `EarthConstants`' "(IAU/WGS-84)", `Color`'s "no MapLibre output to match, so no parity oracle". A bare
+    "Clean-room: no MapLibre source read." names nothing, is unverifiable, and **implies the files without
+    it are not clean-room** — the opposite of what it intends. The claim is already authoritative in
+    `ARCHITECTURE.md` § "Clean-room hygiene" and `THIRD-PARTY-NOTICES.txt`; one home is enough.
 
 - **Test code must not bloat the production codebase.** A member that exists solely for a test does not belong
   on the production class.

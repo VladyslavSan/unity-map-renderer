@@ -532,10 +532,42 @@ type and parameter level.
 
 ### Comments: a short doc on every member, nothing that restates the body
 
-**Every member carries an XML doc, and it is short.** A one- or two-line `<summary>`, plus a `<param>` for
-each parameter — plain and simple. A `<returns>` when the summary does not already answer it. This is the
-floor and it is not optional: a reader should learn what a member is for, and what its arguments mean,
-without opening the body.
+**Every member carries an XML doc, and it is short.** A reader should learn what a member is for, and what
+its arguments mean, without opening the body. Add a `<param>` or `<returns>` when the name and type do not
+already answer it — not as ceremony on every signature.
+
+**These are limits, not guidance:**
+
+| block | max |
+|---|---|
+| class / method `<summary>` | **5 lines** |
+| `<param>` / `<returns>`, each | **2 lines** |
+| inline `//` comment | **2 lines** |
+
+Exceptions are allowed but **must be highly justified**, and in most cases the detail belongs in a
+`docs/*-design.md` instead — with at most a pointer left at the code. An exemption licenses the FACT, never
+the verbosity: state it in one plain sentence.
+
+**Write in [ASD-STE100 Simplified Technical English](https://www.asd-ste100.org/).** One idea per sentence,
+active voice, present tense, a plain word over a clever one. Cut anything that performs rigour instead of
+delivering it — *deliberately*, *by construction*, *precisely*, *exactly as much*, *surfaced loudly*, *note
+that*. The test for any sentence: **would a reader lose a FACT if it were deleted?** If not, delete it.
+
+Three patterns that fail the test every time, all found in this codebase:
+
+- **Self-cancelling contrast** — "X has this hazard; Y does not share it, but a hang there is exactly as
+  much a bug." A paragraph that resolves to nothing. State the hazard once.
+- **Restating a tag** — prose in the `<summary>` re-explaining what the `<param>` or `<exception>` tag
+  immediately below already says, usually with adverbs added.
+- **Repo-wide boilerplate in a file-level doc** — a bare "Clean-room: no MapLibre source read." appears in
+  dozens of files. It names no source, nothing verifies it, and repeating it in *some* files implies the
+  others are not clean-room. A provenance note earns its place only when it names a source the reader would
+  otherwise have to guess: `ArabicJoining`'s "from PUBLIC Unicode data files", `EarthConstants`'
+  "(IAU/WGS-84)", `Color`'s "there is no MapLibre output to match". The repo-wide claim already lives in
+  `ARCHITECTURE.md` § "Clean-room hygiene" and `THIRD-PARTY-NOTICES.txt`; one home is enough.
+
+A block being exempt from being CUT never exempts it from being READABLE — a 20-line doc that survives on a
+genuine invariant is still wrong if 16 of those lines are exposition.
 
 **It is normally also the ceiling.** Past the summary and the params, add prose only for something the body
 *cannot* say. Three things qualify, and they are the only three:
