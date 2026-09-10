@@ -62,7 +62,7 @@ namespace MapRenderer.Tests
             var styleLayerJson = BuildStyleLayerJson(layerName, fillColorExpression);
             var style = StyleParser.Parse(styleLayerJson);
             var fillStyleLayer = style.Layers[0];
-            var paint = new Fill.PaintProperties(fillStyleLayer);
+            var paint = ((Fill.StyleLayer)fillStyleLayer).Paint;
 
             var mvtLayer = SourceLayerResolver.ResolveTileLayer(fillStyleLayer, mvtTile);
             if (mvtLayer == null)

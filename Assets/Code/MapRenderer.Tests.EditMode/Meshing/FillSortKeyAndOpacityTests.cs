@@ -93,9 +93,9 @@ namespace MapRenderer.Tests.Meshing
 
             // Distinct colours per feature via a data-driven expression keyed on `name`, so the rasterization
             // order read off the index buffer identifies which feature paints when.
-            var paint = new Fill.PaintProperties(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
                 ""bottom"", ""#ff0000"", ""middle"", ""#00ff00"", ""top"", ""#0000ff"", ""#ffffff""]}"));
-            var layout = new Fill.LayoutProperties(JsonParser.Parse(@"{""fill-sort-key"": [""get"", ""sk""]}"));
+            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(@"{""fill-sort-key"": [""get"", ""sk""]}"));
 
             Mesh mesh = TestTileMeshBuilder.BuildFill(
                 features, paint, zoom: 0.0, Extent, new TileId { Z = 0, X = 0, Y = 0 }, null, layout);
@@ -125,9 +125,9 @@ namespace MapRenderer.Tests.Meshing
                 Feature(0, 0, "first",  sortKey: 4.0),
                 Feature(0, 0, "second", sortKey: 4.0),
             };
-            var paint = new Fill.PaintProperties(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
                 ""first"", ""#ff0000"", ""second"", ""#00ff00"", ""#ffffff""]}"));
-            var layout = new Fill.LayoutProperties(JsonParser.Parse(@"{""fill-sort-key"": [""get"", ""sk""]}"));
+            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(@"{""fill-sort-key"": [""get"", ""sk""]}"));
 
             Mesh mesh = TestTileMeshBuilder.BuildFill(
                 features, paint, zoom: 0.0, Extent, new TileId { Z = 0, X = 0, Y = 0 }, null, layout);
@@ -151,14 +151,14 @@ namespace MapRenderer.Tests.Meshing
                 Feature(0, 0, "first",  sortKey: 99.0), // key present in the DATA but not referenced by the style
                 Feature(0, 0, "second", sortKey: 1.0),
             };
-            var paint = new Fill.PaintProperties(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
                 ""first"", ""#ff0000"", ""second"", ""#00ff00"", ""#ffffff""]}"));
 
             Mesh withoutLayout = TestTileMeshBuilder.BuildFill(
                 features, paint, zoom: 0.0, Extent, new TileId { Z = 0, X = 0, Y = 0 });
             Mesh withDefaultLayout = TestTileMeshBuilder.BuildFill(
                 features, paint, zoom: 0.0, Extent, new TileId { Z = 0, X = 0, Y = 0 }, null,
-                new Fill.LayoutProperties((JsonValue)null));
+                Fill.LayoutProperties.Parse((JsonValue)null));
             try
             {
                 var noLayout  = PaintOrderColorRuns(withoutLayout);
@@ -201,9 +201,9 @@ namespace MapRenderer.Tests.Meshing
                 Feature(500,  500,  "mid",  sortKey: 2.0),
                 Feature(0,    0,    "near", sortKey: 1.0),
             };
-            var paint = new Fill.PaintProperties(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
                 ""near"", ""#ff0000"", ""mid"", ""#00ff00"", ""far"", ""#0000ff"", ""#ffffff""]}"));
-            var layout = new Fill.LayoutProperties(JsonParser.Parse(@"{""fill-sort-key"": [""get"", ""sk""]}"));
+            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(@"{""fill-sort-key"": [""get"", ""sk""]}"));
 
             Mesh mesh = TestTileMeshBuilder.BuildFill(
                 features, paint, zoom: 0.0, Extent, new TileId { Z = 0, X = 0, Y = 0 }, null, layout);
@@ -266,7 +266,7 @@ namespace MapRenderer.Tests.Meshing
                     geometry: null),                     // a Polygon with NO geometry, between the two drawn ones
                 Feature(500, 500, "second", sortKey: 0.0),
             };
-            var paint = new Fill.PaintProperties(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-color"": [""match"", [""get"", ""name""],
                 ""first"", ""#ff0000"", ""gap"", ""#00ff00"", ""second"", ""#0000ff"", ""#ffffff""]}"));
 
             Mesh mesh = TestTileMeshBuilder.BuildFill(
@@ -297,7 +297,7 @@ namespace MapRenderer.Tests.Meshing
                 Feature(0,   0, "a", sortKey: 0.0, opacity: 0.25),
                 Feature(200, 0, "b", sortKey: 0.0, opacity: 0.75),
             };
-            var paint = new Fill.PaintProperties(JsonParser.Parse(
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(
                 @"{""fill-color"": ""#ffffff"", ""fill-opacity"": [""get"", ""op""]}"));
 
             Assert.IsTrue(paint.Opacity.DependsOnFeature, "precondition: this expression must be data-driven");
@@ -324,7 +324,7 @@ namespace MapRenderer.Tests.Meshing
             // The double-apply guard's other half: a constant/zoom opacity rides the _Opacity uniform, so it
             // must NOT also appear in vertex alpha or the shader would multiply it in twice.
             var features = new List<IFeature> { Feature(0, 0, "a", sortKey: 0.0) };
-            var paint = new Fill.PaintProperties(JsonParser.Parse(
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(
                 @"{""fill-color"": ""#ffffff"", ""fill-opacity"": 0.5}"));
 
             Assert.IsFalse(paint.Opacity.DependsOnFeature, "precondition: constant opacity");
@@ -346,7 +346,7 @@ namespace MapRenderer.Tests.Meshing
         {
             // Both dimensions are real: fill-color may carry its own alpha, and fill-opacity scales it.
             var features = new List<IFeature> { Feature(0, 0, "a", sortKey: 0.0, opacity: 0.5) };
-            var paint = new Fill.PaintProperties(JsonParser.Parse(
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(
                 @"{""fill-color"": ""rgba(255,255,255,0.4)"", ""fill-opacity"": [""get"", ""op""]}"));
 
             Mesh mesh = TestTileMeshBuilder.BuildFill(

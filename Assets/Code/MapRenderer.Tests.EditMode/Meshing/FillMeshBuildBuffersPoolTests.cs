@@ -66,9 +66,9 @@ namespace MapRenderer.Tests.Meshing
         }
 
         private static readonly Fill.PaintProperties Paint =
-            new Fill.PaintProperties(JsonParser.Parse(@"{""fill-color"": ""#ff0000""}"));
+            Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-color"": ""#ff0000""}"));
         private static readonly Fill.LayoutProperties SortKeyLayout =
-            new Fill.LayoutProperties(JsonParser.Parse(@"{""fill-sort-key"": [""get"", ""sk""]}"));
+            Fill.LayoutProperties.Parse(JsonParser.Parse(@"{""fill-sort-key"": [""get"", ""sk""]}"));
 
         /// <summary>
         /// Reuse-by-identity tooth (meter-independent — <c>GC.GetAllocatedBytesForCurrentThread()</c> is dead in

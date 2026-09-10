@@ -117,16 +117,17 @@ namespace MapRenderer.Tests.Meshing
                 "\"B\",[\"rgba\",50,50,200,1]," +
                 "[\"rgba\",128,128,128,1]]";
 
-            var paintLayer = new StyleLayer
+            var paintLayer = new Line.StyleLayer
             {
                 Id          = "test-geolines",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
-                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse(
-                    $"{{\"line-color\":{matchExpr},\"line-width\":4}}"),
+                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
+                    $"{{\"line-color\":{matchExpr},\"line-width\":4}}")),
+                Layout      = Line.LayoutProperties.Parse(null),
             };
-            var paint = new Line.PaintProperties(paintLayer);
-            var layout = new Line.LayoutProperties(paintLayer);
+            var paint = paintLayer.Paint;
+            var layout = paintLayer.Layout;
 
             var mda = Mesh.AllocateWritableMeshData(1);
             // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
@@ -179,16 +180,17 @@ namespace MapRenderer.Tests.Meshing
             // Constant rgba literal: same for all features regardless of properties.
             const string constantExpr = "[\"rgba\",100,150,200,1]";
 
-            var paintLayer = new StyleLayer
+            var paintLayer = new Line.StyleLayer
             {
                 Id          = "test-constant",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
-                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse(
-                    $"{{\"line-color\":{constantExpr},\"line-width\":4}}"),
+                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
+                    $"{{\"line-color\":{constantExpr},\"line-width\":4}}")),
+                Layout      = Line.LayoutProperties.Parse(null),
             };
-            var paint = new Line.PaintProperties(paintLayer);
-            var layout = new Line.LayoutProperties(paintLayer);
+            var paint = paintLayer.Paint;
+            var layout = paintLayer.Layout;
 
             var mda = Mesh.AllocateWritableMeshData(1);
             // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
@@ -256,17 +258,18 @@ namespace MapRenderer.Tests.Meshing
                 "\"thick\",10.0," +
                 "2.0]";
 
-            var paintLayer = new StyleLayer
+            var paintLayer = new Line.StyleLayer
             {
                 Id          = "test-dd-width",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
                 // line-width is data-driven (Feature kind); line-color is constant.
-                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse(
-                    $"{{\"line-width\":{widthExpr}}}"),
+                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
+                    $"{{\"line-width\":{widthExpr}}}")),
+                Layout      = Line.LayoutProperties.Parse(null),
             };
-            var paint = new Line.PaintProperties(paintLayer);
-            var layout = new Line.LayoutProperties(paintLayer);
+            var paint = paintLayer.Paint;
+            var layout = paintLayer.Layout;
 
             // Confirm the paint classified WidthKind as Feature (gate for the bake).
             Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.WidthKind,
@@ -325,17 +328,18 @@ namespace MapRenderer.Tests.Meshing
                 "\"opaque\",1.0," +
                 "1.0]";
 
-            var paintLayer = new StyleLayer
+            var paintLayer = new Line.StyleLayer
             {
                 Id          = "test-dd-opacity",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
                 // line-opacity is data-driven (Feature kind); other properties at defaults.
-                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse(
-                    $"{{\"line-opacity\":{opacityExpr}}}"),
+                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
+                    $"{{\"line-opacity\":{opacityExpr}}}")),
+                Layout      = Line.LayoutProperties.Parse(null),
             };
-            var paint = new Line.PaintProperties(paintLayer);
-            var layout = new Line.LayoutProperties(paintLayer);
+            var paint = paintLayer.Paint;
+            var layout = paintLayer.Layout;
 
             // Confirm the paint classified OpacityKind as Feature.
             Assert.AreEqual(MapRenderer.Core.Expressions.ExpressionKind.Feature, paint.OpacityKind,
@@ -399,16 +403,16 @@ namespace MapRenderer.Tests.Meshing
             var feature  = new DictionaryFeature(geometryType: TileGeometryType.LineString, geometry: commands);
             var features = new List<IFeature> { feature };
 
-            var styleLayer = new StyleLayer
+            var styleLayer = new Line.StyleLayer
             {
                 Id          = "test-miter-limit",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "test",
-                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse("{\"line-width\":4}"),
-                LayoutJson  = MapRenderer.Core.Json.JsonParser.Parse("{\"line-miter-limit\":1.0}"),
+                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"line-width\":4}")),
+                Layout      = Line.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"line-miter-limit\":1.0}")),
             };
-            var paint  = new Line.PaintProperties(styleLayer);
-            var layout = new Line.LayoutProperties(styleLayer);
+            var paint  = styleLayer.Paint;
+            var layout = styleLayer.Layout;
 
             Assert.AreEqual(1.0, layout.MiterLimit, 1e-9,
                 "Precondition: layout must parse the tight miter-limit — otherwise this tooth checks nothing.");
@@ -447,17 +451,17 @@ namespace MapRenderer.Tests.Meshing
             {
                 var feature  = new DictionaryFeature(geometryType: TileGeometryType.LineString, geometry: commands);
                 var features = new List<IFeature> { feature };
-                var styleLayer = new StyleLayer
+                var styleLayer = new Line.StyleLayer
                 {
                     Id          = $"test-round-limit-{roundLimit}",
                     LayerType   = StyleLayerType.Line,
                     SourceLayer = "test",
-                    PaintJson   = MapRenderer.Core.Json.JsonParser.Parse("{\"line-width\":4}"),
-                    LayoutJson  = MapRenderer.Core.Json.JsonParser.Parse(
-                        $"{{\"line-join\":\"round\",\"line-round-limit\":{roundLimit}}}"),
+                    Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"line-width\":4}")),
+                    Layout      = Line.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
+                        $"{{\"line-join\":\"round\",\"line-round-limit\":{roundLimit}}}")),
                 };
-                var paint  = new Line.PaintProperties(styleLayer);
-                var layout = new Line.LayoutProperties(styleLayer);
+                var paint  = styleLayer.Paint;
+                var layout = styleLayer.Layout;
                 Assert.AreEqual(roundLimit, layout.RoundLimit, 1e-9,
                     "Precondition: layout must parse the requested round-limit — otherwise this straddle " +
                     "checks nothing.");

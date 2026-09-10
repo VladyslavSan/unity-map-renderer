@@ -144,7 +144,7 @@ namespace MapRenderer.Tests.Meshing
         }
 
         private static FillExtrusion.PaintProperties Paint()
-            => new FillExtrusion.PaintProperties(JsonParser.Parse("{\"fill-extrusion-height\":[\"get\",\"h\"]}"));
+            => FillExtrusion.PaintProperties.Parse(JsonParser.Parse("{\"fill-extrusion-height\":[\"get\",\"h\"]}"));
 
         /// <summary>
         /// Fixture-authoring sanity, independent of anything the graph or the managed pipeline computes:

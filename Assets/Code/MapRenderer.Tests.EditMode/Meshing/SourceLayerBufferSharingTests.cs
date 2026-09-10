@@ -101,16 +101,18 @@ namespace MapRenderer.Tests.Meshing
             public void CompleteOnMain(CancellationToken ct) { }
         }
 
-        private static StyleLayer Fill(string id, string sourceLayer) => new StyleLayer
+        private static MapRenderer.Core.Style.Fill.StyleLayer Fill(string id, string sourceLayer) => new MapRenderer.Core.Style.Fill.StyleLayer
         {
             Id = id, LayerType = StyleLayerType.Fill, Source = "s", SourceLayer = sourceLayer,
-            PaintJson = JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"),
+            Paint = MapRenderer.Core.Style.Fill.PaintProperties.Parse(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}")),
+            Layout = MapRenderer.Core.Style.Fill.LayoutProperties.Parse(null),
         };
 
         private static SymbolStyle.StyleLayer Symbol(string id, string sourceLayer) => new SymbolStyle.StyleLayer
         {
             Id = id, LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = sourceLayer,
-            LayoutJson = JsonParser.Parse("{\"text-field\":\"{NAME}\"}"),
+            Paint = SymbolStyle.PaintProperties.Parse(null),
+            Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"{NAME}\"}")),
         };
 
         [Test]

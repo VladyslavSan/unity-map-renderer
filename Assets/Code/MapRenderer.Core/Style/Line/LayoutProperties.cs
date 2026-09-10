@@ -21,7 +21,7 @@ namespace MapRenderer.Core.Style.Line
         /// <see cref="PropertyNames.JoinRound"/>/<see cref="PropertyNames.JoinBevel"/>; the tessellator
         /// consumes the enum directly.
         /// </summary>
-        public JoinType Join { get; }
+        public JoinType Join { get; init; }
 
         /// <summary>
         /// line-cap: how line endpoints are drawn. Default <see cref="CapType.Butt"/>.
@@ -29,46 +29,54 @@ namespace MapRenderer.Core.Style.Line
         /// <see cref="PropertyNames.CapRound"/>/<see cref="PropertyNames.CapSquare"/>; the tessellator
         /// consumes the enum directly.
         /// </summary>
-        public CapType Cap { get; }
+        public CapType Cap { get; init; }
 
         /// <summary>line-miter-limit: miter-to-bevel fallback threshold. Default 2. Units: ratio (1/cos(θ/2)).</summary>
-        public double MiterLimit { get; }
+        public double MiterLimit { get; init; }
 
         /// <summary>line-round-limit: round-to-miter fallback threshold. Default 1.05. Units: ratio.</summary>
-        public double RoundLimit { get; }
+        public double RoundLimit { get; init; }
 
-        /// <summary>Convenience: parse the layout properties from a style layer's <c>LayoutJson</c>.</summary>
-        /// <exception cref="System.ArgumentNullException">If <paramref name="layer"/> is null.</exception>
-        public LayoutProperties(MapRenderer.Core.Style.StyleLayer layer)
-            : this((layer ?? throw new System.ArgumentNullException(nameof(layer))).LayoutJson) { }
+        /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
+        private LayoutProperties() { }
 
-        /// <summary>Parse the line layout properties from the layer's <c>layout</c> sub-tree (may be null → defaults).</summary>
-        public LayoutProperties(JsonValue layout)
+        /// <summary>Parse the line layout properties from a layer's <c>layout</c> sub-tree.</summary>
+        /// <param name="layout">The raw <c>layout</c> JSON sub-tree, or <c>null</c> for all spec defaults.</param>
+        /// <returns>A fully-parsed, immutable carrier.</returns>
+        public static LayoutProperties Parse(JsonValue layout)
         {
             string joinStr = layout?.Get(PropertyNames.LineJoin)?.AsString(PropertyNames.JoinMiter) ?? PropertyNames.JoinMiter;
-            Join = ParseJoin(joinStr);
+            string capStr  = layout?.Get(PropertyNames.LineCap)?.AsString(PropertyNames.CapButt) ?? PropertyNames.CapButt;
 
-            string capStr = layout?.Get(PropertyNames.LineCap)?.AsString(PropertyNames.CapButt) ?? PropertyNames.CapButt;
-            Cap = ParseCap(capStr);
-
-            MiterLimit = layout?.Get(PropertyNames.LineMiterLimit)?.AsDouble(2.0)  ?? 2.0;
-            RoundLimit = layout?.Get(PropertyNames.LineRoundLimit)?.AsDouble(1.05) ?? 1.05;
+            return new LayoutProperties
+            {
+                Join       = ParseJoin(joinStr),
+                Cap        = ParseCap(capStr),
+                MiterLimit = layout?.Get(PropertyNames.LineMiterLimit)?.AsDouble(2.0)  ?? 2.0,
+                RoundLimit = layout?.Get(PropertyNames.LineRoundLimit)?.AsDouble(1.05) ?? 1.05,
+            };
         }
 
         // ── String → enum helpers (single source of truth; uses PropertyNames value consts) ──
 
         private static JoinType ParseJoin(string s)
         {
-            if (s == PropertyNames.JoinRound) return JoinType.Round;
-            if (s == PropertyNames.JoinBevel) return JoinType.Bevel;
-            return JoinType.Miter; // default (also the JoinMiter value)
+            return s switch
+            {
+                PropertyNames.JoinRound => JoinType.Round,
+                PropertyNames.JoinBevel => JoinType.Bevel,
+                _                       => JoinType.Miter
+            };
         }
 
         private static CapType ParseCap(string s)
         {
-            if (s == PropertyNames.CapRound)  return CapType.Round;
-            if (s == PropertyNames.CapSquare) return CapType.Square;
-            return CapType.Butt; // default (also the CapButt value)
+            return s switch
+            {
+                PropertyNames.CapRound  => CapType.Round,
+                PropertyNames.CapSquare => CapType.Square,
+                _                       => CapType.Butt
+            };
         }
     }
 }

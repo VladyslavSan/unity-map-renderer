@@ -49,13 +49,14 @@ namespace MapRenderer.Tests.Meshing
         private const uint NonDefaultExtent = 2048;
         private const uint DefaultExtent    = 4096;
 
-        private static Line.PaintProperties Paint() => new Line.PaintProperties(StyleLayer());
-        private static Line.LayoutProperties Layout() => new Line.LayoutProperties(StyleLayer());
+        private static Line.PaintProperties Paint() => StyleLayer().Paint;
+        private static Line.LayoutProperties Layout() => StyleLayer().Layout;
 
-        private static StyleLayer StyleLayer() => new StyleLayer
+        private static Line.StyleLayer StyleLayer() => new Line.StyleLayer
         {
             Id = "extent-probe", LayerType = StyleLayerType.Line, SourceLayer = "probe",
-            PaintJson = JsonParser.Parse("{\"line-color\":\"#ffffff\",\"line-width\":2}"),
+            Paint = Line.PaintProperties.Parse(JsonParser.Parse("{\"line-color\":\"#ffffff\",\"line-width\":2}")),
+            Layout = Line.LayoutProperties.Parse(null),
         };
 
         /// <summary>One three-point polyline, well inside the tile at BOTH extents (max coord 900 &lt; 2048).</summary>

@@ -23,26 +23,28 @@ namespace MapRenderer.Core.Style.Fill
         /// <para>Spec ordering: features sort <b>ascending</b>, and a feature with a HIGHER sort key appears
         /// ABOVE one with a lower key.</para>
         /// </summary>
-        public StyleProperty<float> SortKey { get; }
+        public StyleProperty<float> SortKey { get; init; }
 
         /// <summary>True when <c>fill-sort-key</c> was absent — every feature sorts equal, so the builder can
         /// skip the sort entirely and keep the source's declared feature order byte-for-byte.</summary>
-        public bool SortKeyIsDefault { get; }
+        public bool SortKeyIsDefault { get; init; }
 
-        /// <summary>Convenience: parse the layout properties from a style layer's <c>LayoutJson</c>.</summary>
-        /// <exception cref="System.ArgumentNullException">If <paramref name="layer"/> is null.</exception>
-        public LayoutProperties(MapRenderer.Core.Style.StyleLayer layer)
-            : this((layer ?? throw new System.ArgumentNullException(nameof(layer))).LayoutJson) { }
+        /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
+        private LayoutProperties() { }
 
-        /// <summary>Parse the fill layout properties from the layer's <c>layout</c> sub-tree (may be null →
-        /// spec defaults).</summary>
-        public LayoutProperties(JsonValue layout)
+        /// <summary>Parse the fill layout properties from a layer's <c>layout</c> sub-tree.</summary>
+        /// <param name="layout">The raw <c>layout</c> JSON sub-tree, or <c>null</c> for spec defaults.</param>
+        /// <returns>A fully-parsed, immutable carrier.</returns>
+        public static LayoutProperties Parse(JsonValue layout)
         {
             JsonValue sortKeyJson = layout?.Get(PropertyNames.FillSortKey);
-            SortKeyIsDefault = (sortKeyJson == null);
-            SortKey = sortKeyJson != null
-                ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
+            return new LayoutProperties
+            {
+                SortKeyIsDefault = (sortKeyJson == null),
+                SortKey = sortKeyJson != null
+                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(0f),
+            };
         }
     }
 }

@@ -103,7 +103,7 @@ namespace MapRenderer.Tests.Tiles
             var fakeDecoder = new FakeTileDecoder(fixtureTile);
 
             var styleLayer = new StyleLayer { Id = "fixture-fill", SourceLayer = FixtureSourceLayerName };
-            var paint = new Fill.PaintProperties(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
             var fillLayer = new FakeFillTileMeshRenderLayer(styleLayer, paint);
 
             var projection = new WebMercatorProjection();

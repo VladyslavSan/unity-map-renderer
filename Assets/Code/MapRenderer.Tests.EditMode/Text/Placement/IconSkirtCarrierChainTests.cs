@@ -188,7 +188,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Id = "points",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "points",
-                LayoutJson = JsonParser.Parse("{\"icon-image\":\"marker\",\"icon-size\":2}"),
+                Paint = SymbolStyle.PaintProperties.Parse(null),
+                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"icon-image\":\"marker\",\"icon-size\":2}")),
             };
 
         /// <summary>`symbol-placement: line` with `icon-rotation-alignment` unset ⇒ resolves `auto → map`,
@@ -199,8 +200,9 @@ namespace MapRenderer.Tests.Text.Placement
                 Id = "roads",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "roads",
-                LayoutJson = JsonParser.Parse(
-                    "{\"icon-image\":\"arrow\",\"icon-size\":2,\"symbol-placement\":\"line\"}"),
+                Paint = SymbolStyle.PaintProperties.Parse(null),
+                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
+                    "{\"icon-image\":\"arrow\",\"icon-size\":2,\"symbol-placement\":\"line\"}")),
             };
 
         private static uint ZigZagEncode(long n) => (uint)((n << 1) ^ (n >> 63));

@@ -436,7 +436,7 @@ namespace MapRenderer.Tests.Visual
                 new InMemoryTileLayer(SeamSourceLayerName, id, new IFeature[] { feature }, (uint)TileExtent));
 
             var styleLayer = new StyleLayer { Id = "seam-fill", SourceLayer = SeamSourceLayerName };
-            var paint      = new Fill.PaintProperties(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
+            var paint      = Fill.PaintProperties.Parse(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
             var fillLayer  = new SeamFillRenderLayer(styleLayer, paint);
 
             var context = new TileLayerProcessContext

@@ -60,7 +60,8 @@ namespace MapRenderer.Tests.Text
             Id          = "labels",
             LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
             SourceLayer = "centroids",
-            LayoutJson  = JsonParser.Parse("{\"text-field\":\"{NAME}\"}"),
+            Paint       = SymbolStyle.PaintProperties.Parse(null),
+            Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"{NAME}\"}")),
         };
 
         private static List<SymbolStyle.SymbolFeature> Extract(
@@ -175,7 +176,8 @@ namespace MapRenderer.Tests.Text
                 Id          = "labels",
                 LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "pts",
-                LayoutJson  = JsonParser.Parse("{\"text-field\":\"X\"}"),
+                Paint       = SymbolStyle.PaintProperties.Parse(null),
+                Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"X\"}")),
             };
 
             List<SymbolStyle.SymbolFeature> honestSymbols = Extract(layer, real, DecodedAt);
@@ -249,7 +251,8 @@ namespace MapRenderer.Tests.Text
                 Id          = "labels",
                 LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "pts",
-                LayoutJson  = JsonParser.Parse("{\"text-field\":\"X\"}"),
+                Paint       = SymbolStyle.PaintProperties.Parse(null),
+                Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"X\"}")),
             };
 
             // Asserted, not merely observed by the runner catching a throw: the defect's manifestation IS an

@@ -35,26 +35,26 @@ namespace MapRenderer.Core.Style.Symbol
     {
         /// <summary>text-field: the raw value (a <c>{token}</c> string or an expression array), or null when
         /// absent. Resolved per feature by <see cref="TextFieldResolver.Resolve"/> — NOT a scalar here.</summary>
-        public JsonValue TextField { get; }
+        public JsonValue TextField { get; init; }
 
         /// <summary>text-font: the font stack. Default <c>["Open Sans Regular", "Arial Unicode MS Regular"]</c> (spec).</summary>
-        public string[] TextFont { get; }
+        public string[] TextFont { get; init; }
 
         /// <summary>text-size: glyph size in pixels. Default 16. Zoom-capable.</summary>
-        public StyleProperty<float> TextSize { get; }
+        public StyleProperty<float> TextSize { get; init; }
 
         /// <summary>text-max-width: wrap width in ems. Default 10. Zoom-capable.</summary>
-        public StyleProperty<float> TextMaxWidth { get; }
+        public StyleProperty<float> TextMaxWidth { get; init; }
 
         /// <summary>text-line-height: line-to-line baseline spacing in ems. Default 1.2. Zoom-capable.</summary>
-        public StyleProperty<float> TextLineHeight { get; }
+        public StyleProperty<float> TextLineHeight { get; init; }
 
         /// <summary>text-letter-spacing: extra pen advance between glyphs in ems. Default 0. Zoom-capable.</summary>
-        public StyleProperty<float> TextLetterSpacing { get; }
+        public StyleProperty<float> TextLetterSpacing { get; init; }
 
         /// <summary>text-radial-offset: radial offset in ems, resolved from the anchor. Default 0. Zoom-capable.
         /// Overrides <see cref="TextOffset"/> when non-zero (see <c>TextQuadLayout</c>).</summary>
-        public StyleProperty<float> TextRadialOffset { get; }
+        public StyleProperty<float> TextRadialOffset { get; init; }
 
         /// <summary>symbol-placement: <see cref="Text.SymbolPlacement.Point"/> (default),
         /// <see cref="Text.SymbolPlacement.Line"/>, or <see cref="Text.SymbolPlacement.LineCenter"/>.
@@ -66,58 +66,58 @@ namespace MapRenderer.Core.Style.Symbol
         /// <c>TryEvaluate</c> call). A structurally MALFORMED expression (invalid JSON shape) still throws
         /// from <see cref="ExpressionParser.Parse"/> here at construction — consistent with every
         /// other <see cref="StyleProperty{T}"/> in this file, not a degrade-on-parse-failure contract.</summary>
-        public StyleProperty<SymbolPlacement> SymbolPlacement { get; }
+        public StyleProperty<SymbolPlacement> SymbolPlacement { get; init; }
 
         /// <summary>symbol-sort-key: greedy placement priority (lower placed first). Default 0. Zoom-capable.</summary>
-        public StyleProperty<float> SymbolSortKey { get; }
+        public StyleProperty<float> SymbolSortKey { get; init; }
 
         /// <summary>symbol-spacing: distance in PIXELS between repeated symbols along a line
         /// (<see cref="Text.SymbolPlacement.Line"/> only — ignored for point/line-center). Default 250 (spec),
         /// minimum 1. Zoom-capable.</summary>
-        public StyleProperty<float> SymbolSpacing { get; }
+        public StyleProperty<float> SymbolSpacing { get; init; }
 
         /// <summary>text-max-angle: maximum DEGREE change between adjacent characters on a curved line symbol;
         /// a symbol whose along-line curvature exceeds this at any glyph pair is dropped at that anchor (line /
         /// line-center only). Default 45 (spec). Zoom-capable.</summary>
-        public StyleProperty<float> TextMaxAngle { get; }
+        public StyleProperty<float> TextMaxAngle { get; init; }
 
         /// <summary>text-keep-upright: when true (default), a curved line symbol that would read right-to-left is
         /// walked reversed + flipped so it stays upright/left-to-right; when false the glyphs follow the raw
         /// line direction (may render upside-down). line / line-center only.</summary>
-        public bool TextKeepUpright { get; }
+        public bool TextKeepUpright { get; init; }
 
         /// <summary>text-allow-overlap: skip collision, always place. Default false.</summary>
-        public bool TextAllowOverlap { get; }
+        public bool TextAllowOverlap { get; init; }
 
         /// <summary>text-ignore-placement: place but don't block others. Default false.</summary>
-        public bool TextIgnorePlacement { get; }
+        public bool TextIgnorePlacement { get; init; }
 
         /// <summary>text-padding: collision-box growth in pixels. Default 2 (spec). Zoom-capable.</summary>
-        public StyleProperty<float> TextPadding { get; }
+        public StyleProperty<float> TextPadding { get; init; }
 
         /// <summary>text-anchor: anchor position for the symbol block. Default <see cref="Text.TextAnchor.Center"/>.
         /// An unrecognized/malformed value degrades to the spec default (center).</summary>
-        public TextAnchor TextAnchor { get; }
+        public TextAnchor TextAnchor { get; init; }
 
         /// <summary>text-offset: [x, y] offset in ems from the anchor, in MapLibre's raw y-DOWN convention
         /// (positive y = down). Default [0, 0]. <b>Constant only</b> (parsed as a plain <see cref="float2"/>,
         /// not zoom/data-driven). The y-up reconcile happens in <see cref="TextLayoutOptionsBuilder"/>.</summary>
-        public float2 TextOffset { get; }
+        public float2 TextOffset { get; init; }
 
         /// <summary>text-justify: multi-line justification. Spec default "center" (NOT the enum's zero value
         /// <c>Auto</c> — <c>Auto</c> is only the explicit opt-in that resolves from the anchor at layout time).
         /// An unrecognized/malformed value degrades to the spec default (center).</summary>
-        public TextJustify TextJustify { get; }
+        public TextJustify TextJustify { get; init; }
 
         /// <summary>text-transform: case transform applied to the resolved symbol before shaping. Default
         /// <see cref="Text.TextTransform.None"/>. <b>Constant only</b> (parsed once as a plain enum, not
         /// zoom/data-driven). An unrecognized/malformed value degrades to none.</summary>
-        public TextTransform TextTransform { get; }
+        public TextTransform TextTransform { get; init; }
 
         /// <summary>text-rotation-alignment: whether the symbol rotates with the map (<c>map</c>) or stays
         /// screen-aligned (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/> (→ viewport for the
         /// point placement emitted today). Consumed by the placement billboard rotation (#4).</summary>
-        public AlignmentMode TextRotationAlignment { get; }
+        public AlignmentMode TextRotationAlignment { get; init; }
 
         /// <summary>text-pitch-alignment: whether the symbol lies flat on the map (<c>map</c>) or faces the
         /// camera (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>. <c>auto</c> resolves via
@@ -138,31 +138,31 @@ namespace MapRenderer.Core.Style.Symbol
         /// <para><b>The POINT arm does NOT consume it yet</b> — do not infer otherwise from the above. A
         /// map-pitched point symbol still billboards; the ground-flat point path is a later stage. Glyph SIZE
         /// is likewise still screen-constant on both arms (W1 moved the layout, not the render).</para></summary>
-        public AlignmentMode TextPitchAlignment { get; }
+        public AlignmentMode TextPitchAlignment { get; init; }
 
         /// <summary>icon-image: the raw value (a <c>{token}</c> string or an expression array), or null when
         /// absent. Per-feature-resolved; NOT a scalar here — icon sprite resolution is a later stage.</summary>
-        public JsonValue IconImage { get; }
+        public JsonValue IconImage { get; init; }
 
         /// <summary>icon-size: scale factor applied to the sprite's logical size. Default 1. Zoom-capable.</summary>
-        public StyleProperty<float> IconSize { get; }
+        public StyleProperty<float> IconSize { get; init; }
 
         /// <summary>icon-offset: [x, y] offset from the anchor, in units of the icon's own (unscaled) size.
         /// Default [0, 0]. <b>Constant only</b> (parsed as a plain <see cref="float2"/>, not zoom/data-driven).</summary>
-        public float2 IconOffset { get; }
+        public float2 IconOffset { get; init; }
 
         /// <summary>icon-rotate: clockwise rotation in DEGREES, composed on top of whatever the icon's
         /// rotation-alignment already produced (the map bearing under <c>map</c>, the line tangent under line
         /// placement, nothing under <c>viewport</c>). Default 0. Zoom-capable.</summary>
-        public StyleProperty<float> IconRotate { get; }
+        public StyleProperty<float> IconRotate { get; init; }
 
         /// <summary>icon-anchor: anchor position for the icon. Default <see cref="Text.TextAnchor.Center"/>.
         /// An unrecognized/malformed value degrades to the spec default (center).</summary>
-        public TextAnchor IconAnchor { get; }
+        public TextAnchor IconAnchor { get; init; }
 
         /// <summary>icon-rotation-alignment: whether the icon rotates with the map (<c>map</c>) or stays
         /// screen-aligned (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>.</summary>
-        public AlignmentMode IconRotationAlignment { get; }
+        public AlignmentMode IconRotationAlignment { get; init; }
 
         /// <summary>icon-pitch-alignment: whether the icon lies flat on the map (<c>map</c>) or faces the
         /// camera (<c>viewport</c>). Default <see cref="AlignmentMode.Auto"/>. <c>auto</c> resolves via
@@ -173,129 +173,133 @@ namespace MapRenderer.Core.Style.Symbol
         /// fence as <see cref="TextPitchAlignment"/>, which states both in full. For icons that arm is the
         /// one-glyph along-line symbol a MAP-resolved line icon emits (<c>road_one_way_arrow*</c> and
         /// friends); a POINT icon still billboards.</para></summary>
-        public AlignmentMode IconPitchAlignment { get; }
+        public AlignmentMode IconPitchAlignment { get; init; }
 
         /// <summary>icon-allow-overlap: skip collision, always place. Default false.</summary>
-        public bool IconAllowOverlap { get; }
+        public bool IconAllowOverlap { get; init; }
 
         /// <summary>icon-ignore-placement: place but don't block others. Default false.</summary>
-        public bool IconIgnorePlacement { get; }
+        public bool IconIgnorePlacement { get; init; }
 
         /// <summary>icon-optional: when true, the TEXT half of an icon+text pair may place even if the icon
         /// cannot. Default false ⇒ the two halves place or drop together. Only meaningful on a paired symbol
         /// (see <c>SymbolFeatureExtractor</c>'s pairing predicate); ignored on a lone icon.</summary>
-        public bool IconOptional { get; }
+        public bool IconOptional { get; init; }
 
         /// <summary>text-optional: when true, the ICON half of an icon+text pair may place even if the text
         /// cannot. Default false ⇒ the two halves place or drop together. Only meaningful on a paired symbol;
         /// ignored on a lone text symbol.</summary>
-        public bool TextOptional { get; }
+        public bool TextOptional { get; init; }
 
         /// <summary>icon-padding: collision-box growth in pixels. Default 2 (spec). Zoom-capable.</summary>
-        public StyleProperty<float> IconPadding { get; }
+        public StyleProperty<float> IconPadding { get; init; }
 
-        /// <summary>Convenience: parse from a style layer's <c>LayoutJson</c>.</summary>
-        /// <exception cref="System.ArgumentNullException">If <paramref name="layer"/> is null.</exception>
-        public LayoutProperties(MapRenderer.Core.Style.StyleLayer layer)
-            : this((layer ?? throw new System.ArgumentNullException(nameof(layer))).LayoutJson) { }
+        /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
+        private LayoutProperties() { }
 
-        /// <summary>Parse the symbol layout properties from the layer's <c>layout</c> sub-tree (may be null → defaults).</summary>
-        public LayoutProperties(JsonValue layout)
+        /// <summary>Parse the symbol layout properties from a layer's <c>layout</c> sub-tree.</summary>
+        /// <param name="layout">The raw <c>layout</c> JSON sub-tree, or <c>null</c> for all spec defaults.</param>
+        /// <returns>A fully-parsed, immutable carrier.</returns>
+        public static LayoutProperties Parse(JsonValue layout)
         {
-            TextField = layout?.Get(PropertyNames.TextField); // raw; resolved per feature
-
-            TextFont = ParseFontStack(layout?.Get(PropertyNames.TextFont));
-
             JsonValue textSizeJson = layout?.Get(PropertyNames.TextSize);
-            TextSize = textSizeJson != null
-                ? new StyleProperty<float>(textSizeJson, 16f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(16f);
-
             JsonValue maxWidthJson = layout?.Get(PropertyNames.TextMaxWidth);
-            TextMaxWidth = maxWidthJson != null
-                ? new StyleProperty<float>(maxWidthJson, 10f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(10f);
-
             JsonValue lineHeightJson = layout?.Get(PropertyNames.TextLineHeight);
-            TextLineHeight = lineHeightJson != null
-                ? new StyleProperty<float>(lineHeightJson, 1.2f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(1.2f);
-
             JsonValue letterSpacingJson = layout?.Get(PropertyNames.TextLetterSpacing);
-            TextLetterSpacing = letterSpacingJson != null
-                ? new StyleProperty<float>(letterSpacingJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
-
             JsonValue radialOffsetJson = layout?.Get(PropertyNames.TextRadialOffset);
-            TextRadialOffset = radialOffsetJson != null
-                ? new StyleProperty<float>(radialOffsetJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
-
             JsonValue placementJson = layout?.Get(PropertyNames.SymbolPlacement);
-            SymbolPlacement = placementJson != null
-                ? new StyleProperty<SymbolPlacement>(placementJson, Text.SymbolPlacement.Point,
-                    v => ParsePlacement(v.ToDisplayString()))
-                : new StyleProperty<SymbolPlacement>(Text.SymbolPlacement.Point);
-
             JsonValue sortKeyJson = layout?.Get(PropertyNames.SymbolSortKey);
-            SymbolSortKey = sortKeyJson != null
-                ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
-
             JsonValue spacingJson = layout?.Get(PropertyNames.SymbolSpacing);
-            SymbolSpacing = spacingJson != null
-                ? new StyleProperty<float>(spacingJson, 250f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(250f);
-
             JsonValue maxAngleJson = layout?.Get(PropertyNames.TextMaxAngle);
-            TextMaxAngle = maxAngleJson != null
-                ? new StyleProperty<float>(maxAngleJson, 45f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(45f);
-
-            TextKeepUpright = layout?.Get(PropertyNames.TextKeepUpright)?.AsBool(true) ?? true;
-
-            TextAllowOverlap = layout?.Get(PropertyNames.TextAllowOverlap)?.AsBool(false) ?? false;
-            TextIgnorePlacement = layout?.Get(PropertyNames.TextIgnorePlacement)?.AsBool(false) ?? false;
-
             JsonValue paddingJson = layout?.Get(PropertyNames.TextPadding);
-            TextPadding = paddingJson != null
-                ? new StyleProperty<float>(paddingJson, 2f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(2f);
-
-            TextAnchor = ParseAnchor(layout?.Get(PropertyNames.TextAnchor)?.AsString(null));
-            TextJustify = ParseJustify(layout?.Get(PropertyNames.TextJustify)?.AsString(null));
-            TextTransform = ParseTransform(layout?.Get(PropertyNames.TextTransform)?.AsString(null));
-            TextRotationAlignment = ParseAlignment(layout?.Get(PropertyNames.TextRotationAlignment)?.AsString(null));
-            TextPitchAlignment = ParseAlignment(layout?.Get(PropertyNames.TextPitchAlignment)?.AsString(null));
-            TextOffset = ParseOffset(layout?.Get(PropertyNames.TextOffset));
-
-            IconImage = layout?.Get(PropertyNames.IconImage); // raw; resolved per feature
-
             JsonValue iconSizeJson = layout?.Get(PropertyNames.IconSize);
-            IconSize = iconSizeJson != null
-                ? new StyleProperty<float>(iconSizeJson, 1f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(1f);
-
             JsonValue iconRotateJson = layout?.Get(PropertyNames.IconRotate);
-            IconRotate = iconRotateJson != null
-                ? new StyleProperty<float>(iconRotateJson, 0f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(0f);
-
-            IconOffset = ParseOffset(layout?.Get(PropertyNames.IconOffset));
-
-            IconAnchor = ParseAnchor(layout?.Get(PropertyNames.IconAnchor)?.AsString(null));
-            IconRotationAlignment = ParseAlignment(layout?.Get(PropertyNames.IconRotationAlignment)?.AsString(null));
-            IconPitchAlignment = ParseAlignment(layout?.Get(PropertyNames.IconPitchAlignment)?.AsString(null));
-
-            IconAllowOverlap = layout?.Get(PropertyNames.IconAllowOverlap)?.AsBool(false) ?? false;
-            IconIgnorePlacement = layout?.Get(PropertyNames.IconIgnorePlacement)?.AsBool(false) ?? false;
-            IconOptional = layout?.Get(PropertyNames.IconOptional)?.AsBool(false) ?? false;
-            TextOptional = layout?.Get(PropertyNames.TextOptional)?.AsBool(false) ?? false;
-
             JsonValue iconPaddingJson = layout?.Get(PropertyNames.IconPadding);
-            IconPadding = iconPaddingJson != null
-                ? new StyleProperty<float>(iconPaddingJson, 2f, v => (float)v.AsNumber())
-                : new StyleProperty<float>(2f);
+
+            return new LayoutProperties
+            {
+                TextField = layout?.Get(PropertyNames.TextField), // raw; resolved per feature
+
+                TextFont = ParseFontStack(layout?.Get(PropertyNames.TextFont)),
+
+                TextSize = textSizeJson != null
+                    ? new StyleProperty<float>(textSizeJson, 16f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(16f),
+
+                TextMaxWidth = maxWidthJson != null
+                    ? new StyleProperty<float>(maxWidthJson, 10f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(10f),
+
+                TextLineHeight = lineHeightJson != null
+                    ? new StyleProperty<float>(lineHeightJson, 1.2f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(1.2f),
+
+                TextLetterSpacing = letterSpacingJson != null
+                    ? new StyleProperty<float>(letterSpacingJson, 0f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(0f),
+
+                TextRadialOffset = radialOffsetJson != null
+                    ? new StyleProperty<float>(radialOffsetJson, 0f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(0f),
+
+                SymbolPlacement = placementJson != null
+                    ? new StyleProperty<SymbolPlacement>(placementJson, Text.SymbolPlacement.Point,
+                        v => ParsePlacement(v.ToDisplayString()))
+                    : new StyleProperty<SymbolPlacement>(Text.SymbolPlacement.Point),
+
+                SymbolSortKey = sortKeyJson != null
+                    ? new StyleProperty<float>(sortKeyJson, 0f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(0f),
+
+                SymbolSpacing = spacingJson != null
+                    ? new StyleProperty<float>(spacingJson, 250f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(250f),
+
+                TextMaxAngle = maxAngleJson != null
+                    ? new StyleProperty<float>(maxAngleJson, 45f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(45f),
+
+                TextKeepUpright = layout?.Get(PropertyNames.TextKeepUpright)?.AsBool(true) ?? true,
+
+                TextAllowOverlap = layout?.Get(PropertyNames.TextAllowOverlap)?.AsBool(false) ?? false,
+                TextIgnorePlacement = layout?.Get(PropertyNames.TextIgnorePlacement)?.AsBool(false) ?? false,
+
+                TextPadding = paddingJson != null
+                    ? new StyleProperty<float>(paddingJson, 2f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(2f),
+
+                TextAnchor = ParseAnchor(layout?.Get(PropertyNames.TextAnchor)?.AsString(null)),
+                TextJustify = ParseJustify(layout?.Get(PropertyNames.TextJustify)?.AsString(null)),
+                TextTransform = ParseTransform(layout?.Get(PropertyNames.TextTransform)?.AsString(null)),
+                TextRotationAlignment = ParseAlignment(layout?.Get(PropertyNames.TextRotationAlignment)?.AsString(null)),
+                TextPitchAlignment = ParseAlignment(layout?.Get(PropertyNames.TextPitchAlignment)?.AsString(null)),
+                TextOffset = ParseOffset(layout?.Get(PropertyNames.TextOffset)),
+
+                IconImage = layout?.Get(PropertyNames.IconImage), // raw; resolved per feature
+
+                IconSize = iconSizeJson != null
+                    ? new StyleProperty<float>(iconSizeJson, 1f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(1f),
+
+                IconRotate = iconRotateJson != null
+                    ? new StyleProperty<float>(iconRotateJson, 0f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(0f),
+
+                IconOffset = ParseOffset(layout?.Get(PropertyNames.IconOffset)),
+
+                IconAnchor = ParseAnchor(layout?.Get(PropertyNames.IconAnchor)?.AsString(null)),
+                IconRotationAlignment = ParseAlignment(layout?.Get(PropertyNames.IconRotationAlignment)?.AsString(null)),
+                IconPitchAlignment = ParseAlignment(layout?.Get(PropertyNames.IconPitchAlignment)?.AsString(null)),
+
+                IconAllowOverlap = layout?.Get(PropertyNames.IconAllowOverlap)?.AsBool(false) ?? false,
+                IconIgnorePlacement = layout?.Get(PropertyNames.IconIgnorePlacement)?.AsBool(false) ?? false,
+                IconOptional = layout?.Get(PropertyNames.IconOptional)?.AsBool(false) ?? false,
+                TextOptional = layout?.Get(PropertyNames.TextOptional)?.AsBool(false) ?? false,
+
+                IconPadding = iconPaddingJson != null
+                    ? new StyleProperty<float>(iconPaddingJson, 2f, v => (float)v.AsNumber())
+                    : new StyleProperty<float>(2f),
+            };
         }
 
         // Spec default font stack when text-font is absent or malformed.

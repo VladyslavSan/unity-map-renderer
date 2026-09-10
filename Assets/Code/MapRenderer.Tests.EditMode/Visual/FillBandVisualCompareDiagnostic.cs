@@ -530,7 +530,7 @@ namespace MapRenderer.Tests.Visual
 
                 var selected = TestTileMeshBuilder.Select(styleLayer, mvtLayer, c.Z);
                 Mesh mesh = TestTileMeshBuilder.BuildFillFromLayer(
-                    mvtLayer, selected, new Fill.PaintProperties(styleLayer), c.Z, id,
+                    mvtLayer, selected, ((Fill.StyleLayer)styleLayer).Paint, c.Z, id,
                     suppressBoundaryBand: suppressBand);
                 Assert.IsNotNull(mesh, $"{c.File}: '{c.Layer}' produced no fill geometry");
 

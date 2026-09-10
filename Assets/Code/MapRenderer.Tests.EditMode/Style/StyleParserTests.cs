@@ -111,12 +111,12 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(239, mvt.Features.Count,
                 "real style's source-layer string selects the real 239 country features");
 
-            // A raw paint/layout sub-tree from the real style is retained for later stages.
+            // Raw retains the whole layer object, paint/layout sub-trees included, for later stages.
             StyleLayer fill = null;
             foreach (var l in doc.Layers)
-                if (l.LayerType == StyleLayerType.Fill && l.PaintJson != null) { fill = l; break; }
+                if (l.LayerType == StyleLayerType.Fill && l.Raw.Get("paint") != null) { fill = l; break; }
             Assert.IsNotNull(fill, "a fill layer with a paint block exists in the real style");
-            Assert.IsTrue(fill.PaintJson.IsObject, "real paint sub-tree retained as queryable JSON");
+            Assert.IsTrue(fill.Raw.Get("paint").IsObject, "real paint sub-tree retained as queryable JSON");
         }
 
         // =========================================================================================
@@ -191,7 +191,7 @@ namespace MapRenderer.Tests.Style
             Assert.IsNull(layer.MaxZoom, "layer maxzoom has no spec default → null");
             // And present values are read through:
             Assert.IsNull(layer.Filter);
-            Assert.IsNull(layer.PaintJson);
+            Assert.IsNull(layer.Raw.Get("paint"));
         }
 
         [Test]
@@ -307,11 +307,11 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(doc.Layers[0].Raw.TryGet("future-layer-key", out var flk));
             Assert.AreEqual(42, flk.AsInt());
 
-            // Unknown paint/layout props retained inside the raw subtrees.
-            Assert.IsNotNull(doc.Layers[0].PaintJson);
-            Assert.AreEqual("#fff", doc.Layers[0].PaintJson.GetString("future-paint-prop"));
-            Assert.IsNotNull(doc.Layers[0].LayoutJson);
-            Assert.AreEqual("visible", doc.Layers[0].LayoutJson.GetString("future-layout-prop"));
+            // Unknown paint/layout props retained inside Raw's paint/layout subtrees.
+            Assert.IsNotNull(doc.Layers[0].Raw.Get("paint"));
+            Assert.AreEqual("#fff", doc.Layers[0].Raw.Get("paint").GetString("future-paint-prop"));
+            Assert.IsNotNull(doc.Layers[0].Raw.Get("layout"));
+            Assert.AreEqual("visible", doc.Layers[0].Raw.Get("layout").GetString("future-layout-prop"));
         }
 
         [Test]
@@ -407,13 +407,13 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(layer.Filter.IsArray, "legacy filter retained as raw array");
             Assert.AreEqual("==", layer.Filter.Items[0].AsString());
 
-            Assert.IsNotNull(layer.LayoutJson);
-            Assert.AreEqual("round", layer.LayoutJson.GetString("line-cap"));
-            Assert.AreEqual("round", layer.LayoutJson.GetString("line-join"));
+            Assert.IsNotNull(layer.Raw.Get("layout"));
+            Assert.AreEqual("round", layer.Raw.Get("layout").GetString("line-cap"));
+            Assert.AreEqual("round", layer.Raw.Get("layout").GetString("line-join"));
 
-            Assert.IsNotNull(layer.PaintJson);
-            Assert.AreEqual("#ff0000", layer.PaintJson.GetString("line-color"));
-            Assert.AreEqual(2.0, layer.PaintJson.GetDouble("line-width"), 1e-9);
+            Assert.IsNotNull(layer.Raw.Get("paint"));
+            Assert.AreEqual("#ff0000", layer.Raw.Get("paint").GetString("line-color"));
+            Assert.AreEqual(2.0, layer.Raw.Get("paint").GetDouble("line-width"), 1e-9);
         }
 
         // =========================================================================================

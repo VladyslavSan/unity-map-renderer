@@ -64,7 +64,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         {
             using var mvtTile = MvtDecoder.Decode(id, mvtBytes);
             var fillLayer = style.Layers[0];
-            var paint     = new Fill.PaintProperties(fillLayer);
+            var paint     = ((Fill.StyleLayer)fillLayer).Paint;
             var mvtLayer  = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "Fixture must contain a resolvable MVT layer.");
             var features  = TestTileMeshBuilder.Select(fillLayer, mvtLayer, zoom);

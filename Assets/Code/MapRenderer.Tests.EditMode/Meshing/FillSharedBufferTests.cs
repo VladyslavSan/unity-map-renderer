@@ -115,8 +115,8 @@ namespace MapRenderer.Tests.Meshing
             };
             int[] selectedOrdinals = { 1, 2, 4, 5 };
 
-            var paint  = new Fill.PaintProperties(JsonParser.Parse(ColourByName));
-            var layout = new Fill.LayoutProperties(JsonParser.Parse(SortKeyBySk));
+            var paint  = Fill.PaintProperties.Parse(JsonParser.Parse(ColourByName));
+            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(SortKeyBySk));
 
             Mesh control = null, mixed = null;
             try
@@ -188,8 +188,8 @@ namespace MapRenderer.Tests.Meshing
                 Square(0, 0, "middle", sortKey:  5.0),
                 Square(0, 0, "bottom", sortKey:  1.0),
             };
-            var paint  = new Fill.PaintProperties(JsonParser.Parse(ColourByName));
-            var layout = new Fill.LayoutProperties(JsonParser.Parse(SortKeyBySk));
+            var paint  = Fill.PaintProperties.Parse(JsonParser.Parse(ColourByName));
+            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(SortKeyBySk));
 
             Mesh flat = null, globe = null;
             try
@@ -287,7 +287,7 @@ namespace MapRenderer.Tests.Meshing
                     geometry: MvtCommandStream.Feature(outerRing)),
             };
 
-            var paint = new Fill.PaintProperties(JsonParser.Parse(@"{""fill-color"":""#ffffff""}"));
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-color"":""#ffffff""}"));
 
             Mesh holed = null, full = null, holedOnTheClipBranch = null;
             try

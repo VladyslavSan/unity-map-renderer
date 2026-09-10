@@ -452,14 +452,15 @@ namespace MapRenderer.Tests.Style
 
         // ── LinePaint.HasDashArray parse integration ──────────────────────────────────────────
 
-        private static MapRenderer.Core.Style.StyleLayer MakeDashLayer(string paintJson)
+        private static Line.StyleLayer MakeDashLayer(string paintJson)
         {
-            return new MapRenderer.Core.Style.StyleLayer
+            return new Line.StyleLayer
             {
                 Id          = "test-dash",
                 LayerType   = MapRenderer.Core.Style.StyleLayerType.Line,
                 SourceLayer = "roads",
-                PaintJson   = paintJson != null ? JsonParser.Parse(paintJson) : null,
+                Paint       = Line.PaintProperties.Parse(paintJson != null ? JsonParser.Parse(paintJson) : null),
+                Layout      = Line.LayoutProperties.Parse(null),
             };
         }
 
@@ -467,7 +468,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_HasDashArray_FalseWhenAbsent()
         {
             var layer = MakeDashLayer("{\"line-width\":2}");
-            var paint = new Line.PaintProperties(layer);
+            var paint = layer.Paint;
             Assert.That(paint.HasDashArray, Is.False);
             Assert.That(paint.DashArray, Is.Null);
         }
@@ -476,7 +477,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_HasDashArray_TrueWhenPresent()
         {
             var layer = MakeDashLayer("{\"line-dasharray\":[2,1]}");
-            var paint = new Line.PaintProperties(layer);
+            var paint = layer.Paint;
             Assert.That(paint.HasDashArray, Is.True);
             Assert.That(paint.DashArray, Is.Not.Null);
             Assert.That(paint.DashArrayKind,
@@ -487,7 +488,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_HasDashArray_IsNotInertFallback()
         {
             var layer = MakeDashLayer("{\"line-dasharray\":[2,1]}");
-            var paint = new Line.PaintProperties(layer);
+            var paint = layer.Paint;
             Assert.That(paint.IsInertFallback, Is.False,
                 "Line layer with line-dasharray must not be IsInertFallback.");
         }

@@ -23,7 +23,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SortKey_Absent_DefaultsToZeroAndFlagsDefault()
         {
-            var layout = new Fill.LayoutProperties((JsonValue)null);
+            var layout = Fill.LayoutProperties.Parse((JsonValue)null);
 
             Assert.IsTrue(layout.SortKeyIsDefault,
                 "an absent fill-sort-key must be flagged so the builder can skip the sort entirely — that " +
@@ -34,14 +34,14 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SortKey_EmptyLayoutObject_IsStillDefault()
         {
-            var layout = new Fill.LayoutProperties(JsonParser.Parse("{}"));
+            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse("{}"));
             Assert.IsTrue(layout.SortKeyIsDefault, "a layout object without the key is the same as no layout");
         }
 
         [Test]
         public void SortKey_Constant_IsParsedAndNotFlaggedDefault()
         {
-            var layout = new Fill.LayoutProperties(JsonParser.Parse(@"{""fill-sort-key"": 7}"));
+            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(@"{""fill-sort-key"": 7}"));
 
             Assert.IsFalse(layout.SortKeyIsDefault, "an explicit key must NOT be treated as absent");
             Assert.AreEqual(7f, layout.SortKey.Evaluate(0.0), 1e-9);
@@ -51,7 +51,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SortKey_ZoomExpression_IsZoomDependent()
         {
-            var layout = new Fill.LayoutProperties(JsonParser.Parse(
+            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(
                 @"{""fill-sort-key"": [""interpolate"", [""linear""], [""zoom""], 0, 0, 10, 100]}"));
 
             Assert.IsFalse(layout.SortKeyIsDefault);
@@ -63,7 +63,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SortKey_FeatureExpression_DependsOnFeature()
         {
-            var layout = new Fill.LayoutProperties(JsonParser.Parse(
+            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(
                 @"{""fill-sort-key"": [""get"", ""rank""]}"));
 
             Assert.IsTrue(layout.SortKey.DependsOnFeature,

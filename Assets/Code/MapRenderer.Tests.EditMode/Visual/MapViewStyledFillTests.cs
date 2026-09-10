@@ -457,7 +457,7 @@ namespace MapRenderer.Tests.Visual
             }");
 
             StyleLayer sl = styleDoc.Layers[0];
-            Fill.PaintProperties paint = new Fill.PaintProperties(sl);
+            Fill.PaintProperties paint = ((Fill.StyleLayer)sl).Paint;
 
             // Verify the opacity evaluator is zoom-dependent (not constant).
             Assert.IsNotNull(paint.Opacity, "FillPaint.Opacity must be non-null for the stops expression");

@@ -5,10 +5,9 @@ namespace MapRenderer.Core.Style
     /// <summary>
     /// A style layer (Style Spec <c>layers[]</c>) — the generic base. Line and fill layers are specialized
     /// by <see cref="MapRenderer.Core.Style.Line.StyleLayer"/> / <see cref="MapRenderer.Core.Style.Fill.StyleLayer"/>,
-    /// which add their typed parsed paint/layout; the other types are represented by this base directly.
-    /// The common fields are typed here; <c>paint</c>, <c>layout</c>, and <c>filter</c> are retained as raw
-    /// <see cref="JsonValue"/> sub-trees (named <c>*Json</c> to leave the bare <c>Paint</c>/<c>Layout</c>
-    /// names free for the typed subclass views).
+    /// which add their typed, eagerly-parsed paint/layout; the other types are represented by this base
+    /// directly. The common fields are typed here; only <c>filter</c> and the whole-object <c>Raw</c> are
+    /// retained as raw <see cref="JsonValue"/> — <c>paint</c>/<c>layout</c> are parsed at construction.
     /// </summary>
     public class StyleLayer
     {
@@ -50,18 +49,11 @@ namespace MapRenderer.Core.Style
         /// <summary>Raw <c>filter</c> sub-tree (legacy or expression), or null. Parsed in S10.</summary>
         public JsonValue Filter;
 
-        /// <summary>Raw <c>layout</c> sub-tree, or null. Typed views: the per-type subclass's <c>Layout</c>.
-        /// Internal: external callers access paint/layout via the typed <c>Paint</c>/<c>Layout</c> properties
-        /// on the concrete subclass. Access from <c>MapRenderer.Tests.EditMode</c> is granted via
-        /// <c>InternalsVisibleTo</c> for forward-compat assertions only.</summary>
-        internal JsonValue LayoutJson;
-
-        /// <summary>Raw <c>paint</c> sub-tree, or null. Typed views: the per-type subclass's <c>Paint</c>.
-        /// Internal: see <see cref="LayoutJson"/>.</summary>
-        internal JsonValue PaintJson;
-
-        /// <summary>The full original layer JSON object (preserves any unknown/forward-compat keys).
-        /// Internal: see <see cref="LayoutJson"/>.</summary>
+        /// <summary>The full original layer JSON object, retained so unknown/forward-compat keys survive
+        /// (including its <c>paint</c>/<c>layout</c> sub-trees, which are otherwise parsed and discarded).
+        /// Internal: callers read the typed <c>Paint</c>/<c>Layout</c> views on the concrete subclass instead.
+        /// Access from <c>MapRenderer.Tests.EditMode</c> is granted via <c>InternalsVisibleTo</c> for
+        /// forward-compat assertions only.</summary>
         internal JsonValue Raw;
     }
 }

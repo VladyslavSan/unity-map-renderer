@@ -271,17 +271,18 @@ namespace MapRenderer.Tests.Meshing
             return selected;
         }
 
-        private static StyleLayer StyleLayerWithFilter() => new StyleLayer
+        private static Line.StyleLayer StyleLayerWithFilter() => new Line.StyleLayer
         {
             Id          = "p2-line",
             LayerType   = StyleLayerType.Line,
             SourceLayer = "p2",
-            PaintJson   = JsonParser.Parse(PaintJson),
+            Paint       = Line.PaintProperties.Parse(JsonParser.Parse(PaintJson)),
+            Layout      = Line.LayoutProperties.Parse(null),
             Filter      = JsonParser.Parse(FilterJson),
         };
 
-        private static Line.PaintProperties  Paint()  => new Line.PaintProperties(StyleLayerWithFilter());
-        private static Line.LayoutProperties Layout() => new Line.LayoutProperties(StyleLayerWithFilter());
+        private static Line.PaintProperties  Paint()  => StyleLayerWithFilter().Paint;
+        private static Line.LayoutProperties Layout() => StyleLayerWithFilter().Layout;
 
         private static IFeature LineFeature(string cls, params IReadOnlyList<double2>[] rings)
             => Feature(cls, TileGeometryType.LineString, rings);

@@ -59,8 +59,9 @@ namespace MapRenderer.Tests.Text
             Id = id,
             LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
             SourceLayer = "centroids",
-            LayoutJson = JsonParser.Parse(
-                "{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + fontName + "\"]}"),
+            Paint = SymbolStyle.PaintProperties.Parse(null),
+            Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
+                "{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + fontName + "\"]}")),
         };
 
         private static SymbolStyle.SymbolFeature PointSymbol(string text) => new SymbolStyle.SymbolFeature

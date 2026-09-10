@@ -58,7 +58,7 @@ namespace MapRenderer.Tests.Meshing
                 geometry: SquareRing(x0, y0, size));
 
         private static FillExtrusion.PaintProperties Paint(string paintJson)
-            => new FillExtrusion.PaintProperties(JsonParser.Parse(paintJson));
+            => FillExtrusion.PaintProperties.Parse(JsonParser.Parse(paintJson));
 
         private const double Extent = 4096.0;
         private static readonly TileId ModerateTile = new TileId { Z = 10, X = 300, Y = 380 }; // mid-latitude, arbitrary

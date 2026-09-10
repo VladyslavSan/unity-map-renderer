@@ -36,32 +36,32 @@ namespace MapRenderer.Core.Style.FillExtrusion
         /// <see cref="Base"/>. Default 0.
         /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12, I2).
         /// </summary>
-        public StyleProperty<float> Height { get; }
+        public StyleProperty<float> Height { get; init; }
 
         /// <summary>
         /// fill-extrusion-base: the extruded geometry's base height in metres above ground. Default 0.
         /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12, I2).
         /// </summary>
-        public StyleProperty<float> Base { get; }
+        public StyleProperty<float> Base { get; init; }
 
         /// <summary>
         /// fill-extrusion-color: the extruded geometry's base color. Default opaque black rgba(0,0,0,1).
         /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12, I2).
         /// </summary>
-        public StyleProperty<Color> Color { get; }
+        public StyleProperty<Color> Color { get; init; }
 
         /// <summary>
         /// fill-extrusion-opacity: opacity multiplier [0,1]. Default 1.0.
         /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12, I2).
         /// </summary>
-        public StyleProperty<float> Opacity { get; }
+        public StyleProperty<float> Opacity { get; init; }
 
         /// <summary>
         /// fill-extrusion-vertical-gradient: whether a vertical gradient is applied to the sides of the
         /// extruded geometry. Encoded as float: 1.0 = true (default), 0.0 = false. Constant only;
         /// data-driven or malformed values fall back to 1.0 (true) — render use deferred to I4.
         /// </summary>
-        public StyleProperty<float> VerticalGradient { get; }
+        public StyleProperty<float> VerticalGradient { get; init; }
 
         /// <summary>
         /// fill-extrusion-translate: pixel-space [x, y] translation offset. Default [0, 0]. Unlike
@@ -70,16 +70,16 @@ namespace MapRenderer.Core.Style.FillExtrusion
         /// (see the class doc). Feature/Composite (data-driven) is spec-invalid for a layer-level property —
         /// falls back to the [0, 0] default, mirroring <see cref="VerticalGradient"/>'s guard.
         /// </summary>
-        public StyleProperty<double2> Translate { get; }
+        public StyleProperty<double2> Translate { get; init; }
 
         /// <summary>
         /// fill-extrusion-translate-anchor: coordinate space for <see cref="Translate"/>. Encoded as float:
         /// 0.0 = "map" (default), 1.0 = "viewport". Constant only.
         /// </summary>
-        public StyleProperty<float> TranslateAnchor { get; }
+        public StyleProperty<float> TranslateAnchor { get; init; }
 
         /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>
-        public bool IsInertFallback { get; }
+        public bool IsInertFallback { get; init; }
 
         // ── Convenience accessors matching Fill.PaintProperties' API ────────────────────────────
 
@@ -104,52 +104,52 @@ namespace MapRenderer.Core.Style.FillExtrusion
         /// <summary>Classification of the fill-extrusion-translate-anchor expression.</summary>
         public ExpressionKind TranslateAnchorKind => TranslateAnchor.Kind;
 
-        // ── Constructors ──────────────────────────────────────────────────────────────────────
+        // ── Construction ──────────────────────────────────────────────────────────────────────
 
-        /// <summary>Convenience: parse the paint properties from a style layer's <c>PaintJson</c>.</summary>
-        /// <param name="layer">The style layer whose <c>PaintJson</c> to parse.</param>
-        /// <exception cref="System.ArgumentNullException">If <paramref name="layer"/> is null.</exception>
-        public PaintProperties(MapRenderer.Core.Style.StyleLayer layer)
-            : this((layer ?? throw new System.ArgumentNullException(nameof(layer))).PaintJson) { }
+        /// <summary>Private: instances come from <see cref="Parse"/>.</summary>
+        private PaintProperties() { }
 
-        /// <summary>Parse and classify all fill-extrusion paint properties from the layer's <c>paint</c>
-        /// sub-tree (may be null → all spec defaults).</summary>
-        /// <param name="paint">The layer's raw <c>paint</c> JSON sub-tree, or <c>null</c>.</param>
-        public PaintProperties(JsonValue paint)
+        /// <summary>Parse and classify all fill-extrusion paint properties from a layer's <c>paint</c>
+        /// sub-tree.</summary>
+        /// <param name="paint">The layer's raw <c>paint</c> JSON sub-tree, or <c>null</c> for all spec
+        /// defaults.</param>
+        /// <returns>A fully-parsed, immutable carrier.</returns>
+        public static PaintProperties Parse(JsonValue paint)
         {
             bool anyPresent = false;
 
             // fill-extrusion-height: default 0
             JsonValue heightJson = paint?.Get(PropertyNames.FillExtrusionHeight);
             if (heightJson != null) anyPresent = true;
-            Height = heightJson != null
+            StyleProperty<float> height = heightJson != null
                 ? new StyleProperty<float>(heightJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
             // fill-extrusion-base: default 0
             JsonValue baseJson = paint?.Get(PropertyNames.FillExtrusionBase);
             if (baseJson != null) anyPresent = true;
-            Base = baseJson != null
+            StyleProperty<float> baseHeight = baseJson != null
                 ? new StyleProperty<float>(baseJson, 0f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(0f);
 
             // fill-extrusion-color: default rgba(0,0,0,1)
             JsonValue colorJson = paint?.Get(PropertyNames.FillExtrusionColor);
             if (colorJson != null) anyPresent = true;
-            Color = colorJson != null
+            StyleProperty<Color> color = colorJson != null
                 ? new StyleProperty<Color>(colorJson, new Color(0f, 0f, 0f, 1f), v => v.AsColorCoerced())
                 : new StyleProperty<Color>(new Color(0f, 0f, 0f, 1f));
 
             // fill-extrusion-opacity: default 1.0
             JsonValue opacityJson = paint?.Get(PropertyNames.FillExtrusionOpacity);
             if (opacityJson != null) anyPresent = true;
-            Opacity = opacityJson != null
+            StyleProperty<float> opacity = opacityJson != null
                 ? new StyleProperty<float>(opacityJson, 1f, v => (float)v.AsNumber())
                 : new StyleProperty<float>(1f);
 
             // fill-extrusion-vertical-gradient: default true (1.0). Tolerates data-driven by falling to default.
             JsonValue verticalGradientJson = paint?.Get(PropertyNames.FillExtrusionVerticalGradient);
             if (verticalGradientJson != null) anyPresent = true;
+            StyleProperty<float> verticalGradient;
             if (verticalGradientJson != null)
             {
                 try
@@ -157,18 +157,18 @@ namespace MapRenderer.Core.Style.FillExtrusion
                     var candidate = new StyleProperty<float>(
                         verticalGradientJson, 1f, v => v.AsBool() ? 1f : 0f);
                     // fill-extrusion-vertical-gradient must not be data-driven (Feature/Composite → default true)
-                    VerticalGradient = candidate.DependsOnFeature
+                    verticalGradient = candidate.DependsOnFeature
                         ? new StyleProperty<float>(1f)
                         : candidate;
                 }
                 catch
                 {
-                    VerticalGradient = new StyleProperty<float>(1f);
+                    verticalGradient = new StyleProperty<float>(1f);
                 }
             }
             else
             {
-                VerticalGradient = new StyleProperty<float>(1f);
+                verticalGradient = new StyleProperty<float>(1f);
             }
 
             // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (I2b — see
@@ -177,6 +177,7 @@ namespace MapRenderer.Core.Style.FillExtrusion
             // strict parser would otherwise reject as "operator must be a string").
             JsonValue translateJson = paint?.Get(PropertyNames.FillExtrusionTranslate);
             if (translateJson != null) anyPresent = true;
+            StyleProperty<double2> translate;
             if (translateJson != null)
             {
                 try
@@ -190,7 +191,7 @@ namespace MapRenderer.Core.Style.FillExtrusion
                         });
                     // fill-extrusion-translate is a layer-level property — a data-driven value is spec-invalid
                     // (Feature/Composite → default [0,0]), mirroring the VerticalGradient/Antialias guard.
-                    Translate = candidate.DependsOnFeature
+                    translate = candidate.DependsOnFeature
                         ? new StyleProperty<double2>(new double2(0.0, 0.0))
                         : candidate;
                 }
@@ -200,21 +201,31 @@ namespace MapRenderer.Core.Style.FillExtrusion
                     // projection throws IndexOutOfRangeException at Constant-kind eager eval) — fall to the
                     // spec default rather than let one bad key take down the whole layer, mirroring
                     // VerticalGradient/Antialias's catch-all above.
-                    Translate = new StyleProperty<double2>(new double2(0.0, 0.0));
+                    translate = new StyleProperty<double2>(new double2(0.0, 0.0));
                 }
             }
             else
             {
-                Translate = new StyleProperty<double2>(new double2(0.0, 0.0));
+                translate = new StyleProperty<double2>(new double2(0.0, 0.0));
             }
 
             // fill-extrusion-translate-anchor: "map"→0, "viewport"→1
             JsonValue anchorJson = paint?.Get(PropertyNames.FillExtrusionTranslateAnchor);
             if (anchorJson != null) anyPresent = true;
             float anchorVal = (anchorJson != null && anchorJson.AsString(null) == "viewport") ? 1.0f : 0.0f;
-            TranslateAnchor = new StyleProperty<float>(anchorVal);
+            StyleProperty<float> translateAnchor = new StyleProperty<float>(anchorVal);
 
-            IsInertFallback = !anyPresent;
+            return new PaintProperties
+            {
+                Height           = height,
+                Base             = baseHeight,
+                Color            = color,
+                Opacity          = opacity,
+                VerticalGradient = verticalGradient,
+                Translate        = translate,
+                TranslateAnchor  = translateAnchor,
+                IsInertFallback  = !anyPresent,
+            };
         }
     }
 }

@@ -19,14 +19,14 @@ namespace MapRenderer.Tests.Style
     [TestFixture]
     public class FillExtrusionPaintTests
     {
-        private static StyleLayer MakeLayer(string paintJson, string sourceLayer = "buildings")
+        private static FillExtrusion.StyleLayer MakeLayer(string paintJson, string sourceLayer = "buildings")
         {
-            return new StyleLayer
+            return new FillExtrusion.StyleLayer
             {
                 Id          = "test-fill-extrusion",
                 LayerType   = StyleLayerType.FillExtrusion,
                 SourceLayer = sourceLayer,
-                PaintJson   = paintJson != null ? JsonParser.Parse(paintJson) : null,
+                Paint       = FillExtrusion.PaintProperties.Parse(paintJson != null ? JsonParser.Parse(paintJson) : null),
             };
         }
 
@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.Style
         public void Height_ConstantValue_ClassifiesAsConstantAndPins()
         {
             var layer = MakeLayer("{\"fill-extrusion-height\":42}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.HeightKind, "a numeric literal must classify as Constant.");
             Assert.AreEqual(42f, fp.Height.Evaluate(0.0), 1e-4f, "fill-extrusion-height must pin to its literal value.");
@@ -47,7 +47,7 @@ namespace MapRenderer.Tests.Style
         public void Height_Absent_UsesSpecDefault_Zero()
         {
             var layer = MakeLayer("{}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.HeightKind, "absent fill-extrusion-height must use spec default (Constant kind).");
             Assert.AreEqual(0f, fp.Height.Evaluate(0.0), 1e-6f, "default fill-extrusion-height must be 0.");
@@ -60,7 +60,7 @@ namespace MapRenderer.Tests.Style
             const string paintJson =
                 "{\"fill-extrusion-height\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0,16,50]}";
             var layer = MakeLayer(paintJson);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Zoom, fp.HeightKind, "a zoom-interpolate expression must classify as Zoom.");
             Assert.AreEqual(0f, fp.Height.Evaluate(10.0), 0.01f);
@@ -72,7 +72,7 @@ namespace MapRenderer.Tests.Style
         {
             const string paintJson = "{\"fill-extrusion-height\":[\"get\",\"height\"]}";
             var layer = MakeLayer(paintJson);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Feature, fp.HeightKind, "a [\"get\",...] expression must classify as Feature.");
             Assert.IsTrue(fp.Height.DependsOnFeature);
@@ -84,7 +84,7 @@ namespace MapRenderer.Tests.Style
         public void Base_ConstantValue_ClassifiesAsConstantAndPins()
         {
             var layer = MakeLayer("{\"fill-extrusion-base\":5}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.BaseKind);
             Assert.AreEqual(5f, fp.Base.Evaluate(0.0), 1e-4f, "fill-extrusion-base must pin to its literal value.");
@@ -94,7 +94,7 @@ namespace MapRenderer.Tests.Style
         public void Base_Absent_UsesSpecDefault_Zero()
         {
             var layer = MakeLayer("{}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(0f, fp.Base.Evaluate(0.0), 1e-6f, "default fill-extrusion-base must be 0.");
         }
@@ -105,7 +105,7 @@ namespace MapRenderer.Tests.Style
             const string paintJson =
                 "{\"fill-extrusion-base\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0,16,4]}";
             var layer = MakeLayer(paintJson);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Zoom, fp.BaseKind, "a zoom-interpolate expression must classify as Zoom.");
             Assert.AreEqual(0f, fp.Base.Evaluate(10.0), 0.01f);
@@ -117,7 +117,7 @@ namespace MapRenderer.Tests.Style
         {
             const string paintJson = "{\"fill-extrusion-base\":[\"get\",\"min_height\"]}";
             var layer = MakeLayer(paintJson);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Feature, fp.BaseKind, "a [\"get\",...] expression must classify as Feature.");
             Assert.IsTrue(fp.Base.DependsOnFeature);
@@ -129,7 +129,7 @@ namespace MapRenderer.Tests.Style
         public void Color_Constant_ClassifiesAsConstantAndPins()
         {
             var layer = MakeLayer("{\"fill-extrusion-color\":[\"rgba\",200,100,50,1]}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.ColorKind);
             var c = fp.Color.Evaluate(0.0);
@@ -142,7 +142,7 @@ namespace MapRenderer.Tests.Style
         public void Color_Absent_UsesSpecDefault_Black()
         {
             var layer = MakeLayer("{}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.ColorKind, "absent fill-extrusion-color must use spec default (Constant kind).");
             var c = fp.Color.Evaluate(0.0);
@@ -159,7 +159,7 @@ namespace MapRenderer.Tests.Style
                 "{\"fill-extrusion-color\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
                 "10,[\"rgba\",255,0,0,1],16,[\"rgba\",0,0,255,1]]}";
             var layer = MakeLayer(paintJson);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Zoom, fp.ColorKind, "a zoom-interpolate expression must classify as Zoom.");
 
@@ -180,7 +180,7 @@ namespace MapRenderer.Tests.Style
                 "\"residential\",[\"rgba\",200,50,50,1]," +
                 "[\"rgba\",128,128,128,1]]}";
             var layer = MakeLayer(paintJson);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Feature, fp.ColorKind, "a [\"match\",[\"get\",...],...] expression must classify as Feature.");
             Assert.IsTrue(fp.Color.DependsOnFeature);
@@ -192,7 +192,7 @@ namespace MapRenderer.Tests.Style
         public void Opacity_Absent_UsesSpecDefault_One()
         {
             var layer = MakeLayer("{}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.OpacityKind);
             Assert.AreEqual(1.0f, fp.Opacity.Evaluate(0.0), 1e-6f, "default fill-extrusion-opacity must be 1.0.");
@@ -202,7 +202,7 @@ namespace MapRenderer.Tests.Style
         public void Opacity_Constant_Pins()
         {
             var layer = MakeLayer("{\"fill-extrusion-opacity\":0.5}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(0.5f, fp.Opacity.Evaluate(0.0), 1e-6f);
         }
@@ -213,7 +213,7 @@ namespace MapRenderer.Tests.Style
             const string paintJson =
                 "{\"fill-extrusion-opacity\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0.2,16,1.0]}";
             var layer = MakeLayer(paintJson);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Zoom, fp.OpacityKind, "a zoom-interpolate expression must classify as Zoom.");
             Assert.AreEqual(0.2f, fp.Opacity.Evaluate(10.0), 0.01f);
@@ -225,7 +225,7 @@ namespace MapRenderer.Tests.Style
         {
             const string paintJson = "{\"fill-extrusion-opacity\":[\"get\",\"opacity\"]}";
             var layer = MakeLayer(paintJson);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Feature, fp.OpacityKind, "a [\"get\",...] expression must classify as Feature.");
             Assert.IsTrue(fp.Opacity.DependsOnFeature);
@@ -237,7 +237,7 @@ namespace MapRenderer.Tests.Style
         public void VerticalGradient_Absent_UsesSpecDefault_True()
         {
             var layer = MakeLayer("{}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(1.0f, fp.VerticalGradient.Evaluate(0.0), 1e-6f,
                 "default fill-extrusion-vertical-gradient must encode 'true' as 1.0.");
@@ -247,7 +247,7 @@ namespace MapRenderer.Tests.Style
         public void VerticalGradient_False_EncodesAsZero()
         {
             var layer = MakeLayer("{\"fill-extrusion-vertical-gradient\":false}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(0.0f, fp.VerticalGradient.Evaluate(0.0), 1e-6f,
                 "fill-extrusion-vertical-gradient:false must encode as 0.0.");
@@ -259,7 +259,7 @@ namespace MapRenderer.Tests.Style
         public void TranslateAnchor_Viewport_IsOne()
         {
             var layer = MakeLayer("{\"fill-extrusion-translate-anchor\":\"viewport\"}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(1.0f, fp.TranslateAnchor.Evaluate(0.0), 1e-6f,
                 "fill-extrusion-translate-anchor 'viewport' must encode as 1.0.");
@@ -269,7 +269,7 @@ namespace MapRenderer.Tests.Style
         public void TranslateAnchor_AbsentDefaultsToMap_IsZero()
         {
             var layer = MakeLayer("{}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(0.0f, fp.TranslateAnchor.Evaluate(0.0), 1e-6f,
                 "absent fill-extrusion-translate-anchor must default to 'map' (0.0).");
@@ -283,7 +283,7 @@ namespace MapRenderer.Tests.Style
             // A bare [x,y] array — the common constant form real styles use — must parse (via
             // WrapBareArrayLiterals) rather than throw "operator must be a string".
             var layer = MakeLayer("{\"fill-extrusion-translate\":[12,-4]}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.TranslateKind);
             var t = fp.Translate.Evaluate(0.0);
@@ -296,7 +296,7 @@ namespace MapRenderer.Tests.Style
         public void Translate_Absent_UsesSpecDefault_Zero()
         {
             var layer = MakeLayer("{}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.TranslateKind);
             var t = fp.Translate.Evaluate(0.0);
@@ -313,7 +313,7 @@ namespace MapRenderer.Tests.Style
                 "{\"fill-extrusion-translate\":[\"interpolate\",[\"linear\"],[\"zoom\"]," +
                 "10,[\"literal\",[0,0]],16,[\"literal\",[20,-10]]]}";
             var layer = MakeLayer(paintJson);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Zoom, fp.TranslateKind,
                 "a zoom-interpolate translate must classify as Zoom, not collapse to a Constant [0,0].");
@@ -334,7 +334,7 @@ namespace MapRenderer.Tests.Style
             // fill-extrusion-translate is a layer-level property; a data-driven value is spec-invalid and
             // must fall back to the default rather than throw at bind time (mirrors VerticalGradient).
             var layer = MakeLayer("{\"fill-extrusion-translate\":[\"get\",\"offset\"]}");
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, fp.TranslateKind,
                 "a data-driven translate must fall back to the Constant default, not classify as Feature.");
@@ -349,7 +349,7 @@ namespace MapRenderer.Tests.Style
         public void NullPaint_IsInertFallback()
         {
             var layer = MakeLayer(null);
-            var fp    = new FillExtrusion.PaintProperties(layer);
+            var fp    = layer.Paint;
 
             Assert.IsTrue(fp.IsInertFallback, "a layer with null Paint must be IsInertFallback.");
         }
@@ -377,7 +377,7 @@ namespace MapRenderer.Tests.Style
 
             var fe = (FillExtrusion.StyleLayer)doc.Layers[0];
             Assert.AreEqual(30f, fe.Paint.Height.Evaluate(0.0), 1e-4f,
-                "the typed subclass's lazily-parsed Paint must read the real paint sub-tree.");
+                "the typed subclass's eagerly-parsed Paint must read the real paint sub-tree.");
         }
     }
 }

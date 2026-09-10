@@ -315,7 +315,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void Paint_NoSizeKey_IsScreenRelative_TheSpecBehaviour()
         {
-            var paint = new Fill.PaintProperties(JsonParser.Parse(@"{""fill-pattern"":""plaza""}"));
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-pattern"":""plaza""}"));
 
             Assert.AreEqual(Fill.FillPatternSizing.ScreenRelative, paint.PatternSizing,
                 "every stock MapLibre style must mean screen-relative — it has no way to ask for anything else");
@@ -325,7 +325,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void Paint_ExtensionSizeKey_SwitchesToWorldAbsolute()
         {
-            var paint = new Fill.PaintProperties(JsonParser.Parse(
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(
                 @"{""fill-pattern"":""plaza"", ""x-fill-pattern-metres"": 25.5}"));
 
             Assert.AreEqual(Fill.FillPatternSizing.WorldAbsolute, paint.PatternSizing,
@@ -341,7 +341,7 @@ namespace MapRenderer.Tests.Style
             // cost the layer its rendering. Zero and negative are unusable as a divisor; a string is garbage.
             foreach (string value in new[] { "0", "-4", "\"big\"" })
             {
-                var paint = new Fill.PaintProperties(JsonParser.Parse(
+                var paint = Fill.PaintProperties.Parse(JsonParser.Parse(
                     $@"{{""fill-pattern"":""plaza"", ""x-fill-pattern-metres"": {value}}}"));
 
                 Assert.AreEqual(Fill.FillPatternSizing.ScreenRelative, paint.PatternSizing,
@@ -355,7 +355,7 @@ namespace MapRenderer.Tests.Style
         {
             // IsInertFallback drives "this layer declared nothing" short-circuits; an extension-only paint
             // block HAS declared something, so treating it as inert would silently drop the layer.
-            var paint = new Fill.PaintProperties(JsonParser.Parse(@"{""x-fill-pattern-metres"": 10}"));
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""x-fill-pattern-metres"": 10}"));
             Assert.IsFalse(paint.IsInertFallback);
         }
 
@@ -367,7 +367,7 @@ namespace MapRenderer.Tests.Style
             // Pins WHY the shader must clip rather than paint: this is Liberty's road_area_pattern verbatim,
             // and its Color evaluates to opaque black. Nothing here is wrong — the spec default IS black —
             // which is precisely why "unresolved" cannot be allowed to fall through to the colour path.
-            var paint = new Fill.PaintProperties(JsonParser.Parse(@"{""fill-pattern"":""pedestrian_polygon""}"));
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-pattern"":""pedestrian_polygon""}"));
 
             Assert.AreEqual("pedestrian_polygon", paint.PatternName);
             var color = paint.Color.Evaluate(0.0);

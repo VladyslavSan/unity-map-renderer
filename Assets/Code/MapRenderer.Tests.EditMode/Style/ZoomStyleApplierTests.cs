@@ -272,7 +272,7 @@ namespace MapRenderer.Tests.Style
             Material fillMat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
             try
             {
-                var paint = new MapRenderer.Core.Style.Fill.PaintProperties(
+                var paint = MapRenderer.Core.Style.Fill.PaintProperties.Parse(
                     JsonParser.Parse(@"{""fill-opacity"": 0.5}"));
                 var applier = new ZoomStyleApplier(fillMat);
                 MaterialFactory.BindFillPaintToApplier(paint, applier, fillMat);
@@ -298,7 +298,7 @@ namespace MapRenderer.Tests.Style
             {
                 fillMat.SetFloat("_Opacity", 0.25f); // a stale/inherited value the bind must overwrite
 
-                var paint = new MapRenderer.Core.Style.Fill.PaintProperties(
+                var paint = MapRenderer.Core.Style.Fill.PaintProperties.Parse(
                     JsonParser.Parse(@"{""fill-opacity"": [""get"", ""op""]}"));
                 Assert.IsTrue(paint.Opacity.DependsOnFeature, "precondition: this expression is data-driven");
 

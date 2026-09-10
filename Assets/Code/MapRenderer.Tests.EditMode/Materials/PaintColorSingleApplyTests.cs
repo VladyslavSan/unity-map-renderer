@@ -168,10 +168,10 @@ namespace MapRenderer.Tests.Materials
             return mat;
         }
 
-        private static Line.PaintProperties LinePaint(string json)      => new Line.PaintProperties(JsonParser.Parse(json));
-        private static Line.LayoutProperties LineLayout()               => new Line.LayoutProperties(JsonParser.Parse("{}"));
+        private static Line.PaintProperties LinePaint(string json)      => Line.PaintProperties.Parse(JsonParser.Parse(json));
+        private static Line.LayoutProperties LineLayout()               => Line.LayoutProperties.Parse(JsonParser.Parse("{}"));
         private static FillExtrusion.PaintProperties ExtrusionPaint(string json)
-            => new FillExtrusion.PaintProperties(JsonParser.Parse(json));
+            => FillExtrusion.PaintProperties.Parse(JsonParser.Parse(json));
 
         private static Mesh BuildLineMesh(Line.PaintProperties paint)
             => TestTileMeshBuilder.BuildLine(new[] { LineFeature() }, paint, LineLayout(), Zoom, Extent, Tile, LocalOrigin);
@@ -368,7 +368,7 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void ConstantFillColor_IsUnchanged()
         {
-            var paint = new Fill.PaintProperties(JsonParser.Parse($"{{\"fill-color\":\"{AuthoredHex}\"}}"));
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":\"{AuthoredHex}\"}}"));
             Material mat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
             Assert.IsNotNull(mat, "Map/Fill base material must be configured.");
             var applier = new ZoomStyleApplier(mat);

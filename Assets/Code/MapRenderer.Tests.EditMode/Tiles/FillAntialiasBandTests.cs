@@ -63,8 +63,8 @@ namespace MapRenderer.Tests.Tiles
             var tile = new TileId { Z = 0, X = 0, Y = 0 };
             TileGeometryBuffers geometry = TrianglePolygon(tile);
             // The project default enters HERE, at parse — exactly where production puts it
-            // (StyleParser.Parse -> Fill.StyleLayer.AntialiasDefault -> this ctor).
-            var paint = new Fill.PaintProperties(JsonParser.Parse(paintJson), antialiasWhereUnspecified);
+            // (StyleParser.Parse -> Fill.PaintProperties.Parse's antialiasDefault parameter).
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(paintJson), antialiasWhereUnspecified);
 
             FillMeshPipeline.LayerInput input = StyledFillTileBuilder.BuildLayerInput(
                 OneSelectedPolygon(), geometry, paint, zoom: 0.0, tileOriginRender: double3.zero,

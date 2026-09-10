@@ -414,18 +414,19 @@ namespace MapRenderer.Tests.Meshing
 
         private static int LineVertexCount(IReadOnlyList<IFeature> features)
         {
-            StyleLayer styleLayer = LineStyleLayer();
+            Line.StyleLayer styleLayer = LineStyleLayer();
             return TestTileMeshBuilder.LineVertexCount(
-                features, new Line.PaintProperties(styleLayer), new Line.LayoutProperties(styleLayer),
+                features, styleLayer.Paint, styleLayer.Layout,
                 TestZoom, FixtureExtent, FixtureTile, double2.zero);
         }
 
-        private static StyleLayer LineStyleLayer() => new StyleLayer
+        private static Line.StyleLayer LineStyleLayer() => new Line.StyleLayer
         {
             Id          = "b3-line",
             LayerType   = StyleLayerType.Line,
             SourceLayer = "b3",
-            PaintJson   = MapRenderer.Core.Json.JsonParser.Parse("{\"line-color\":\"#ff0000\",\"line-width\":4}"),
+            Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"line-color\":\"#ff0000\",\"line-width\":4}")),
+            Layout      = Line.LayoutProperties.Parse(null),
         };
 
         private static double Shoelace2(NativeArray<double2> verts, int start, int len)
@@ -514,15 +515,16 @@ namespace MapRenderer.Tests.Meshing
 
         private static Mesh BuildFill(IReadOnlyList<IFeature> features)
         {
-            var styleLayer = new StyleLayer
+            var styleLayer = new Fill.StyleLayer
             {
                 Id          = "b3-fill",
                 LayerType   = StyleLayerType.Fill,
                 SourceLayer = "b3",
-                PaintJson   = MapRenderer.Core.Json.JsonParser.Parse("{\"fill-color\":\"#00ff00\"}"),
+                Paint       = Fill.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"fill-color\":\"#00ff00\"}")),
+                Layout      = Fill.LayoutProperties.Parse(null),
             };
             return TestTileMeshBuilder.BuildFill(
-                features, new Fill.PaintProperties(styleLayer), 0.0, FixtureExtent, FixtureTile);
+                features, styleLayer.Paint, 0.0, FixtureExtent, FixtureTile);
         }
     }
 }

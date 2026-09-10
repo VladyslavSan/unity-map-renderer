@@ -81,7 +81,8 @@ namespace MapRenderer.Tests.Style
                 LayerType = StyleLayerType.Symbol,
                 Source = "s",
                 SourceLayer = "points",
-                LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(layoutJson),
+                Paint = SymbolStyle.PaintProperties.Parse(null),
+                Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(layoutJson)),
             };
 
         private static List<SymbolStyle.SymbolFeature> ExtractPoint(string layoutJson, SpriteAtlasView atlas)
@@ -390,10 +391,11 @@ namespace MapRenderer.Tests.Style
                 SourceLayer = "transportation_name",
                 Filter = MapRenderer.Core.Json.JsonParser.Parse(
                     "[\"all\",[\"<=\",[\"get\",\"ref_length\"],6],[\"match\",[\"geometry-type\"],[\"LineString\",\"MultiLineString\"],true,false]]"),
-                LayoutJson = MapRenderer.Core.Json.JsonParser.Parse(
+                Paint = SymbolStyle.PaintProperties.Parse(null),
+                Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
                     "{\"symbol-placement\":\"line\",\"text-field\":[\"to-string\",[\"get\",\"ref\"]]," +
                     "\"icon-image\":\"road_3\",\"text-rotation-alignment\":\"map\"," +
-                    "\"icon-rotation-alignment\":\"viewport\"}"),
+                    "\"icon-rotation-alignment\":\"viewport\"}")),
             };
 
             var symbols = new List<SymbolStyle.SymbolFeature>();

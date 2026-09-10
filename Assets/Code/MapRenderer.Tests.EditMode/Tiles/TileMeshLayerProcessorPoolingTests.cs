@@ -196,7 +196,7 @@ namespace MapRenderer.Tests.Tiles
             using var fixtureTile = new InMemoryDecodedTile(layer);
             TileGeometryBuffers geometry = layer.Geometry;
 
-            var paint = new Fill.PaintProperties(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
             var projection = new WebMercatorProjection();
             double3 renderOrigin = TileRenderOrigin.Project(tileId, projection);
             var selected = new List<SelectedTileFeature> { new SelectedTileFeature { Feature = feature, Ordinal = 0 } };

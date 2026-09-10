@@ -51,15 +51,16 @@ namespace MapRenderer.Tests.Meshing
             List<IFeature> features = SyntheticLineLayer();
             IReadOnlyList<SelectedTileFeature> selection = TestTileMeshBuilder.Selection(features);
 
-            var styleLayer = new StyleLayer
+            var styleLayer = new Line.StyleLayer
             {
                 Id          = "alloc-line",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "alloc",
-                PaintJson   = JsonParser.Parse(PaintJson),
+                Paint       = Line.PaintProperties.Parse(JsonParser.Parse(PaintJson)),
+                Layout      = Line.LayoutProperties.Parse(null),
             };
-            var paint  = new Line.PaintProperties(styleLayer);
-            var layout = new Line.LayoutProperties(styleLayer);
+            var paint  = styleLayer.Paint;
+            var layout = styleLayer.Layout;
 
             // Non-vacuity: a constant style really does bypass both per-feature bake branches — otherwise
             // this tooth would be measuring the expression-eval path (out of the Rank-3 fence) instead of

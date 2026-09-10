@@ -227,7 +227,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 // Direct sync path for reference.
                 using var mvtTile   = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, bytes);
                 var fillLayer = style.Layers[0];
-                var paint     = new Fill.PaintProperties(fillLayer);
+                var paint     = ((Fill.StyleLayer)fillLayer).Paint;
                 var features  = FeatureSelector.SelectFeatures(fillLayer, mvtTile, 0.0);
                 var mvtLayer  = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
                 Assert.IsNotNull(mvtLayer);

@@ -70,8 +70,9 @@ namespace MapRenderer.Tests.Text.Placement
                 Id = "labels",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
-                LayoutJson = JsonParser.Parse(
-                    "{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + FontName + "\"]" + extraLayoutJson + "}"),
+                Paint = SymbolStyle.PaintProperties.Parse(null),
+                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
+                    "{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + FontName + "\"]" + extraLayoutJson + "}")),
             };
 
         [Test]

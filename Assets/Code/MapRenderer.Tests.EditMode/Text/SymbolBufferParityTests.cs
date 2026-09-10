@@ -523,7 +523,8 @@ namespace MapRenderer.Tests.Text
                 Id          = "b4-point",
                 LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = sourceLayer,
-                LayoutJson  = JsonParser.Parse("{\"text-field\":\"{NAME}\"}"),
+                Paint       = SymbolStyle.PaintProperties.Parse(null),
+                Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"{NAME}\"}")),
                 Filter      = filterJson != null ? JsonParser.Parse(filterJson) : null,
             };
 
@@ -533,8 +534,9 @@ namespace MapRenderer.Tests.Text
                 Id          = "b4-line",
                 LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "probe",
-                LayoutJson  = JsonParser.Parse(
-                    "{\"text-field\":\"{NAME}\",\"symbol-placement\":\"line\",\"symbol-spacing\":1}"),
+                Paint       = SymbolStyle.PaintProperties.Parse(null),
+                Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
+                    "{\"text-field\":\"{NAME}\",\"symbol-placement\":\"line\",\"symbol-spacing\":1}")),
             };
 
         private static IFeature PointFeature(uint[] geometry)

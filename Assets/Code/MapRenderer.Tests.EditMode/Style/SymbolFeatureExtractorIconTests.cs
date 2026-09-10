@@ -85,7 +85,8 @@ namespace MapRenderer.Tests.Style
                 Id = "points",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "points",
-                LayoutJson = JsonParser.Parse(layoutJson),
+                Paint = SymbolStyle.PaintProperties.Parse(null),
+                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(layoutJson)),
             };
 
         private static IDecodedTile OnePointTile(double2 point)

@@ -32,9 +32,9 @@ namespace MapRenderer.Tests.Visual
             // ── Build the geolines line mesh on the globe via the real StyledLineTileBuilder. ──
             using MvtTile mvtTile = MvtDecoder.Decode(new TileId { Z = 0, X = 0, Y = 0 }, SampleTileFixture.Bytes());
             var style = StyleParser.Parse(LineStyleJson());
-            var styleLayer = style.Layers[0];
-            var paint  = new Line.PaintProperties(styleLayer);
-            var layout = new Line.LayoutProperties(styleLayer);
+            var styleLayer = (Line.StyleLayer)style.Layers[0];
+            var paint  = styleLayer.Paint;
+            var layout = styleLayer.Layout;
 
             var mvtLayer = SourceLayerResolver.ResolveTileLayer(styleLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "fixture must contain the geolines layer");

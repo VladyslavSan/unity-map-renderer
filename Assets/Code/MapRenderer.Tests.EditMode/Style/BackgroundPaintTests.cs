@@ -18,13 +18,13 @@ namespace MapRenderer.Tests.Style
     [TestFixture]
     public class BackgroundPaintTests
     {
-        private static StyleLayer MakeBackgroundLayer(string paintJson)
+        private static Background.StyleLayer MakeBackgroundLayer(string paintJson)
         {
-            return new StyleLayer
+            return new Background.StyleLayer
             {
                 Id        = "test-background",
                 LayerType = StyleLayerType.Background,
-                PaintJson = paintJson != null ? JsonParser.Parse(paintJson) : null,
+                Paint     = Background.PaintProperties.Parse(paintJson != null ? JsonParser.Parse(paintJson) : null),
             };
         }
 
@@ -34,7 +34,7 @@ namespace MapRenderer.Tests.Style
         public void BackgroundPaint_AbsentPaint_UsesSpecDefaults()
         {
             var layer = MakeBackgroundLayer("{}");
-            var bp    = new Background.PaintProperties(layer);
+            var bp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, bp.Color.Kind);
             var c = bp.Color.Evaluate(0.0);
@@ -52,7 +52,7 @@ namespace MapRenderer.Tests.Style
         public void BackgroundPaint_NullPaint_IsInertFallback()
         {
             var layer = MakeBackgroundLayer(null);
-            var bp    = new Background.PaintProperties(layer);
+            var bp    = layer.Paint;
 
             Assert.IsTrue(bp.IsInertFallback, "A layer with null Paint must be IsInertFallback.");
         }
@@ -63,7 +63,7 @@ namespace MapRenderer.Tests.Style
         public void BackgroundPaint_ExplicitColorString_Parses()
         {
             var layer = MakeBackgroundLayer("{\"background-color\":\"#ff0000\"}");
-            var bp    = new Background.PaintProperties(layer);
+            var bp    = layer.Paint;
 
             var c = bp.Color.Evaluate(0.0);
             Assert.AreEqual(1.0, c.R, 1e-4, "Red channel must be 1.0 for #ff0000.");
@@ -76,7 +76,7 @@ namespace MapRenderer.Tests.Style
         public void BackgroundPaint_ExplicitColorRgbaArray_Parses()
         {
             var layer = MakeBackgroundLayer("{\"background-color\":[\"rgba\",0,255,0,1]}");
-            var bp    = new Background.PaintProperties(layer);
+            var bp    = layer.Paint;
 
             var c = bp.Color.Evaluate(0.0);
             Assert.AreEqual(0.0, c.R, 1e-4);
@@ -88,7 +88,7 @@ namespace MapRenderer.Tests.Style
         public void BackgroundPaint_ExplicitOpacityNumber_Parses()
         {
             var layer = MakeBackgroundLayer("{\"background-opacity\":0.5}");
-            var bp    = new Background.PaintProperties(layer);
+            var bp    = layer.Paint;
 
             Assert.AreEqual(0.5f, bp.Opacity.Evaluate(0.0), 1e-6f);
             Assert.IsFalse(bp.IsInertFallback);
@@ -98,7 +98,7 @@ namespace MapRenderer.Tests.Style
         public void BackgroundPaint_ExplicitPatternString_Parses()
         {
             var layer = MakeBackgroundLayer("{\"background-pattern\":\"stripes\"}");
-            var bp    = new Background.PaintProperties(layer);
+            var bp    = layer.Paint;
 
             Assert.AreEqual("stripes", bp.PatternName);
             Assert.IsFalse(bp.IsInertFallback);
@@ -113,7 +113,7 @@ namespace MapRenderer.Tests.Style
                 "{\"background-color\":[\"interpolate\",[\"exponential\",1],[\"zoom\"]," +
                 "0,\"#000000\",10,\"#ffffff\"]}";
             var layer = MakeBackgroundLayer(paintJson);
-            var bp    = new Background.PaintProperties(layer);
+            var bp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Zoom, bp.Color.Kind,
                 "A zoom-interpolate background-color must classify as Zoom.");

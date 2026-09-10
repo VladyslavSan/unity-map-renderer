@@ -9,9 +9,10 @@ namespace MapRenderer.Tests.Style
 {
     /// <summary>
     /// S60 acceptance criterion 1: raw JSON fields are encapsulated.
-    /// Asserts that <see cref="StyleLayer.PaintJson"/>, <see cref="StyleLayer.LayoutJson"/>, and
-    /// <see cref="StyleLayer.Raw"/> are NOT public (they are internal), while
-    /// <see cref="StyleLayer.Filter"/> remains public.
+    /// Asserts that <see cref="StyleLayer.Raw"/> is NOT public (it is internal), while
+    /// <see cref="StyleLayer.Filter"/> remains public. <c>PaintJson</c>/<c>LayoutJson</c> no longer exist
+    /// (UMR-108: paint/layout are parsed eagerly, not retained as raw sub-trees) — there is nothing left to
+    /// assert non-public for them.
     ///
     /// Uses reflection so that an accidental <c>public</c> revert is a compile-time miss but a test fail.
     /// </summary>
@@ -19,24 +20,6 @@ namespace MapRenderer.Tests.Style
     public class StyleLayerEncapsulationTests
     {
         private const BindingFlags AnyInstance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
-
-        [Test]
-        public void PaintJson_IsNotPublic()
-        {
-            var fi = typeof(StyleLayer).GetField("PaintJson", AnyInstance);
-            Assert.IsNotNull(fi, "PaintJson field must exist on StyleLayer.");
-            Assert.IsFalse(fi.IsPublic,
-                "PaintJson must NOT be public (S60: raw JSON encapsulated as internal).");
-        }
-
-        [Test]
-        public void LayoutJson_IsNotPublic()
-        {
-            var fi = typeof(StyleLayer).GetField("LayoutJson", AnyInstance);
-            Assert.IsNotNull(fi, "LayoutJson field must exist on StyleLayer.");
-            Assert.IsFalse(fi.IsPublic,
-                "LayoutJson must NOT be public (S60: raw JSON encapsulated as internal).");
-        }
 
         [Test]
         public void Raw_IsNotPublic()

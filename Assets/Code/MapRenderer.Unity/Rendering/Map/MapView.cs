@@ -212,7 +212,21 @@ namespace MapRenderer.Unity.Rendering.Map
         {
             var           loader = DocumentLoaderOverride ?? StyleDocumentLoader.LoadTextAsync;
             string        json   = await loader(styleUri, ct);
-            StyleDocument style  = StyleParser.Parse(json, _config.FillAntialiasing);
+            StyleDocument style;
+            try
+            {
+                // UMR-108: paint/layout expressions parse eagerly here, so a malformed-but-valid-JSON
+                // expression (bad interpolate/step stops, wrong arity, unknown operator) throws NOW rather
+                // than lazily on first access. Caught here, before SetStyle(StyleDocument,...) — the overload
+                // commits _style/StyleId/TileManager.CurrentStyle as its very first step, so returning without
+                // calling it leaves the previous style fully live (no half-applied restyle).
+                style = StyleParser.Parse(json, _config.FillAntialiasing);
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"[MapView.SetStyle] failed to parse style '{styleUri}' — keeping the previous style live. {ex}");
+                return;
+            }
             await SetStyle(style, styleUri, ct);
         }
 

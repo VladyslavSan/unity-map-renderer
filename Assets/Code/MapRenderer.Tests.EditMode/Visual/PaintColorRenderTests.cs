@@ -61,10 +61,10 @@ namespace MapRenderer.Tests.Visual
         /// <param name="colorToken">The style value for <c>line-color</c>, verbatim JSON — a quoted hex
         /// string or an <c>["rgba", …]</c> literal, so an authored ALPHA can be driven too.</param>
         private static Line.PaintProperties Paint(string colorToken)
-            => new Line.PaintProperties(JsonParser.Parse($"{{\"line-color\":{colorToken},\"line-width\":{LineWidthPx}}}"));
+            => Line.PaintProperties.Parse(JsonParser.Parse($"{{\"line-color\":{colorToken},\"line-width\":{LineWidthPx}}}"));
 
         private static Line.LayoutProperties Layout()
-            => new Line.LayoutProperties(JsonParser.Parse("{}"));
+            => Line.LayoutProperties.Parse(JsonParser.Parse("{}"));
 
         private static IFeature LineFeature()
         {

@@ -1,7 +1,6 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
 // Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
 
-using System;
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geometry;
@@ -29,16 +28,16 @@ namespace MapRenderer.Tests.Style
     [TestFixture]
     public class LinePaintTests
     {
-        private static StyleLayer MakeLineLayer(string paintJson, string layoutJson = null,
+        private static Line.StyleLayer MakeLineLayer(string paintJson, string layoutJson = null,
             string sourceLayer = "roads")
         {
-            return new StyleLayer
+            return new Line.StyleLayer
             {
                 Id          = "test-line",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = sourceLayer,
-                PaintJson   = paintJson  != null ? JsonParser.Parse(paintJson)  : null,
-                LayoutJson  = layoutJson != null ? JsonParser.Parse(layoutJson) : null,
+                Paint       = Line.PaintProperties.Parse(paintJson != null ? JsonParser.Parse(paintJson) : null),
+                Layout      = Line.LayoutProperties.Parse(layoutJson != null ? JsonParser.Parse(layoutJson) : null),
             };
         }
 
@@ -48,7 +47,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_ConstantColor_ClassifiesAsConstant()
         {
             var layer = MakeLineLayer("{\"line-color\":[\"rgba\",255,0,0,1]}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, lp.ColorKind,
                 "An rgba(...) literal must classify as Constant.");
@@ -72,7 +71,7 @@ namespace MapRenderer.Tests.Style
             const string paintJson =
                 "{\"line-width\":[\"interpolate\",[\"linear\"],[\"zoom\"],5,2.0,15,10.0]}";
             var layer = MakeLineLayer(paintJson);
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Zoom, lp.WidthKind,
                 "A zoom-interpolate expression must classify as Zoom.");
@@ -99,7 +98,7 @@ namespace MapRenderer.Tests.Style
                 "\"motorway\",[\"rgba\",200,50,50,1]," +
                 "[\"rgba\",128,128,128,1]]}";
             var layer = MakeLineLayer(paintJson);
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Feature, lp.ColorKind,
                 "A [\"get\",...] match expression must classify as Feature.");
@@ -114,7 +113,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_AbsentColor_UsesSpecDefault_Black()
         {
             var layer = MakeLineLayer("{}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, lp.ColorKind,
                 "Absent line-color must use spec default (Constant kind).");
@@ -135,7 +134,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_AbsentOpacity_UsesSpecDefault_One()
         {
             var layer = MakeLineLayer("{}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, lp.OpacityKind);
             float v = lp.Opacity.Evaluate(0.0);
@@ -148,7 +147,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_AbsentWidth_UsesSpecDefault_One()
         {
             var layer = MakeLineLayer("{}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, lp.WidthKind);
             float v = lp.Width.Evaluate(0.0);
@@ -161,7 +160,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_AbsentBlur_UsesSpecDefault_Zero()
         {
             var layer = MakeLineLayer("{}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             float v = lp.Blur.Evaluate(0.0);
             Assert.AreEqual(0.0f, v, 1e-6f, "Default line-blur must be 0.0.");
@@ -173,7 +172,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_AbsentGapWidth_UsesSpecDefault_Zero()
         {
             var layer = MakeLineLayer("{}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             float v = lp.GapWidth.Evaluate(0.0);
             Assert.AreEqual(0.0f, v, 1e-6f, "Default line-gap-width must be 0.0.");
@@ -185,7 +184,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_GapWidth_Present_Parsed()
         {
             var layer = MakeLineLayer("{\"line-gap-width\":8.0}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             float v = lp.GapWidth.Evaluate(0.0);
             Assert.AreEqual(8.0f, v, 1e-6f, "line-gap-width must be 8.0.");
@@ -198,7 +197,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_Translate_ComponentsArePinned()
         {
             var layer = MakeLineLayer("{\"line-translate\":[16,-8]}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, lp.TranslateKind);
             var t = lp.Translate.Evaluate(0.0);
@@ -212,7 +211,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_TranslateAnchorViewport_IsOne()
         {
             var layer = MakeLineLayer("{\"line-translate-anchor\":\"viewport\"}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, lp.TranslateAnchorKind);
             float v = lp.TranslateAnchor.Evaluate(0.0);
@@ -225,7 +224,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_TranslateAnchorMap_IsZero()
         {
             var layer = MakeLineLayer("{\"line-translate-anchor\":\"map\"}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             float v = lp.TranslateAnchor.Evaluate(0.0);
             Assert.AreEqual(0.0f, v, 1e-6f, "line-translate-anchor 'map' must encode as 0.0.");
@@ -237,7 +236,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_LayoutJoinCap_Parsed()
         {
             var layer = MakeLineLayer("{}", "{\"line-join\":\"round\",\"line-cap\":\"square\"}");
-            var lo    = new Line.LayoutProperties(layer);
+            var lo    = layer.Layout;
 
             Assert.AreEqual(JoinType.Round,  lo.Join, "line-join='round' must parse to JoinType.Round.");
             Assert.AreEqual(CapType.Square, lo.Cap,  "line-cap='square' must parse to CapType.Square.");
@@ -247,7 +246,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_LayoutJoinBevel_Parsed()
         {
             var layer = MakeLineLayer("{}", "{\"line-join\":\"bevel\"}");
-            var lo    = new Line.LayoutProperties(layer);
+            var lo    = layer.Layout;
 
             Assert.AreEqual(JoinType.Bevel, lo.Join, "line-join='bevel' must parse to JoinType.Bevel.");
         }
@@ -256,7 +255,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_LayoutCapRound_Parsed()
         {
             var layer = MakeLineLayer("{}", "{\"line-cap\":\"round\"}");
-            var lo    = new Line.LayoutProperties(layer);
+            var lo    = layer.Layout;
 
             Assert.AreEqual(CapType.Round, lo.Cap, "line-cap='round' must parse to CapType.Round.");
         }
@@ -265,7 +264,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_LayoutMiterLimit_Parsed()
         {
             var layer = MakeLineLayer("{}", "{\"line-miter-limit\":5.0}");
-            var lo    = new Line.LayoutProperties(layer);
+            var lo    = layer.Layout;
 
             Assert.AreEqual(5.0, lo.MiterLimit, 1e-6, "line-miter-limit must be parsed from layout.");
         }
@@ -274,7 +273,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_LayoutRoundLimit_Parsed()
         {
             var layer = MakeLineLayer("{}", "{\"line-round-limit\":1.2}");
-            var lo    = new Line.LayoutProperties(layer);
+            var lo    = layer.Layout;
 
             Assert.AreEqual(1.2, lo.RoundLimit, 1e-6, "line-round-limit must be parsed from layout.");
         }
@@ -283,7 +282,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_AbsentLayout_UsesSpecDefaults()
         {
             var layer = MakeLineLayer("{}");
-            var lo    = new Line.LayoutProperties(layer);
+            var lo    = layer.Layout;
 
             Assert.AreEqual(JoinType.Miter, lo.Join,       "Default line-join must be JoinType.Miter.");
             Assert.AreEqual(CapType.Butt,   lo.Cap,        "Default line-cap must be CapType.Butt.");
@@ -297,7 +296,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_Offset_ConstantValue_IsParsed()
         {
             var layer = MakeLineLayer("{\"line-offset\":5}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Constant, lp.OffsetKind,
                 "A numeric line-offset must classify as Constant.");
@@ -310,7 +309,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_Offset_Absent_DefaultsToZero()
         {
             var layer = MakeLineLayer("{}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             float v = lp.Offset.Evaluate(0.0);
             Assert.AreEqual(0.0f, v, 1e-6f, "Absent line-offset must default to 0.0.");
@@ -320,7 +319,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_Offset_NegativeValue_IsParsed()
         {
             var layer = MakeLineLayer("{\"line-offset\":-3}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             float v = lp.Offset.Evaluate(0.0);
             Assert.AreEqual(-3.0f, v, 1e-6f, "Negative line-offset must parse correctly.");
@@ -331,7 +330,7 @@ namespace MapRenderer.Tests.Style
         {
             var json  = "{\"line-offset\":[\"interpolate\",[\"linear\"],[\"zoom\"],10,0,14,8]}";
             var layer = MakeLineLayer(json);
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual(ExpressionKind.Zoom, lp.OffsetKind,
                 "A zoom-interpolate line-offset must classify as Zoom kind.");
@@ -343,7 +342,7 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_PatternName_IsParsed()
         {
             var layer = MakeLineLayer("{\"line-pattern\":\"road_shield\"}");
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.AreEqual("road_shield", lp.PatternName, "line-pattern must be read as PatternName.");
             Assert.IsFalse(lp.IsInertFallback);
@@ -355,18 +354,9 @@ namespace MapRenderer.Tests.Style
         public void LinePaint_NullPaint_IsInertFallback()
         {
             var layer = MakeLineLayer(null);
-            var lp    = new Line.PaintProperties(layer);
+            var lp    = layer.Paint;
 
             Assert.IsTrue(lp.IsInertFallback, "A layer with null Paint must be IsInertFallback.");
-        }
-
-        // ── Null layer → ArgumentNullException ─────────────────────────────────
-
-        [Test]
-        public void LinePaint_NullLayer_ThrowsArgumentNullException()
-        {
-            Assert.Throws<ArgumentNullException>(() => new Line.PaintProperties((StyleLayer)null),
-                "PaintProperties((StyleLayer)null) must throw ArgumentNullException.");
         }
 
         // ── S60: PropertyNames value constants ──────────────────────────────────

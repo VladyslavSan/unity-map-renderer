@@ -1093,7 +1093,7 @@ namespace MapRenderer.Tests.Visual
             string paintJson = dataDriven
                 ? $"{{\"fill-extrusion-height\":[\"get\",\"{CasterHeightProperty}\"]}}"
                 : $"{{\"fill-extrusion-height\":{roofHeight}}}";
-            var paint = new FillExtrusion.PaintProperties(JsonParser.Parse(paintJson));
+            var paint = FillExtrusion.PaintProperties.Parse(JsonParser.Parse(paintJson));
             Assert.AreEqual(dataDriven, paint.Height.DependsOnFeature,
                 "fixture sanity: this variant must classify as the height path it claims to exercise.");
 

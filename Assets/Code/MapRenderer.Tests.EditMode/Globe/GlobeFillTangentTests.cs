@@ -39,7 +39,7 @@ namespace MapRenderer.Tests.Globe
         {
             var mvtTile   = TestDecodedTiles.Track(MvtDecoder.Decode(FixtureTile, SampleTileFixture.Bytes()));
             var fillLayer = MinimalStyle().Layers[0];
-            var paint     = new Fill.PaintProperties(fillLayer);
+            var paint     = ((Fill.StyleLayer)fillLayer).Paint;
             var mvtLayer  = SourceLayerResolver.ResolveTileLayer(fillLayer, mvtTile);
             Assert.IsNotNull(mvtLayer, "fixture must have the 'countries' layer");
             var selected  = TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0);

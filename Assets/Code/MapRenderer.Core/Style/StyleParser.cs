@@ -13,6 +13,16 @@ namespace MapRenderer.Core.Style
     /// <see cref="JsonParseException"/> from <see cref="JsonParser"/>; a structurally surprising but
     /// valid-JSON document (e.g. an unexpected type for a field) is tolerated by falling back to a
     /// default rather than throwing.
+    ///
+    /// <para><b>Exception:</b> a paint/layout key that parses eagerly through the expression engine (UMR-108
+    /// — every typed <c>Paint</c>/<c>Layout</c> view parses at construction, not lazily on first access) can
+    /// throw <see cref="MapRenderer.Core.Expressions.ExpressionParseException"/> when its VALUE is a malformed
+    /// expression (bad interpolate/step stops, wrong arity, unknown operator) — that is not the "unexpected
+    /// type for a field" case above, and THIS method does not catch it. <c>MapView.SetStyle(string,
+    /// CancellationToken)</c> is the one in-repo call site and guards its own call. A caller that invokes
+    /// <see cref="Parse(string, bool)"/>/<see cref="Parse(JsonValue, bool)"/> directly — including
+    /// <c>MapView.SetStyle(StyleDocument, string, CancellationToken)</c>, which takes an ALREADY-parsed
+    /// document and never reaches that guard — must handle this exception itself.</para>
     /// </summary>
     public static class StyleParser
     {
@@ -101,18 +111,51 @@ namespace MapRenderer.Core.Style
             string rawType = json.GetString("type");
             StyleLayerType layerType = StyleLayerTypeExtensions.ParseLayerType(rawType);
 
-            // Factory: line/fill/symbol/background/fill-extrusion get their typed subclass (which exposes
-            // parsed Paint/Layout); every other type uses the generic base. The typed views parse lazily
-            // from PaintJson/LayoutJson on access.
+            JsonValue layoutJson = json.Get("layout");
+            JsonValue paintJson  = json.Get("paint");
+
+            // Factory: line/fill/symbol/background/fill-extrusion get their typed subclass, with its typed
+            // Paint/Layout parsed here, eagerly; every other type uses the generic base. Raw retains the
+            // original object for forward-compat.
             StyleLayer layer;
             switch (layerType)
             {
-                case StyleLayerType.Line:          layer = new Line.StyleLayer();          break;
-                case StyleLayerType.Fill:          layer = new Fill.StyleLayer { AntialiasDefault = fillAntialiasDefault }; break;
-                case StyleLayerType.Symbol:        layer = new Symbol.StyleLayer();        break;
-                case StyleLayerType.Background:    layer = new Background.StyleLayer();    break;
-                case StyleLayerType.FillExtrusion: layer = new FillExtrusion.StyleLayer(); break;
-                default:                           layer = new StyleLayer();               break;
+                case StyleLayerType.Line:
+                    layer = new Line.StyleLayer
+                    {
+                        Paint  = Line.PaintProperties.Parse(paintJson),
+                        Layout = Line.LayoutProperties.Parse(layoutJson),
+                    };
+                    break;
+                case StyleLayerType.Fill:
+                    layer = new Fill.StyleLayer
+                    {
+                        Paint  = Fill.PaintProperties.Parse(paintJson, fillAntialiasDefault),
+                        Layout = Fill.LayoutProperties.Parse(layoutJson),
+                    };
+                    break;
+                case StyleLayerType.Symbol:
+                    layer = new Symbol.StyleLayer
+                    {
+                        Paint  = Symbol.PaintProperties.Parse(paintJson),
+                        Layout = Symbol.LayoutProperties.Parse(layoutJson),
+                    };
+                    break;
+                case StyleLayerType.Background:
+                    layer = new Background.StyleLayer
+                    {
+                        Paint = Background.PaintProperties.Parse(paintJson),
+                    };
+                    break;
+                case StyleLayerType.FillExtrusion:
+                    layer = new FillExtrusion.StyleLayer
+                    {
+                        Paint = FillExtrusion.PaintProperties.Parse(paintJson),
+                    };
+                    break;
+                default:
+                    layer = new StyleLayer();
+                    break;
             }
 
             layer.Raw = json;
@@ -126,10 +169,8 @@ namespace MapRenderer.Core.Style
             layer.MinZoom = json.GetNullableDouble("minzoom");
             layer.MaxZoom = json.GetNullableDouble("maxzoom");
 
-            // Raw sub-trees retained verbatim (null if the key is absent).
+            // Raw sub-tree retained verbatim (null if the key is absent).
             layer.Filter = json.Get("filter");
-            layer.LayoutJson = json.Get("layout");
-            layer.PaintJson = json.Get("paint");
 
             return layer;
         }
