@@ -67,29 +67,40 @@ The map is a **data pipeline that ends in meshes**: camera state selects tiles �
 decoded → features are tessellated into vertex/index buffers → buffers become renderable geometry.
 The data-parallel stages run as Burst jobs across tiles; only mesh creation touches the main thread.
 
+**This is not a `SystemBase`/ECS pipeline** — the hot path is Burst + Jobs scheduled from plain
+orchestrator classes (`TileManager`, `SymbolPlacementSystem` are `VerifiedDisposable`, not
+`SystemBase`). `Unity.Entities` is used narrowly, as one of three interchangeable render backends —
+`Rendering/Backend/Entities/TileRenderer.cs` is the only file in the product that uses it. "DOTS (ECS +
+Burst + Jobs)" stays the umbrella term for the stack (Burst + Jobs are DOTS regardless of ECS extent);
+this diagram is the detail behind that umbrella.
+
 ```
-                       ┌───────────────────────────── per-frame ────────────────────────────┐
- Camera/ViewState ─► TileSelectionSystem ─► requests
-                                              │
-                       ┌──────── async + Burst jobs (off main thread) ────────┐
-                       ▼                                                       │
-   BYO DataSource ─► FetchSystem ─► DecodeJob(MVT/MLT) ─► TessellationJob(s) ──┘
-   (HTTP/PMTiles/                    (Burst, per tile)    (fill/line/extrusion,
-    local/in-mem)                                          Burst, NativeArrays)
+                       ┌───────────────────────────── per-frame tick ─────────────────────────────┐
+Camera/ViewState ─► TileManager  (Rendering/Tile/TileManager.cs) — cover → fetch → build → consume → evict
+                                     │
+                     ┌──────── async + Burst jobs (off main thread) ────────┐
+                     ▼                                                       │
+  BYO DataSource ─► fetch ─► MvtDecoder / MvtDecodeJob (MapRenderer.Jobs) ─► FillMeshGraph /
+  (HTTP/PMTiles/               (managed proto parse + Burst per-tile          LineMeshGraph
+   local/in-mem)                geometry decode)                             (MapRenderer.Jobs,
+                                                                               scheduled job graphs) ──┘
                                                                   │
                                                                   ▼
-                                                       MeshBuildSystem  ── main-thread sync point:
-                                                       NativeArray<Vertex/Index> → Mesh / GraphicsBuffer
+                                                    consume  ── main-thread sync point: each
+                                                    tile-layer mesh registers as a draw item via
+                                                    ITileRenderBackend (Entities / BRG / GameObjects —
+                                                    TileManager has no per-backend branching)
                                                                   │
                        ┌──────────────────────────────────────────┴───────────┐
                        ▼                                                        ▼
-            Fills / lines / extrusions                          LabelPlacementSystem  (per frame,
-            → ECS render entities                                screen-space collision, Burst job
-            (Entities Graphics / BatchRendererGroup,             over a spatial grid)
-             per-layer materials, draw order)                           │
-                                                                        ▼
-                                                              Symbol/text billboards
-                                                              (SDF, camera-facing)
+            Tile-mesh layers                                    SymbolPlacementSystem  (separate
+            → tile meshes, one build per                        path, per frame: screen-space
+            tile add/remove, drawn via                          placement + collision, Burst job
+            the selected backend                                over a spatial grid)
+                                                                          │
+                                                                          ▼
+                                                                Symbol/text billboards
+                                                                (SDF, camera-facing)
 ```
 
 ### Module boundaries — what belongs where
@@ -108,6 +119,11 @@ shrinks as subsystems nativize.
 | `MapRenderer.Unity` | **the product** | MonoBehaviours, mesh building, rendering glue, tile/label coordination |
 | `MapRenderer.Jobs` | **the product** | the native/decode assembly: Burst + `Unity.Collections` jobs, the **tile decoders**, and the types that **own** blittable geometry |
 | `MapRenderer.Core` | **legacy — no new code** | engine-free code that predates this rule: tile/Web-Mercator math, geometry, earcut, style/expression evaluation, text shaping |
+| `MapRenderer.App` | **the product** | the composition root (`MapHost`, scene wiring) plus the dev-facing surfaces built on it — camera control, menus, diagnostics/telemetry panels |
+| `MapRenderer.Tests.EditMode` | test runner | headless EditMode tests (the primary gate, `./Tools/run-tests.sh`) |
+| `MapRenderer.Tests.PlayMode` | test runner | PlayMode tests (multi-frame/async behaviour EditMode can't exercise) |
+| `MapRenderer.Tests.Shared` | shared test infra | fixtures/helpers referenced by both test runners |
+| `MapRenderer.Unity.Editor` | editor-only | the URP `ShaderGUI` for the map shaders (`Editor/ShaderGUI/`); Editor platform only, never in a player build |
 
 > **`Jobs` is not "only Burst-able code" — read the row literally.** Since IR C1 it also holds a hand-rolled
 > **managed** protobuf decoder (`Mvt/MvtDecoder.cs`), the managed selection seam (`Tiles/FeatureSelector.cs`)
@@ -327,8 +343,3 @@ not a current target.
 | Coordinate jitter at world scale | Floating-origin rebasing from Step 3; doubles in core, floats at render |
 | GC / frame spikes | NativeArray everywhere in hot path; no managed allocs per frame; GraphicsBuffer for large geometry |
 | Text / i18n complexity | HarfBuzzSharp; sequence last (Step 4) |
-
-## Open question for the next session
-Ready for the **Step 0 design note** — ECS layout (entities/components/systems), the data-source
-interface, MVT decode approach (hand-rolled vs lib), triangulation pick, and the URP/HDRP rendering
-approach — or do you want to start coding the spike directly?

@@ -5,8 +5,9 @@ and decisions, `docs/coordinates-and-projections.md` for the math foundations, `
 §1 for how MVT bytes become a mesh (the per-kind fill/line stage orderings + the build/consume tile loop;
 line AA, lit shading, and the render-layer model are the later sections), `docs/conventions.md` for
 generic coding conventions, `docs/gc-and-allocation-design.md` for why managed allocation dominates
-frame timing (GC is stop-the-world) and how the hot paths avoid it, `docs/step-0.md` for the current
-milestone, **`docs/web-target.md` before touching a web build** (the `Tools/build.sh web` recipe, the two
+frame timing (GC is stop-the-world) and how the hot paths avoid it, `README.md` for current status
+(`docs/step-0.md` is historical only — pre-spike design, kept for record),
+**`docs/web-target.md` before touching a web build** (the `Tools/build.sh web` recipe, the two
 settings a web player must have or it silently never starts, what does and does not run off the main
 thread there, and how to prove a build is the configuration you asked for), and
 **`docs/lessons-learned.md` for hard-won engineering gotchas** (Unity/URP/HLSL + the headless test
@@ -23,9 +24,12 @@ reviews (e.g. *"violates SPEC-DPR R-9"*). See `specs/README.md` for the doc type
 
 ## Project layout
 
-**The product is `MapRenderer.Unity` + `MapRenderer.Jobs`; `MapRenderer.Core` is legacy — not a destination
-for new code, and never a placement argument.** Put code where it belongs architecturally, then test it
-wherever it lands. **New features are designed data-oriented and native-first from the start** — the data
+**The product is `MapRenderer.Unity` + `MapRenderer.Jobs`, plus `MapRenderer.App` as the composition root
+(`MapHost`, scene wiring, and the dev-facing surfaces built on it — camera control, menus, diagnostics);
+`MapRenderer.Core` is legacy — not a destination for new code, and never a placement argument.** Renderer
+logic still goes to `Unity`/`Jobs` only — `App` wires the product together, it does not host it. Put code
+where it belongs architecturally, then test it wherever it lands. **New features are designed data-oriented
+and native-first from the start** — the data
 plane (anything per tile / feature / vertex / glyph / frame, or read inside a job) is born native; nativizing
 later is not the plan. **Read `ARCHITECTURE.md` §2 "Module boundaries" before moving code between assemblies
 or adding a type to Core** — it carries both rules, the rationale, and the three-workaround failure that
@@ -35,7 +39,13 @@ produced the first one.
 - `Assets/Code/MapRenderer.Jobs/` — **the product**: Burst + Collections jobs; anything naturally blittable.
 - `Assets/Code/MapRenderer.Core/` — **legacy, no new code**: engine-free tile math, geometry, earcut,
   style/expression evaluation, text shaping that predates the rule.
+- `Assets/Code/MapRenderer.App/` — **the product (composition root)**: `MapHost` + scene wiring, plus
+  the dev-facing surfaces built on it (camera control, menus, diagnostics/telemetry) — not a place for
+  renderer/mesh-building logic.
 - `Assets/Code/MapRenderer.Tests.EditMode/` — headless EditMode tests.
+- `Assets/Code/MapRenderer.Tests.PlayMode/` — PlayMode tests (multi-frame/async behaviour EditMode can't
+  exercise).
+- `Assets/Code/MapRenderer.Tests.Shared/` — shared test infra/fixtures used by both test runners.
 - `Assets/Fixtures/` — committed test data (e.g. a sample MVT tile).
 - Assemblies are split via `.asmdef`; Core does not depend on `MapRenderer.Unity`.
 

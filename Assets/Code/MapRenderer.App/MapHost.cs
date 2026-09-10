@@ -19,8 +19,8 @@ using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// Map composition root — assembles, wires, and starts the map subsystem. Lives on the <b>MapRoot</b>
-    /// GameObject, the scene owner of the map (<see cref="MapViewComponent"/> + <see cref="Controller"/>).
+    /// Map composition root — assembles, wires, and starts the map subsystem. Lives on the scene's map
+    /// root GameObject (<see cref="MapViewComponent"/> + <see cref="Controller"/>).
     /// One component brings the whole thing up: the MapView + camera graph, lighting, input, and the Map
     /// reference on any dev surface (debug menu, telemetry, camera panel) that is present in the scene — add one
     /// to use it; MapHost never adds or gates them, and enabling/disabling is the component's own checkbox.
@@ -46,8 +46,8 @@ namespace MapRenderer.App
     ///   <see cref="InitialLongitude"/>  — initial map center longitude.
     ///   <see cref="InitialZoom"/>       — initial zoom level.
     ///
-    /// Rendered layer types: fill, line (with casing), symbol (text), and background. Raster and
-    /// fill-extrusion layers present in a style are silently skipped until those features land.
+    /// Rendered layer types: see <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerFactory"/> for
+    /// the current supported/not-yet-supported list.
     ///
     /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
     /// </summary>
@@ -253,7 +253,7 @@ namespace MapRenderer.App
         /// <para>This is the single wiring graph entry point. Both the runtime <see cref="Start"/>
         /// and EditMode wiring tests call this method.</para>
         /// </summary>
-        /// <param name="root">The MapRoot GameObject (must carry MapView + Controller).</param>
+        /// <param name="root">The map-root GameObject — must carry MapView + Controller.</param>
         /// <param name="camera">The camera to drive; typically <c>Camera.main</c>.</param>
         /// <param name="initialView">Initial camera state (the MapCamera is built from it).</param>
         public static void Wire(

@@ -1,6 +1,12 @@
 # Job scheduling — a real job graph over the Burst work
 
-**Status:** designed 2026-09-02, revised the same day after a dual-arm review, nothing landed. Design SSOT
+**Status:** designed 2026-09-02, revised the same day after a dual-arm review. Stage 0's probe reached its
+verdict (per-layer shape stands) and has no production code of its own to land. Stages 1–6 landed — see
+each stage's own status note for what shipped and when (Stage 1: 2026-09-02; Stage 2: `a8e713c5`; Stage 3:
+`f8e61a7e`; Stage 4: Group A `f5e13c19`, Group B `c1702ed7`; Stage 5: Group A, per its "What shipped" note;
+Stage 6: per its own header). Stage 7's original framing is superseded — its own correction blocks say so
+— but what it became (batching the filter VM's per-feature dispatch, later widened by mesh-path routing)
+did land; see those corrections for the actual scope. Design SSOT
 for turning the project's Burst job *library* into a job *graph*: how a multi-stage tile build is expressed
 as `JobHandle` dependencies instead of call order, who owns the handles and the native buffers across the
 chain, how completion reaches the main thread, and what happens to the managed-closure seam

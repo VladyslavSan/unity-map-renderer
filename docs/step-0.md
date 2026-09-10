@@ -1,5 +1,10 @@
 # Step 0 — Spike: one MVT tile's fills on screen
 
+> **Historical.** This describes the pre-spike design as of 2026-07-18. The current architecture,
+> assembly layout, and pipeline are in [`ARCHITECTURE.md`](../ARCHITECTURE.md); current milestone
+> status is in [`README.md`](../README.md). Kept for record — do not treat as current (e.g. MVT decode
+> has since moved to `MapRenderer.Jobs`; see `ARCHITECTURE.md`'s module table).
+
 **Exit criterion:** the `countries` polygons from `Assets/Fixtures/sample-tile.bytes` render as a Unity
 `Mesh`. Planar Web Mercator only; fills only; no ECS World, no streaming, no styling.
 
