@@ -177,6 +177,16 @@ to its live position) and forces its opacity toward 0 in emit — so it eases OU
 Only once fully faded does gather set its offset to `-1` (the Burst stage job's "skip"). This soft-cull is the
 single mechanism behind all three; no job changed to add any of them.
 
+**`SymbolPlacementSystem`'s own identity** (moved from its class doc, UMR-118): it is a plain class (NOT a
+MonoBehaviour) — the "placed every frame" path (`ARCHITECTURE.md` §"Two geometry classes"), structurally
+distinct from the static per-`(tile,layer)` `ITileRenderBackend` meshes it never touches
+(`SymbolPlacementStructureTests` grep-checks this). Every on-screen symbol's screen-space AABB (`SymbolBox`,
+`text-padding` applied) runs through `SymbolCollision.SelectSurvivors` — greedy, sort-key-driven,
+permutation-invariant selection — BEFORE the world emit, over reused arrays (no per-frame managed allocation).
+A slot that produces no quads this Tick (no atlas, empty batch, everything culled/suppressed) is HIDDEN, not
+left drawing stale content — the mirror image of the pre-E2 Editor blink; `WorldSymbolRenderer.EndFrame` owns
+this per-slot show/hide.
+
 ## 1.5 Tile-coverage pre-cull  *(IMPLEMENTED — moved ahead of the SoA build)*
 
 A coarse step *before* the per-label pipeline: skip a tile's labels entirely when the tile covers less than ~N%

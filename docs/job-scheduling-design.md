@@ -1034,6 +1034,27 @@ corner values it guards are checked on the path production actually takes. Defer
 because it is a retirement with its own test-repointing, not because it is optional; recorded here rather
 than in a source comment, which is where stage 2 first put it.
 
+#### `TileManager.LoadedTile`'s lifecycle (moved from its struct doc, UMR-118)
+
+The per-tile live record's lifecycle (S47/S51, extended by stage 3 above):
+
+1. Fetch (`Request` → `UniTask<SharedDisposable<IDecodedTile>>` in-flight, stored as `.Preserve()`).
+2. Mesh build kicked — `Step` becomes `BuildStep.Prologue` (`MeshBuildTask` in-flight, source tiles only)
+   then `BuildStep.Measure` then `BuildStep.Write` (`Graph` in-flight, every tile — a background tile
+   starts directly at Measure, no Prologue); `FetchCompleted = true` either way.
+3. Mesh build consumed (`Built = true`; `Step = BuildStep.None`).
+
+Mid-flight release protection: `ReleaseTile` removes the tile from `_loaded` immediately, so `PumpPending`
+and `DrainMeshBuilds` — which iterate `_loaded` — never visit released tiles. A tile released while its
+mesh build is in-flight will never have `ConsumeMeshBuild` called for it.
+
+#### `TileManager.KickSourcelessBackground`'s E1 history (moved from its method doc, UMR-118)
+
+No projection gate: E1 was resolved by reordering (the globe subdivide stage landed first), so the graph
+builds both arms and `KickSourcelessBackground` kicks on every projection. It allocates NO
+`Mesh.MeshDataArray` itself — that is the write step's job (`TileBuildGraph.CompleteMeasureAndScheduleWrite`),
+which is where `PmMeshDataAllocate` now brackets the allocation.
+
 ### Stage 4 — globe subdivide and fill-extrusion roofs as graph nodes
 
 > **LANDED 2026-09-04 as `f5e13c19`** (gate 2571/2571, compiled clean, results written by that run, on a

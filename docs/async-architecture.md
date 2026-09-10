@@ -141,6 +141,52 @@ continuation resumes on the main thread — the single choke-point that owns the
 mesh build result has completed but not yet been consumed); assert **zero leaked `NativeArray`** (Unity
 `NativeLeakDetection`/alloc-vs-dispose counts) and **zero orphaned `Mesh`** (created-vs-destroyed count).
 
+### `TileManager.LoadedTile.Decode`'s residency lifetime (moved from its field doc, UMR-118)
+
+`Decode` is the decode-provisioning handle the fetch produced (`ITileFeatureSource.GetTile`'s result); set
+when the fetch completes, null before that and null again once the record no longer owns it. **This field
+IS one reference** to an already-decoded tile holding `Allocator.Persistent` buffers, and it is cleared
+exactly ONE way — `TileManager.RenderTeardownRecord` RELEASES it (cover change, eviction, restyle,
+teardown), for a kicked record precisely as much as a never-kicked one. The mesh kick no longer TRANSFERS
+this reference: it takes its own separate one (`TileManager.KickMeshBuild`'s prologue `Acquire()`), so this
+field stays live and unchanged across the whole kick. Dropping it any other way leaks the tile.
+
+**Deliberate cost, recorded rather than tested** (no observing tooth exists for it). Because this field now
+survives the kick instead of being released when the mesh build completes, a decoded tile's
+`Allocator.Persistent` buffers live for the record's WHOLE in-cover lifetime, not just until its mesh is
+built — a DURATION increase in peak resident decoded-tile memory on top of the eager-decode BREADTH
+increase the prior stage already accepted (every fetched cover tile decodes, kicked or not). Rendered
+output is unaffected — this is a resource-lifetime cost, not a behaviour change — and it was chosen
+knowingly over the alternative (release at kick completion instead of at teardown), which would have partly
+resurrected the transfer machinery this stage deletes. A future residency-ceiling tooth, if one is ever
+added, is the thing that would stop this being deliberate.
+
+### `TileManager.DrainMeshBuilds`'s off-PlayerLoop proof (moved from its method doc, UMR-118)
+
+A full drain handles tiles at any stage of the pipeline:
+1. Fetch in-flight: parks until the fetch `UniTask` completes, then kicks mesh build inline.
+2. Mesh build in-flight: parks until the handle completes, then consumes inline.
+3. Neither (tile not yet fetched): marks `Built = true` (nothing to do).
+
+Safe: the fetch `UniTask`'s completion stays OFF the PlayerLoop (see `TileDecodeDispatch`'s class doc) —
+supplied by the decode hop on the `HasData` path, and by synchronous/inline completion otherwise — so its
+continuation fires without needing the Unity PlayerLoop to advance. The mesh build dispatches through
+`IWorkScheduler`, whose completion fires on the COMPLETING thread and is never posted to the PlayerLoop —
+the same non-blocking guarantee, by a different mechanism. Parking on either completion via
+`UniTaskParkExtensions.WaitOffPlayerLoop` from the main thread therefore does not deadlock (no PlayerLoop
+dependency to dead-end on).
+
+### `TileManager.KickMeshBuild`'s off-PlayerLoop completion (moved from its method doc, UMR-118)
+
+`KickMeshBuild` dispatches through `IWorkScheduler` — `ThreadPoolWorkScheduler` on desktop/editor,
+`InlineWorkScheduler` on a WebGL player, where no worker ever picks a ThreadPool dispatch up
+(`docs/web-target.md`). Under both policies, completion fires on the COMPLETING thread and is never posted
+to the PlayerLoop, so `DrainMeshBuilds`'s and `Dispose`'s synchronous-spin polls — which never pump the
+PlayerLoop — cannot dead-end waiting for a continuation that would only ever run there. The returned
+`WorkHandle<T>` is pollable across frames with no `.Preserve()` needed — its backing completion source
+never recycles. The task captures only value-type/immutable inputs (`decode`, layer records are read-only
+after `Initialise`); no `UnityEngine.Object` is captured or touched off-main.
+
 ### `TileScheduler.Dispose` does not drain in-flight fetches
 
 `TileScheduler.Dispose` cancels and disposes the per-tile CTSs and clears its maps, but does not block to

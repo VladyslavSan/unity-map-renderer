@@ -259,6 +259,46 @@ archaeology is pruned during the moves — keep the *why*, drop the diffs git hi
   suite; the S87 resumable-consume and S48/S51 leak-guard tests exercise every moved path; a dedicated test flips
   `BlockConsumeForTests` and asserts a backlog builds.
 
+### 1.7 `TileManager`'s extraction rationale (moved from its class doc, UMR-118)
+
+`TileManager` was extracted from `MapView` as the biggest, most cohesive cut of the decomposition:
+`MapView` keeps the camera, the `RenderLayerSet`, and the scene origin; `TileManager` keeps the scheduler,
+the loaded-tile table, and all the in-flight async machinery, and is just ticked once per frame.
+
+Explicit interface — the three things the lifecycle needs from `MapView`, passed in per call so `MapView`'s
+inspector-editable config and rebasing scene origin stay authoritative:
+
+- the current `CameraProperties`,
+- the scene origin (Mercator) for tile placement,
+- tile-selection config (`TileSelectionConfig`) read from `MapView`'s serialized fields.
+
+The `RenderLayerSet` (render bundles) is stable for the object's life, so it's injected at construction.
+
+### 1.8 `TileManager.SetSources`'s restyle decision log (moved from its method doc, UMR-118)
+
+`SetSources` (the `MapView.SetStyle` entry point) handles BOTH first call and RESTYLE in one pass:
+
+1. **Render-teardown EVERY existing record** (destroy meshes, unregister draw items, stash in-flight in the
+   holding pens) and clear `_loaded` — the old records reference the old layer indexing + the old backend,
+   so they must go. This does NOT touch any scheduler/cache, so a kept source's warm cache survives.
+2. **Diff the registry by `SourceKey`**: a spec whose `(SourceId, Key)` matches an existing pipeline KEEPS
+   that pipeline instance (its source + scheduler + cache, so already-fetched bytes are reused); a
+   new/changed spec builds a fresh pipeline; an existing pipeline matched by no spec is pipeline-torn-down
+   (scheduler + owned source disposed).
+3. **Rebuild the backend** (the material list changed) and re-arm cover selection; the next Tick
+   re-requests the cover, hitting kept caches (no re-fetch).
+
+### 1.9 `TileManager.KickMeshBuild`'s bake-at-integer-zoom decision (moved from its method doc, UMR-118)
+
+The paint bake zoom is the tile's INTEGER zoom (`id.Z`), not the fractional camera zoom — a tile is built
+exactly once per load (never re-baked while `LoadedTile.Built`), so baking at `id.Z` makes the prepared
+artifact a pure function of `(styleId, tileId, layerId)` — the sound key `PreparedTileCache` needs.
+`CameraProperties` is not read for this purpose; the call sites take it only for other reasons.
+
+This is the bake-parameter SSOT (alongside the clip-window bake parameter recorded as finding F-CLIP-1 in
+`docs/meshing-design.md`) — see the commit that introduced the bake-revision mechanism,
+`fix(tile-pipeline): key prepared tiles by bake revision`.
+
 ---
 
 ## 2. Symbol-path budgeting + off-thread staging (stall #1) — Stages A, B goals met (mechanism superseded by Epic A); C pending
@@ -456,6 +496,15 @@ pends; 10 Ticks ⇒ `Σ CoverRecomputesLastTick(ticks 2..10) == 0` while `pendin
 Prerequisite: capture `PmMeshDataAllocate` numbers from a liberty-style pan session first — this stage's
 alloc-loop half is measure-first. The overshoot half (#4) is structurally certain regardless.
 
+### `TileManager.PumpPending`'s paint-order seam (implemented today; moved from its method doc, UMR-118)
+
+The work list `PumpPending` builds is sorted by the priority context before the processing loop — this is
+the PAINT-order seam (as load-bearing as the admission gate): without it, a corner tile can still win the
+≤N-kicks/consumes-per-Tick race purely from Dictionary enumeration order, even with priority-ordered
+admission (the "middle stays white" symptom). The sort reuses the shared `_toRelease` scratch field — safe
+because it is filled and fully consumed within this one single-threaded call (never live across calls),
+the same discipline the "departing" vs. "unsettled" dual-use of this scratch list already relies on.
+
 ### 4.1 New `LoadedTile` state
 
 ```csharp
@@ -578,6 +627,15 @@ private readonly HashSet<LoadedKey> _releaseQueued = new HashSet<LoadedKey>();  
   `_releaseQueued.Contains(key)` records (don't start a build for a condemned tile). In-flight work proceeds to
   the existing pens. `SetSources` clears both structures. Zero-GC: both containers pre-sized; the steady state
   never touches them.
+
+**`TileManager.ReleaseTile`'s cache-transfer scoping** (moved from its inline comment, UMR-118): a fully-Built
+tile's mesh transfer into `PreparedTileCache` is scoped to THIS method (a genuine eviction) — deliberately NOT
+folded into `RenderTeardownRecord`, which `SetSources` ALSO calls for every record on a restyle (rebuilt
+backend + re-indexed `RenderLayerSet`). Caching those meshes there would file them under whatever
+`CurrentStyle` happens to be at that moment, risking a later hit under a coincidentally-matching `(tileId,
+layerId)` serving stale-style geometry; sidestepped entirely by never transferring on that path — a restyle
+keeps the always-destroy behaviour unchanged. `_cacheEnabled == false` skips the transfer entirely —
+`RenderTeardownRecord`'s `DestroyTrackedMeshes` then destroys `lt.Meshes` exactly as it did pre-cache.
 
 ### 5.2 Batched removal — backend seam
 

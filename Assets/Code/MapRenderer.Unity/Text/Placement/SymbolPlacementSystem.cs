@@ -1,8 +1,6 @@
-// Namespace-collision guard (see GlyphAtlasTexture.cs's header comment for the full explanation): this
-// file lives in MapRenderer.Unity.Text.Placement and uses Unity.Mathematics types (float2/float4/float4x4/
-// double2/double3) — TOP-LEVEL `using Unity.Mathematics;` + unqualified types, NEVER an inline
-// `Unity.Mathematics.X` (would bind to the nonexistent `MapRenderer.Unity.Text.Placement.Unity.Mathematics`,
-// CS0234). `MapRenderer.Unity.Text` does not collide with any bare UnityEngine type.
+// Namespace-collision guard: this file uses Unity.Mathematics types (float2/float4/float4x4/double2/
+// double3) — TOP-LEVEL `using Unity.Mathematics;` with unqualified types, never an inline
+// `Unity.Mathematics.X` (binds to the nonexistent `...Placement.Unity.Mathematics`, CS0234).
 
 using System;
 using System.Collections.Generic;
@@ -26,82 +24,40 @@ using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Unity.Text.Placement
 {
-    /// <summary>
-    /// S20 Slice 1: the dedicated PER-FRAME symbol renderer (F1, stage doc §6) — a plain class (NOT a
-    /// MonoBehaviour), owned by <see cref="MapView"/>, ticked as the last step of <c>MapView.LateUpdate</c>
-    /// AFTER <see cref="MapCamera.SyncToCamera"/> (the committed-camera seam). Every <see cref="Tick"/>
-    /// re-projects every symbol's anchor and rebuilds the projection/staging/collision pools from buffer,
-    /// then hands each surviving candidate's glyph corners to <see cref="WorldSymbolRenderer"/> (Epic A / A1),
-    /// which owns the persistent per-<c>(tile,slot,kind)</c> meshes and presenters a real camera render
-    /// redraws BY ITSELF (no orchestrator, no <c>Graphics.RenderMesh</c>). This is the "placed every frame"
-    /// path (<c>ARCHITECTURE.md</c> §"Two geometry classes"), structurally distinct from the static
-    /// per-<c>(tile,layer)</c> <see cref="Backend.ITileRenderBackend"/> meshes (T5: this type never calls
-    /// <c>AddTileLayer</c> — grep-checked by <c>SymbolPlacementStructureTests</c>).
-    ///
-    /// <para><b>Collision (Slice 2).</b> Every on-screen symbol's screen-space AABB (<see cref="SymbolBox"/>,
-    /// <c>text-padding</c> applied) is run through <see cref="SymbolCollision.SelectSurvivors"/> — greedy,
-    /// sort-key-driven, permutation-invariant survivor selection (stage doc §4 T1) — BEFORE the world emit,
-    /// so only survivors emit quads. The projection/collision/emit pass runs over reused arrays (no
-    /// per-frame managed allocation — T4). Collision is GLOBAL across every symbol layer (D8) — only the
-    /// DRAW is partitioned by material slot.</para>
-    ///
-    /// <para><b>Presence (E2, design §5).</b> A slot that produces no quads this Tick (no atlas, empty
-    /// batch, everything culled/suppressed) is HIDDEN, not left drawing stale content — the mirror image
-    /// of the pre-E2 Editor blink; <see cref="WorldSymbolRenderer.EndFrame"/> owns this per-slot show/hide.</para>
-    /// <para><c>internal</c> (not <c>public</c>): an implementation detail <see cref="MapView"/> owns, not a
-    /// public API surface. Members stay <c>public</c> so <see cref="Tick"/>'s accessibility domain matches its
-    /// <c>internal</c> <see cref="Backend.SceneFrame"/> parameter (CS0051 would fire if this class were
-    /// <c>public</c>).</para>
-    /// </summary>
-    // `partial`: the opt-in per-layer/per-screen-band breakdown diagnostic lives in
-    // SymbolPlacementSystem.Diagnostics.cs (one file to strip). It reads this class's private per-frame buffers
-    // directly and is armed via RequestSymbolBreakdown(); TickCore checks the flag after projection.
+    /// <summary>Per-frame symbol renderer, owned by <see cref="MapView"/>, ticked last after
+    /// <see cref="MapCamera.SyncToCamera"/>. Collision runs across every symbol layer; only the draw step
+    /// splits by material slot. The class is <c>internal</c>, but members stay <c>public</c> so
+    /// <see cref="Tick"/>'s <c>internal</c> <see cref="Backend.SceneFrame"/> param avoids CS0051.</summary>
+    // `partial`: the opt-in breakdown diagnostic lives in SymbolPlacementSystem.Diagnostics.cs.
     internal sealed partial class SymbolPlacementSystem : VerifiedDisposable
     {
-        /// <summary>Profiler marker name constants (SSOT) for the per-frame symbol path — referenced by the
-        /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c> (internal, via
-        /// <c>InternalsVisibleTo</c>). Hierarchical names so the Profiler flat search reads as a tree.</summary>
+        /// <summary>Profiler marker name constants (SSOT) for the symbol path — <c>ProfilerMarkerTests</c>
+        /// asserts this exact string set. Hierarchical names so the Profiler flat search reads as a tree.</summary>
         internal static class ProfilerMarkerNames
         {
-            // Runs BEFORE Tick (native mirror compaction of the winners' baked slices — the Stage-2 residual
-            // per-frame copy that replaced the managed SoA Build). Marked so it isn't invisible self-time in the
-            // View.LateUpdate umbrella (it sits in the timeline gap between Symbol.BatchBuild and Symbol.SymbolTick).
-            // R1: the heavy compaction below now runs only on a front-set change (a reconcile swap / SetStyle /
-            // Dispose) — a same-version frame runs only the three per-frame mask memcpys, so this marker now mostly
-            // measures a memo HIT (that is the point of R1: see docs/symbol-symbol-perf-design.md §10.2).
+            /// <summary>Marker for Stage-2 mirror compaction — a same-version frame mostly measures a memo hit.</summary>
             internal const string Gather      = "MapRenderer.Symbol.Gather";
             internal const string Tick        = "MapRenderer.Symbol.SymbolTick";
             internal const string Project     = "MapRenderer.Symbol.Project";
-            // The per-symbol cull SCAN (GatherSymbolPoints): visits every non-dropped mirror symbol and runs the
-            // horizon/distance/zoom culls, so its cost is O(input) even when it culls everything (the projection
-            // below then does nothing). Split out of ProjectPositions because a capture with 0 symbols projected
-            // was still charging ~9ms to a marker named "ProjectPositions" — the scan, not projection.
+            /// <summary>Marker for the per-symbol cull scan, split out so its cost isn't lumped into ProjectPositions.</summary>
             internal const string GatherPoints = "MapRenderer.Symbol.GatherPoints";
-            // GatherPoints splits into two passes over the mirror, so the timeline shows which half owns the cost:
-            // Cull = the per-symbol trigger verdict (departing/coverage/zoom/horizon/distance — the geometric maths);
-            // Compact = the fade-alive probe + the kept-point append + counter tally.
+            /// <summary>GatherPoints' two passes: Cull is the per-symbol verdict, Compact is the fade-probe/append/tally.</summary>
             internal const string GatherCull    = "MapRenderer.Symbol.Gather.Cull";
             internal const string GatherCompact = "MapRenderer.Symbol.Gather.Compact";
             internal const string ProjectPositions = "MapRenderer.Symbol.ProjectPositions";
             internal const string Stage       = "MapRenderer.Symbol.Stage";
-            // R3: grid sizing + Schedule only — the job's own wait no longer lives here (see CollideHarvest).
+            // Grid sizing + Schedule only — the job's own wait lives in CollideHarvest.
             internal const string Collide     = "MapRenderer.Symbol.Collide";
-            // R3: Complete()-ing the PREVIOUS Tick's scheduled collision, at the top of THIS Tick. Must read ≈0 —
-            // a non-zero value means the deferred job did not finish in the inter-frame gap and the wait has
-            // merely moved, not gone (see the stage design doc §10.3's Gate step P).
+            /// <summary>Marker for harvesting the previous Tick's scheduled collision — should read ≈0.</summary>
             internal const string CollideHarvest = "MapRenderer.Symbol.CollideHarvest";
             internal const string Emit        = "MapRenderer.Symbol.Emit";
-            // Emit splits into two costs with DIFFERENT shapes, and lumping them hid that: EmitLoop is
-            // per-CANDIDATE (fade lookups + the per-quad world-vertex hand-off), while EmitDecay is per-LIVE-FADE-
-            // IDENTITY — DecayUnseenFadeSymbols sweeps every key in _fadeOpacity every frame regardless of how many
-            // candidates there are. With tens of thousands of live identities the second can rival the first, so
-            // an optimization aimed at "Emit" could attack the wrong half. Same reason Gather got its own marker.
+            /// <summary>Emit splits into EmitLoop (per-candidate) and EmitDecay (per-live-fade-identity) —
+            /// the two cost shapes differ enough to profile separately.</summary>
             internal const string EmitLoop    = "MapRenderer.Symbol.EmitLoop";
             internal const string EmitDecay   = "MapRenderer.Symbol.EmitDecay";
         }
 
-        // Per-frame profiler markers for the symbol path (Profiler window → search "MapRenderer.Symbol").
-        // PmTick is the whole per-frame submit; the sub-markers break it into project→collide→emit.
+        // Per-frame profiler markers (Profiler window → search "MapRenderer.Symbol"); PmTick covers the whole submit.
         private static readonly ProfilerMarker PmGather =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Gather);
 
@@ -111,19 +67,11 @@ namespace MapRenderer.Unity.Text.Placement
         private static readonly ProfilerMarker PmProject =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Project);
 
-        // PmProject breakdown, three siblings nested under PmProject (so the umbrella total is preserved):
-        // GatherPoints = the O(input) per-symbol cull SCAN (GatherSymbolPoints); ProjectPositions = the projection
-        // itself (the SymbolProjectionJob .Run() wait, over ONLY the symbols the scan kept — free when the scan culls
-        // everything); Stage = the managed staging loop that reads the projected screen positions and builds the
-        // collision candidates/boxes/quads. Gather and projection were once ONE marker named "ProjectPositions",
-        // which charged the scan's cost to a projection-named row (a 0-symbol capture still read ~9ms); they are
-        // split so the timeline answers, at a glance, whether the cost is the cull scan, the projection job wait, or
-        // the managed staging work.
+        // GatherPoints, ProjectPositions and Stage nest under PmProject, split so the cull scan's cost isn't lumped in.
         private static readonly ProfilerMarker PmGatherPoints =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.GatherPoints);
 
-        // GatherPoints' two passes (nested under PmGatherPoints): Cull = the per-symbol trigger verdict pass,
-        // Compact = the fade-probe + append pass. See ProfilerMarkerNames.GatherCull / GatherCompact.
+        // GatherPoints' two passes nest under PmGatherPoints — see ProfilerMarkerNames.GatherCull/GatherCompact.
         private static readonly ProfilerMarker PmGatherCull =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.GatherCull);
         private static readonly ProfilerMarker PmGatherCompact =
@@ -138,12 +86,11 @@ namespace MapRenderer.Unity.Text.Placement
         private static readonly ProfilerMarker PmCollide =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Collide);
 
-        // R3: this marker MUST read ≈0 — see ProfilerMarkerNames.CollideHarvest's comment.
+        // Should read ≈0 — see ProfilerMarkerNames.CollideHarvest's comment.
         private static readonly ProfilerMarker PmCollideHarvest =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.CollideHarvest);
 
-        // Emit = the A-4 fade + world-renderer hand-off (managed, main thread) that runs AFTER collision — it
-        // is a candidate main-thread hot spot in its own right, not hidden inside the SymbolTick umbrella.
+        // Emit is the fade + world-renderer hand-off (managed, main thread), run after collision.
         private static readonly ProfilerMarker PmEmit =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.Emit);
 
@@ -154,184 +101,101 @@ namespace MapRenderer.Unity.Text.Placement
         private static readonly ProfilerMarker PmEmitDecay =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.EmitDecay);
 
-        // Epic A / A1 (design §11 A1 D7): the world-anchored FALLBACK materials — clones of
-        // MapMaterialSet.SymbolTextWorld/SymbolIconWorld, used for any slot without a supplied per-layer
-        // world material (and for a Tick passed no symbolLayers at all). Null (no Shader.Find
-        // fallback — D7 orchestrator decision) means that world draw path stays inert.
+        /// <summary>World-anchored fallback materials, used for any slot with no supplied per-layer material.
+        /// Null means that draw path stays inert.</summary>
         private Material _worldTextMaterial;
         private Material _worldIconMaterial;
 
-        // Epic A / A1 (design §3.3, §11 A1 D1): the dedicated world-anchored point/icon renderer — owns its
-        // own per-(tile,slot,kind) meshes/presenters, ticked BeginFrame/Emit/EndFrame every Tick.
-        // internal, not private: four zero-production-reach accessors that forwarded to it lived on this
-        // class purely as test surface. Broadening the field (the convention's allowed footprint) let them
-        // move to the test assembly as extension methods instead.
+        /// <summary>The world-anchored point/icon renderer, ticked BeginFrame/Emit/EndFrame every <see cref="Tick"/>.
+        /// <c>internal</c> so test-only accessors reach it as extension methods instead of living here.</summary>
         internal WorldSymbolRenderer WorldRenderer { get; } = new WorldSymbolRenderer();
 
-        // ── B-4a: collision runs as a Burst IJob (CollisionJob) directly over the STAGE job's native output
-        // pools (_stageCandidates/_stageBoxes — see below), with no managed round-trip. Every symbol, point (1 box) or
-        // curved along-line (N glyph boxes), is ONE SymbolCandidate spanning a contiguous range of the flat box
-        // pool, so a road name and a city name compete in ONE greedy pass; the grid keeps it ~O(n·k), and the
-        // greedy is inherently serial (each placement depends on all prior survivors) so it is ONE job. The job
-        // sorts _stageCandidates in place into placement order and writes _nSurvivors; the emit loop reads the sorted
-        // candidates (via SymbolCandidate.SymbolIndex, stable across the sort) + survivor flags + _stageEmit/_stageQuads.
-        // The uniform grid is PRE-SIZED on the main thread (CollisionGridSizing) each frame because a Burst
-        // job cannot grow a NativeArray. Bit-identical to the managed SymbolCollision reference (differential test).
+        /// <summary>Collision is one Burst job over the stage job's output — each symbol is one
+        /// <c>SymbolCandidate</c> spanning a box range, so every symbol competes in one greedy pass.</summary>
         private NativeList<byte>           _nSurvivors;
         private NativeList<int>            _gridCellHead;
         private NativeList<int>            _gridNodeBox;
         private NativeList<int>            _gridNodeNext;
         private NativeArray<int>           _survivorCountOut;
 
-        // R3 (deferred collision, design §10.3): the collision scheduled at the END of a Tick and consumed at the
-        // START of the next one, so the main thread never blocks on the single-threaded greedy. _pendingCandidateCount
-        // pins the candidate count the handle was scheduled over — the harvest must NOT read _stageCounts[0], which this
-        // frame's stage job is about to overwrite.
-        // null ⇔ nothing scheduled: the presence of the handle IS the pending flag.
+        /// <summary>Scheduled at the end of a Tick, harvested at the start of the next. Null means nothing
+        /// scheduled; <c>_pendingCandidateCount</c> pins the count since the next stage job overwrites it.</summary>
         private JobHandle? _collisionHandle;
         private int        _pendingCandidateCount;
 
-        // AssertFadeIdsUnique's buffer set — persistent + Cleared per call (not a fresh Allocator.Temp container
-        // per Tick), so the debug-only duplicate check never allocates managed memory in the Editor (a per-call
-        // NativeHashSet's AtomicSafetyHandle/DisposeSentinel bookkeeping under ENABLE_UNITY_COLLECTIONS_CHECKS
-        // does — SymbolPlacementAllocTests caught it as a periodic steady-state GC alloc). Allocated LAZILY, inside
-        // AssertFadeIdsUnique itself (guarded on IsCreated), NOT here in the ctor: the method's own [Conditional]
-        // strips its CALL sites in release, and the lazy-alloc guard means the method BODY never runs there either
-        // — so a release build never executes `new NativeHashSet(...)` and this stays a zero-allocation default
-        // (uncreated) struct. (A `#if UNITY_ASSERTIONS` field guard would also work, but is unnecessary — no
-        // release-build reference to this field exists outside the [Conditional] method.)
+        /// <summary><c>AssertFadeIdsUnique</c>'s duplicate-check buffer, allocated lazily inside that
+        /// method — a release build strips its call sites, so this field stays zero-allocation.</summary>
         private NativeHashSet<long> _debugFadeIdSeen;
 
-        // The pre-projection symbol distance cull, as a fraction of the camera's far-clip distance: a symbol whose
-        // anchor is farther from the CAMERA than SymbolMaxDistanceFraction × the far distance is skipped before
-        // projection/collision (fading out first if still alive — the distCulled trigger). 1.0 = cull only at the
-        // far distance (near-inert, since tile selection already frustum-bounds by the same far); lower it to pull
-        // symbols CLOSER than the full frustum depth, trimming the far horizon band of tiny/unstable symbols.
-        // Runtime-tunable via the Diagnostics slider. See SymbolFarPlaneCull. Replaces an earlier fixed
-        // viewport-span radius around the look-at, which at high tilt sat ~4× looser than the frustum reached.
+        /// <summary>The pre-projection distance cull, as a fraction of the camera's far-clip distance — past it a
+        /// symbol skips projection/collision. Runtime-tunable via the Diagnostics slider.</summary>
         internal double SymbolMaxDistanceFraction { get; set; } = 1.0;
 
-        // ── A-4: fade state machine ──────────────────────────────────────────────────────────────────────
-        // A persistent per-FADE-identity opacity (SymbolCandidate.FadeId) eased toward 1 (collision-placed) or 0
-        // (suppressed / gone) at 1/FadeDurationSeconds per second, so a symbol eases in/out instead of popping.
-        // PlacedQuad.Color.w already carries the alpha the shader emits — fade is pure CPU state, no shader change.
-        // internal (not private): SymbolSubsystem derives its departing-tile grace window from this so the grace
-        // always exceeds the fade — if this constant changes, the grace tracks it and a purge never drops a still-
-        // fading (visible) departing symbol (which would pop).
+        // ── Fade state machine ──
+        /// <summary>Seconds for a symbol's opacity to ease fully toward 1 (placed) or 0 (gone). <c>internal</c>
+        /// because <c>SymbolSubsystem</c> derives its departing-tile grace window from this constant.</summary>
         internal const float FadeDurationSeconds = 0.3f;
-        private const float FadeEpsilon = 1e-3f; // below this, a symbol is invisible → not emitted / dropped
-        // Holds identities that are visible or fading IN — nothing is parked at 0 once a fade-OUT reaches the
-        // floor, because an invisible identity carries no state and nothing would ever collect it (see EaseFade).
-        // Sized by VISIBLE symbols, not by staged candidates: the two differ by an order of magnitude in a dense
-        // view (~2.5k placed quads vs ~31k candidates), and DecayUnseenFadeSymbols walks this map in full every
-        // frame, so its size is a per-frame COST and not merely memory.
-        // Native (not a managed Dictionary) so the gather scan's fade-alive probe can move into Burst — same
-        // long-keyed, per-frame-mutated, Persistent lifetime as _placedLastFrame / _droppedHalvesLastFrame, which
-        // were already migrated for the stage job. This is an INITIAL capacity (the container grows on demand), a
-        // startup hint sized near the steady-state live count (~2.5k placed + churn headroom); growth is a rare
-        // amortized realloc, so there is no reason to oversize — it would only cost memory (buckets = 2×capacity).
+        private const float FadeEpsilon = 1e-3f; // below this, a symbol is invisible: not emitted, dropped
+        // Holds identities visible or fading in — nothing is parked at 0 once a fade-out completes (EaseFade).
+        /// <summary>Sized by visible symbols, not staged candidates — the two differ by an order of magnitude
+        /// in a dense view. Native so the gather scan's fade-alive probe can move into Burst.</summary>
         private const int FadeMapInitialCapacity = 16384;
-        private NativeHashMap<long, float> _fadeOpacity; // NOT readonly — allocated in the ctor
-        // The identities EaseFade STORED this frame — i.e. exactly the _fadeOpacity keys it touched, not every
-        // candidate it looked at. The direction the decay sweep needs is `stored ⇒ seen`: a key it finds unseen
-        // really was untouched, so nothing alive is swept. (The converse can fail harmlessly — two candidates
-        // sharing one FadeId, where the second drops what the first stored — but the sweep only ever consults
-        // this set for keys it enumerated out of _fadeOpacity, so a stale entry is never read.) Keeping it in
-        // lockstep with the store is why both live inside EaseFade rather than in the emit loop.
-        private NativeHashSet<long> _seenFade; // NOT readonly — allocated in the ctor
-        private NativeList<long> _fadeSweepKeys; // NOT readonly — allocated in the ctor; reused decay-sweep buffer
+        /// <summary>Not readonly — allocated in the ctor.</summary>
+        private NativeHashMap<long, float> _fadeOpacity;
+        /// <summary>The identities <c>EaseFade</c> stored this frame. The decay sweep needs
+        /// <c>stored ⇒ seen</c>: a key it finds unseen was untouched.</summary>
+        private NativeHashSet<long> _seenFade;
+        /// <summary>Reused decay-sweep buffer; not readonly — allocated in the ctor.</summary>
+        private NativeList<long> _fadeSweepKeys;
 
-        // FadeIds of symbols the gather cull (tile-coverage / B-3 distance) hit THIS frame but whose fade is still
-        // alive: instead of a hard skip (which would pop the symbol — a pre-cull produces no geometry, so nothing
-        // draws its fade), gather keeps STAGING them and symbols their FadeIds here; the emit loop then eases them
-        // toward 0 (a fade-OUT in place at their live position) regardless of collision survival. Once a symbol's
-        // fade settles to <= epsilon the gather cull hard-skips it (the perf win returns in steady state). Cleared
-        // + repopulated each frame in gather → zero per-frame GC.
-        private NativeHashSet<long> _forceFadeOut; // NOT readonly — allocated in the ctor
+        /// <summary>FadeIds the gather cull hit this frame whose fade is still alive — gather keeps staging
+        /// them instead of a hard skip, and the emit loop eases them toward 0 in place.</summary>
+        private NativeHashSet<long> _forceFadeOut; // not readonly — allocated in the ctor
 
-        // Per-frame slot → visible-at-live-zoom lookup, filled by GatherSymbolPoints before its symbol loop so the
-        // pre-projection zoom gate is one array read per symbol, not a managed StyleLayer.IsVisibleAtZoom call per
-        // symbol (slots number in the tens; symbols in the tens of thousands). Reused across frames; only grown
-        // when the slot count rises (never shrinks). Index == material slot == ShapedSymbol.MaterialIndex.
-        // Native (not a managed bool[]) so the Cull pass's per-symbol read can move into CullJob (Burst).
-        private NativeList<bool> _slotVisibleThisFrame; // NOT readonly — allocated in the ctor
+        /// <summary>Per-frame slot → visible-at-live-zoom lookup, filled before <c>GatherSymbolPoints</c>'
+        /// symbol loop. Index == material slot == <see cref="ShapedSymbol.MaterialIndex"/>.</summary>
+        private NativeList<bool> _slotVisibleThisFrame; // not readonly — allocated in the ctor
 
-        // Per-symbol cull verdict from GatherSymbolPoints' first pass (Cull), consumed by its second pass (Compact).
-        // Splitting the single gather loop into two marked passes localises the cost (trigger maths vs
-        // fade-probe+append) and is the shape the Burst gather needs (pass 1 → parallel job). Reused across frames
-        // (ResizeUninitialized), zero per-frame GC.
-        private NativeList<GatherTrigger> _gatherTrigger; // NOT readonly — allocated in the ctor
+        /// <summary>Per-symbol cull verdict from <c>GatherSymbolPoints</c>' Cull pass, consumed by its Compact pass.</summary>
+        private NativeList<GatherTrigger> _gatherTrigger; // not readonly — allocated in the ctor
 
-        // Per-trigger culled tally the Compact pass (CompactJob) writes, indexed by (int)GatherTrigger, then
-        // added back onto the five Last*CulledCount properties after .Run() — a job cannot write those managed
-        // properties, so this native array is the bridge. Persistent (allocated once, like _gatherTrigger) and
-        // zeroed at the top of each dispatch. NOT readonly — allocated in the ctor.
+        /// <summary>Per-trigger culled tally the Compact pass writes — a job can't write the managed
+        /// <c>Last*CulledCount</c> properties, so this is the bridge.</summary>
         private NativeArray<int> _gatherCulledCounts;
 
-        // ── A-5: sticky-placement hysteresis ────────────────────────────────────────────────────────────────
-        // FadeIds that SURVIVED last frame's collision. Staging looks each candidate up here to set
-        // SymbolCandidate.WasPlacedLastFrame, which biases the greedy sort so an incumbent keeps its slot over a
-        // near-tied newcomer (killing the tile-churn/reprojection tiebreak flip that reads as flicker). Rebuilt
-        // from the survivors AFTER each real collision. Reused across frames → zero per-frame GC (T4).
-        // R2: NATIVE so StageJob can read it from Burst (the A-5 resolve moved into the job). Sized up front
-        // to the maintainer's scene order-of-magnitude so the first frames don't pay rehash growth; Clear() never
-        // shrinks, so this only shapes startup. Holds SURVIVORS (shown candidates), not all candidates.
+        // ── Sticky-placement hysteresis ──
+        /// <summary>FadeIds that survived last frame's collision — staging biases the greedy sort so an
+        /// incumbent keeps its slot over a near-tied newcomer, killing the tile-churn flicker.</summary>
         private const int PlacedSetInitialCapacity = 16384;
-        private NativeHashSet<long> _placedLastFrame; // NOT readonly — allocated in the ctor
+        /// <summary>Not readonly — allocated in the ctor.</summary>
+        private NativeHashSet<long> _placedLastFrame;
 
-        // ── Stage C: per-half collision verdict for optional pairs (icon-optional / text-optional) ───────────
-        // FadeId -> SymbolCandidate.DroppedBoxMask, for the survivors whose mask was non-zero. Carries last
-        // frame's verdict across R3's one-frame gap exactly as _placedLastFrame carries the whole-candidate one:
-        // the emit loop runs BEFORE collision, so a dropped half can only be skipped on the following frame.
-        // ONLY a pair whose style sets one of the two properties ever gets an entry, so on every shipped style
-        // today this map is allocated, cleared and read as empty — a probe the stage job also skips outright.
-        // Small initial capacity for the same reason. Native so StageJob can read it from Burst.
+        // ── Per-half collision verdict for optional pairs (icon-optional / text-optional) ──
+        /// <summary>FadeId → <c>SymbolCandidate.DroppedBoxMask</c> for survivors with a non-zero mask —
+        /// carries last frame's verdict across the one-frame collision-defer gap.</summary>
         private const int DroppedHalvesInitialCapacity = 64;
-        private NativeHashMap<long, byte> _droppedHalvesLastFrame; // NOT readonly — allocated in the ctor
+        /// <summary>Not readonly — allocated in the ctor.</summary>
+        private NativeHashMap<long, byte> _droppedHalvesLastFrame;
 
-        // ── B-2: parallel symbol projection ─────────────────────────────────────────────────────────────────
-        // Every visible symbol's screen geometry this frame — a point symbol's anchor, a line symbol's path
-        // vertices — is projected UP FRONT in one pass by the Burst SymbolProjectionJob, and the staging pass reads
-        // the precomputed screen positions instead of projecting inline. Generic over what a symbol RENDERS (text
-        // today, icon later): a symbol is projected as its anchor/path world points regardless. The flat world
-        // points go in _symbolPoints; _stagePointOffset[r] is symbol r's start in it (-1 = B-3-culled → skipped);
-        // the fill writes the parallel _symbolScreen/_symbolDepth/_symbolValid. The job is dispatched with .Run()
-        // (Burst-compiled, executed inline on the caller — no Schedule/Complete round-trip, no worker hand-off, no
-        // count threshold), so the projection is always Burst SIMD with zero managed fallback and zero per-frame GC.
-        // All buffers are reused + grown geometrically.
+        /// <summary>Every visible symbol's screen geometry this frame, projected by the Burst
+        /// <c>SymbolProjectionJob</c>. <c>_stagePointOffset[r]</c> is symbol r's start (-1 = culled).</summary>
         private NativeList<double3> _symbolPoints;
-        // P2: index-parallel to _symbolPoints — the unit surface normal at each gathered world point. Filled
-        // in lockstep in GatherSymbolPoints; not yet consumed by any downstream reader.
+        // Index-parallel to _symbolPoints — the unit surface normal at each point; not yet consumed downstream.
         private NativeList<float3>  _symbolUps;
         private NativeList<float2>  _symbolScreen;
         private NativeList<float>   _symbolDepth;
         private NativeList<byte>    _symbolValid;
 
-        // ── Lever C step 3b: the Burst StageJob's native buffers ──────────────────────────────────────────
-        // A native MIRROR of the plan's STAGE data (refreshed only when the plan's WinnerSetVersion changes —
-        // never per frame), the per-frame job inputs (gather offsets + resolved incumbency), its pre-sized
-        // outputs, and reused buffer. The job calls the SAME SymbolStagingMath the differential test pins; its
-        // native outputs (_stageBoxes/_stageQuads/_stageCandidates/_stageEmit) feed the collision + emit passes DIRECTLY —
-        // no managed round-trip.
-        //
-        // The memo key is (source instance, version), NOT the version alone. It was introduced (§7.10 finding
-        // 1a) because a demo and a production fill path had independent counters that could collide on a
-        // NUMBER; that path is gone, and production drives exactly one subsystem-owned plan whose version moves
-        // monotonically, so today the version alone would in fact discriminate. Identity is kept because it is
-        // the term that stays correct if a second plan instance ever appears — the subsystem already
-        // double-buffers its reconcile result, and a front/back plan pair would reintroduce exactly the
-        // two-counters-one-number case this closes. Dropping it would be a silent correctness cliff, not a
-        // simplification.
-        private SymbolGatherPlan _mirrorPlan;            // the plan the mirror was last filled from
-        private long _mirrorVersion = long.MinValue;     // that plan's WinnerSetVersion when it was mirrored
-        // Burst-gather Stage 1 (design doc §10.9, §2 of the plan): a per-frame REUSED table of non-owning
-        // BlockView pointer-views over plan.Blocks[0, plan.BlockCount) — built by BuildBlockViews just
-        // before SymbolGatherJob.Run(), read only during that synchronous call, never held across a frame
-        // boundary. Stage 2 (async gather) must pin the owning snapshot independently of the front pin before
-        // these pointers are allowed to outlive a frame — see the design doc §2.4; NOT this stage's problem
-        // (GatherIntoMirror's .Run() is synchronous, so a view can never outlive the block it points into).
+        /// <summary>Native mirror of the plan's stage data, refreshed only when <c>WinnerSetVersion</c> changes.
+        /// The memo key is (instance, version) — identity matters if a second plan instance appears.</summary>
+        private SymbolGatherPlan _mirrorPlan;
+        /// <summary>The plan's WinnerSetVersion when it was mirrored.</summary>
+        private long _mirrorVersion = long.MinValue;
+        /// <summary>Per-frame reused table of non-owning views over the plan's blocks, built just before the
+        /// gather job runs. Never held across a frame boundary — <see cref="GatherIntoMirror"/>'s <c>.Run()</c> is synchronous.</summary>
         private NativeList<BlockView> _gatherBlockViews;
-        private NativeArray<int> _gatherCounts; // SymbolGatherJob.OutCounts — see its Count* consts for the layout
+        /// <summary><c>SymbolGatherJob</c>'s OutCounts — see its Count* consts for the layout.</summary>
+        private NativeArray<int> _gatherCounts;
         // ── mirror: per-symbol fields (one entry per gathered winner, mirror-local index) ──
         private NativeList<SymbolPlacementKind> _mirrorKinds;
         private NativeList<int>  _mirrorDetail;
@@ -357,26 +221,19 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeList<CurvedGlyph> _mirrorGlyphs;
         private NativeList<LineAnchor>  _mirrorAnchors;
         private NativeList<long>        _mirrorFadeIds;
-        // Stage-2 (symbol-symbol native gather): the RECORD-LEVEL fields the gather cull (GatherSymbolPoints) reads —
-        // previously read off the managed batch, now native so the production path never touches a managed SoA.
-        // _mirrorWorldStart/_mirrorWorldPoints are the (remapped) per-symbol world-point slice; _mirrorRepAnchor
-        // the B-3 cull point; _mirrorSymbolDeparting/_mirrorSymbolCoverageFading the per-frame fade-out flags
-        // (0/1). GatherIntoMirror populates them from the plan; the shared core reads only these, never a
-        // managed source.
+        /// <summary>Record-level fields the gather cull reads, native so the path never touches a managed
+        /// SoA. <c>_mirrorRepAnchor</c> is the distance-cull point.</summary>
         private NativeList<int>     _mirrorWorldStart;
         private NativeList<double3> _mirrorRepAnchor;
         private NativeList<double3> _mirrorWorldPoints;
-        // P2: index-parallel to _mirrorWorldPoints (same _mirrorWorldStart/_mirrorWorldCount slice) — the unit
-        // surface normal at each mirrored world point. Written by GatherIntoMirror; not yet consumed.
+        // Index-parallel to _mirrorWorldPoints — the unit surface normal at each point; not yet consumed.
         private NativeList<float3>  _mirrorWorldUps;
         private NativeList<byte>    _mirrorSymbolDeparting;
         private NativeList<byte>    _mirrorSymbolCoverageFading;
-        // D1: the tile-coverage cull's Drop decision as a per-symbol MASK (SymbolTileCoverageFilter.ClassifyActive
-        // via SymbolGatherPlan.Dropped) — a Dropped winner stays resident in the mirror (never compacted out) and
-        // GatherSymbolPoints hard-skips it as its FIRST, unconditional check (no fade — it was never on screen).
+        /// <summary>The tile-coverage cull's Drop decision as a per-symbol mask. A Dropped winner stays
+        /// resident in the mirror; <c>GatherSymbolPoints</c> hard-skips it first, unconditionally.</summary>
         private NativeList<byte>    _mirrorSymbolDropped;
-        // Mirror-side COUNTS — the shared core reads these rather than any managed source's counts, so it works
-        // off one native representation. Accumulated by GatherIntoMirror.
+        // Mirror-side counts — the shared core reads these instead of any managed source's counts.
         private int _mirrorCount;
         private int _mirrorPointCount;
         private int _mirrorCurvedCount;
@@ -385,14 +242,8 @@ namespace MapRenderer.Unity.Text.Placement
         private int _mirrorAnchorCount;
         private int _mirrorFadeCount;
         private int _mirrorWorldPointCount;
-        // D1 fix-pass (Blocker 1): _mirrorCount includes Dropped symbols (they stay RESIDENT, masked — never
-        // compacted out), so it is no longer "was there any placement work this frame" — an all-Dropped mirror
-        // still has _mirrorCount > 0. _mirrorNonDroppedCount = _mirrorCount minus Dropped symbols is the
-        // pre-D1-equivalent count: TickCore's placement/fade-decay gate reads THIS, not _mirrorCount, so an
-        // all-Dropped frame behaves exactly like the pre-D1 empty mirror (block skipped, no
-        // DecayUnseenFadeSymbols — live fades stay frozen, not decayed). Departing symbols are never Dropped
-        // (ClassifyActive never classifies them — Blocker 2's scope fence), so _mirrorNonDroppedCount == the
-        // pre-D1 post-compaction _mirrorCount by construction (departing symbols always counted).
+        /// <summary><c>_mirrorCount</c> includes Dropped symbols, so it no longer means "any placement
+        /// work this frame". <c>TickCore</c>'s gate reads this field instead, so an all-Dropped frame keeps fades frozen.</summary>
         private int _mirrorNonDroppedCount;
 
         // ── mirror: staging-output upper bounds (camera-independent — summed from the gathered blocks) ──
@@ -401,43 +252,35 @@ namespace MapRenderer.Unity.Text.Placement
         private int _mirrorMaxCandidates;
 
         // ── stage-job buffers (pre-sized to the mirror's worst case, refilled every Tick) ──
-        private NativeList<int>            _stagePointOffset;     // gather output (-1 = culled)
-        private NativeList<byte>           _stageAnchorWasPlaced; // per-frame A-5 anchor incumbency — filled by StageJob, sized here
-        internal NativeList<SymbolBox>      _stageBoxes;           // internal: read by SymbolPlacementSystemTestExtensions.LastStagedBoxes()
+        /// <summary>Gather output; -1 = culled.</summary>
+        private NativeList<int>            _stagePointOffset;
+        /// <summary>Per-frame anchor incumbency — filled by StageJob, sized here.</summary>
+        private NativeList<byte>           _stageAnchorWasPlaced;
+        /// <summary><c>internal</c>: read by <c>SymbolPlacementSystemTestExtensions.LastStagedBoxes()</c>.</summary>
+        internal NativeList<SymbolBox>      _stageBoxes;
         private NativeList<PlacedQuad>     _stageQuads;
         private NativeList<SymbolCandidate> _stageCandidates;
         private NativeList<CandidateEmit>  _stageEmit;
-        private NativeArray<int>           _stageCounts;          // [candidateCount, boxCount, quadCount, emitCount]
-        private NativeList<float2>         _stagePath;            // arc-walk buffer (>= max path length)
+        /// <summary>[candidateCount, boxCount, quadCount, emitCount].</summary>
+        private NativeArray<int>           _stageCounts;
+        /// <summary>Arc-walk buffer (&gt;= max path length).</summary>
+        private NativeList<float2>         _stagePath;
         private NativeList<float>          _stageCumulativeLength;
 
-        // Where a surviving candidate's already-built quads live in _stageQuads + which material slot they draw
-        // in (Core.Text.Placement.CandidateEmit). §10 D8: NOT keyed by SymbolCandidate.SymbolIndex — a candidate
-        // owns a RANGE (EmitStart/EmitCount), since a centred icon+text pair is ONE candidate emitting TWO emits
-        // (different atlases). Emission walks that range and copies each emit's [QuadStart, QuadStart+QuadCount).
-        // The ranges point INTO this pool, so the in-place candidate sort still cannot disturb them.
-        // Filled by SymbolStagingMath alongside the candidates.
+        // A surviving candidate's built quads live in _stageQuads as a range (EmitStart/EmitCount) the sort can't disturb.
 
-        /// <summary>Number of <see cref="Tick"/> calls so far — T5 structural guard (the vertex buffer is
-        /// rebuilt every Tick, not once at tile consume). Test surface.</summary>
+        /// <summary>Number of <see cref="Tick"/> calls so far — the vertex buffer rebuilds every Tick, not
+        /// once at tile consume. Test surface.</summary>
         internal int TickCount { get; private set; }
 
-        /// <summary>Heavy mirror FILLS so far — bumped once per real <see cref="GatherIntoMirror"/> rebuild,
-        /// never on a memo hit. Drives the telemetry panel's rebuilds/second
-        /// readout (how often the winner set actually changes ⇒ whether the memo can help at all), and is what
-        /// keeps the R1 memo tests from passing trivially on an unmemoized implementation.</summary>
+        /// <summary>Heavy mirror fills so far — bumped once per real <see cref="GatherIntoMirror"/> rebuild,
+        /// never on a memo hit. Drives the telemetry panel's rebuilds/second readout.</summary>
         internal int MirrorRebuildCount { get; private set; }
 
         private SymbolPlacementTelemetrySnapshot _telemetry;
 
-        /// <summary>
-        /// This provider's own levels, owned as a field and handed out BY REFERENCE — a reader touches the live
-        /// struct with no copy and no boxing (<c>docs/telemetry-design.md</c> §3). Refreshed at the end of
-        /// <see cref="Tick"/>, so the numbers are that pass's, not last frame's.
-        ///
-        /// <para><b>There is nothing to gate.</b> Every field below is a value this pass already stores as it
-        /// runs, so the refresh is a repackage, not a capture.</para>
-        /// </summary>
+        /// <summary>This provider's levels, handed out by reference (see <c>docs/telemetry-design.md</c> §3).
+        /// Refreshed at the end of <see cref="Tick"/>, so the numbers are this pass's, not last frame's.</summary>
         internal ref readonly SymbolPlacementTelemetrySnapshot Telemetry => ref _telemetry;
 
         private void RefreshTelemetry() =>
@@ -461,92 +304,60 @@ namespace MapRenderer.Unity.Text.Placement
         /// <summary>Symbols fed into the LAST <see cref="Tick"/> (before any projection cull) — telemetry.</summary>
         internal int LastInputSymbolCount { get; private set; }
 
-        /// <summary>W3 — collision BOXES staged on the last <see cref="Tick"/> (a point symbol is 1, a curved
-        /// symbol is 1 per glyph). The N+1 sibling of the <see cref="LastQuadCount"/> family above.</summary>
+        /// <summary>Collision boxes staged on the last <see cref="Tick"/> — a point symbol is 1, a curved symbol is 1 per glyph.</summary>
         internal int LastBoxCount { get; private set; }
 
-        /// <summary>Collision CANDIDATES on the last Tick (symbols that survived projection and entered the
-        /// greedy pass — a point symbol is 1, a curved/repeated line symbol is 1 per anchor). Telemetry.</summary>
+        /// <summary>Collision candidates on the last Tick — a point symbol is 1, a curved/repeated line symbol is 1 per anchor.</summary>
         internal int LastCandidateCount { get; private set; }
 
-        /// <summary>Collision SURVIVORS. R3: the collision is deferred a Tick, so this is the survivor count of
-        /// the collision run over the PREVIOUS Tick's candidates (raw <c>_survivorCountOut[0]</c>, unfiltered),
-        /// not this Tick's — one Tick behind <see cref="LastCandidateCount"/>, which is always this Tick's.
-        /// Telemetry.</summary>
+        /// <summary>Collision survivors — one Tick behind <see cref="LastCandidateCount"/>, since collision is
+        /// deferred: this is the raw, unfiltered survivor count from the previous Tick's candidates.</summary>
         internal int LastSurvivorCount { get; private set; }
 
-        /// <summary>Symbols skipped by the pre-projection far-distance cull on the last Tick (farther from the
-        /// camera than <see cref="SymbolMaxDistanceFraction"/> × the far plane — never projected or collided).
-        /// Telemetry — a proxy for how much the tilted-view horizon pile-up was trimmed.</summary>
+        /// <summary>Symbols skipped by the pre-projection far-distance cull on the last Tick (past
+        /// <see cref="SymbolMaxDistanceFraction"/> × far plane).</summary>
         internal int LastDistanceCulledCount { get; private set; }
 
-        /// <summary>Retain-as-departing: symbols skipped on the last Tick because their tile is leaving cover and the
-        /// symbol has already faded out (before that it stays STAGED, fading — no pop). Telemetry — a proxy for how
-        /// many tile-unload fade-outs completed this frame.</summary>
+        /// <summary>Symbols skipped on the last Tick because their tile is leaving cover and has finished
+        /// fading out — before that they stay staged, fading, so there's no pop.</summary>
         internal int LastDepartingCulledCount { get; private set; }
 
-        /// <summary>S3: symbols skipped on the last Tick because their anchor is hidden behind the globe's own
-        /// bulk (<see cref="HorizonCull"/>) — never projected or collided. Telemetry — always 0 under a planar
-        /// projection (Mercator's <c>TryGetHorizonOccluder</c> returns false ⇒ the trigger is inert).</summary>
+        /// <summary>Symbols skipped on the last Tick because their anchor is hidden behind the globe's bulk
+        /// (<see cref="HorizonCull"/>). Always 0 under a planar projection.</summary>
         internal int LastHorizonCulledCount { get; private set; }
 
-        /// <summary>Symbols skipped by the pre-projection ZOOM gate on the last Tick — their style layer is out of
-        /// the live camera zoom's <c>[minzoom, maxzoom)</c> and they have no live fade, so gather hard-skips them
-        /// (never projected/staged/collided) instead of projecting then suppressing them post-stage. Telemetry —
-        /// the direct measure of the overzoom waste this gate removes (e.g. z14 <c>poi_r*</c> points). Symbols
-        /// still fading out are exempt (kept staged via <c>CompactJob</c>'s fade-alive probe), so they are
-        /// NOT counted here — <see cref="ApplySuppression"/> still owns their same-frame hide.</summary>
+        /// <summary>Symbols skipped by the pre-projection zoom gate on the last Tick — out of the live camera
+        /// zoom range and not fading. A still-fading symbol stays staged instead; <see cref="ApplySuppression"/> hides it same-frame.</summary>
         internal int LastZoomCulledCount { get; private set; }
 
-        /// <summary>A-4 fade symbols held — the SIZE OF THE MAP <see cref="DecayUnseenFadeSymbols"/> walks each
-        /// Tick, which is the per-frame cost being measured. An identity that has finished fading OUT is dropped
-        /// rather than parked at 0 (see <c>EaseFade</c>), so this tracks the drawn symbol count rather than
-        /// <see cref="LastCandidateCount"/> — a view whose candidates outnumber its placed symbols ten to one does
-        /// not pay the sweep ten times over.
-        /// <para>Do NOT redefine this as a filtered or epsilon-thresholded count: the RAW size is the cost, and a
-        /// filtered count would read as healthy while invisible identities piled up again — silently disarming
-        /// <c>SymbolFadeTests.Tick_StableCollisionLoser_LeavesNoFadeRecordBehind</c>, which pins exactly this.
-        /// (The map legitimately holds sub-epsilon values while a symbol fades IN.)</para></summary>
+        /// <summary>Live fade-identity count — the size of the map <see cref="DecayUnseenFadeSymbols"/> walks
+        /// each Tick, the cost being measured. Keep it the raw size: filtering it would silently disarm
+        /// <c>SymbolFadeTests.Tick_StableCollisionLoser_LeavesNoFadeRecordBehind</c>, which pins this exact count.</summary>
         internal int LiveFadeSymbolCount => _fadeOpacity.Count;
 
-        /// <summary>Coverage-fade: symbols skipped on the last Tick because their tile's on-screen coverage crossed
-        /// below threshold (<see cref="Core.Text.Placement.SymbolTileCoverageFilter"/>) and have now fully faded out
-        /// (before that they stay STAGED, fading — no pop). Telemetry — mirrors <see cref="LastDepartingCulledCount"/>,
-        /// just for the coverage-crossing trigger.</summary>
+        /// <summary>Symbols skipped on the last Tick because their tile's coverage dropped below threshold and
+        /// have now fully faded out. Mirrors <see cref="LastDepartingCulledCount"/> for the coverage trigger.</summary>
         internal int LastCoverageFadingCulledCount { get; private set; }
 
-        // The map view this system renders symbols for — injected at construction (S20: one
-        // SymbolPlacementSystem per MapView). Read AFTER MapCamera.SyncToCamera has committed the frame's
-        // transform: MapView.LateUpdate does SyncToCamera → tile rebase → places symbols, in that order.
+        /// <summary>The map view this system renders symbols for. Read after <see cref="MapCamera.SyncToCamera"/>
+        /// commits the frame transform — <c>MapView.LateUpdate</c> runs sync → rebase → place, in that order.</summary>
         private readonly MapCamera _camera;
 
-        /// <summary>
-        /// The default world materials are <see cref="MaterialExtensions.CloneWithParent"/> clones of the
-        /// <see cref="MapMaterialSet.SymbolTextWorld"/>/<see cref="MapMaterialSet.SymbolIconWorld"/> bases
-        /// (S58 pattern: materials reference the shader by GUID, no <c>Shader.Find</c>) — used for the demo /
-        /// single-material path and as the fallback for any slot without a supplied per-layer material.
-        /// Cloned (not the base asset itself) because <see cref="Tick"/> mutates the text clone every frame
-        /// (atlas texture + screen params). Per-symbol-layer materials (per-layer <c>text-halo-*</c>) are
-        /// owned by each <see cref="Style.SymbolRenderLayer"/> (D11/E2) and supplied to <see cref="Tick"/> as
-        /// the <c>symbolLayers</c> list.
-        /// </summary>
-        /// <param name="worldTextBase">Epic A / A1 (design §11 A1 D7): the <c>MapMaterialSet.SymbolTextWorld</c>
-        /// base — the world-anchored point-text draw path, and the ONLY point-text draw path since commit 1
-        /// retired the screen path. No <c>Shader.Find</c> fallback (production is GUID-only, S58) — a caller
-        /// must supply it.</param>
-        /// <param name="worldIconBase">Epic A / A1 D7: the <c>MapMaterialSet.SymbolIconWorld</c> base — the
-        /// world-anchored icon draw path. Null (default) → world icons stay inert, text unaffected.</param>
+        /// <summary>Default world materials — the fallback for slots with no per-layer material (owned instead
+        /// by <c>Style.SymbolRenderLayer</c>), cloned since <see cref="Tick"/> mutates them every frame.</summary>
+        /// <param name="worldTextBase">The only world-anchored point-text draw path; no <c>Shader.Find</c> fallback, the caller must supply it.</param>
+        /// <param name="worldIconBase">The world-anchored icon draw path; null leaves world icons inert.</param>
         public SymbolPlacementSystem(MapCamera camera, Material worldTextBase, Material worldIconBase = null)
         {
             _camera = camera ?? throw new ArgumentNullException(nameof(camera));
 
-            _symbolPoints = new NativeList<double3>(Allocator.Persistent); // B-2 projection buffer
+            _symbolPoints = new NativeList<double3>(Allocator.Persistent); // projection buffer
             _symbolUps = new NativeList<float3>(Allocator.Persistent);
             _symbolScreen = new NativeList<float2>(Allocator.Persistent);
             _symbolDepth  = new NativeList<float>(Allocator.Persistent);
             _symbolValid  = new NativeList<byte>(Allocator.Persistent);
 
-            _nSurvivors       = new NativeList<byte>(Allocator.Persistent); // B-4a collision survivor flags
+            _nSurvivors       = new NativeList<byte>(Allocator.Persistent); // collision survivor flags
             _gridCellHead     = new NativeList<int>(Allocator.Persistent);
             _gridNodeBox      = new NativeList<int>(Allocator.Persistent);
             _gridNodeNext     = new NativeList<int>(Allocator.Persistent);
@@ -556,7 +367,7 @@ namespace MapRenderer.Unity.Text.Placement
             _gatherBlockViews = new NativeList<BlockView>(Allocator.Persistent);
             _gatherCounts = new NativeArray<int>(SymbolGatherJob.CountLength, Allocator.Persistent);
 
-            // Lever C step 3b: the Burst stage job's native buffers.
+            // The Burst stage job's native buffers.
             _mirrorKinds = new NativeList<SymbolPlacementKind>(Allocator.Persistent);
             _mirrorDetail = new NativeList<int>(Allocator.Persistent);
             _mirrorWorldCount = new NativeList<int>(Allocator.Persistent);
@@ -591,13 +402,12 @@ namespace MapRenderer.Unity.Text.Placement
             _gatherTrigger = new NativeList<GatherTrigger>(Allocator.Persistent);
             _slotVisibleThisFrame = new NativeList<bool>(Allocator.Persistent);
             _gatherCulledCounts = new NativeArray<int>((int)GatherTrigger.Dropped + 1, Allocator.Persistent);
-            // _debugFadeIdSeen is NOT allocated here — see its field doc: AssertFadeIdsUnique allocates it
-            // lazily on first use, so a release build (where that [Conditional] method never runs) never pays for it.
+            // _debugFadeIdSeen isn't allocated here — see its field doc; AssertFadeIdsUnique allocates it lazily.
             _stageBoxes = new NativeList<SymbolBox>(Allocator.Persistent);
             _stageQuads = new NativeList<PlacedQuad>(Allocator.Persistent);
             _stageCandidates = new NativeList<SymbolCandidate>(Allocator.Persistent);
             _stageEmit = new NativeList<CandidateEmit>(Allocator.Persistent);
-            _stageCounts = new NativeArray<int>(4, Allocator.Persistent); // §10 D8: [3]=emitCount
+            _stageCounts = new NativeArray<int>(4, Allocator.Persistent); // [3]=emitCount
             _stagePath = new NativeList<float2>(Allocator.Persistent);
             _stageCumulativeLength = new NativeList<float>(Allocator.Persistent);
 
@@ -612,8 +422,7 @@ namespace MapRenderer.Unity.Text.Placement
                 _worldTextMaterial.name = "SymbolPlacementSystem_WorldTextMaterial";
             }
 
-            // Epic A / A1 D7: the world-anchored demo icon material — same null-tolerant pattern as
-            // worldTextBase above (no Shader.Find fallback; production passes MapMaterialSet.SymbolIconWorld).
+            // The world icon material follows the same null-tolerant pattern as worldTextBase above.
             if (worldIconBase != null)
             {
                 _worldIconMaterial      = worldIconBase.CloneWithParent();
@@ -621,30 +430,22 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        /// <summary>Stage-2 (symbol-symbol native gather) PRODUCTION entry: tick a per-frame
-        /// <see cref="SymbolGatherPlan"/> (winners + their pre-baked <see cref="SymbolTileBlock"/> slices,
-        /// produced by <see cref="Text.SymbolSubsystem.CurrentBatch"/>). <see cref="GatherIntoMirror"/>
-        /// compacts each winner's baked slice straight into the native mirror — no per-frame managed SoA build —
-        /// then the core (project → stage → collide → emit) runs off the mirror.</summary>
-        /// <param name="symbolLayers">Per-symbol-layer render layers, index == <see cref="ShapedSymbol.MaterialIndex"/>,
-        /// each owning its own material + persistent presenter (D11/E2). Null / empty → every symbol draws through
-        /// the single fallback material/presenter. Collision is GLOBAL regardless; only the draw is partitioned.</param>
-        /// <param name="spriteTexture">I5b: the sprite sheet backing every ICON symbol's <see cref="SymbolQuad"/> UVs
-        /// (<c>SymbolSubsystem.IconTexture</c>). Null → icons never build/present.</param>
+        /// <summary>Production entry: ticks a per-frame <see cref="SymbolGatherPlan"/> — <see cref="GatherIntoMirror"/>
+        /// compacts each winner into the native mirror, then project→stage→collide→emit runs off it.</summary>
+        /// <param name="symbolLayers">Per-symbol-layer render layers, index == <see cref="ShapedSymbol.MaterialIndex"/>; null/empty draws through the fallback.</param>
+        /// <param name="spriteTexture">The sprite sheet backing every icon's UVs; null means icons never build.</param>
         public void Tick(in SceneFrame frame, SymbolGatherPlan plan, GlyphAtlasTexture atlas,
             float deltaTime = float.PositiveInfinity, IReadOnlyList<SymbolRenderLayer> symbolLayers = null,
             Texture2D spriteTexture = null)
         {
             using (PmGather.Auto())
-                GatherIntoMirror(plan); // sets _mirrorNonDroppedCount — read below, not plan.WinnerCount (Should-Fix 3:
-                                        // WinnerCount includes Dropped symbols; telemetry/gating must not)
+                GatherIntoMirror(plan); // sets _mirrorNonDroppedCount — read below, not plan.WinnerCount, which includes Dropped symbols
             TickCore(frame, atlas, deltaTime, symbolLayers, _mirrorNonDroppedCount, spriteTexture);
             RefreshTelemetry();   // after the pass, so the levels are this Tick's
         }
 
 
-        // The per-frame core — reads ONLY the native mirror (_m* + _mirrorCount/…), never a managed source. Split out
-        // from Tick so the mirror fill and the work done over it stay separable.
+        // The per-frame core reads only the native mirror, never a managed source — split out from Tick.
         private void TickCore(in SceneFrame frame, GlyphAtlasTexture atlas,
             float deltaTime, IReadOnlyList<SymbolRenderLayer> symbolLayers, int inputSymbolCount,
             Texture2D spriteTexture = null)
@@ -654,17 +455,12 @@ namespace MapRenderer.Unity.Text.Placement
 
             using (PmTick.Auto())
             {
-                // R3: complete the PREVIOUS Tick's scheduled collision and re-key its survivors into
-                // _placedLastFrame — read by BOTH StageJob (A-5 incumbency) and the emit loop below.
+                // Completes the previous Tick's scheduled collision, re-keying survivors into _placedLastFrame.
                 using (PmCollideHarvest.Auto())
                     HarvestCollision();
 
                 double2 viewportLogicalPx = _camera.ViewportLogicalPx;
-                // W1: this frame's world ruler for map-pitched curved symbols. MetresPerDevicePixel is per
-                // DEVICE px by its own doc (DevicePixelRatio is absent there on purpose); every staging
-                // quantity it meets — TextSizePx, CurvedGlyph.ArcCenter, the projected screen path — is
-                // LOGICAL px. The ratio is therefore a real factor and it is applied HERE, once, so the value
-                // that travels is already per-logical-px and no hop downstream can drop or double it.
+                // The world ruler for map-pitched curved symbols — converts device pixels to logical pixels once, here.
                 float metresPerLogicalPixel = (float)(_camera.MetresPerDevicePixel * _camera.DevicePixelRatio);
 
                 LastCandidateCount = 0;
@@ -674,81 +470,49 @@ namespace MapRenderer.Unity.Text.Placement
                 LastCoverageFadingCulledCount = 0;
                 LastZoomCulledCount = 0;
 
-                WorldRenderer.BeginFrame(); // Epic A / A1: clear every live world slot's accumulators
+                WorldRenderer.BeginFrame(); // clear every live world slot's accumulators
 
                 int totalQuads = 0;
 
-                // D1 fix-pass (Blocker 1): gate on the EFFECTIVE non-Dropped count, not raw _mirrorCount — an
-                // all-Dropped mirror (every resident symbol masked) must skip this whole block exactly like the
-                // pre-D1 empty-after-compaction mirror did, so live _fadeOpacity entries stay frozen rather than
-                // decaying via DecayUnseenFadeSymbols below (a Dropped tile was never on screen; nothing to decay).
+                // Gate on the EFFECTIVE non-Dropped count (see _mirrorNonDroppedCount's field doc).
                 if (_mirrorNonDroppedCount > 0 && atlas?.Texture != null && _worldTextMaterial != null)
                 {
                     float4x4 viewProj = ViewProj(_camera.Camera);
                     double3 sceneOriginRender = frame.SceneOriginRender;
                     float3x3 rebase = frame.Rebase;
 
-                    // S3: the globe far-side horizon cull's params, built ONCE per Tick. `occ == false` on a
-                    // planar projection (WebMercatorProjection.TryGetHorizonOccluder) ⇒ globeRadiusSq = -1 ⇒
-                    // HorizonCull.IsHiddenBeyondHorizon is an unconditional no-op for every symbol. `cameraRelative`
-                    // is Stage U's SceneFrame.CameraRelativePosition (ComputeRelativePose's `pos`, folded in by
-                    // MapView.BuildSceneFrame) — NOT a fresh pose computation and NOT transform.position.
+                    // Globe horizon-cull params, built once per Tick — on a planar projection occ is false, so HorizonCull is a no-op.
                     bool occ = _camera.Projection.TryGetHorizonOccluder(out double3 occCentre, out double occRadius);
                     double3 cameraRelative = frame.CameraRelativePosition;
                     double  globeRadiusSq  = occ ? occRadius * occRadius : -1.0;
 
-                    // The pre-projection symbol distance cull threshold (render metres): a fraction of the camera's
-                    // far-clip distance — computed from the camera properties (CurrentFarMetres), NOT read off
-                    // Camera.farClipPlane, so it is correct even before a SyncToCamera has run this frame. SymbolPlacementSystem
-                    // farther than this from the camera are skipped BEFORE projection/collision (the tilted horizon
-                    // pile-up, where they are discarded/unstable anyway).
+                    // Pre-projection distance-cull threshold, from CurrentFarMetres so it works before SyncToCamera runs this frame.
                     double symbolCullDistance = SymbolMaxDistanceFraction * _camera.CurrentFarMetres;
 
-                    // Map bearing (heading) — drives text-translate-anchor:map and text-rotation-alignment:map
-                    // (#4). Read once per frame; zero for a north-up map, where map- and viewport-alignment
-                    // coincide. The bearing sign lives in SymbolBearing (the single visual-verify constant).
+                    // Map bearing drives text-translate-anchor:map/text-rotation-alignment:map; zero for a north-up map.
                     float bearingRadians = (float)_camera.CurrentProperties.Heading.Radians;
 
-                    // (1) Project + STAGE every symbol into the unified native pools (the Burst StageJob): one
-                    //     SymbolCandidate per symbol (point = 1 AABB box; curved = N rotated-glyph boxes) in _stageBoxes,
-                    //     its drawn quads in _stageQuads. Point and curved share the collision pass from here, so a
-                    //     road name and a city name compete for space (#5 B3).
+                    // (1) Project and stage every symbol into the unified native pools (the Burst StageJob).
                     int candidateCount = 0, boxCount = 0;
                     using (PmProject.Auto())
                     {
-                        // B-2: gather every un-culled symbol's world points (anchor / line path) — no matrix mul,
-                        // but O(input): it visits EVERY non-dropped symbol to run the horizon/distance/zoom culls
-                        // (the B-3 distance cull runs here), so its cost stands even when it culls everything. Its
-                        // own marker (GatherPoints) — it is NOT projection, and lumping it under ProjectPositions
-                        // once charged a 0-symbol scan ~9ms to a projection-named row.
+                        // Gathers every un-culled symbol's world point — O(input), since it culls even when everything is culled.
                         using (PmGatherPoints.Auto())
                         {
-                            // Tile-coverage pre-cull now runs upstream, in SymbolSubsystem.CurrentBatch (via
-                            // Core's SymbolTileCoverageFilter). D1: a Dropped tile's symbols stay RESIDENT in the mirror
-                            // (flagged _mirrorSymbolDropped) and are hard-skipped below — a mask, not a compaction, but the
-                            // same effect as removal. A Fading tile's symbols also ride (SymbolCoverageFading), so gather
-                            // eases them out instead of popping (the 4th fade-out trigger below).
+                            // A Dropped tile's symbols stay resident and get hard-skipped below; a Fading tile's still gather.
                             GatherSymbolPoints(sceneOriginRender, symbolCullDistance, rebase, cameraRelative, occCentre, globeRadiusSq,
                                                symbolLayers, _camera.CurrentProperties.Zoom);
                         }
 
-                        // Project ONLY the symbols the scan kept (_symbolPoints) in one pass — the parallel Burst
-                        // SymbolProjectionJob via .Run(). Free when the scan culled everything (total == 0 early
-                        // return). Staging below reads these precomputed screen positions rather than projecting inline.
+                        // Projects only the symbols the scan kept, via the parallel Burst SymbolProjectionJob — free when fully culled.
                         using (PmProjectPositions.Auto())
                             ProjectSymbols(sceneOriginRender, viewProj, viewportLogicalPx, rebase);
 
                         using (PmStage.Auto())
                         {
-                            // Stage the whole mirror in ONE Burst job (StageJob) — same SymbolStagingMath as the
-                            // managed reference, SIMD-compiled. The mirror is already filled (GatherIntoMirror,
-                            // before this core); pre-size outputs (the job itself resolves this
-                            // frame's A-5 incumbency, R2); run; read counts. Its native outputs feed the collision +
-                            // emit passes directly.
+                            // Stages the whole mirror in one Burst job (StageJob); its output feeds collision and emit directly.
                             PreSizeStageOutputs();
-                            // W3: the map-pitched collision box is the screen AABB of the glyph's four
-                            // PROJECTED world corners, so the staging math needs this frame's projection —
-                            // the same four values ProjectSymbols above was just handed.
+                            // The collision box is the screen AABB of the glyph's four projected world corners.
                             var view = new SymbolViewTransform
                             {
                                 SceneOriginRender = sceneOriginRender,
@@ -762,29 +526,16 @@ namespace MapRenderer.Unity.Text.Placement
                         }
                     }
 
-                    // Diagnostic (opt-in): on an armed capture, dump this frame's input symbols bucketed by
-                    // style layer and by vertical screen band. Runs here — after projection filled _symbolScreen/
-                    // _symbolValid — so the band split is real. A single branch when un-armed (see Diagnostics partial).
+                    // Diagnostic (opt-in): on an armed capture, dumps this frame's input symbols by style layer and screen band.
                     if (_breakdownRequested)
                         CaptureSymbolBreakdown(symbolLayers, viewportLogicalPx);
 
-                    // Mark out-of-zoom candidates SymbolCandidate.Suppressed BEFORE collision, so a symbol whose layer
-                    // is outside the LIVE camera zoom's minzoom/maxzoom neither wins nor blocks the true winner (it
-                    // still eases to 0 in the emit loop). Display-time gate → overzoom works: a z14 tile reveals
-                    // poi_r1/r7/r20 as the camera passes 15/16/17, and hides them on zoom-out.
+                    // Marks out-of-zoom candidates Suppressed before collision, so they neither win nor block the true winner.
                     ApplySuppression(candidateCount, symbolLayers, _camera.CurrentProperties.Zoom);
 
                     LastCandidateCount = candidateCount;
 
-                    // (2) A-4 FADE, reading LAST TICK's collision verdict (R3 — re-keyed into _placedLastFrame by
-                    //     HarvestCollision at the top of this Tick): ease each candidate's persistent opacity toward
-                    //     1 (shown) or 0 (not last Tick's survivor / suppressed / force-faded), then emit its staged
-                    //     quads scaled by that opacity. A suppressed symbol is still staged this frame, so it fades
-                    //     OUT in place from its live placement (no cross-frame quad cache); a new symbol fades IN
-                    //     from 0. Symbols not seen this frame decay and are dropped (bounded). Emit no longer writes
-                    //     _placedLastFrame — HarvestCollision is its sole writer now (R3 §2.4) — so emit order here
-                    //     is STAGING order, not placement order (the collision below sorts _stageCandidates in place,
-                    //     but that sort happens AFTER this loop reads it — see the schedule note below).
+                    // (2) Fade using last tick's verdict, then emit — staging order, since the collision sort below runs after.
                     using (PmEmit.Auto())
                     {
                         using (PmEmitLoop.Auto())
@@ -795,48 +546,18 @@ namespace MapRenderer.Unity.Text.Placement
                                 SymbolCandidate cand = _stageCandidates[s]; // staging order — the collision job hasn't sorted yet
                                 long fadeId = cand.FadeId;
 
-                                // `WasPlacedLastFrame` IS `_placedLastFrame.Contains(fadeId)`, already resolved in
-                                // Burst by StageJob and carried on the candidate we just loaded — so read it
-                                // instead of re-probing the set here (one native hash lookup, plus its Editor safety
-                                // check, per candidate). Exact on both arms: the job fills AnchorWasPlaced over its
-                                // whole range element-wise against AnchorFadeIds, slices both with the SAME
-                                // (fadeStart, anchorCount + 1), and StageCurved indexes the pair at one `a` (and at
-                                // `anchorCount` for the centred fallback). Safe because HarvestCollision is the set's
-                                // sole writer and ran before the stage job — the contents cannot differ between them.
+                                // WasPlacedLastFrame comes pre-resolved from StageJob — safe since HarvestCollision, the sole writer, ran first.
                                 bool placed = cand.WasPlacedLastFrame;
 
-                                // A candidate that is neither placed nor holds a fade symbol can produce nothing:
-                                // EaseFade would ease 0 toward 0, store nothing (the drop branch, with no key to
-                                // remove), add nothing to _seenFade, and the caller would `continue` on the returned
-                                // 0. Skipping outright is exactly that, minus the probes — and it is the common case,
-                                // since candidates outnumber placed symbols roughly ten to one in a dense view.
+                                // Skipping here matches what EaseFade would do anyway: ease 0 toward 0 and return 0.
                                 if (!placed && !_fadeOpacity.ContainsKey(fadeId)) continue;
 
-                                // (EaseFade below symbols this id in _seenFade iff it stores one — see its field doc.)
-                                // Show iff this candidate's FadeId survived LAST Tick's collision (harvested above) and
-                                // it isn't force-fading-out (gather-cull) or suppressed (out-of-zoom, evaluated LIVE
-                                // this frame so the display-time gate stays same-frame — R3 §2.8). One-frame verdict
-                                // latency: a brand-new candidate or a flipped verdict shows per last Tick's outcome
-                                // for one Tick. `_forceFadeOut` is probed LAST — same boolean, but it is the rarest
-                                // term, so ordering it after the two cheap ones skips it for most candidates.
+                                // Suppressed is evaluated live this frame, so the display gate stays same-frame.
                                 bool show = placed && !cand.Suppressed && !_forceFadeOut.Contains(fadeId);
                                 float opacity = EaseFade(fadeId, show ? 1f : 0f, deltaTime);
                                 if (opacity <= FadeEpsilon) continue;
 
-                                // Epic A / A1 (design §11 A1 D2/D6) + Stage AC: every candidate now emits into the
-                                // world renderer — StagePoint and, since Stage AC, StageCurved both set
-                                // CandidateEmit.IsWorld unconditionally (the old screen _slotQuads/_slotIconQuads
-                                // bucket routing was retired with the dead render path it fed).
-                                // §10 D8: a candidate's emits are no longer keyed by SymbolIndex alone — an
-                                // ordinary candidate has EmitCount == 1 (one iteration, unchanged cost), and a
-                                // centred icon+text pair has EmitCount == 2 (its icon and text, each with its
-                                // own (Slot, AtlasKind)) — both draw at this ONE opacity (one EaseFade above),
-                                // which is the point: the pair fades as a single unit.
-                                // Stage C: skip the emit of a half LAST Tick's collision dropped (icon-optional /
-                                // text-optional) — its partner still draws. The mask is seeded onto the candidate
-                                // by staging from _droppedHalvesLastFrame, since the verdict for THIS Tick's
-                                // collision does not exist yet (R3). Zero for every other candidate, so the added
-                                // test short-circuits on the first term everywhere else.
+                                // A pair's icon+text share EmitCount == 2 and fade as one unit; this skips only the half last tick dropped.
                                 byte droppedHalves = cand.DroppedBoxMask;
                                 for (int e = cand.EmitStart, eEnd = cand.EmitStart + cand.EmitCount; e < eEnd; e++)
                                 {
@@ -851,37 +572,20 @@ namespace MapRenderer.Unity.Text.Placement
                             DecayUnseenFadeSymbols(deltaTime);
                     }
 
-                    // (3) R3: schedule the collision LAST — after emit, not before. The job sorts _stageCandidates in
-                    //     place, so nothing downstream may read that array this frame once it's scheduled; emit
-                    //     above is the only reader and it already ran. Complete()s at the top of the NEXT Tick
-                    //     (HarvestCollision), so the greedy runs in the inter-frame gap instead of under a blocking
-                    //     wait here.
+                    // (3) Schedule collision last — the job sorts _stageCandidates in place, so nothing after this may read it.
                     using (PmCollide.Auto())
                         ScheduleCollision(candidateCount, boxCount);
                 }
 
                 LastQuadCount = totalQuads;
 
-                // Epic A / A1: build + place every non-empty WORLD slot (point/icon), hide the rest, reclaim
-                // idle ones — runs every Tick regardless of whether this Tick built anything (a Tick that placed
-                // nothing this frame must still hide slots a PRIOR Tick left visible).
+                // Builds and places every non-empty world slot, hiding the rest, since a prior Tick may have left slots visible.
                 WorldRenderer.EndFrame(in frame, symbolLayers, _worldTextMaterial, _worldIconMaterial,
                     atlas?.Texture, spriteTexture, viewportLogicalPx);
             }
         }
 
-        // ── B-2: gather + project every symbol's screen geometry ──────────────────────────────────────────────
-        // Flatten every un-culled symbol's world points (from the native mirror) into _symbolPoints — a point's
-        // anchor, a line's path vertices — recording each symbol's start in the native _stagePointOffset (-1 = culled →
-        // skipped by the stage job). Cheap: array reads + the coverage/distance/horizon fade triggers, no matrix
-        // mul; the projection (matrix mul) happens once, in ProjectSymbols. Reads ONLY the mirror (_m*), which
-        // GatherIntoMirror populates from the plan.
-        //
-        // D1: the tile-coverage cull's DROP decision (SymbolTileCoverageFilter.ClassifyActive, via
-        // SymbolGatherPlan.Dropped) is now a per-symbol MASK (_mirrorSymbolDropped) — a Dropped tile's symbols DO reach
-        // the mirror (resident, never compacted out) but are hard-skipped here, FIRST and unconditionally: a
-        // Dropped tile was never on screen, so — unlike departing/coverage-fading — there is nothing to ease out,
-        // never mind its fade state. A FADING tile's symbols still gather (_mirrorSymbolCoverageFading), handled below.
+        // Flattens every un-culled symbol's world point into _symbolPoints; _stagePointOffset holds each start (-1 = culled).
         private void GatherSymbolPoints(double3 sceneOriginRender, double symbolCullDistance,
             in float3x3 rebase, double3 cameraRelative, double3 globeCentreRelative, double globeRadiusSq,
             IReadOnlyList<SymbolRenderLayer> symbolLayers, double zoom)
@@ -891,9 +595,7 @@ namespace MapRenderer.Unity.Text.Placement
             _symbolUps.Clear();
             _forceFadeOut.Clear();
 
-            // Resolve the per-frame ZOOM gate once per slot (not per symbol): a slot is gated OUT when its layer
-            // is outside the live camera zoom's [minzoom, maxzoom). No layer list (demo/single-material path) or a
-            // null layer ⇒ not gated — matches ApplySuppression's own "no layer → not suppressed" default.
+            // Resolves the per-frame zoom gate once per slot — no layer list means not gated.
             int slotCount = symbolLayers?.Count ?? 0;
             if (_slotVisibleThisFrame.Length < slotCount)
                 _slotVisibleThisFrame.Resize(slotCount, NativeArrayOptions.UninitializedMemory);
@@ -905,23 +607,7 @@ namespace MapRenderer.Unity.Text.Placement
 
             _gatherTrigger.ResizeUninitialized(_mirrorCount);
 
-            // Pass 1 — Cull: per-symbol trigger verdict → _gatherTrigger, in short-circuit priority
-            // dropped → departing → coverage → ZOOM → horizon → distance. An if-else-if chain that early-outs, so a
-            // departing / coverage-fading / zoom-gated symbol never runs the two expensive rebase-mul culls
-            // (horizon, far-distance) and no guard is re-evaluated. globeRadiusSq < 0 makes the horizon cull a no-op
-            // on a planar projection.
-            //
-            // ZOOM is tested BEFORE horizon/distance on purpose: at overzoom depths the overwhelming majority of
-            // symbols are zoom-gated — symbols riding in the tile for a HIGHER-zoom reveal (e.g. poi_r20, minzoom 17,
-            // present in a z14 tile) — so the cheap array read (IsOutOfLiveZoom) kills ~all of them before the
-            // matrix maths (measured ~57k of ~60k hard-skips at z14/tilt60). Consequence — "zoom wins" attribution:
-            // a symbol that is BOTH out-of-zoom AND beyond-far/behind-horizon now counts as zoom-gated. KEEP/SKIP is
-            // byte-identical either way; only which counter increments moves. Horizon still precedes distance.
-            //
-            // Ported to Burst (CullJob): the chain is identical, only the per-element READ moves under
-            // .Run() (Burst-compiled, inline, no worker hand-off — see SymbolProjectionJob's ProjectSymbols for
-            // the same pattern) so the mirror reads skip the AtomicSafetyHandle overhead the Editor pays per
-            // NativeArray access. SlotCount (not SlotVisible.Length) bounds the zoom-slot read.
+            // Pass 1 — Cull: priority dropped → departing → coverage → zoom → horizon → distance.
             using (PmGatherCull.Auto())
                 new CullJob
                 {
@@ -936,20 +622,10 @@ namespace MapRenderer.Unity.Text.Placement
                     OutTrigger = _gatherTrigger.AsArray(),
                 }.Run(_mirrorCount);
 
-            // Pass 2 — Compact: consume the verdict in symbol order (so _stagePointOffset / _symbolPoints match the
-            // old single-loop form byte-for-byte) via the Burst CompactJob. A triggered symbol whose fade is
-            // still alive KEEPS staging (its FadeIds recorded into _forceFadeOut; the emit loop eases it to 0 — no
-            // pop); a triggered fade-DEAD symbol is hard-skipped (offset -1) and tallied into its trigger's counter
-            // (_gatherCulledCounts, enum-indexed — see the job's Execute for why that is equivalent to the old switch); a
-            // kept (None) symbol is appended. A Dropped symbol is hard-skipped with no counter (never on screen).
-            // The running offset is load-bearing (symbol r's destination depends on every kept symbol before it),
-            // so the job is IJob (not IJobParallelFor) — same inline .Run() pattern as CullJob above.
+            // Pass 2 — Compact: a fade-alive triggered symbol keeps staging via _forceFadeOut. The running offset makes this IJob, not parallel.
             using (PmGatherCompact.Auto())
             {
-                // _gatherCulledCounts is persistent buffer (allocated once, like _gatherTrigger) — a job cannot
-                // write the managed Last*CulledCount properties, so this native array is the bridge, added back
-                // after .Run(). Zero it each call: the job does Counts[(int)t]++, so a stale array would
-                // accumulate across ticks (a missing reset surfaces as a doubling in the multi-tick gather teeth).
+                // _gatherCulledCounts is persistent scratch, the bridge since a job can't write managed properties; zeroed each call.
                 for (int i = 0; i < _gatherCulledCounts.Length; i++) _gatherCulledCounts[i] = 0;
                 new CompactJob
                 {
@@ -975,8 +651,7 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // Project the gathered _symbolPoints to screen/depth/valid via the Burst SymbolProjectionJob, run inline
-        // with .Run() — no managed serial fallback (see the .Run() comment below for why).
+        // Projects the gathered _symbolPoints to screen/depth/valid via the Burst SymbolProjectionJob, run inline.
         private void ProjectSymbols(double3 sceneOriginRender, in float4x4 viewProj, double2 viewportLogicalPx, in float3x3 rebase)
         {
             int total = _symbolPoints.Length;
@@ -985,10 +660,7 @@ namespace MapRenderer.Unity.Text.Placement
             _symbolValid.Resize(total,  NativeArrayOptions.UninitializedMemory);
             if (total == 0) return;
 
-            // .Run() Burst-compiles and executes the parallel-for inline on the calling thread: no Schedule/Complete
-            // round-trip, no worker hand-off, no count threshold — and no managed serial fallback that would run
-            // outside Burst. The caller blocks here regardless (staging reads the output immediately below), so an
-            // inline .Run() is strictly cheaper than Schedule().Complete() for this synchronous consume.
+            // .Run() executes inline — the caller blocks here regardless, since staging reads the output immediately.
             new SymbolProjectionJob
             {
                 Points            = _symbolPoints.AsArray(),
@@ -1002,19 +674,13 @@ namespace MapRenderer.Unity.Text.Placement
             }.Run(total);
         }
 
-        // R3: complete the collision scheduled at the END of the previous Tick and RE-KEY its survivors by FadeId
-        // into _placedLastFrame. The job sorted _stageCandidates in place, so last frame's per-position survivor flags are
-        // meaningless against this frame's candidates — FadeId is the only cross-frame identity (it must be unique per
-        // live candidate: SymbolCandidate.FadeId's contract, asserted in ScheduleCollision).
-        //
-        // The filter reproduces the pre-R3 emit expression exactly, on the frame the collision belonged to:
-        // _forceFadeOut still holds THAT frame's content here, because GatherSymbolPoints clears it later this Tick.
+        // Completes last tick's collision, re-keying survivors by FadeId into _placedLastFrame. This filter
+        // must match the emit loop's exact expression from that frame.
         private void HarvestCollision()
         {
             if (_collisionHandle is not { } scheduled)
             {
-                // No collision was in flight ⇒ last Tick produced no verdict (no candidates / no atlas / no symbols)
-                // ⇒ no incumbents and nothing to show — the same state the pre-R3 !didBuild clear produced.
+                // No collision in flight means last Tick produced no verdict — same state as an empty-build clear.
                 _placedLastFrame.Clear();
                 _droppedHalvesLastFrame.Clear();
                 LastSurvivorCount = 0;
@@ -1033,22 +699,14 @@ namespace MapRenderer.Unity.Text.Placement
                 long fadeId = candidate.FadeId;
                 if (_forceFadeOut.Contains(fadeId)) continue;
                 _placedLastFrame.Add(fadeId);
-                // Stage C: a survivor that placed WITHOUT one of its optional halves symbols which — read by
-                // next Tick's staging, which seeds it back onto the re-staged candidate for the emit gate.
-                // Non-zero only for an icon-optional/text-optional pair, so this stays untaken everywhere else.
+                // A survivor missing an optional half is labeled here, read back by next Tick's staging for the emit gate.
                 if (candidate.DroppedBoxMask != 0) _droppedHalvesLastFrame[fadeId] = candidate.DroppedBoxMask;
             }
             LastSurvivorCount = _survivorCountOut[0];
         }
 
-        // B-4a: run the greedy collision as the Burst CollisionJob directly over the stage job's native output
-        // pools (no managed round-trip — the stage job already wrote them native). PRE-SIZES the uniform grid on the
-        // main thread (a Burst job cannot grow a NativeArray, and this sizing pass stays on frame N — R4, not this
-        // stage), then SCHEDULES the job and returns without completing it. R3 (design §10.3): the Complete moves to
-        // the START of the next Tick (HarvestCollision above), so the main thread never blocks on the single-threaded
-        // greedy — it runs in the inter-frame gap instead. _stageCandidates is left sorted in placement order by the
-        // job and _nSurvivors holds the per-sorted-position survivor flags; both are read by the NEXT Tick's harvest,
-        // not this one — see _pendingCandidateCount's field comment for why the count must be pinned here.
+        // Runs collision as a Burst job over the stage output, scheduled but not completed here — Complete moves
+        // to next Tick's harvest, so the main thread never blocks. Outputs are read by that next Tick, not this one.
         private void ScheduleCollision(int candidateCount, int boxCount)
         {
             if (candidateCount <= 0) return; // nothing pending ⇒ next Tick's harvest reads "no verdict"
@@ -1057,21 +715,12 @@ namespace MapRenderer.Unity.Text.Placement
             NativeArray<SymbolCandidate> nc = _stageCandidates.AsArray(); // stage job's candidates — sorted IN PLACE here
             NativeArray<SymbolBox>       nb = _stageBoxes.AsArray();       // stage job's boxes (read-only; grid over [0,boxCount))
 
-            // DEBUG (compiled out in release): the staged candidate stream must tile [0,boxCount) contiguously —
-            // the invariant NodeUpperBoundByCandidates and the job's per-reference insert rely on. A violation is
-            // the never-reproduced malformed-stream source behind the dense-scene node-pool overflow; catch it
-            // loudly here with the offending candidate, rather than as a silent grid corruption downstream.
+            // Debug-only: catches a malformed staged stream here, with the offending candidate.
             AssertCandidateRangesTile(nc, candidateCount, boxCount);
-            // R3: FadeId is now the DISPLAY key (HarvestCollision re-keys by it), so two live candidates sharing one
-            // would both show when one wins — see SymbolCandidate.FadeId's uniqueness contract and this assert's doc.
+            // FadeId is now the display key (HarvestCollision re-keys by it) — see SymbolCandidate.FadeId's uniqueness contract.
             AssertFadeIdsUnique(nc, candidateCount);
 
-            // Pre-size the uniform grid: CellHead = W*H (filled -1); the node arrays bound the job's inserts.
-            // The bound is counted PER CANDIDATE box-reference (NodeUpperBoundByCandidates), NOT per unique box, so
-            // it mirrors the job's insert loop exactly and can't under-count regardless of the stream's shape (it
-            // equals the per-unique bound when the ranges tile disjointly — the normal case the assert above checks
-            // — and strictly exceeds it if a box were ever shared). Adopted after a dense-scene overflow whose exact
-            // trigger was never reproduced; the assert catches a malformed stream if one ever occurs.
+            // Pre-sizes the uniform grid; the node bound is counted per candidate box-reference so it can't under-count.
             CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(nb, boxCount);
             int cells   = dims.W * dims.H;
             int nodeCap = math.max(1, CollisionGridSizing.NodeUpperBoundByCandidates(nc, candidateCount, nb, boxCount, in dims));
@@ -1090,36 +739,20 @@ namespace MapRenderer.Unity.Text.Placement
                 GridMinX       = dims.MinX, GridMinY = dims.MinY, GridInvCell = dims.InvCell,
                 GridW          = dims.W, GridH = dims.H,
             }.Schedule();
-            // Without this the job may not be handed to a worker until the next sync point, which would defeat the
-            // entire point of deferring — the wait would just move to wherever the next implicit sync lands.
+            // Without this the job may not reach a worker until the next sync point, defeating the point of deferring.
             JobHandle.ScheduleBatchedJobs();
 
             _pendingCandidateCount = candidateCount;
         }
 
-        // Debug-only (UNITY_ASSERTIONS ⇒ Editor + development builds; compiled out of release). R3 promotes FadeId
-        // from a fade/sort key to the DISPLAY key — the emit loop shows a candidate iff its FadeId is in last frame's
-        // survivor set — so SymbolCandidate.FadeId's "unique per live candidate" contract is now load-bearing for what
-        // the user sees, not just for the opacity symbol. Two candidates sharing an id would both show when one wins.
-        // Scope limit: this checks duplicates among the candidates of ONE frame; it cannot see sequential reuse of an
-        // id across frames (that is a designed behaviour — a stable FadeId across frames is what lets a symbol keep
-        // its opacity symbol instead of popping — so no cross-frame check is offered; see SymbolDeferredCollisionTests
-        // / the R3 design doc for the one known sequential-reuse fixture hazard this does NOT catch).
-        //
-        // Reuses the persistent _debugFadeIdSeen field rather than constructing a fresh NativeHashSet per call: a
-        // per-call Allocator.Temp container's AtomicSafetyHandle/DisposeSentinel bookkeeping under
-        // ENABLE_UNITY_COLLECTIONS_CHECKS (on in the Editor, where UNITY_ASSERTIONS is also on) allocates managed
-        // memory occasionally — SymbolPlacementAllocTests caught exactly this as a periodic steady-state GC alloc
-        // once a NativeHashSet<long>(Allocator.Temp) was constructed here every Tick. Instance method (not static)
-        // so it can reach the field; not itself a production cost (the whole body is compiled out of release).
+        // Debug-only. FadeId is the display key, so SymbolCandidate.FadeId's per-frame uniqueness is load-bearing
+        // for what the user sees — two candidates sharing an id would both show when one wins. This checks only
+        // one frame's candidates; it can't see sequential reuse across frames (see SymbolDeferredCollisionTests
+        // for the known hazard this doesn't catch).
         [System.Diagnostics.Conditional("UNITY_ASSERTIONS")]
         private void AssertFadeIdsUnique(NativeArray<SymbolCandidate> candidates, int candidateCount)
         {
-            // Lazy allocation (see the field's doc): a release build never reaches this line ([Conditional]
-            // strips the call site), so _debugFadeIdSeen stays a default (uncreated) struct there — zero
-            // allocation. 64 (not PlacedSetInitialCapacity's 16384) — Clear() keeps whatever capacity the set
-            // grows to, so it warms itself after one real-scene frame; growth is a native realloc, which cannot
-            // reintroduce the managed GC alloc the persistent-reuse pattern was adopted to fix.
+            // 64, not PlacedSetInitialCapacity's 16384: Clear() keeps grown capacity, so this warms itself after one frame.
             if (!_debugFadeIdSeen.IsCreated) _debugFadeIdSeen = new NativeHashSet<long>(64, Allocator.Persistent);
             _debugFadeIdSeen.Clear();
             for (int i = 0; i < candidateCount; i++)
@@ -1137,13 +770,7 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // Debug-only (UNITY_ASSERTIONS ⇒ Editor + Development builds; compiled out of release, so it costs a live
-        // build NOTHING — no field, no allocation, reads only what ScheduleCollision already holds). Asserts the staged
-        // candidate stream is well-formed: box ranges tiling [0,boxCount) contiguously in staging order
-        // (SymbolCandidate.TryFindRangeTilingViolation's contract). A fire is the never-reproduced overlap/over-range
-        // source behind the dense-scene collision overflow — release still never crashes (the sizing + Insert guard
-        // hold), but here it surfaces LOUDLY with the exact offending candidate to capture instead of a silent
-        // slightly-permissive placement.
+        // Debug-only. Asserts the staged stream tiles [0,boxCount) contiguously, reported with the offending candidate.
         [System.Diagnostics.Conditional("UNITY_ASSERTIONS")]
         private static void AssertCandidateRangesTile(NativeArray<SymbolCandidate> candidates, int candidateCount, int boxCount)
         {
@@ -1167,10 +794,7 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // §10 D10: debug-only (compiled out of release, costs a live build nothing — no field, no allocation).
-        // Walks the mirror's compacted POINT pool: every Owner must be immediately followed by its Rider
-        // (Points[d+1]) and every Rider immediately preceded by its Owner — StageJob.Execute's own
-        // adjacency check (SAME shape), surfaced here loudly instead of silently degrading to a lone badge.
+        // Debug-only. Every mirror Owner must be immediately followed by its Rider, and every Rider by its Owner.
         [System.Diagnostics.Conditional("UNITY_ASSERTIONS")]
         private void AssertPairAdjacency()
         {
@@ -1199,9 +823,7 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // The symbol's text-color, sRGB→linear + folded text-opacity — the vertex color the shader emits
-        // directly (mirrors StyledFill/LineTileBuilder's Color.linear; without it a dark #333 uploads as
-        // linear ~0.2 and displays washed-out). Alpha is not gamma-encoded — carried straight.
+        // sRGB→linear + folded opacity, the vertex color the shader emits directly; alpha isn't gamma-encoded.
         internal static float4 LinearColor(in SymbolPaint paint)
         {
             float4 srgb   = paint.TextColor;
@@ -1213,34 +835,15 @@ namespace MapRenderer.Unity.Text.Placement
         internal static int ClampSlot(int slot, int slotCount) => (slot < 0 || slot >= slotCount) ? 0 : slot;
 
 
-        // Stage-2 (symbol-symbol native gather) — fill the native mirror directly from the per-frame winner
-        // SymbolGatherPlan (the PRODUCTION path), compacting each winner's pre-baked block slice into the mirror
-        // pools at running offsets and REMAPPING every Detail/*Start by the running pool offset. This replaced a
-        // managed SoA build + mirror double-copy: the camera-independent per-symbol SoA is already baked
-        // per tile (Stage 1), so per frame we only memcpy the winning slices into one contiguous buffer.
-        //
-        // Record order == plan order == the collected list Build would walk (D1: EVERY collected winner, Drops
-        // included — the tile-coverage cull is a per-symbol MASK applied downstream, not a compaction here), and
-        // each block slice == what Build would compute for that symbol (Stage-1 drift-guard), so the mirror is byte-identical to
-        // Build over the same list (the parity teeth). departing/coverageFading are the per-frame overrides, applied
-        // here from the plan (fenced OUT of the immutable block).
-        //
-        // R1 (memoized gather): everything below the entry early-out is a pure function of the WINNER SET
-        // (plan.BlockId/LocalIndex/Blocks/WinnerCount), which changes only on a front-swap — see
-        // SymbolSubsystem's _frontSetVersion. On a same-source-and-version frame every heavy pool below is
-        // already correct, so only the three per-frame masks are rewritten (WritePerFrameMasks).
+        // Fills the native mirror from the per-frame winner plan; record order matches plan order, so the mirror is byte-identical to Build.
         internal void GatherIntoMirror(SymbolGatherPlan plan)
         {
-            // Same SOURCE and same SET version ⇒ every pool below is already correct (the set is the only thing they
-            // depend on). The count term is the release-build backstop: if a future front-mutation site ever lands
-            // without a version bump, fall through and rebuild rather than memcpy a mismatched length (a checked
-            // throw in the Editor, a raw memmove out of bounds in a player).
+            // Same source and version means every pool below is already correct; the count check is a release-build backstop.
             bool sameSourceAndVersion = plan != null && ReferenceEquals(plan, _mirrorPlan)
                                          && plan.WinnerSetVersion == _mirrorVersion;
             if (sameSourceAndVersion)
             {
-                AssertMemoPlanMatchesMirror(plan);        // debug-only — fires iff the key says "same set" but the
-                                                           // count disagrees, i.e. exactly when the backstop below engages
+                AssertMemoPlanMatchesMirror(plan); // debug-only — fires when the key says same-set but the count disagrees
                 if (plan.WinnerCount == _mirrorCount)
                 {
                     WritePerFrameMasks(plan);             // the ONLY per-frame work on a held mirror
@@ -1251,16 +854,13 @@ namespace MapRenderer.Unity.Text.Placement
             MirrorRebuildCount++;
             int winners = plan?.WinnerCount ?? 0;
 
-            // The three per-frame masks are WritePerFrameMasks' inputs, never read by SymbolGatherJob — resized
-            // here on the main thread exactly as the old inline resize did (:1075-1076 pre-Burst-gather).
+            // The three per-frame masks are WritePerFrameMasks' inputs, resized here on the main thread.
             _mirrorSymbolDeparting.ResizeUninitialized(winners); _mirrorSymbolCoverageFading.ResizeUninitialized(winners);
             _mirrorSymbolDropped.ResizeUninitialized(winners);
 
             if (winners == 0)
             {
-                // Degenerate case: the old two loops fell through to zero naturally over `for (int r = 0; r < 0; …)`.
-                // An explicit branch keeps that behaviour without dispatching a job over an empty view table or
-                // dereferencing a null plan.Blocks/plan.BlockCount.
+                // Explicit branch avoids dispatching a job over an empty view table or a null plan.Blocks/BlockCount.
                 _mirrorKinds.ResizeUninitialized(0); _mirrorDetail.ResizeUninitialized(0);
                 _mirrorWorldCount.ResizeUninitialized(0); _mirrorWorldStart.ResizeUninitialized(0);
                 _mirrorRepAnchor.ResizeUninitialized(0);
@@ -1281,8 +881,7 @@ namespace MapRenderer.Unity.Text.Placement
             {
                 BuildBlockViews(plan); // main-thread, alloc-free (see its own doc) — the per-frame view table
 
-                // Line-for-line Burst transliteration of the two managed loops this replaces — see
-                // SymbolGatherJob's own doc for the byte-identity argument and the job-shape precedent.
+                // Line-for-line Burst transliteration of the two managed loops this replaces — see SymbolGatherJob's own doc.
                 new SymbolGatherJob
                 {
                     BlockViews = _gatherBlockViews.AsArray(),
@@ -1312,37 +911,21 @@ namespace MapRenderer.Unity.Text.Placement
                 _mirrorMaxQuads = _gatherCounts[SymbolGatherJob.CountMaxQuads];
                 _mirrorMaxCandidates = _gatherCounts[SymbolGatherJob.CountMaxCandidates];
 
-                // §10 D10: debug-only sanity check on the REBUILD path (never the memo hit above — a held
-                // mirror's adjacency was already checked the frame it was built). By the time a symbol reaches
-                // here its PairRole is no longer a proposal — SymbolTileBlockBaker/SymbolReconciler
-                // both already resolved it via SymbolPairing — so a stamped Owner/Rider SHOULD always have its
-                // partner immediately adjacent; a miss here means something between bake and gather broke the
-                // adjacency contract (SymbolGatherJob compacts point symbols in WINNER order — the property
-                // this checks).
+                // Debug-only, rebuild path only — a miss here means something between bake and gather broke adjacency.
                 AssertPairAdjacency();
             }
 
-            _mirrorCount = winners; // set BEFORE WritePerFrameMasks — it bounds its copies on THIS frame's count, not
-                                // the previous one (calling it before would write a partial/over-long mask range)
+            _mirrorCount = winners; // set before WritePerFrameMasks, which bounds copies on this frame's count
 
-            // R1: the per-frame masks (Departing/CoverageFading/Dropped) + _mirrorNonDroppedCount are the ONLY per-frame
-            // inputs — one writer shared by the heavy path and the memo-hit early-out above, so mask byte-identity
-            // between the two is structural, not tested-for.
+            // The per-frame masks + _mirrorNonDroppedCount are the only per-frame inputs, written by one shared writer.
             WritePerFrameMasks(plan);
 
-            // Stamp the shared source key — a later Tick with the SAME plan+version memo-hits above; a demo
-            // Tick(batch) or a different plan mismatches on identity and falls through to its own rebuild.
+            // Stamps the shared source key so a later same-plan-and-version Tick memo-hits above; anything else rebuilds.
             _mirrorPlan = plan; _mirrorVersion = plan?.WinnerSetVersion ?? long.MinValue;
         }
 
-        // Burst-gather Stage 1 (design doc §2.4): rebuild the reusable view table from plan.Blocks[0,
-        // plan.BlockCount) — one BlockView per block, each field a non-owning UnsafeList<T> pointer view
-        // over that block's OWN Allocator.Persistent array. NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr performs
-        // an AtomicSafetyHandle.CheckRead per call — a disposed block throws HERE, on the main thread, with a
-        // real stack, rather than the job silently reading freed memory (§2.3's decisive argument for this
-        // storage shape). Managed-allocation-free: indexing plan.Blocks (a plain array) and taking pointers off
-        // already-live NativeArrays allocates nothing (SymbolTileBlockBaker.Bake always allocates all 20
-        // arrays, even at length 0, so no IsCreated guard is needed here). Called from GatherIntoMirror, above.
+        // Rebuilds the reusable view table from plan.Blocks — non-owning pointer views over each block's own array.
+        // GetUnsafeReadOnlyPtr checks safety per call, so a disposed block throws here, not silently in the job.
         private unsafe void BuildBlockViews(SymbolGatherPlan plan)
         {
             _gatherBlockViews.ResizeUninitialized(plan.BlockCount);
@@ -1378,28 +961,18 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // R1: the ONLY per-frame inputs to the mirror — the three per-symbol byte masks (SymbolTileCoverageFilter's
-        // Keep/Fade/Drop classification + the store's departing flag) and the _mirrorNonDroppedCount they derive.
-        // Everything else the gather writes is a pure function of the winner SET, so a same-version frame runs only
-        // this. Source and destination are already native and already the same length (SymbolGatherPlan's
-        // NativeList<byte>s are WinnerCount long; the mirror masks were sized to `symbols` by the rebuild that
-        // filled them), so this is a straight memcpy per mask — it never resizes, reallocates, or walks a symbol.
-        // This is what makes the plan.WinnerCount == _mirrorCount term in GatherIntoMirror's memo predicate non-optional
-        // (see that predicate's comment for why a length mismatch here would be unsafe).
+        // The only per-frame inputs to the mirror — everything else the gather writes is a pure function of
+        // the winner set. A length mismatch here is unsafe, which is why GatherIntoMirror's count check is non-optional.
         private void WritePerFrameMasks(SymbolGatherPlan plan)
         {
             if (plan == null || _mirrorCount == 0) { _mirrorNonDroppedCount = 0; return; } // clean no-op (incl. the null-plan heavy path)
             NativeArray<byte>.Copy(plan.Departing.AsArray(), 0, _mirrorSymbolDeparting.AsArray(), 0, _mirrorCount);
             NativeArray<byte>.Copy(plan.CoverageFading.AsArray(), 0, _mirrorSymbolCoverageFading.AsArray(), 0, _mirrorCount);
             NativeArray<byte>.Copy(plan.Dropped.AsArray(), 0, _mirrorSymbolDropped.AsArray(), 0, _mirrorCount);
-            _mirrorNonDroppedCount = _mirrorCount - plan.DroppedCount; // Blocker 1: TickCore gates on THIS
+            _mirrorNonDroppedCount = _mirrorCount - plan.DroppedCount; // TickCore gates on this, not _mirrorCount
         }
 
-        // Debug-only (fires loudly in the Editor / development builds — where the RED-verify and gate run — and
-        // costs a release player nothing): the memo key said "same set" (source + version match) but the symbol
-        // count disagrees. That should never happen (every front-content change bumps the version), so a fire
-        // means a future front-mutation site landed without bumping WinnerSetVersion — exactly the scenario the
-        // GatherIntoMirror predicate's count term exists to survive (see its comment).
+        // Debug-only. A fire means the memo key said "same set" but the count disagrees — a future site landed without bumping WinnerSetVersion.
         [System.Diagnostics.Conditional("UNITY_ASSERTIONS")]
         private void AssertMemoPlanMatchesMirror(SymbolGatherPlan plan)
         {
@@ -1423,19 +996,15 @@ namespace MapRenderer.Unity.Text.Placement
             for (int i = 0; i < count; i++) dst[i] = (byte)(src[i] ? 1 : 0);
         }
 
-        // D1: zero-fill a symbol-level byte mask that has no per-symbol source to copy from.
+        // Zero-fill a symbol-level byte mask that has no per-symbol source to copy from.
         private static void ClearBytes(NativeList<byte> dst, int count)
         {
             dst.ResizeUninitialized(count);
             for (int i = 0; i < count; i++) dst[i] = 0;
         }
 
-        /// <summary>Stage-2 parity-test seam (reached via <c>InternalsVisibleTo</c>): materialize the private
-        /// native mirror — as last filled by <see cref="GatherIntoMirror"/> —
-        /// into <paramref name="dest"/>'s managed SoA, so a test can assert the gather is field-by-field identical
-        /// to an independent block-reading oracle (<c>SymbolGatherParityTests</c>) over the same winners (tooth #3). No
-        /// production caller: the private native mirror is otherwise unreachable, so this is the sanctioned
-        /// broaden-to-internal accessor.</summary>
+        /// <summary>Test seam (via <c>InternalsVisibleTo</c>): materializes the private native mirror into
+        /// <paramref name="dest"/>'s managed SoA, so a test can assert gather matches an independent oracle.</summary>
         internal void CopyMirrorInto(SymbolBatch dest)
         {
             dest.Kinds = new SymbolPlacementKind[_mirrorCount];
@@ -1485,10 +1054,7 @@ namespace MapRenderer.Unity.Text.Placement
             return a;
         }
 
-        // Pre-size the job's output pools to the mirror worst case (Burst cannot grow) + the arc-walk buffer to at
-        // least the longest path (the total gathered-point count is a safe upper bound for any single path).
-        // R2: also sizes _stageAnchorWasPlaced — the A-5 anchor-incumbency resolve moved into StageJob itself
-        // (Burst), so this method only sizes the buffer the job fills; it no longer resolves any fade id.
+        // Pre-sizes the job's output pools to the mirror's worst case, since Burst can't grow them.
         private void PreSizeStageOutputs()
         {
             _stageBoxes.ResizeUninitialized(math.max(1, _mirrorMaxBoxes));
@@ -1498,9 +1064,7 @@ namespace MapRenderer.Unity.Text.Placement
             int buffer = math.max(1, _symbolPoints.Length);
             _stagePath.ResizeUninitialized(buffer);
             _stageCumulativeLength.ResizeUninitialized(buffer);
-            // No math.max(1, …) floor here, unlike the resizes above: a zero-length _mirrorFadeCount is fine — the
-            // job's fill loop and the curved arm's fade-id slice are both empty in that case, so there's no OOB
-            // to guard against.
+            // No math.max(1, …) floor here: a zero-length _mirrorFadeCount is fine, since the fill loop and fade-id slice are both empty then.
             _stageAnchorWasPlaced.ResizeUninitialized(_mirrorFadeCount);
         }
 
@@ -1518,39 +1082,27 @@ namespace MapRenderer.Unity.Text.Placement
                 Quads = _mirrorQuads.AsArray(), Glyphs = _mirrorGlyphs.AsArray(), Anchors = _mirrorAnchors.AsArray(), AnchorFadeIds = _mirrorFadeIds.AsArray(),
                 PointOffset = _stagePointOffset.AsArray(),
                 Screen = _symbolScreen.AsArray(), Depth = _symbolDepth.AsArray(), Valid = _symbolValid.AsArray(),
-                // Stage AC (curved-world): the SAME gathered world polyline Screen was projected FROM
-                // (_symbolPoints persists across the synchronous .Run() call below — see its own field doc).
-                WorldPointsRender = _symbolPoints.AsArray(), WorldUpsRender = _symbolUps.AsArray(),
+                WorldPointsRender = _symbolPoints.AsArray(), WorldUpsRender = _symbolUps.AsArray(), // the same polyline Screen was projected from
                 AnchorWasPlaced = _stageAnchorWasPlaced.AsArray(), Placed = _placedLastFrame.AsReadOnly(),
                 DroppedHalves = _droppedHalvesLastFrame.AsReadOnly(),
                 Bearing = bearingRadians, Viewport = viewportLogicalPx,
-                MetresPerLogicalPixel = metresPerLogicalPixel, // W1: per-frame ruler, patched per curved symbol
-                View = view,                                  // W3: per-frame view transform (curved arm only)
+                MetresPerLogicalPixel = metresPerLogicalPixel, // per-frame ruler, patched per curved symbol
+                View = view,                                  // per-frame view transform (curved arm only)
                 PathPoints = _stagePath.AsArray(), CumulativeLengths = _stageCumulativeLength.AsArray(),
                 Boxes = _stageBoxes.AsArray(), StagedQuads = _stageQuads.AsArray(),
                 Candidates = _stageCandidates.AsArray(), Emit = _stageEmit.AsArray(), OutCounts = _stageCounts,
             }.Run();
         }
 
-        // ── A-4 fade helpers ──────────────────────────────────────────────────────────────────────────────
-        // Move this identity's opacity one deltaTime step toward `target` (1 = placed, 0 = suppressed/gone). A
-        // never-seen id starts at 0, so it fades IN. deltaTime == +inf (the Tick default) makes step == +inf, so
-        // it SNAPS straight to the target — a single-Tick test then renders fully-placed symbols (byte-parity).
+        // ── Fade helpers ──
+        // Moves this identity's opacity one deltaTime step toward target; deltaTime == +inf snaps straight to it.
         private float EaseFade(long fadeId, float target, float deltaTime)
         {
             bool had = _fadeOpacity.TryGetValue(fadeId, out float current); // absent ≡ 0 (`current` defaults to 0)
             float step = deltaTime / FadeDurationSeconds;
             float next = target > current ? math.min(current + step, target) : math.max(current - step, target);
 
-            // Storing an invisible identity would leak it permanently: DecayUnseenFadeSymbols only drops keys NOT
-            // seen this frame, and a staged candidate is always seen — so every candidate that never places (most
-            // of them, in a dense view) would park a 0 that nothing collects. Drop instead. This is the same floor
-            // rule DecayUnseenFadeSymbols already applies to its own decay; it just never reached the hot path.
-            // Both readers outside this loop (CompactJob's fade-alive probe) test `TryGetValue && > epsilon`,
-            // under which an ABSENT entry and ANY sub-epsilon stored value read alike — covering every value this
-            // branch can discard, not just exact zeros — so dropping is behaviour-preserving there.
-            // `target <= current` confines the drop to a fade-OUT (or an already-invisible identity): without it, a
-            // fade-IN whose first step landed below epsilon would be dropped and restart from 0 every frame.
+            // Dropping here only fires on a fade-out — without that guard, a fade-in below epsilon would restart from 0 every frame.
             if (next <= FadeEpsilon && target <= current)
             {
                 if (had) _fadeOpacity.Remove(fadeId);
@@ -1562,16 +1114,12 @@ namespace MapRenderer.Unity.Text.Placement
             return next;
         }
 
-        // Symbols whose symbol was NOT staged this frame (its tile left cover / it projected off-screen / it was
-        // removed) decay toward 0 and are DROPPED once invisible — keeping the map bounded (never an
-        // ever-growing dict). No-cache scope: an absent symbol is not re-drawn (v1); this only controls whether a
-        // reappearing id resumes from a decayed value or fades in fresh.
+        // Symbols not staged this frame decay toward 0 and are dropped once invisible, keeping the map bounded.
         private void DecayUnseenFadeSymbols(float deltaTime)
         {
             float step = deltaTime / FadeDurationSeconds;
             _fadeSweepKeys.Clear();
-            // NativeHashMap has no .Keys collection; enumerate its key/value pairs (read-only — removals are
-            // deferred into _fadeSweepKeys below, so we never mutate the map mid-enumeration).
+            // NativeHashMap has no .Keys collection; enumeration here is read-only, with removals deferred into _fadeSweepKeys.
             foreach (var kv in _fadeOpacity)
                 if (!_seenFade.Contains(kv.Key)) _fadeSweepKeys.Add(kv.Key);
             for (int i = 0; i < _fadeSweepKeys.Length; i++)
@@ -1583,19 +1131,14 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // Mark each just-staged candidate SymbolCandidate.Suppressed BEFORE collision when its owning layer is OUT OF
-        // the live camera zoom's minzoom/maxzoom (MapLibre layer visibility). A suppressed candidate is treated as
-        // absent — never placed, never a blocker — while it still eases to 0 (fading out) in the emit loop. Evaluated
-        // per-frame against the LIVE zoom — NOT the tile build zoom — so overzoomed tiles reveal/hide layers as the
-        // camera crosses a layer boundary. Cheap main-thread pass; Slot comes from the emit symbol.
+        // Marks each candidate Suppressed before collision when its layer is out of the live camera zoom.
         private void ApplySuppression(int candidateCount, IReadOnlyList<SymbolRenderLayer> symbolLayers, double zoom)
         {
             if (symbolLayers == null || symbolLayers.Count == 0) return; // no layer list → no per-layer zoom ranges
             for (int s = 0; s < candidateCount; s++)
             {
                 SymbolCandidate c = _stageCandidates[s];
-                // §10 D8: EmitStart, not SymbolIndex — a pair's icon and text share one layer/slot, so either
-                // half's emit symbol answers this; EmitStart is always valid (EmitCount >= 1).
+                // EmitStart, not SymbolIndex — a pair's icon/text share one layer/slot, so either half's label answers this.
                 int slot = _stageEmit[c.EmitStart].Slot;
                 bool suppress = slot >= 0 && slot < symbolLayers.Count && symbolLayers[slot]?.StyleLayer != null
                     && !symbolLayers[slot].StyleLayer.IsVisibleAtZoom(zoom);
@@ -1603,16 +1146,10 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        /// <summary>A-4 POINT fade identity: the A-3 cross-tile key on the shared canonical grid
-        /// (<see cref="CrossTileSymbolKey.CanonicalGridMeters"/>), hashed to a long. Stage 3b: this quantizes to
-        /// the SAME fixed grid the store dedup does, so a point symbol's fade cell and its dedup cell are literally
-        /// one canonical identity — the fade partition equals the dedup partition. Fixed (zoom-independent) grid ⇒
-        /// a frame-STABLE id (a per-frame display-zoom grid would re-key every symbol as the camera zooms); reusing
-        /// <see cref="CrossTileSymbolKey"/> lets the same symbol from a swapped tile keep its opacity symbol (the
-        /// seamless no-op). <c>internal</c> so an EditMode test can pin the stable-across-zoom + within-grid-collapse
-        /// behaviour and the fade↔dedup agreement directly.</summary>
-        /// <param name="iconImage">I6: the icon's resolved sprite name (null for text, <see cref="ShapedSymbol.IconImage"/>)
-        /// — folded into the fade id via a guard-skip (see <see cref="Hash64"/>) so a text symbol's id is unchanged.</param>
+        /// <summary>Point fade identity — hashed from the cross-tile key on the shared canonical grid, the same
+        /// grid the store dedup uses, so a symbol's fade cell and dedup cell are one identity. Fixed and
+        /// zoom-independent, so the same symbol from a swapped tile keeps a stable id and doesn't pop.</summary>
+        /// <param name="iconImage">The icon's resolved sprite name; folded in via a guard-skip so a text symbol's id is unchanged.</param>
         internal static long PointFadeId(in double3 anchorRender, int layerId, string text, string iconImage = null)
             => Hash64(CrossTileSymbolKey.For(anchorRender, layerId, text, iconImage, CrossTileSymbolKey.CanonicalGridMeters));
 
@@ -1623,40 +1160,20 @@ namespace MapRenderer.Unity.Text.Placement
                 ulong h = 1469598103934665603UL; // FNV-1a 64
                 h = (h ^ (ulong)k.GridX) * 1099511628211UL;
                 h = (h ^ (ulong)k.GridZ) * 1099511628211UL;
-                // Stage 3b: fold GridY too, so the fade tuple == the dedup tuple (GridX,GridZ,GridY, layer, text,
-                // icon) — parity with CrossTileSymbolKey.Equals, which already compares GridY. NOTE this is NOT a
-                // raw no-op even when GridY == 0: (h ^ 0) * prime still multiplies the accumulator, so every
-                // point symbol's RAW fade id shifts. It is still snapshot-safe because the fade id is only ever an
-                // equality/PARTITION key (_fadeOpacity/_placedLastFrame/_seenFade lookups) and multiply-by-the-odd-
-                // FNV-prime is a bijection on ulong ⇒ which symbols share an id is unchanged; the one magnitude-
-                // ordered use (SymbolCollision.ComparePlacementOrder's FadeId tiebreak) is unreachable for points
-                // (distinct point candidates already differ on FeatureIndex/TileKey). On Mercator render.y ≡ 0 ⇒
-                // GridY = 0 (partition unchanged); on the globe GridY separates two equator-mirrored anchors that
-                // share X/Z but differ in Y.
+                // Folding GridY is not a no-op even at 0 — (h ^ 0) * prime still shifts every id. This stays
+                // snapshot-safe since the fade id is only an equality key, and multiply-by-the-odd-prime is a bijection.
                 h = (h ^ (ulong)k.GridY) * 1099511628211UL;
                 h = (h ^ (ulong)(uint)k.LayerId) * 1099511628211UL;
                 h = (h ^ (ulong)(uint)(k.Text?.GetHashCode() ?? 0)) * 1099511628211UL;
-                // I6 guard-skip fold: only mix IconImage when non-null, so a text symbol's fade id (IconImage
-                // always null) hashes IDENTICALLY to before this field existed — same #1 invariant as
-                // CrossTileSymbolKey.GetHashCode (an unconditional `?? 0` fold would still perturb every text id).
+                // Guard-skip fold: mixes IconImage only when non-null, so a text symbol's fade id is unchanged from before this field existed.
                 if (k.IconImage != null)
                     h = (h ^ (ulong)(uint)k.IconImage.GetHashCode()) * 1099511628211UL;
                 return (long)h;
             }
         }
 
-        /// <summary>
-        /// Manual column-by-column conversion (not an assumed <c>(float4x4)</c> cast operator — the same
-        /// "don't rely on possibly-absent implicit numeric conversions" caution <c>FloatingOrigin</c>
-        /// documents for <c>double3</c>→<c>float3</c>). Column-major, matching
-        /// <see cref="SymbolScreenProjection"/>'s <c>math.mul(float4x4, float4)</c> convention.
-        /// <c>internal</c> so <c>SymbolScreenProjectionUnityTests</c> reuses the SAME conversion instead of
-        /// duplicating it (the test-code-bloat convention's allowed footprint: broaden private → internal).
-        /// </summary>
-        /// <summary>The camera's view-projection matrix (projection × world-to-camera) as a
-        /// <see cref="float4x4"/> — the single definition shared by symbol placement (<see cref="Tick"/>) and the
-        /// coverage pre-cull (<c>SymbolSubsystem.CurrentBatch</c>), read live off the committed camera so
-        /// both see the same frame's matrices. Column-major (<see cref="ToFloat4x4"/> convention).</summary>
+        /// <summary>The camera's view-projection matrix — the single definition shared by <see cref="Tick"/>
+        /// and the coverage pre-cull, so both see the same frame. Column-major, matching <c>SymbolScreenProjection</c>'s convention.</summary>
         internal static float4x4 ViewProj(Camera camera)
             => math.mul(ToFloat4x4(camera.projectionMatrix), ToFloat4x4(camera.worldToCameraMatrix));
 
@@ -1673,20 +1190,15 @@ namespace MapRenderer.Unity.Text.Placement
                 new float4(c3.x, c3.y, c3.z, c3.w));
         }
 
-        /// <summary>Destroys the world renderer + materials (main-thread only — play → <c>Destroy</c>,
-        /// edit → <c>DestroyImmediate</c>, mirroring <c>GlyphAtlasTexture</c>/<c>MaterialFactory</c>) and
-        /// disposes the native buffer buffers. Idempotent.</summary>
+        /// <summary>Destroys the world renderer, materials, and native scratch buffers (main-thread only). Idempotent.</summary>
         protected override void DoDispose()
         {
-            // R3: a scheduled-but-never-completed collision holds _stageCandidates/_stageBoxes/_nSurvivors/_survivorCountOut
-            // and the grid lists — disposing them under a live job is a use-after-free (a safety-system throw in the
-            // Editor). This is the only teardown path (VerifiedDisposable guarantees DoDispose runs at most once).
+            // A scheduled-but-never-completed collision holds several native buffers — disposing under a live
+            // job is a use-after-free. This is the only teardown path (DoDispose runs at most once).
             if (_collisionHandle is { } scheduled) { scheduled.Complete(); _collisionHandle = null; }
 
-            // R1: _mirrorPlan otherwise retains a strong reference to the plan indefinitely (unlike the old
-            // per-tick _lastBatch reset) — SymbolSubsystem.Dispose disposes _gatherPlan while this system may
-            // still point at it, and a later gather with that plan would memo-hit and memcpy from disposed
-            // NativeLists. Not reachable through MapView teardown today; free to close.
+            // _mirrorPlan otherwise retains the plan indefinitely — SymbolSubsystem.Dispose may dispose it while
+            // this system still points at it, so a later gather would memo-hit and memcpy from disposed NativeLists.
             _mirrorPlan = null; _mirrorVersion = long.MinValue;
 
             WorldRenderer.Dispose();
@@ -1697,20 +1209,20 @@ namespace MapRenderer.Unity.Text.Placement
             _worldIconMaterial.DestroySafely();
             _worldIconMaterial = null;
 
-            _symbolPoints.Dispose(); // B-2 projection buffer
+            _symbolPoints.Dispose(); // projection buffer
             _symbolUps.Dispose();
             _symbolScreen.Dispose();
             _symbolDepth.Dispose();
             _symbolValid.Dispose();
 
-            _nSurvivors.Dispose(); // B-4a collision survivor flags
+            _nSurvivors.Dispose(); // collision survivor flags
             _gridCellHead.Dispose();
             _gridNodeBox.Dispose();
             _gridNodeNext.Dispose();
             _survivorCountOut.Dispose();
 
             _gatherBlockViews.Dispose(); _gatherCounts.Dispose();                    // Burst-gather Stage 1 buffers
-            _mirrorKinds.Dispose(); _mirrorDetail.Dispose(); _mirrorWorldCount.Dispose();          // Lever C step 3b native buffers
+            _mirrorKinds.Dispose(); _mirrorDetail.Dispose(); _mirrorWorldCount.Dispose();          // Burst stage job's native buffers
             _mirrorPointQuadStart.Dispose(); _mirrorPointQuadCount.Dispose();
             _mirrorCurvedGlyphStart.Dispose(); _mirrorCurvedGlyphCount.Dispose();
             _mirrorCurvedAnchorStart.Dispose(); _mirrorCurvedAnchorCount.Dispose(); _mirrorCurvedAnchorFadeStart.Dispose();
@@ -1721,14 +1233,13 @@ namespace MapRenderer.Unity.Text.Placement
             _stagePointOffset.Dispose(); _stageAnchorWasPlaced.Dispose();
             _stageBoxes.Dispose(); _stageQuads.Dispose(); _stageCandidates.Dispose(); _stageEmit.Dispose();
             _stageCounts.Dispose(); _stagePath.Dispose(); _stageCumulativeLength.Dispose();
-            _placedLastFrame.Dispose(); // R2: native set, ctor-allocated alongside the other persistent containers
-            _droppedHalvesLastFrame.Dispose(); // Stage C: same lifetime as _placedLastFrame
+            _placedLastFrame.Dispose(); // native set, ctor-allocated alongside the other persistent containers
+            _droppedHalvesLastFrame.Dispose(); // Same lifetime as _placedLastFrame
             _fadeOpacity.Dispose(); _seenFade.Dispose(); _forceFadeOut.Dispose(); _fadeSweepKeys.Dispose(); // fade collections, same lifetime
             _gatherTrigger.Dispose(); // gather Cull→Compact per-symbol verdict buffer
             _slotVisibleThisFrame.Dispose(); // per-slot zoom-visibility lookup, CullJob input
             _gatherCulledCounts.Dispose(); // per-trigger culled tally, CompactJob output bridge
-            // R3: AssertFadeIdsUnique's persistent buffer set (see its field doc) — lazily allocated, so it may
-            // be a default (never-created) value here; Dispose() already no-ops on that, so no IsCreated guard.
+            // AssertFadeIdsUnique's scratch set may be a default (never-created) value here; Dispose() no-ops on that.
             _debugFadeIdSeen.Dispose();
         }
     }
