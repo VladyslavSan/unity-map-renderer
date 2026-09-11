@@ -437,6 +437,8 @@ namespace MapRenderer.Tests.Tiles
             }
             finally
             {
+                // Open the gates BEFORE teardown: DoDispose parks 10 s on each still-pending fetch.
+                gated.ReleaseAll();
                 view.Teardown();
                 Object.DestroyImmediate(go);
             }
@@ -540,6 +542,8 @@ namespace MapRenderer.Tests.Tiles
             }
             finally
             {
+                // Open the gates BEFORE teardown: DoDispose parks 10 s on each still-pending fetch.
+                gated.ReleaseAll();
                 view.Teardown();
                 Object.DestroyImmediate(go);
             }
@@ -583,6 +587,8 @@ namespace MapRenderer.Tests.Tiles
             }
             finally
             {
+                // Open the gates BEFORE teardown: DoDispose parks 10 s on each still-pending fetch.
+                gated.ReleaseAll();
                 view.Teardown();
                 Object.DestroyImmediate(go);
             }
