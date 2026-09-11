@@ -10,7 +10,7 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// Symbol-symbol perf Phase 1 / Stage 2 (design §5 B): the per-frame WINNER PLAN a native gather consumes —
+    /// Symbol-label perf Phase 1 / Stage 2 (design §5 B): the per-frame WINNER PLAN a native gather consumes —
     /// what <see cref="Text.SymbolSubsystem.CurrentBatch"/> produces instead of a fully-built
     /// <see cref="SymbolBatch"/>. One entry per collected winner, in final render order: a
     /// <see cref="BlockId"/>/<see cref="LocalIndex"/> pointing at the winner's pre-baked

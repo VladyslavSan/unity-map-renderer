@@ -21,7 +21,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// S20 T5: symbols are the per-frame path, never the static tile path.
     /// (a) STRUCTURAL — a grep guard: nothing under the symbol-placement source tree calls
     ///     <c>ITileRenderBackend.AddTileLayer</c>.
-    /// (b) BEHAVIORAL — the billboard buffer is rebuilt from buffer every <see cref="SymbolPlacementSystem.Tick"/>,
+    /// (b) BEHAVIORAL — the billboard buffer is rebuilt from scratch every <see cref="SymbolPlacementSystem.Tick"/>,
     ///     not cached/accumulated across calls.
     /// </summary>
     [TestFixture]
@@ -191,7 +191,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(2, system.TickCount);
                 Assert.AreEqual(2, system.LastQuadCount, "2 labels x 1 quad each = 2 placed quads.");
 
-                // Rebuilt from buffer, not accumulated: ticking with FEWER symbols must report FEWER quads,
+                // Rebuilt from scratch, not accumulated: ticking with FEWER symbols must report FEWER quads,
                 // not the sum of every Tick so far (which would prove a cache/append bug).
                 system.TickSymbols(in frame, oneSymbol, atlasTexture, mapCamera.Projection);
                 system.TickSymbols(in frame, oneSymbol, atlasTexture, mapCamera.Projection);

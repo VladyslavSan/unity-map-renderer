@@ -41,7 +41,7 @@ namespace MapRenderer.Unity.Text.Placement
         // omits pool counts by design: the gather indexes only by a winner's LocalIndex/Detail/*Start). A
         // count that can disagree with Length is a bug waiting to happen; Length cannot disagree with itself.
 
-        // ── per-symbol symbols, RAW list order (dense — one slot per source symbol) ──
+        // ── per-symbol columns, RAW list order (dense — one slot per source symbol) ──
         // Length == the symbols list length.
         internal NativeArray<SymbolPlacementKind> Kinds;
         internal NativeArray<int>     Detail;      // index into Points[] or Curveds[] (by Kinds[i])

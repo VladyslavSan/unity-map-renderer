@@ -10,7 +10,7 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// Symbol-symbol perf Phase 1 / Stage 1 (design doc §4, §5 B): bakes one tile's build-time
+    /// Symbol-label perf Phase 1 / Stage 1 (design doc §4, §5 B): bakes one tile's build-time
     /// <see cref="SymbolTileBuffer"/> into a fresh native <see cref="SymbolTileBlock"/>. The per-symbol
     /// field math lives in the <see cref="BuildPointInput"/>/<see cref="BuildCurvedInput"/> helpers, shared by
     /// this bake and by the baker's golden test — the test states its expected per-symbol values by calling the

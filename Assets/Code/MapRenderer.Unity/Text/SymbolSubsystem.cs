@@ -150,7 +150,7 @@ namespace MapRenderer.Unity.Text
         // Whether the prepared mesh cache is enabled — drives keep-warm-on-release: enabled ⇒ a released tile
         // can return via a cache HIT, so keep its symbols warm; disabled ⇒ a revisit re-fetches, so drop them.
         private readonly bool _cacheEnabled;
-        // Reused buffer for the per-frame reconcile — loaded keys filtered to sources with symbol layers. Never
+        // Reused scratch for the per-frame reconcile — loaded keys filtered to sources with symbol layers. Never
         // reallocated in steady state.
         private readonly List<SymbolTileStore.Key> _reconcileKeys = new();
         private int _lastUploadedGlyphCount;

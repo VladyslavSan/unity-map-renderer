@@ -114,7 +114,7 @@ namespace MapRenderer.Tests.Text.Placement
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
 
             // Step 5a: the plan is built ONCE, outside every measured region — TestSymbolPlan.Build
-            // allocates managed buffer, and the thing under measurement is Tick, not plan construction.
+            // allocates managed scratch, and the thing under measurement is Tick, not plan construction.
             // This is the faithful translation of what the pre-native-gather batch path did: the SoA build
             // also ran once and the mirror refresh then skipped on the unchanged version, so repeated
             // ticks measured the same memo-hit steady state they measure here.
@@ -208,7 +208,7 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
 
             // Step 5a: the plan is built ONCE, outside every measured region — TestSymbolPlan.Build
-            // allocates managed buffer, and the thing under measurement is Tick, not plan construction.
+            // allocates managed scratch, and the thing under measurement is Tick, not plan construction.
             // This is the faithful translation of what the pre-native-gather batch path did: the SoA build
             // also ran once and the mirror refresh then skipped on the unchanged version, so repeated
             // ticks measured the same memo-hit steady state they measure here.
@@ -292,7 +292,7 @@ namespace MapRenderer.Tests.Text.Placement
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
 
             // Step 5a: the plan is built ONCE, outside every measured region — TestSymbolPlan.Build
-            // allocates managed buffer, and the thing under measurement is Tick, not plan construction.
+            // allocates managed scratch, and the thing under measurement is Tick, not plan construction.
             // This is the faithful translation of what the pre-native-gather batch path did: the SoA build
             // also ran once and the mirror refresh then skipped on the unchanged version, so repeated
             // ticks measured the same memo-hit steady state they measure here.

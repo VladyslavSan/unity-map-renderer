@@ -9,7 +9,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
-    /// Burst-gather Stage 1 (docs/symbol-symbol-perf-design.md §10.9): a LINE-FOR-LINE Burst transliteration of
+    /// Burst-gather Stage 1 (docs/symbol-label-perf-design.md §10.9): a LINE-FOR-LINE Burst transliteration of
     /// <c>SymbolPlacementSystem.GatherIntoMirror</c>'s two managed loops (<c>SymbolPlacementSystem.cs:1050-1157</c>)
     /// — compact every winner's pre-baked <see cref="BlockView"/> slice into one contiguous set of native
     /// mirror pools, remapping every <c>Detail</c>/<c>*Start</c> field by the running pool offset. Run

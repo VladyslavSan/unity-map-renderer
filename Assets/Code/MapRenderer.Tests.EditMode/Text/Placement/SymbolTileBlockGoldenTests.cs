@@ -25,7 +25,7 @@ using Symbol = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Symbol-symbol perf Phase 1 / Stage 1 (design §4, §5 B; <c>step4.4-plan.md</c> §4.4a): the
+    /// Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B; <c>step4.4-plan.md</c> §4.4a): the
     /// block-byte-identity golden — pins <see cref="SymbolTileBlockBaker.Bake"/>'s output shape so a
     /// later refactor of the bake path (4.4b sheds the resident graph, 4.4c retypes <c>Shape</c> onto
     /// reused buffer) cannot silently change what gets baked, only how it gets there.

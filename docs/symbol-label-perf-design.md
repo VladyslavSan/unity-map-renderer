@@ -31,7 +31,7 @@ PlayerLoop                              16.61 ms
 / tilt tiles). Camera **moving** → the visible set churns and grows, and the whole visible set is
 re-converted from managed carriers every frame — 95% of the frame in a full rebuild.
 
-There is also a **second, un-profiled copy of the same data**: after `Build`, `LabelPlacementSystem`
+There is also a **second, un-profiled copy of the same data**: after `Build`, `SymbolPlacementSystem`
 mirrors the managed SoA into the Burst-job NativeLists (`RefreshBatchMirror`, keyed on `BuildId`) every
 frame. So the per-frame label data is materialised **twice**.
 
@@ -45,7 +45,7 @@ Almost everything `BatchBuild` produces is **fixed the moment a tile's labels ar
   stable; the quantize only ever merges a parent+child pair, which exists only during a zoom transition.
 
 The genuinely **camera-dependent** work — anchor projection, global collision, billboarding — is the *cheap*
-part, already Burst and downstream in `LabelPlacementSystem.Tick`. So the 15.76 ms is spent recomputing a
+part, already Burst and downstream in `SymbolPlacementSystem.Tick`. So the 15.76 ms is spent recomputing a
 byte-identical result on every pan frame. **The fix is to stop redoing the camera-independent per-label
 conversion per frame — bake it once, at tile build.**
 
@@ -588,7 +588,7 @@ that its expected values are unchanged.** A disarmed test reads identically to a
 
 ### 10.9 R (LANDED) — the gather itself as a synchronous Burst job (Stage 1 of 2)
 
-`LabelPlacementSystem.GatherIntoMirror`'s two managed loops (compact each winner's pre-baked
+`SymbolPlacementSystem.GatherIntoMirror`'s two managed loops (compact each winner's pre-baked
 `SymbolTileLabelBlock` slice into the native mirror, remapping every `Detail`/`*Start` field by a running pool
 offset) are now one `[BurstCompile(CompileSynchronously = true)] IJob` (`SymbolGatherJob`,
 `Assets/Code/MapRenderer.Jobs/SymbolGatherJob.cs`), run **synchronously** (`.Run()`) in the exact same place the
@@ -598,7 +598,7 @@ testable**, which the async version is not by construction.
 
 **Storage decision (a′) — a per-frame view table, block storage untouched.** `SymbolTileLabelBlock` keeps its
 19 `NativeArray<T>` fields exactly as they are. Immediately before the job runs, `BuildBlockViews`
-(`LabelPlacementSystem.cs`) builds a reusable `NativeList<BlockView>` — one entry per
+(`SymbolPlacementSystem.cs`) builds a reusable `NativeList<BlockView>` — one entry per
 `plan.Blocks[0, plan.BlockCount)` — where `BlockView` (`Assets/Code/MapRenderer.Jobs/BlockView.cs`)
 holds 19 typed **non-owning `UnsafeList<T>` views**, each built via
 `new UnsafeList<T>((T*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(array), array.Length)`. Two options were
@@ -824,7 +824,7 @@ candidate count instead of the visible-label count. The whole sweep then walked 
 few hundred live ones. The floor rule that fixes it already existed just below, inside `DecayUnseenFadeRecords`
 itself; it had simply never reached the hot path.
 
-**The fix**, in `LabelPlacementSystem.EaseFade`:
+**The fix**, in `SymbolPlacementSystem.EaseFade`:
 - Drop rather than store when `next <= FadeEpsilon`. Both readers outside the loop (`MarkFadeOutIfAlive`,
   `TryForceFadeOut`) test `TryGetValue && > FadeEpsilon`, where absent and stored-zero are indistinguishable —
   so this is behaviour-preserving, not a semantic change.

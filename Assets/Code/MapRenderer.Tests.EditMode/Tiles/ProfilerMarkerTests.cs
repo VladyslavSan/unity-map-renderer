@@ -127,7 +127,7 @@ namespace MapRenderer.Tests.Tiles
                 MapView.ProfilerMarkerNames.SceneFrame,
                 MapView.ProfilerMarkerNames.SymbolCollect,
                 MapView.ProfilerMarkerNames.SymbolBatch,
-                // Symbol-symbol markers below read their names from each type's nested ProfilerMarkerNames const
+                // Symbol-label markers below read their names from each type's nested ProfilerMarkerNames const
                 // (SSOT), reached via InternalsVisibleTo — renaming a marker is a one-line edit at its source.
                 SymbolSubsystem.ProfilerMarkerNames.SymbolExtract,
                 SymbolSubsystem.ProfilerMarkerNames.AtlasUpload,

@@ -3,7 +3,7 @@
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// MapLibre <c>text-transform</c>: a case transform applied to the resolved symbol string BEFORE shaping.
+    /// MapLibre <c>text-transform</c>: a case transform applied to the resolved label string BEFORE shaping.
     /// <see cref="None"/> (the style-spec default) is the zero value so a stray <c>default(TextTransform)</c>
     /// degrades to "leave the text as-is".
     /// </summary>

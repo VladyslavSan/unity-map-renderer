@@ -585,7 +585,7 @@ namespace MapRenderer.Tests.Text
             store.Clear();
         }
 
-        // ═══ Symbol-symbol perf Phase 1 / Stage 1 (design §4, §5 B): Block dispose lifecycle ═══
+        // ═══ Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B): Block dispose lifecycle ═══
         //
         // SymbolTileStore.Entry.Block is held as plain System.IDisposable (pure dispose-once lifetime
         // bookkeeping — see SymbolTileStore's Entry doc); a fake counter stands in for the real

@@ -19,7 +19,7 @@ using Is = UnityEngine.TestTools.Constraints.Is; // Is.Not.AllocatingGCMemory() 
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Symbol-symbol perf Phase 1 / Stage 2 (design §5 B) — THE ORDER-PARITY TOOTH (#3). The production per-frame
+    /// Symbol-label perf Phase 1 / Stage 2 (design §5 B) — THE ORDER-PARITY TOOTH (#3). The production per-frame
     /// path replaced a managed SoA build with a NATIVE GATHER (<see cref="SymbolPlacementSystem.GatherIntoMirror"/>)
     /// that compacts each winner's pre-baked <see cref="SymbolTileBlock"/> slice into the placement job's
     /// native mirror. This test proves the gather is BYTE-IDENTICAL to an INDEPENDENT restatement over the SAME
@@ -332,7 +332,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             public void Dispose()
             {
-                Lps.Dispose();                                    // frees the cloned material + native buffer
+                Lps.Dispose();                                    // frees the cloned material + native scratch
                 UnityEngine.Object.DestroyImmediate(_camGo);      // destroy the Camera FIRST so the RT is no longer
                 UnityEngine.Object.DestroyImmediate(_rt);         // its targetTexture (else Unity logs an Error → test fail)
                 UnityEngine.Object.DestroyImmediate(_baseMaterial); // the base clone source (Lps.Dispose never sees it)

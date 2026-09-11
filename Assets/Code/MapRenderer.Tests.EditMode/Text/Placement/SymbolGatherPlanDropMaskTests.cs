@@ -18,7 +18,7 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// D1-#2 (symbol-symbol native bake, Phase 2): the tile-coverage cull's Drop decision is now a per-record
+    /// D1-#2 (symbol-label native bake, Phase 2): the tile-coverage cull's Drop decision is now a per-record
     /// MASK (<see cref="SymbolGatherPlan.Dropped"/>, stamped onto the native mirror as <c>_mirrorSymbolDropped</c>)
     /// instead of a physical compaction — a Dropped winner stays RESIDENT in the plan/mirror and is hard-skipped
     /// by <c>SymbolPlacementSystem.GatherSymbolPoints</c>'s FIRST, unconditional check. This is the falsifiable

@@ -163,7 +163,7 @@ namespace MapRenderer.Unity.Rendering.Map
             SymbolPlacementSystem = new SymbolPlacementSystem(Camera,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolTextWorld : null,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolIconWorld : null);
-            // S105: the decoupled symbol-symbol subsystem produces the real map symbols SymbolPlacementSystem.Tick renders.
+            // S105: the decoupled symbol subsystem produces the real map symbols SymbolPlacementSystem.Tick renders.
             // D11/E2: per-layer materials (SymbolTextWorld clone + text-halo-* bind) now live on each
             // SymbolRenderLayer (Layers.Build), not here. A5b: DATA arrives via TileManager's per-tile KICK
             // (SymbolSubsystem implements ISymbolTileWorkerFactory); the tile LIFECYCLE is PULLED — each frame we
@@ -174,7 +174,7 @@ namespace MapRenderer.Unity.Rendering.Map
             TileManager.SymbolWorkerFactory = SymbolSubsystem;
         }
 
-        // S105: production symbol symbols (real map data), fed to SymbolPlacementSystem.Tick each frame.
+        // S105: production symbols (real map data), fed to SymbolPlacementSystem.Tick each frame.
         internal readonly SymbolSubsystem SymbolSubsystem;
 
         // D10: reused scratch for SetStyle's symbol-layer derivation (below) — a restyle never allocates a
@@ -526,7 +526,7 @@ namespace MapRenderer.Unity.Rendering.Map
                     SymbolSubsystem.PumpBuilds();
                 }
 
-                // Stage-2 (symbol-symbol native gather): the per-frame WINNER PLAN — collect (+ cross-tile dedup) +
+                // Stage-2 (symbol-label native gather): the per-frame WINNER PLAN — collect (+ cross-tile dedup) +
                 // the pre-build tile-coverage cull, recording each winner's (blockId, localIndex) against the
                 // per-tile baked block, rebuilt every frame (allocation-free). Hoisted out of the SymbolPlacementSystem.Tick
                 // argument so its managed dedup/collect cost is MARKED (Symbol.BatchBuild), not folded into the

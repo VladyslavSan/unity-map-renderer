@@ -142,7 +142,7 @@ Parse: `Style/Line/{PaintProperties,LayoutProperties,LineDash}.cs`. Consume: `St
 Layer **not implemented** — no `Style/Circle/`, no shader, no render slot. `circle-radius/-color/-blur/-opacity/-translate(-anchor)/-stroke-*/-pitch-scale/-pitch-alignment/-sort-key` — **all ❌**.
 
 ### symbol — text
-Parse: `Style/Symbol/{Layout,Paint}Properties.cs`. Consume: `SymbolFeatureExtractor` → `StyledSymbolTileBuilder` → `TextQuadLayout` → `LabelPlacementSystem` → `SymbolText` shader.
+Parse: `Style/Symbol/{Layout,Paint}Properties.cs`. Consume: `SymbolFeatureExtractor` → `StyledSymbolTileBuilder` → `TextQuadLayout` → `SymbolPlacementSystem` → `SymbolText` shader.
 
 | Property | Status | Notes |
 |---|:---:|---|

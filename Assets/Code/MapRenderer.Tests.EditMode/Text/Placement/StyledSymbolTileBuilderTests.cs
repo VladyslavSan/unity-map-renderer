@@ -392,7 +392,7 @@ namespace MapRenderer.Tests.Text.Placement
                 "scale 1 — IconQuadLayout already baked icon-size in (matches the point-icon branch)");
             // 4.4c: AppendPath/AppendAnchors COPY into the buffer's own pools (never hold the caller's array
             // reference), so "carried, not rebuilt" is now a VALUE check — still proves the values are copied
-            // verbatim, not recomputed from buffer by some other path.
+            // verbatim, not recomputed from scratch by some other path.
             CollectionAssert.AreEqual(pathRender, output.Path.GetRange(built.PathStart, built.PathCount),
                 "the projected path is carried, not rebuilt");
             CollectionAssert.AreEqual(anchors, output.Anchors.GetRange(built.AnchorStart, built.AnchorCount),

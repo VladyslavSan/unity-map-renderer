@@ -652,7 +652,7 @@ entities through three systems, and D5 patched only the first, one-directionally
 |---|---|---|
 | Collision (`LabelCollision.ComparePlacementOrder` + the greedy) | two candidates, ordinals *N* (icon) and *N+1* (text); the text is force-fed `AllowOverlap` + `IgnorePlacement` so it always places | the icon can lose to a higher-priority label while its number still draws — **the bare number** |
 | Cross-tile dedup (`DedupKey` in `SymbolLabelReconciler.Run`) | icon key `(cell, layer, ∅, iconImage)`, text key `(cell, layer, text, ∅)` — two independent finest-zoom scans | the two halves can be selected from **different tiles**, so the number sits metres off its badge |
-| Fade (`LabelPlacementSystem.PointFadeId` → `_fadeOpacity` / `_placedLastFrame`) | one opacity record per half | the halves ease in/out **independently** |
+| Fade (`SymbolPlacementSystem.PointFadeId` → `_fadeOpacity` / `_placedLastFrame`) | one opacity record per half | the halves ease in/out **independently** |
 
 MapLibre treats a symbol's icon and text as ONE instance: `icon-optional` / `text-optional` default false ⇒
 they place or drop together, with a combined box.

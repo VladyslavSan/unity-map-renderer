@@ -16,7 +16,7 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Symbol-symbol perf Phase 1 / Stage 1 (design §4, §5 B): <see cref="SymbolTileBlockBaker.Bake"/>
+    /// Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B): <see cref="SymbolTileBlockBaker.Bake"/>
     /// against a REAL <see cref="SymbolTileBlock"/> — the native-lifetime half of the Stage-1 acceptance
     /// teeth (the dispose-SITE teeth — commit-overwrite / FIFO-evict / true-release / Clear — live
     /// in <c>SymbolTileStoreTests</c> against a fake <see cref="IDisposable"/> counter, since the store

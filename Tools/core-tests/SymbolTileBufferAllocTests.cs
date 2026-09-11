@@ -15,7 +15,7 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Symbol-symbol perf Phase 1 / Stage 1 (design §4, §5 B; <c>step4.4-plan.md</c> §4.4c — banks 3b): a
+    /// Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B; <c>step4.4-plan.md</c> §4.4c — banks 3b): a
     /// <see cref="SymbolTileBuffer"/> reused across builds (<c>SymbolSubsystem</c>'s pool: rent →
     /// <see cref="SymbolTileBuffer.Clear"/> → repopulate) must not measurably grow the managed heap once
     /// its pooled lists' backing capacity has stabilized — the entire point of replacing a fresh per-symbol
@@ -25,7 +25,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// (<c>StyledSymbolTileBuilder.Shape</c>, `:268`) is a genuine, deliberate per-symbol allocation with
     /// no caller-buffer variant — out of scope, and <c>StyledSymbolTileBuilder</c> itself needs
     /// <c>Unity.Collections</c> transitively so it cannot run here anyway. This tooth targets exactly what
-    /// IS reused: the buffer buffer's own <see cref="SymbolTileBuffer.AddSymbol"/> +
+    /// IS reused: the buffer's own <see cref="SymbolTileBuffer.AddSymbol"/> +
     /// <see cref="SymbolTileBuffer.AppendQuads"/> pool-append path, which is the piece Shape's four
     /// emit sites and the baker both drive.</para>
     /// </summary>

@@ -68,7 +68,7 @@ namespace MapRenderer.Core.View
         /// gather, never on a memo hit. A LEVEL, per this type's contract; the panel derives the per-second rate,
         /// which is the number that matters: it says how often the winner set actually changes, and therefore
         /// whether the gather memo can help at all. Approaching the frame rate ⇒ the set churns every frame and
-        /// memoization is structurally dead (see `docs/symbol-symbol-perf-design.md` §10.4).</summary>
+        /// memoization is structurally dead (see `docs/symbol-label-perf-design.md` §10.4).</summary>
         public int MirrorRebuildCount { get; init; }
     }
 }

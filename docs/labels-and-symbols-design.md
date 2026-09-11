@@ -129,10 +129,10 @@ rebuild, `SymbolLabelBatchBuilder`:
 Between the cross-tile dedup and the SoA build, `CurrentBatch` also runs the tile-coverage pre-cull (§1.5) —
 a low-coverage tile's active labels never reach the builder at all.
 
-The batch carries a **`BuildId`** bumped on every rebuild; `LabelPlacementSystem` mirrors it into native buffers
+The batch carries a **`BuildId`** bumped on every rebuild; `SymbolPlacementSystem` mirrors it into native buffers
 only when `BuildId` changes.
 
-## 1.4 The per-frame placement loop — `LabelPlacementSystem.Tick`
+## 1.4 The per-frame placement loop — `SymbolPlacementSystem.Tick`
 
 Everything camera-dependent lives here, over reused buffers (no per-frame GC). Stages:
 
@@ -196,7 +196,7 @@ stabilizes per-frame label cost with barely any lost information. Complements th
 cull (a horizon *radius*): this is a per-**tile** *screen-area* metric, which catches the tilt-foreshortened
 slivers a radius keeps.
 
-**Where it runs.** Originally the cull ran post-build (flagged in `LabelPlacementSystem.Tick`, applied in
+**Where it runs.** Originally the cull ran post-build (flagged in `SymbolPlacementSystem.Tick`, applied in
 gather) to preserve a per-batch version cache that has since been removed (`cb0786c7`) — once that cache was
 gone, nothing justified paying for the SoA build (glyph/quad copies, sRGB→linear, fade-id hashing) on a tile
 whose labels were about to be discarded. The cull now runs in `SymbolLabelSubsystem.CurrentBatch`, **after**
@@ -263,7 +263,7 @@ IsCulled(coverage, minCoverage)  →  minCoverage > 0 && coverage < minCoverage
 is never below a finite threshold, so a near-plane-straddling tile is always kept. Default
 `MapViewConfig.LabelTileCoverageCull = 0.05` (threaded through `MapView.LateUpdate` → `CurrentBatch`) — a
 maintainer eyeball-tunable. Telemetry: `SymbolLabelSubsystem.LastTileCoverageCulledCount` (the Drop count,
-moved from `LabelPlacementSystem`) + `LabelPlacementSystem.LastCoverageFadingCulledCount` (the fully-faded
+moved from `SymbolPlacementSystem`) + `SymbolPlacementSystem.LastCoverageFadingCulledCount` (the fully-faded
 coverage-fade count, the gather-side companion).
 
 **Behaviour vs the old post-build cull:** the *rendered set* is unchanged (a tile below threshold is hidden
@@ -278,7 +278,7 @@ tilt-scaling the threshold; explicit hysteresis *on the threshold itself* (disti
 culling ahead of the A-3 dedup (would change dedup winners — see above). Telemetry is surfaced through
 `SymbolStoreTelemetrySnapshot.CoverageDroppedLabels` / `LabelPlacementTelemetrySnapshot.CoverageFadingLabels` → the `MapTelemetryPanel` (beside the
 distance cull), so the threshold is tunable by watching the live drop/fade counts. `viewProj` and the logical
-viewport are single shared definitions (`LabelPlacementSystem.ViewProj(Camera)` + `MapCamera.ViewportLogicalPx`)
+viewport are single shared definitions (`SymbolPlacementSystem.ViewProj(Camera)` + `MapCamera.ViewportLogicalPx`)
 read by both `CurrentBatch` and `Tick`.
 
 ## 1.6 Retain-as-departing — fading a tile out when it leaves cover
@@ -317,7 +317,7 @@ not done.
 
 # 2. Smoothness & robustness
 
-The placement layer was originally **stateless**: `LabelPlacementSystem.Tick` cleared everything and rebuilt
+The placement layer was originally **stateless**: `SymbolPlacementSystem.Tick` cleared everything and rebuilt
 projection → collision → billboard quads from scratch every frame, with labels aggregated per `(source, tile)`
 and no cross-frame or cross-tile memory. That produced four user-visible problems:
 
@@ -448,11 +448,11 @@ default 45) drops a label whose adjacent-glyph tangent change exceeds it. Line-p
 **Inherently screen-space (load-bearing).** `symbol-spacing` and the tangent are pixels/screen-space. A
 build-time fixed anchor count would make spacing drift with zoom (a bug, not an approximation), and a build-time
 render-space tangent is only correct at bearing-0/no-tilt. So placement — project the line, walk it in pixels,
-place+rotate each glyph — happens **per frame** in `LabelPlacementSystem`, exactly like point-label projection.
+place+rotate each glyph — happens **per frame** in `SymbolPlacementSystem`, exactly like point-label projection.
 Build time only extracts the line geometry and shapes the text.
 
 ```
-BUILD (Core, per tile, once)                    PER FRAME (LabelPlacementSystem, screen-space)
+BUILD (Core, per tile, once)                    PER FRAME (SymbolPlacementSystem, screen-space)
 ─────────────────────────                       ────────────────────────────────────────────
 extract LineString feature                      project the render-space path → screen polyline
   → carry the render-space PATH on the label      (per-vertex TryProjectAnchor; drop if any behind camera)
@@ -509,7 +509,7 @@ different anchors/rotations instead of N sharing one. New work is two pure Core 
   >    that work — it was one arbitrary choice among many that the linearity permits. (The retired
   >    `BillboardMath.BuildQuad` this sentence named no longer exists; the two live sites are those above.)
 
-**Placement (`LabelPlacementSystem`, per frame):** `SymbolLabel`/`LabelInstance` carry a `PathRender`
+**Placement (`SymbolPlacementSystem`, per frame):** `SymbolLabel`/`LabelInstance` carry a `PathRender`
 (`double3[]`) for line labels (null for point labels — `AnchorRender` untouched) plus `SymbolPlacement` +
 `SymbolSpacingPx`. Project each path vertex with `TryProjectAnchor` (skip the label if any vertex is behind the
 camera — partial-visibility clipping is a refinement); build a `PolylineArcWalker` over the projected polyline;
@@ -992,7 +992,7 @@ the one setting an eyeball would check first — and 1× is precisely where the 
 | Draw (Unity) | `SymbolRenderLayer` + `SymbolText.shader` (SDF) | **`SymbolIcon.shader`** (RGBA) + a sprite-texture bind |
 
 The build-time half rides the same per-layer tile pipeline (`TileSymbolLayerProcessor`); the per-frame half is
-the same `LabelPlacementSystem.Tick`. Collision is the same global grid — an icon is just another candidate box.
+the same `SymbolPlacementSystem.Tick`. Collision is the same global grid — an icon is just another candidate box.
 
 ## 5.4 The load-bearing decision (I5): how icons ride `SymbolLabelBatch`
 

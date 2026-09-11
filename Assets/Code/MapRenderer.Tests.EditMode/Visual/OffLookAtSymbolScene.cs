@@ -3,7 +3,7 @@
 //
 // Stage P-M — THE OFF-LOOK-AT, MULTI-DEPTH MEASUREMENT FIXTURE.
 //
-// WHAT THIS IS. One rendered scene carrying SIX real buffer at TWO view depths: a curved symbol anchored at
+// WHAT THIS IS. One rendered scene carrying SIX real symbols at TWO view depths: a curved symbol anchored at
 // the look-at (view depth d) and its twin anchored away from it at ~2d, built from the SAME glyph cell, the
 // SAME TextSizePx and the SAME baked em advances; the same pair again along the RECEDING direction; and a
 // point symbol at each of the two anchors. It measures, per symbol, the per-glyph WORLD anchors the CPU
@@ -17,7 +17,7 @@
 //
 // WHAT CHANGED AT W1 — READ THIS BEFORE THE PARAGRAPH BELOW IT. Stage P-M built this fixture on the PRE-FIX
 // tree and deliberately asserted nothing about the far symbol; the fix is stage W1, and it landed HERE. The
-// four curved buffer now carry `PitchAlignment = AlignmentMode.Map`, so `SymbolStagingMath.StageCurved` lays
+// four curved symbols now carry `PitchAlignment = AlignmentMode.Map`, so `SymbolStagingMath.StageCurved` lays
 // them out in WORLD ARC LENGTH, and the far assertions P-M deferred live in
 // `MapPitchedWorldArcLayoutTests` (W1-T1…T5). Two consequences reverse P-M's own framing:
 //   • THE RECEDING ARM IS NOW THE MEASUREMENT ARM, not a soundness arm. Under the world walk the
@@ -89,8 +89,8 @@ namespace MapRenderer.Tests
         Receding,
     }
 
-    /// <summary>The six buffer this fixture stages, each on its OWN tile key (hence its own slot mesh, so no
-    /// two buffer' glyph vertices ever share a buffer).</summary>
+    /// <summary>The six symbols this fixture stages, each on its OWN tile key (hence its own slot mesh, so no
+    /// two symbols' glyph vertices ever share a buffer).</summary>
     internal enum OffLookAtSymbolId
     {
         CrossNear, CrossFar, RecedingNear, RecedingFar, PointNear, PointFar,
@@ -190,7 +190,7 @@ namespace MapRenderer.Tests
         /// projection of the world midpoint — the F4 obstruction, so nothing here was asserted for the
         /// receding arm. Under the world walk the anchor resolves by WORLD arc length, and the receding roads
         /// are built symmetric in metres, so a receding symbol now lands here too. F4 is retired for
-        /// map-pitched buffer.</para></summary>
+        /// map-pitched symbols.</para></summary>
         public readonly double3 AnchorWorldUnity;
 
         public readonly double2 AnchorScreenPx;
@@ -400,9 +400,9 @@ namespace MapRenderer.Tests
         /// row-flipped frame (row 0 = the TOP scanline, same convention as <see cref="InkPixels"/>).
         ///
         /// <para><b>Why the receding arm needs this at all.</b> <see cref="InkPixels"/> is rendered from the
-        /// two CROSS-AZIMUTH buffer only — <see cref="Create"/>'s two-pass note explains that a receding
+        /// two CROSS-AZIMUTH symbols only — <see cref="Create"/>'s two-pass note explains that a receding
         /// symbol crosses the frame vertically by construction, so with everything drawn at once no band can
-        /// say WHICH symbol put ink in it. The two receding buffer additionally run along the same ground
+        /// say WHICH symbol put ink in it. The two receding symbols additionally run along the same ground
         /// direction ĝ from the same origin, so at heading 0 they project into nearly the SAME columns and a
         /// column band cannot separate them either. Rendering one symbol at a time removes the attribution
         /// question entirely rather than managing it.</para>
@@ -507,12 +507,12 @@ namespace MapRenderer.Tests
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// Builds the scene, solves the two anchors, stages all six buffer through the REAL
+        /// Builds the scene, solves the two anchors, stages all six symbols through the REAL
         /// <c>SymbolPlacementSystem.Tick</c>, measures every slot mesh, and renders the ink frame.
         ///
-        /// <para><b>TWO TICK PASSES, ONE SCENE AND ONE CAMERA.</b> Pass 1 ticks all six buffer and takes every
-        /// geometric measurement off the built meshes. Pass 2 re-ticks with ONLY the two cross-azimuth buffer
-        /// and renders — because the receding and point buffer' ink sweeps across both cross-azimuth row
+        /// <para><b>TWO TICK PASSES, ONE SCENE AND ONE CAMERA.</b> Pass 1 ticks all six symbols and takes every
+        /// geometric measurement off the built meshes. Pass 2 re-ticks with ONLY the two cross-azimuth symbols
+        /// and renders — because the receding and point symbols' ink sweeps across both cross-azimuth row
         /// bands (a receding symbol crosses the frame vertically by construction), which would make the ink
         /// arm unable to say WHICH symbol put ink in a band. The two passes share the camera, so their
         /// projections are identical; that the cross-azimuth geometry is unchanged between them is ASSERTED
@@ -602,7 +602,7 @@ namespace MapRenderer.Tests
             // The point arm borrows WorldPointEmitRenderTests' 'A' LAYOUT while the Tick binds the 'F'
             // ATLAS — Tick takes one GlyphAtlasTexture and uses it for exactly one thing, the material's
             // texture (`atlas?.Texture`), never for geometry. The point arm's measurand is its staged
-            // ANCHOR (M12) and the point buffer are excluded from the ink pass, so the mismatched atlas
+            // ANCHOR (M12) and the point symbols are excluded from the ink pass, so the mismatched atlas
             // cannot reach any reading this fixture takes.
             SymbolQuad cell;
             (atlasF, cell) = WorldCurvedAbRenderSnapshotTests.BuildGlyphF();
@@ -624,7 +624,7 @@ namespace MapRenderer.Tests
             for (int g = 0; g < config.GlyphCount; g++)
                 glyphs.Add(new CurvedGlyph { ArcCenter = g * config.AdvanceBakedPx, Cell = cell, CellSkirt = 0f });
 
-            // ── the six buffer ─────────────────────────────────────────────────────────────────────────
+            // ── the six symbols ─────────────────────────────────────────────────────────────────────────
             SceneFrame frame = scene.BuildIdentityRebaseSceneFrame();
             double3 origin = frame.SceneOriginRender;
             TileId baseTile = TestTileKeys.Containing(sceneConfig.LookAt.Surface, zoom: 14);
@@ -743,7 +743,7 @@ namespace MapRenderer.Tests
                         $"{linearHalfLenM:F1} m).");
                 }
 
-                // W1: all four curved buffer are map-pitched, so StageCurved centres them at the WORLD arc
+                // W1: all four curved symbols are map-pitched, so StageCurved centres them at the WORLD arc
                 // midpoint and its `symbolSpanArc > total` / `centerArc ± halfSpan` gates are in METRES. This
                 // mirrors that gate exactly. (Pre-W1 this was the same statement in screen px; the units
                 // moved with the production gate, the assertion did not weaken.) A road too short must fail
@@ -770,7 +770,7 @@ namespace MapRenderer.Tests
                     placement: SymbolPlacement.LineCenter,
                     up: worldUp,
                     // W1: the RESOLVED pitch alignment, and the switch this whole fixture measures. Without
-                    // it these buffer keep taking the pre-W1 screen walk and the stage measures nothing.
+                    // it these symbols keep taking the pre-W1 screen walk and the stage measures nothing.
                     // (A shipped line-symbol layer reaches the same value through
                     // AlignmentResolution.ResolvePitch in SymbolFeatureExtractor; this fixture hand-builds
                     // its buffer records, so it states the resolved value directly.)
@@ -781,7 +781,7 @@ namespace MapRenderer.Tests
                     maxAngleDeg: 180f,
                     keepUpright: false,
                     // P3a's recorded lesson: at coarse zoom the dedup/collision machinery decides who emits
-                    // and a fixture silently loses buffer.
+                    // and a fixture silently loses symbols.
                     allowOverlap: true,
                     featureIndex: (int)id,
                     tileKey: TileKeyFor(baseTile, id));
@@ -881,7 +881,7 @@ namespace MapRenderer.Tests
 
                 // PASS 2 — ink. Only the cross-azimuth pair, so a band's ink can only have come from the
                 // symbol whose anchor defines it (see this method's two-pass note). Symbols 0/1 are
-                // CrossNear/CrossFar — the first two buffer appended above.
+                // CrossNear/CrossFar — the first two symbols appended above.
                 var crossOnly = new SymbolTileBuffer();
                 TestSymbolTileBuffer.CopySymbolInto(crossOnly, buffer, 0);
                 TestSymbolTileBuffer.CopySymbolInto(crossOnly, buffer, 1);
@@ -930,8 +930,8 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Each symbol gets its OWN tile key (the containing z14 tile's X + the symbol ordinal), so the
-        /// six buffer land in six separate slot meshes and no two buffer' glyph vertices ever interleave in
-        /// one buffer. The far buffer additionally carry a genuinely large Level-1 RTC bake — their anchors
+        /// six symbols land in six separate slot meshes and no two symbols' glyph vertices ever interleave in
+        /// one buffer. The far symbols additionally carry a genuinely large Level-1 RTC bake — their anchors
         /// sit ~100 tile widths from their nominal tile origin (the exact
         /// <c>WorldCurvedAbRenderSnapshotTests..._NonzeroAnchorLocal</c> pattern, taken further).</summary>
         private static long TileKeyFor(TileId baseTile, OffLookAtSymbolId id)

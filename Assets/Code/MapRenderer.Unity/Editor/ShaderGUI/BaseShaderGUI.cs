@@ -39,7 +39,7 @@ namespace MapRenderer.Unity.Editor
             MapFeature     = 1 << 4,
         }
 
-        // Smoothness source channel symbols (not a domain enum — a texture-channel selector).
+        // Smoothness source channel labels (not a domain enum — a texture-channel selector).
         static readonly string[] s_SmoothnessSrc = { "Metallic Alpha", "Albedo Alpha" };
 
         protected MaterialEditor     _editor;
@@ -143,7 +143,7 @@ namespace MapRenderer.Unity.Editor
         // ─────────────────────────────────────────────────────────────────────────────────────────
         protected virtual void DrawSurfaceOptions(Material material)
         {
-            // Domain enums (runtime) → symbols generated from the enum value names by EnumPopup.
+            // Domain enums (runtime) → labels generated from the enum value names by EnumPopup.
             EnumPopup<SurfaceType>(ShaderProperties.PropertyNames.Surface, "Surface Type");
             EnumPopup<WorkflowMode>(ShaderProperties.PropertyNames.WorkflowMode, "Workflow Mode");
 
@@ -151,7 +151,7 @@ namespace MapRenderer.Unity.Editor
             // Raw low-level render state (the S58 knobs — what URP's Surface Type/Blend presets hide).
             EnumPopup<DepthWrite>(ShaderProperties.PropertyNames.ZWrite, "Depth Write");
             EnumPopup<CompareFunction>(ShaderProperties.PropertyNames.ZTest, "Depth Test");
-            // Symbol matches the ShaderLab `Cull` directive: the enum names the face that is CULLED
+            // Label matches the ShaderLab `Cull` directive: the enum names the face that is CULLED
             // (Off/Front/Back), NOT the face rendered. "Render Face" would invert it (Cull Front → the
             // BACK face renders), so this popup is labelled by what it literally sets.
             EnumPopup<CullMode>(ShaderProperties.PropertyNames.CullMode, "Cull");
@@ -308,7 +308,7 @@ namespace MapRenderer.Unity.Editor
         }
 
         /// <summary>Texture row with an optional scale/strength field — shown ONLY when the texture is
-        /// assigned (URP's <c>TexturePropertySingleLine(symbol, tex, tex.textureValue != null ? extra : null)</c>
+        /// assigned (URP's <c>TexturePropertySingleLine(label, tex, tex.textureValue != null ? extra : null)</c>
         /// pattern, used for normal / height / occlusion / detail maps).</summary>
         protected void Tex(string texName, string label, string extraName)
         {

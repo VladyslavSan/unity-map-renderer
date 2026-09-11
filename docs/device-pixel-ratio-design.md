@@ -365,7 +365,7 @@ therefore invisible to the whole suite:
   `GroundResolution(zoom)` as metres per **logical** px and are fed an already-÷dpr cursor and viewport by
   `Controller.cs:220,229`. Fold, and anchored pan and zoom-to-cursor drift on a dense panel — the S92
   B-ZOOMPIN / B-PAN invariants, broken.
-* **The label horizon cull radius changes by dpr.** `LabelPlacementSystem.cs:616` pairs
+* **The label horizon cull radius changes by dpr.** `SymbolPlacementSystem.cs` pairs
   `CameraPoseMath.MetersPerPixel(zoom)` with `viewportLogicalPx` in one `CullRadiusMeters` call; under the
   fold the two operands land in different spaces.
 

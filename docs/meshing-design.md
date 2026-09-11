@@ -577,7 +577,7 @@ not the concrete types).
   consume is indifferent to gaps, guarded by `(uint)materialIndex >= _layers.Count`.
 - **Global symbol collision, per-layer symbol draw** (MapLibre semantics). Collision stays ONE cross-layer pass
   (`LabelCollisionJob` over all candidates — a road name and a city name keep competing in one greedy pass); each
-  symbol layer draws its own survivors at its own queue via its per-slot mesh/material. `LabelPlacementSystem`
+  symbol layer draws its own survivors at its own queue via its per-slot mesh/material. `SymbolPlacementSystem`
   partitions survivor quads by `LabelInstance.MaterialIndex` into per-slot meshes; slot `g` IS the g-th declared
   symbol layer. `SymbolRenderLayer`'s icon material gets `QueueFor(DrawIndex, Base)` and its text material
   `QueueFor(DrawIndex, Above)` (G7/D7 — the icon always draws under its own layer's text), so two symbol layers

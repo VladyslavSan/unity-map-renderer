@@ -41,7 +41,7 @@ test** on the anchor before placement.
 - **Current state is better than "no globe support":** anchor world positions come from
   `projection.Project(GeoCoordinate)` (`SymbolLabelBatchBuilder.cs:90`, `SyntheticLabelSource.cs:105,139`) —
   projection-agnostic, with a `"stays globe-correct"` note (`SymbolLabelBatchBuilder.cs:77`). The per-frame
-  projection culls behind-camera anchors (`LabelPlacementSystem.cs:407`), and there is a B-3
+  projection culls behind-camera anchors (`SymbolPlacementSystem.cs`), and there is a B-3
   horizon/distance cull for the tilted-view pile-up. So placement is projection-aware; **the specific gap is
   far-side occlusion.**
 - **Likely fix:** reuse the projection's existing horizon predicate — `IProjection.TryGetHorizonOccluder`

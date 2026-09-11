@@ -15,7 +15,7 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Symbol-symbol perf Phase 1 (block-byte-identity golden, design §5 B): a shared column-by-column
+    /// Symbol-label perf Phase 1 (block-byte-identity golden, design §5 B): a shared column-by-column
     /// digest + equality helper over a baked <see cref="SymbolTileBlock"/> — the single place every
     /// bake-invariant test (the 4.4a golden here; the 4.4b prod-vs-oracle block compare) reads the block's
     /// arrays from, so the two cannot drift into checking different columns.

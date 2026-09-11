@@ -108,7 +108,7 @@ namespace MapRenderer.Jobs.Fill
         /// </summary>
         /// <param name="count">The actual count reported by a job (or computed in the pre-pass).</param>
         /// <param name="capacity">The capacity the buffer was sized to.</param>
-        /// <param name="what">A short symbol naming the quantity, for the exception message.</param>
+        /// <param name="what">A short label naming the quantity, for the exception message.</param>
         public static void EnsureCapacity(int count, int capacity, string what)
         {
             if (count > capacity)

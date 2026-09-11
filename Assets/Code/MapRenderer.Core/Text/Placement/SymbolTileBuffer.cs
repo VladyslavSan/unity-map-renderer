@@ -7,7 +7,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// Symbol-symbol perf Phase 1 / Stage 1 (design §4, §5 B): one build's per-symbol placement input, held as
+    /// Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B): one build's per-symbol placement input, held as
     /// a REUSED buffer instead of a fresh managed carrier list per tile — <see cref="Symbols"/>
     /// (one <see cref="ShapedSymbol"/> per successfully-shaped symbol; the list is dense, since a per-symbol build
     /// failure is skipped rather than recorded)

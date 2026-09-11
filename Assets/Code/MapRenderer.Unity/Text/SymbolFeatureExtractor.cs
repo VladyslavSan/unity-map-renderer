@@ -392,7 +392,7 @@ namespace MapRenderer.Unity.Text
                         // S4: subdivide the tile-local path ONCE so ProjectPath/anchor-resolve and
                         // LineAnchorPlacement.Compute both index against the SAME finer sequence — never
                         // subdivide only one of the two, or LineAnchor.Segment silently desyncs from
-                        // PathRender (docs/symbols-and-symbols-design.md §4). On a flat projection
+                        // PathRender (docs/labels-and-symbols-design.md §4). On a flat projection
                         // (MaxRefineAngleRad == ∞, e.g. Mercator) this bypasses LineCurvatureSubdivision.Subdivide
                         // entirely and passes the ORIGINAL path straight through — the live Mercator
                         // byte-identity guarantee (zero-alloc, unchanged behaviour).
@@ -736,7 +736,7 @@ namespace MapRenderer.Unity.Text
         /// <para><c>KeepUpright</c> is hard-false, not threaded: <c>icon-keep-upright</c>'s spec default is
         /// <c>false</c> (unlike <c>text-keep-upright</c>), and for a one-way arrow that default is the only
         /// correct behaviour — the arrow encodes the road's direction of travel, so flipping it to read
-        /// "upright" would point it the wrong way. See docs/symbols-and-symbols-design.md.</para>
+        /// "upright" would point it the wrong way. See docs/labels-and-symbols-design.md.</para>
         ///
         /// <para>Never paired: a pair is proposed only in <see cref="EmitAtAnchor"/>, on the point path, so
         /// this symbol's <c>PairRole</c> stays <see cref="SymbolPairRole.None"/> structurally — §10's "a curved
