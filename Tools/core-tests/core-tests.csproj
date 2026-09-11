@@ -271,6 +271,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/FilterEquivalenceTests.cs" />
     <!-- Epic A / A6: MvtFeatureAdapter fold-verbatim byte-parity guard (F-5) -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Globe/GlobeTileSelectorTests.cs" />
+    <!-- UMR-125: tilt cover-growth characterisation + the on-screen-size instrument's own proof -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/TiltCoverGrowthTests.cs" />
 
     <!-- S39: MVT property/id decoding tests (shared verbatim) -->
 
