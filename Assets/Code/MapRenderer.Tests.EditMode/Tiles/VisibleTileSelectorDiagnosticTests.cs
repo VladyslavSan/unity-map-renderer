@@ -1,17 +1,21 @@
-// Unity EditMode only — ACCEPTANCE test for the tilt-aware visible-tile selector (it began as the diagnostic
-// that pinned the bug; the two roles are the same test).
+// Unity EditMode only — ACCEPTANCE test for the tilt-aware visible-tile selector's TWO shipped arms: it began
+// as the diagnostic that pinned the tilt-selection bug, and now also pins the screen-space LOD cover
+// MapViewConfig.cs:170 actually ships — checked by a different predicate (below).
 //
-// Reproduces the demo scenario from the bug screenshot (Berlin, zoom 13, swept over tilt × heading) and checks
-// three things, side by side, per case:
-//   (1) the production FrustumTileSelector's cover,
+// Reproduces the demo scenario from the bug screenshot (Berlin, zoom 13, swept over tilt × heading) and checks,
+// per case:
+//   (1) the production FrustumTileSelector's FLAT and LOD covers,
 //   (2) the GROUND TRUTH — a top-down quadtree from tile 0/0/0, subdividing every tile whose ground quad
 //       intersects the REAL Unity camera frustum, down to the target selection zoom, and
 //   (3) the engine-free Core ViewFrustum driving the SAME traversal.
 //
-// Two hard gates: (3) must equal (2) tile-for-tile (proves the engine-free frustum matches the real camera —
-// the linchpin), and (1) must have ZERO MISSING vs (2) at every tilt/heading (proves the selector requests
-// every visible tile — the fix). The pre-fix overhead corner-bbox selector missed ~40 of ~60 tiles at 60°
-// tilt; grep the run for "[TILEDIAG]" to see current/truth/MISSING/EXTRA per case.
+// Hard gates: (3) must equal (2) tile-for-tile (proves the engine-free frustum matches the real camera — the
+// linchpin). The FLAT cover must have ZERO tiles MISSING vs (2) by EXACT set membership — its oracle at :128
+// is single-zoom by construction, so exact membership is only a well-posed question for this arm; it is what
+// pinned the original bug (the pre-fix corner-bbox selector missed ~40 of ~60 tiles at 60° tilt). The LOD
+// cover instead needs every ground-truth tile covered by exactly one ANCESTOR-OR-SELF — a coarse tile
+// legitimately stands in for its children under level-of-detail, so exact membership is the wrong question
+// there. Grep the run for "[TILEDIAG]" to see both covers, truth, and their diffs per case.
 
 using System.Collections.Generic;
 using System.Linq;
@@ -38,7 +42,7 @@ namespace MapRenderer.Tests.Tiles
         [TestCase(60.0, 30.0)]  // tilt + heading
         [TestCase(60.0, 45.0)]
         [TestCase(60.0, 90.0)]
-        public void Diagnose_TiltedView_CurrentSelector_vs_FrustumTraversal(double tiltDeg, double headingDeg)
+        public void Diagnose_TiltedView_FlatAndLodCovers_vs_FrustumTraversal(double tiltDeg, double headingDeg)
         {
             // ── Scenario (matches the bug screenshot) ────────────────────────────────────────────────
             double2 vp   = new double2(1600, 900); // logical framing viewport (DPR=1 for the test)
@@ -53,12 +57,20 @@ namespace MapRenderer.Tests.Tiles
             int offset  = (int)math.round(math.log2(WebMercator.TilePixelSize / onScreenTilePx));
             int targetZ = math.clamp(cam.IntegerZoom + offset, minZoom, maxZoom);
 
-            // ── (1) CURRENT selector ─────────────────────────────────────────────────────────────────
+            // ── (1) CURRENT selectors — flat cover and screen-space LOD cover, same ViewContext ────────
+            var viewContext = new ViewContext { Camera = cam, ViewportPx = vp, Projection = proj };
+
             var selector = new FrustumTileSelector(minZoom: minZoom, maxZoom: maxZoom,
                                                           onScreenTilePx: onScreenTilePx);
             var current = new List<TileId>();
-            selector.SelectVisibleTiles(
-                new ViewContext { Camera = cam, ViewportPx = vp, Projection = proj }, current);
+            selector.SelectVisibleTiles(viewContext, current);
+
+            var lodSelector = new FrustumTileSelector(minZoom: minZoom, maxZoom: maxZoom,
+                                                      onScreenTilePx: onScreenTilePx,
+                                                      lod: new ScreenSpaceLodStrategy(),
+                                                      farPolicy: new GeometryAwareFarPlane());
+            var lodCover = new List<TileId>();
+            lodSelector.SelectVisibleTiles(viewContext, lodCover);
 
             // ── Real Unity camera, posed EXACTLY as MapCamera.SyncToCamera (DPR=1) ──────────────────────
             double altitude = CameraPoseMath.AltitudeForZoom(cam.Zoom, vp.y, fov);
@@ -211,6 +223,25 @@ namespace MapRenderer.Tests.Tiles
                 var missing = exactTruth.Where(t => !cs.Contains(t)).ToList(); // visible but NOT selected → gaps
                 var extra   = current.Where(t => !es.Contains(t)).ToList();    // selected but NOT visible → wasted
 
+                // ── LOD partition check — every ground-truth tile needs exactly one ANCESTOR-OR-SELF in the
+                // LOD cover. z == g.Z (self) counts; the walk goes all the way to z == 0 (the world tile is an
+                // ancestor of everything); a descendant branch is impossible (targetZ caps the cover and
+                // g.Z == targetZ, so no cover tile is below g).
+                var lodSet     = new HashSet<TileId>(lodCover);
+                var holes      = new List<TileId>();
+                var overlapped = new List<TileId>();
+                foreach (TileId g in exactTruth)
+                {
+                    int n = 0;
+                    for (int z = g.Z; z >= 0; z--)
+                    {
+                        int s = g.Z - z;
+                        if (lodSet.Contains(new TileId { Z = z, X = g.X >> s, Y = g.Y >> s })) n++;
+                    }
+                    if (n == 0) holes.Add(g);
+                    else if (n >= 2) overlapped.Add(g);
+                }
+
                 Debug.Log($"[TILEDIAG] scenario: Berlin z={cam.Zoom} tilt={cam.Tilt.Degrees}° heading={cam.Heading.Degrees}° " +
                           $"fov={fov} vp={vp.x}×{vp.y} → targetZ={targetZ}, altitude={altitude:F0}m, quadtree tested={tested} tiles");
                 Debug.Log($"[TILEDIAG] CURRENT selector : {current.Count,4} tiles  {Fmt(current)}");
@@ -219,12 +250,45 @@ namespace MapRenderer.Tests.Tiles
                 Debug.Log($"[TILEDIAG] EXTRA   (selected, NOT visible → wasted)    : {extra.Count,4}  {Fmt(extra)}");
                 Debug.Log($"[TILEDIAG] extent — current X:[{Range(current, ti => ti.X)}] Y:[{Range(current, ti => ti.Y)}]  " +
                           $"exact X:[{Range(exactTruth, ti => ti.X)}] Y:[{Range(exactTruth, ti => ti.Y)}]");
+                Debug.Log($"[TILEDIAG] LOD selector     : {lodCover.Count,4} tiles (z {Range(lodCover, ti => ti.Z)})  " +
+                          $"holes={holes.Count} overlap={overlapped.Count}  {Fmt(lodCover)}");
 
                 // ACCEPTANCE (the hard gate): the selector must request EVERY genuinely-visible tile — zero gaps
                 // — at any tilt/heading. EXTRA (residual AABB false positives) is only logged, not asserted.
                 Assert.AreEqual(0, missing.Count,
                     $"selector MUST cover every visible tile (tilt={tiltDeg}° heading={headingDeg}°); " +
                     $"{missing.Count} MISSING: {Fmt(missing)}");
+
+                // LEVEL-OF-DETAIL ACCEPTANCE: exact set membership is the wrong question here — a coarse
+                // ancestor legitimately stands in for its children. Every ground-truth tile must instead be
+                // covered by exactly one ancestor-or-self. Holes and overlaps are different defects (a white
+                // gap vs. a double-covered patch, different costs, different fixes) — assert them separately.
+                Assert.AreEqual(0, holes.Count,
+                    $"screen-space LOD left {holes.Count} visible tile(s) uncovered (white gaps) at " +
+                    $"tilt={tiltDeg}° heading={headingDeg}°: {Fmt(holes)}");
+                // Tripwire, not a live check: the traversal emits a tile or descends into its children,
+                // never both (FrustumTileSelector's emit-then-continue), so the cover is prefix-free and
+                // n >= 2 is unreachable today. It becomes reachable under the planned retain-until-replaced
+                // change in TileLodStrategy, which is why the clause is live code rather than a comment.
+                Assert.AreEqual(0, overlapped.Count,
+                    $"screen-space LOD covers {overlapped.Count} visible tile(s) more than once (a cover " +
+                    $"tile and its own ancestor are both emitted) at tilt={tiltDeg}° heading={headingDeg}°: " +
+                    $"{Fmt(overlapped)}");
+
+                // ANTI-VACUITY 1 — runs at EVERY pose. Holes and overlaps cannot see a cover that is
+                // uniformly too COARSE: every truth tile still has exactly one ancestor, so both stay zero.
+                // The near field must reach full detail, which is what the strategy promises.
+                Assert.AreEqual(targetZ, lodCover.Max(t => t.Z),
+                    $"screen-space LOD never reaches full detail at tilt={tiltDeg}° " +
+                    $"heading={headingDeg}° — the near field must hit the target zoom z={targetZ}");
+
+                // ANTI-VACUITY 2 — the LOD arm must not degenerate into a second flat arm (the wrong
+                // strategy wired in). Bounded to tilt >= 45 because below that the shipped cover is
+                // honestly single-zoom; asserting mixed-zoom there would red a correct tree.
+                if (tiltDeg >= 45.0)
+                    Assert.Less(lodCover.Min(t => t.Z), lodCover.Max(t => t.Z),
+                        $"screen-space LOD cover is single-zoom at tilt={tiltDeg}° heading={headingDeg}° — " +
+                        $"the LOD arm is not exercising level-of-detail (did the wrong strategy get wired in?)");
             }
             finally
             {

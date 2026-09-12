@@ -27,6 +27,7 @@ using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
+using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
@@ -581,6 +582,76 @@ namespace MapRenderer.Tests.Tiles
                     "whatever CompleteWriteAndTakePayloads never claimed.");
                 Assert.AreEqual(negativesBaseline, TileBuildGraph.DebugNegativeObservations,
                     "the idempotency guard must never have observed a negative live count.");
+            }
+            finally
+            {
+                view.Teardown();
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        /// <summary>
+        /// UMR-127 investigation: the SAME hold as the Write case above, but the graph is parked by calling
+        /// <see cref="TileManager.SetSources"/> with an EMPTY source list rather than a pan — zero sources
+        /// ⇒ zero cover ⇒ nothing is ever fetched, measured, or written again for the rest of this test, so
+        /// no other job can incidentally flush the batch queue.
+        ///
+        /// <para>This proves the drain works when the parked graph's
+        /// <see cref="TileBuildGraph.IsStepComplete"/> is <b>already true</b> at parking time (the common
+        /// case — <c>DrainPendingDisposal</c> disposes it on the very next call, no other scheduling
+        /// needed). It does <b>not</b> reproduce UMR-127's rare leak: a ~1-in-1000 pan-eviction run leaves
+        /// a handful of <see cref="TileBuildGraph"/> instances live even though the pen ends up empty and
+        /// every parked graph's handle completed — i.e. those instances never entered
+        /// <c>_pendingGraphDisposal</c> at all. That leak was characterised with a throwaway repeated-trial
+        /// harness (not landed — see the ticket) and is still open.</para>
+        /// </summary>
+        [Test]
+        public void ParkedGraph_AlreadyComplete_DrainsWithoutAnyOtherJobScheduled()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go   = new GameObject("SourceTileGraphBuild_ParkedGraphDrain");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.Config.Backend               = RenderBackend.GameObject;
+            view.Config.MaxConsumesPerTick     = 0; // block consume — leave the write complete but untaken
+            view.Config.MaxMeshBuildsPerTick   = 64;
+            view.Config.MaxReleasesPerTick     = 64;
+            view.WithTestCamera();
+
+            try
+            {
+                long graphBaseline = TileBuildGraph.DebugLiveCount;
+
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
+
+                // Pump until the write step is complete but unconsumed — same precondition as the Write case.
+                for (int f = 0; f < 3000 && view.CaptureTelemetry().ConsumeBacklog < 1; f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                }
+                Assert.GreaterOrEqual(view.CaptureTelemetry().ConsumeBacklog, 1,
+                    "drive precondition: the tile's write step must be complete but unconsumed " +
+                    "before eviction.");
+
+                // Evict via the SAME RenderTeardownRecord funnel every abandonment path uses — but with
+                // ZERO replacement sources, so no cover is ever recomputed and nothing is ever scheduled
+                // again for the rest of this test.
+                view.TileManager.SetSources(Array.Empty<TileManager.SourceSpec>(), view.Config.Backend);
+
+                Assert.Greater(TileBuildGraph.DebugLiveCount, graphBaseline,
+                    "positive control: the evicted graph must still be LIVE right after eviction — the pen " +
+                    "defers disposal to the drain.");
+
+                // Small, bounded pump — nothing left in this test can ever schedule a new job, so a fixed
+                // small budget is exactly as conclusive as a much larger one for this (already-complete) case.
+                for (int f = 0; f < 1000 && TileBuildGraph.DebugLiveCount > graphBaseline; f++)
+                    view.LateUpdate();
+
+                Assert.AreEqual(graphBaseline, TileBuildGraph.DebugLiveCount,
+                    "the pen must drain a parked graph whose handle is already complete, with no other tick " +
+                    "activity required to notice it.");
             }
             finally
             {
