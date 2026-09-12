@@ -31,9 +31,27 @@ namespace MapRenderer.Core.Lifetime
         private readonly T _value;     // set once; the last Release disposes it, never nulls it
         private int _refs = 1;         // the creator's reference — born with the wrapper
 
+        private static long _liveCount;
+        private static long _negativeObservations;
+
+        /// <summary>Net live <see cref="SharedDisposable{T}"/> instances for this closed <typeparamref name="T"/>
+        /// — incremented at construction, decremented only after <see cref="Release"/> disposes the value (a
+        /// throwing <c>Dispose</c> leaves the count elevated: it reads disposed, not merely released). The
+        /// finalizer never decrements it — adding one for symmetry would silently disarm every delta tooth
+        /// over this counter, with no test going RED. Test-only (Core grants InternalsVisibleTo).</summary>
+        internal static long DebugLiveCount => Interlocked.Read(ref _liveCount);
+
+        /// <summary>Non-zero iff <see cref="Release"/>'s decrement ever took <see cref="DebugLiveCount"/> below
+        /// zero — a "back to baseline" reading is only honest when this is also zero, since a negative
+        /// decrement can wrap back through zero on a later leak and read as clean.</summary>
+        internal static long DebugNegativeObservations => Interlocked.Read(ref _negativeObservations);
+
         /// <param name="value">The value this wrapper shares and disposes at the last release. Never null.</param>
-        public SharedDisposable(T value) =>
+        public SharedDisposable(T value)
+        {
             _value = value ?? throw new ArgumentNullException(nameof(value));
+            Interlocked.Increment(ref _liveCount); // after the null check — a throwing ctor doesn't count
+        }
 
         /// <summary>The shared value. <b>BORROWED</b> — never dispose it, and never retain it past your own
         /// <see cref="Release"/>; the last release disposes it. A read after the last release is a
@@ -68,6 +86,8 @@ namespace MapRenderer.Core.Lifetime
             if (remaining == 0)
             {
                 _value.Dispose();
+                long after = Interlocked.Decrement(ref _liveCount);
+                if (after < 0) Interlocked.Increment(ref _negativeObservations);
                 GC.SuppressFinalize(this);   // drained cleanly — no leak to report
             }
             else

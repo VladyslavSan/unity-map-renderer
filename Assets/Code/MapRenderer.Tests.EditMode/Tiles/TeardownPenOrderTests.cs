@@ -6,8 +6,10 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.View.Camera;
+using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
@@ -32,8 +34,12 @@ namespace MapRenderer.Tests.Tiles
         /// <c>SourceTileGraphBuildTests</c>'s Case 1 uses for its Tick-based drain), which would make
         /// this fixture racy for no new coverage — the prologue arm's <c>Dispose</c> path shares the
         /// exact same <c>_pending.FlushAll()</c> call and ordering this test already exercises.</para>
-        /// <para><b>RED recipe:</b> hoist <c>_pending.FlushAll()</c> above the <c>_loaded</c> teardown
-        /// loop in <c>DoDispose</c>.</para></summary>
+        /// <para><b>RED recipe:</b> two independent recipes, one per assertion. Hoisting
+        /// <c>_pending.FlushAll()</c> above the <c>_loaded</c> teardown loop in <c>DoDispose</c> reds the
+        /// graph assertion (<c>graphBaseline</c>). Deleting the fetch loop in
+        /// <c>PendingDisposalQueue.FlushAll</c> (the <c>for (int i = 0; i < _fetch.Count; i++)</c> loop —
+        /// leave <c>_fetch.Clear()</c>) reds the fetch-lease assertion (<c>fetchBaseline</c>); this
+        /// fixture is not that recipe's only observer.</para></summary>
         [Test]
         public void Dispose_FlushesPensAfterRecordTeardown()
         {
@@ -54,6 +60,7 @@ namespace MapRenderer.Tests.Tiles
             try
             {
                 long graphBaseline = TileBuildGraph.DebugLiveCount;
+                long fetchBaseline = SharedDisposable<IDecodedTile>.DebugLiveCount;
 
                 var style = StyleParser.Parse(@"{
                     ""version"": 8, ""name"": ""T9"",
@@ -97,7 +104,11 @@ namespace MapRenderer.Tests.Tiles
 
                 // Complete the underlying task WITHOUT ticking again — WaitOffPlayerLoop inside FlushAll
                 // then resolves immediately, but the record's own FetchCompleted flag is still false.
+                long beforeStuckDecode = SharedDisposable<IDecodedTile>.DebugLiveCount;
                 stuckGate.TrySetResult(new TileResponse(SampleTileFixture.Bytes(), TileEncoding.Mvt));
+                Assert.Greater(SharedDisposable<IDecodedTile>.DebugLiveCount, beforeStuckDecode,
+                    "precondition: resolving the stuck source must mint its decode lease — without one the " +
+                    "post-teardown balance below is vacuous.");
 
                 view.Teardown();
                 Object.DestroyImmediate(go);
@@ -106,6 +117,12 @@ namespace MapRenderer.Tests.Tiles
                 Assert.AreEqual(graphBaseline, TileBuildGraph.DebugLiveCount,
                     "the graph pen must be flushed AFTER the teardown loop stashes into it — an inverted " +
                     "FlushAll leaves this elevated.");
+                Assert.AreEqual(0, SharedDisposable<IDecodedTile>.DebugNegativeObservations,
+                    "the decode-lease balance below is only honest if no Release() ever over-fired.");
+                Assert.AreEqual(fetchBaseline, SharedDisposable<IDecodedTile>.DebugLiveCount,
+                    "the fetch pen must release the stuck-source tile's decode lease — a missing fetch " +
+                    "drain leaks its SharedDisposable<IDecodedTile> (this reads the WHOLE per-generic " +
+                    "total, so an unbalanced lease from elsewhere would also red this).");
             }
             finally
             {
