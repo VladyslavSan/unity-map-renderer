@@ -142,7 +142,7 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>
         /// Drives a real <c>ScreenSpaceLod</c> quadtree descent at stall scale (high zoom, real tilt,
         /// Berlin params mirroring <see cref="TileLoadStressDriver"/>) and asserts a sub-tile camera nudge
-        /// — same tile set stays selected, but <c>_coverDirty</c> still trips — ticks alloc-free.
+        /// — same tile set stays selected, but <c>CoverKeyGate</c> still trips dirty — ticks alloc-free.
         ///
         /// This is NOT a re-run of <c>MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory</c>
         /// (that test's z2 whole-world cover is real, valuable prior art but never exercises the deep
@@ -203,8 +203,8 @@ namespace MapRenderer.Tests.Tiles
                 int loadedBefore = view.LoadedTileCount();
 
                 // Sub-tile nudge (~10 cm) — far smaller than any tile in this cover (the finest, z14, is
-                // ~1.5 km even at Berlin's latitude): the same tile set stays selected, but the cover-key
-                // exact-equality check in TileManager.Tick still trips _coverDirty.
+                // ~1.5 km even at Berlin's latitude): the same tile set stays selected, but CoverKeyGate's
+                // exact-equality check still trips it dirty.
                 view.Camera.Apply(new CameraPropertiesUpdate { Latitude = 52.52 + 1e-6, Longitude = 13.405 - 1e-6 });
 
                 Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
@@ -264,7 +264,7 @@ namespace MapRenderer.Tests.Tiles
                 double lat = 0.0;
                 for (int i = 0; i < N; i++)
                 {
-                    lat += 1e-6; // sub-tile nudge each iteration — same tile stays selected, _coverDirty trips
+                    lat += 1e-6; // sub-tile nudge each iteration — same tile stays selected, CoverKeyGate trips dirty
                     view.Camera.Apply(new CameraPropertiesUpdate { Latitude = lat });
                     view.LateUpdate();
                     recomputes += view.CoverRecomputesLastTick();
@@ -287,11 +287,12 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// The stall-#6 gate change: the expensive cover recompute (quadtree descent + request/release diff)
-        /// is now gated on <c>_coverDirty</c> ALONE — a static camera with tiles still in-flight no longer
+        /// is now gated on <c>CoverKeyGate.IsDirty</c> ALONE — a static camera with tiles still in-flight no longer
         /// forces it every frame. A GATED data source keeps every requested tile pending across ticks (its
         /// fetch only completes on cancellation), so <c>pending &gt; 0</c> holds while the camera stays put.
         ///
-        /// <para>Falsifiable: BEFORE the fix the gate was <c>!_coverDirty &amp;&amp; pending == 0</c>, so
+        /// <para>Falsifiable: BEFORE the fix the gate was <c>!_coverDirty &amp;&amp; pending == 0</c> (the
+        /// pre-UMR-112 field; now <c>CoverKeyGate.IsDirty</c>), so
         /// <c>pending &gt; 0</c> forced the full recompute (CoverRecomputesLastTick == 1) every frame for zero
         /// effect (the cover set is unchanged → the request/release loops are pure no-ops). This test asserts
         /// 0 across those frames — it FAILS on the pre-fix gate. <c>PumpPending</c> still runs each tick, so

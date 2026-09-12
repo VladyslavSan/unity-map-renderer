@@ -365,8 +365,8 @@ namespace MapRenderer.Tests.Tiles
                     "sanity: the cover must be admitted (in-flight), not yet built.");
                 int loadedBefore = view.LoadedTileCount();
 
-                // Sub-tile nudge: dirties _coverDirty (exact cover-key equality trips) without changing the
-                // selected tile set (far smaller than any tile in a z5 cover).
+                // Sub-tile nudge: trips CoverKeyGate dirty (exact cover-key equality trips) without changing
+                // the selected tile set (far smaller than any tile in a z5 cover).
                 view.Camera.Apply(new CameraPropertiesUpdate { Latitude = lat + 1e-7, Longitude = lon - 1e-7 });
                 view.LateUpdate();
 

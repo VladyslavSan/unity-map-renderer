@@ -598,11 +598,11 @@ namespace MapRenderer.Tests.Tiles
         ///
         /// <para>This proves the drain works when the parked graph's
         /// <see cref="TileBuildGraph.IsStepComplete"/> is <b>already true</b> at parking time (the common
-        /// case — <c>DrainPendingDisposal</c> disposes it on the very next call, no other scheduling
-        /// needed). It does <b>not</b> reproduce UMR-127's rare leak: a ~1-in-1000 pan-eviction run leaves
-        /// a handful of <see cref="TileBuildGraph"/> instances live even though the pen ends up empty and
-        /// every parked graph's handle completed — i.e. those instances never entered
-        /// <c>_pendingGraphDisposal</c> at all. That leak was characterised with a throwaway repeated-trial
+        /// case — <c>PendingDisposalQueue.DrainCompleted</c> disposes it on the very next call, no other
+        /// scheduling needed). It does <b>not</b> reproduce UMR-127's rare leak: a ~1-in-1000 pan-eviction
+        /// run leaves a handful of <see cref="TileBuildGraph"/> instances live even though the pen ends up
+        /// empty and every parked graph's handle completed — i.e. those instances never entered
+        /// <c>PendingDisposalQueue</c>'s graph pen at all. That leak was characterised with a throwaway repeated-trial
         /// harness (not landed — see the ticket) and is still open.</para>
         /// </summary>
         [Test]

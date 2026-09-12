@@ -545,23 +545,23 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Times the full cover recompute ran in the most recent <see cref="Tick"/>, as opposed to an early-out.</summary>
         internal int CoverRecomputesLastTick { get; private set; }
 
-        /// <summary>Tiles newly started in the most recent <see cref="PumpPending"/> call — incremented once
+        /// <summary>Tiles newly started in the most recent <see cref="Tick"/> — incremented once
         /// per tile, at its first kick. This is what <see cref="Config.MaxMeshBuildsPerTick"/> bounds.</summary>
         internal int TileBuildsStartedLastTick { get; private set; }
 
         /// <summary><see cref="Mesh.MeshDataArray"/>s allocated by the graph arm's write step in the most recent pass — one per non-empty layer.</summary>
         internal long MeshDataArraysAllocatedLastKick { get; private set; }
 
-        /// <summary>Sum of layer-mesh vertex counts consumed in the most recent PumpPending call.</summary>
+        /// <summary>Sum of layer-mesh vertex counts consumed in the most recent <see cref="Tick"/>.</summary>
         internal int VerticesConsumedLastTick { get; private set; }
 
-        /// <summary>Tiles that reached <c>Built</c> in the most recent PumpPending call.</summary>
+        /// <summary>Tiles that reached <c>Built</c> in the most recent <see cref="Tick"/>.</summary>
         internal int TilesConsumedLastTick { get; private set; }
 
-        /// <summary>Layer meshes uploaded and registered in the most recent PumpPending call — the per-frame mesh-count budget observable.</summary>
+        /// <summary>Layer meshes uploaded and registered in the most recent <see cref="Tick"/> — the per-frame mesh-count budget observable.</summary>
         internal int MeshesConsumedLastTick { get; private set; }
 
-        /// <summary>(Tile, source) records fully released in the most recent <see cref="DrainReleaseQueue"/> call.</summary>
+        /// <summary>(Tile, source) records fully released in the most recent <see cref="Tick"/>.</summary>
         internal int TilesReleasedLastTick { get; private set; }
 
         /// <summary>Current deferred-release backlog depth (records awaiting <see cref="DrainReleaseQueue"/>).</summary>
@@ -729,7 +729,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (Selector == null) return;
 
-            CoverRecomputesLastTick = 0; // Reset each Tick; set below only if the full recompute runs
+            ResetPerTickCounters();
 
             // Defensive backstop, not the normal path — cfg.Projection is always non-null here in production.
             _projection = cfg.Projection ?? new WebMercatorProjection(); // cached for the mesh build bake
@@ -821,6 +821,22 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // Drain a budgeted slice of the deferred-release backlog EVERY Tick, after admission/pump.
             DrainReleaseQueue(cfg.MaxReleasesPerTick);
+        }
+
+        /// <summary>Zeroes the six per-tick counters — cover recomputes, builds started, tiles/vertices/meshes
+        /// consumed, tiles released — at the top of <see cref="TickCore"/>. Five are read-only telemetry;
+        /// <see cref="TileBuildsStartedLastTick"/> also bounds <see cref="PumpPending"/>'s build cap, now over
+        /// the whole Tick rather than just the pump — a stray charge before <c>PumpPending</c> fails safe
+        /// (admits nothing) instead of silently doubling the cap, though no tooth tells which path charged it.</summary>
+        private void ResetPerTickCounters()
+        {
+            // A throw before PumpPending now clears the previous Tick's counts too, rather than retaining them.
+            CoverRecomputesLastTick   = 0;
+            TileBuildsStartedLastTick = 0;
+            VerticesConsumedLastTick  = 0;
+            TilesConsumedLastTick     = 0;
+            MeshesConsumedLastTick    = 0;
+            TilesReleasedLastTick     = 0;
         }
 
         /// <summary>Deterministic drain: blocks until every in-flight fetch/mesh-build task completes and
@@ -985,11 +1001,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             using var sFetchPoll = PmFetchPoll.Auto();
 
-            // Reset per-tick observability counters.
-            TileBuildsStartedLastTick     = 0;
-            VerticesConsumedLastTick      = 0;
-            TilesConsumedLastTick         = 0;
-            MeshesConsumedLastTick        = 0;
+            // The four consume/build counters reset in ResetPerTickCounters() (once per Tick); this field's
+            // window is the KICK pass — the suffix says so — and DrainMeshBuilds also accumulates into it.
             MeshDataArraysAllocatedLastKick = 0;
 
             // Treat 0 as uncapped for the kick + vertex caps (unset config field → harmless default).
@@ -1435,7 +1448,6 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// key is re-validated — one back in cover, or already cleared by a restyle, is skipped without spending budget.</summary>
         private void DrainReleaseQueue(int budget)
         {
-            TilesReleasedLastTick = 0;
             if (_releaseQueue.Count == 0) return;
 
             int cap      = budget > 0 ? budget : int.MaxValue;
