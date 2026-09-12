@@ -37,6 +37,7 @@ Trailers (see below)
 | `shaders` | HLSL / URP materials |
 | `projection` | Web-Mercator / coordinate math |
 | `build` | player-build tooling: `Tools/build.sh`, `Assets/Editor/BuildScript.cs`, build settings |
+| `text` | the symbol subsystem: text shaping, icon symbols, placement, collision, the glyph atlas, `SymbolTileStore` |
 | `backlog` | roadmap & planning docs (e.g. the MapLibre parity spec) |
 | `docs` | documentation |
 
