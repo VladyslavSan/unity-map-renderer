@@ -433,7 +433,7 @@ namespace MapRenderer.Tests.Tiles
                     $"have decoded before the balance is asserted ({fake.Probe.DecodeCount} did). If they did " +
                     "not, nothing was ever at risk and UnbalancedCount is trivially zero.");
 
-                // DrainPendingFetchDisposal runs once per Tick and routes each completed task through the
+                // PendingDisposalQueue.DrainCompleted runs once per Tick and routes each completed task through the
                 // single abandonment funnel. Driven against the FIXED count, not the moving DecodeCount.
                 for (int f = 0; f < 600 && fake.Probe.DisposedCount < abandoned; f++)
                 {

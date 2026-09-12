@@ -14,7 +14,7 @@
 //   - Mesh delta: zero orphaned Mesh after load+release (carried over from S51).
 //   - NativeArray balance: DebugLiveAllocCount == 0 after every load+release cycle.
 //   - Positive control: a deliberately-leaked LayerMeshData produces DebugLiveAllocCount > 0.
-//   - Race path: mid-flight-released tile's NativeArrays are disposed via _pendingDisposal.
+//   - Race path: mid-flight-released tile's NativeArrays are disposed via PendingDisposalQueue.
 //
 // This test is Unity-only (uses MonoBehaviour, Object.FindObjectsOfTypeAll, Mesh creation,
 // NativeArray). It does NOT compile in the headless dotnet-test path (excluded from core-tests.csproj).
@@ -769,7 +769,7 @@ namespace MapRenderer.Tests.Lifetime
                 view.Config.MaxMeshBuildsPerTick = 64;
 
                 // Let the released graph complete, then pump until the new cover settles.
-                // DrainPendingDisposal() is called inside each Tick — released tiles' native resources are
+                // PendingDisposalQueue.DrainCompleted() is called inside each Tick — released tiles' native resources are
                 // disposed as their held step completes.
                 PumpUntilSettled(view, maxFrames: 500);
 
@@ -791,7 +791,7 @@ namespace MapRenderer.Tests.Lifetime
                 Assert.AreEqual(buildGraphBefore, buildGraphAfter,
                     $"TileBuildGraph.DebugLiveCount must return to baseline after load+mid-flight-release " +
                     $"cycle. Baseline: {buildGraphBefore}, after: {buildGraphAfter}. Check: (a) the pen in " +
-                    "RenderTeardownRecord, (b) DrainPendingDisposal() called in Tick, (c) Teardown() spins+" +
+                    "RenderTeardownRecord, (b) PendingDisposalQueue.DrainCompleted() called in Tick, (c) Teardown() spins+" +
                     "disposes pending tasks.");
             }
             finally

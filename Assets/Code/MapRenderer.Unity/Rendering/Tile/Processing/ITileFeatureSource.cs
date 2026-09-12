@@ -49,7 +49,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// keeps the tile alive across the <c>SetStyle</c>→<c>SpritesSettled</c> window and is why a parked
         /// build no longer re-decodes — and releases it from <c>PumpBuilds</c>' drain or from
         /// <c>SymbolSubsystem.DrainAndDiscardParkedBuilds</c>. A fetch outcome nobody wants is released
-        /// by <c>TileManager.DiscardFetchOutcome</c>.</para>
+        /// by <c>PendingDisposalQueue.DiscardFetchOutcome</c>.</para>
         ///
         /// <para><b>Failures are reported through the returned <see cref="UniTask{T}"/>, never thrown
         /// synchronously</b> — true of both implementations, and what lets the coordinator observe every

@@ -132,7 +132,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Composite key for the multi-source loaded table — value-type + <see cref="System.IEquatable{T}"/> avoids boxing on every Dictionary probe.</summary>
-        private readonly struct LoadedKey : System.IEquatable<LoadedKey>
+        internal readonly struct LoadedKey : System.IEquatable<LoadedKey>
         {
             public readonly TileId Tile;
             public readonly int    Slot;
@@ -153,20 +153,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                     return Tile.GetHashCode() * 31 + Slot;
                 }
             }
-        }
-
-        /// <summary>One data pipeline per rendered source-id; <see cref="Slot"/> keys <see cref="LoadedKey"/> so the loop never hashes a string.</summary>
-        private sealed class SourcePipeline
-        {
-            public string             SourceId; // the StyleLayer.Source this pipeline serves (normalized, never null)
-            public int                Slot;     // index into _pipelines (0..N-1)
-            public ITileFeatureSource FeatureSource;
-            public int                MinZoom; // resolved source minzoom — admission clamp (decision 10)
-            public int                MaxZoom; // resolved source maxzoom
-            public SourceKey          DefKey;  // resolved-definition identity — restyle "unchanged?" diff (7a)
-
-            /// <summary>True for the one synthetic pipeline serving <see cref="Style.BackgroundRenderLayer"/> — derived from <see cref="FeatureSource"/> so it can't desync.</summary>
-            public bool IsSourceless => FeatureSource == null;
         }
 
         /// <summary>Value-equality identity of a resolved source definition — the restyle diff key. Two
@@ -265,7 +251,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly Style.RenderLayerSet _layers; // owned by MapView; this reads the ordered render layers
 
         // Per-source pipeline registry — the per-tile lifecycle is per-(tile, source); see LoadedKey.
-        private readonly List<SourcePipeline> _pipelines = new(4);
+        private readonly SourceRegistry _sources = new();
 
         /// <summary>The normalized source-id a rendered style layer draws from (null → "").</summary>
         private static string SourceIdOf(StyleLayer layer) => layer?.Source ?? string.Empty;
@@ -320,8 +306,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly List<LoadedKey>    _desired    = new(64);
         private readonly HashSet<LoadedKey> _desiredSet = new(64);
 
-        /// <summary>Reused insertion-sort scratch for <see cref="_desired"/>/<see cref="PumpPending"/>'s priority keys — grown, never shrunk.</summary>
-        private double[] _priorityKeys = new double[64];
+        /// <summary>Sorts <see cref="_desired"/> and <see cref="_toRelease"/> by priority key.</summary>
+        private readonly TilePrioritySorter _sorter = new();
 
         /// <summary>The seam driving the decoupled symbol-placement subsystem — a throwing factory must
         /// never fault the tile pipeline. Lifecycle is pulled via <see cref="CollectLoadedTileKeys"/>, never pushed.</summary>
@@ -331,17 +317,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly HashSet<int> _coverStatsX = new();
         private readonly HashSet<int> _coverStatsY = new();
 
-        private bool _coverDirty = true;
-
-        /// <summary>Tile-selection key (scalar fields, no boxing) over zoom/heading/tilt/viewport — any of which changes the covered set.</summary>
-        private double _coverKeyLon;
-        private double _coverKeyLat;
-        private double _coverKeyZoom;
-        private double _coverKeyHeading;
-        private double _coverKeyTilt;
-        private double _coverKeyViewportX;
-        private double _coverKeyViewportY;
-        private bool   _coverKeyInitialised;
+        /// <summary>The cover-recompute staleness gate — dirty when the camera/viewport moved since the last commit.</summary>
+        private readonly CoverKeyGate _coverGate = new();
 
         /// <summary>Reusable scratch for one <see cref="ConsumeMeshBuild"/> call's new meshes/handles — cleared per call, merged into the tile's arrays.</summary>
         private readonly List<Mesh> _consumeMeshes = new(8);
@@ -370,13 +347,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Prepared-cache miss count (see <see cref="PreparedCacheHits"/>).</summary>
         internal int PreparedCacheMisses => _prepared.Misses;
 
-        /// <summary>Mid-flight discard pen: a build's NativeArrays don't exist yet if released while running,
-        /// so they're stashed here and disposed once each Tick drains the completed task (teardown spins to completion).</summary>
-        private readonly List<WorkHandle<Processing.TilePrologueOutput>> _pendingDisposal = new(8);
-
-        /// <summary>The graph arm's twin of <see cref="_pendingDisposal"/> — same reason: a build released
-        /// while in flight has no result yet to dispose (<c>docs/job-scheduling-design.md</c> §6 exit (2)/(3)).</summary>
-        private readonly List<Processing.TileBuildGraph> _pendingGraphDisposal = new(8);
+        /// <summary>The three release-time holding pens (prologue, graph, fetch).</summary>
+        private readonly PendingDisposalQueue _pending = new();
 
         /// <summary>Teardown-cancel token, cancelled once at the top of <c>DoDispose</c> so builds abort first.
         /// A field initializer, not set in the constructor, so it's never re-created across a restyle.</summary>
@@ -423,10 +395,6 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// role for the graph arm. Test-only, since the prologue step yields no <c>JobHandle</c> for this to gate.</summary>
         internal JobHandle GraphDepsForTest { get; set; }
 
-        /// <summary>Mid-flight fetch pen: a released tile's in-flight <c>UniTask</c> must stay observed or
-        /// its GC finalizer floods the console on fault. Stashed here; each Tick observes completed ones.</summary>
-        private readonly List<UniTask<SharedDisposable<IDecodedTile>>> _pendingFetchDisposal = new(8);
-
         // Running count of genuine (non-cancellation) fetch errors, for bounded logging.
         private int _fetchErrorCount;
 
@@ -466,47 +434,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Purge PreparedTileCache every call — a restyle rebuilds layer indexing, so a held layerId may no longer match.
             _prepared.Clear();
 
-            // 2. Diff the pipeline registry by (SourceId, resolved Key).
-            var kept    = new List<SourcePipeline>(specs.Count);
-            var keptOld = new HashSet<SourcePipeline>();
-            for (int i = 0; i < specs.Count; i++)
-            {
-                var            spec     = specs[i];
-                SourcePipeline existing = FindPipeline(spec.SourceId, spec.Key);
-                if (existing != null)
-                {
-                    existing.MinZoom = spec.MinZoom; // zoom may be re-read from a re-resolved def; identity kept
-                    existing.MaxZoom = spec.MaxZoom;
-                    kept.Add(existing);
-                    keptOld.Add(existing);
-                }
-                else
-                {
-                    kept.Add(new SourcePipeline
-                    {
-                        SourceId = spec.SourceId, FeatureSource = spec.CreateSource(),
-                        MinZoom  = spec.MinZoom, MaxZoom        = spec.MaxZoom, DefKey = spec.Key,
-                    });
-                }
-            }
-
-            // Pipeline-teardown removed sources: dispose the feature source — fetch, scheduler and cache all live inside it now.
-            for (int i = 0; i < _pipelines.Count; i++)
-            {
-                var p = _pipelines[i];
-                if (keptOld.Contains(p)) continue;
-                p.FeatureSource?.Dispose();
-            }
-
-            // Commit the new registry with stable slots 0..N-1.
-            _pipelines.Clear();
-            for (int i = 0; i < kept.Count; i++)
-            {
-                kept[i].Slot = i;
-                _pipelines.Add(kept[i]);
-            }
-
-            // Append the source-less pipeline after real ones take stable slots, iff the style has ≥1 background layer.
+            // 2. Diff the pipeline registry against the new specs and commit stable slots.
             bool hasBackground = false;
             for (int li = 0; li < _layers.Count; li++)
                 if (_layers[li] is Style.BackgroundRenderLayer)
@@ -515,34 +443,11 @@ namespace MapRenderer.Unity.Rendering.Tile
                     break;
                 }
 
-            if (hasBackground)
-            {
-                _pipelines.Add(new SourcePipeline
-                {
-                    // Source left null ⇒ IsSourceless is true (computed). The synthetic background pipeline.
-                    SourceId = string.Empty, Slot    = _pipelines.Count,
-                    MinZoom  = int.MinValue, MaxZoom = int.MaxValue,
-                });
-            }
+            _sources.Rebuild(specs, hasBackground);
 
             // 3. Rebuild the backend from the (caller-rebuilt) styled layer set; re-arm cover selection.
-            _coverDirty          = true;
-            _coverKeyInitialised = false;
+            _coverGate.Invalidate();
             BuildBackend(backend);
-        }
-
-        /// <summary>The existing pipeline with this source-id AND matching resolved key, or null.</summary>
-        private SourcePipeline FindPipeline(string sourceId, SourceKey key)
-        {
-            for (int i = 0; i < _pipelines.Count; i++)
-            {
-                if (_pipelines[i].SourceId == sourceId && _pipelines[i].DefKey.Equals(key))
-                {
-                    return _pipelines[i];
-                }
-            }
-
-            return null;
         }
 
         /// <summary>Constructs the tile render backend from the styled layer set (default arm Entities so a
@@ -588,34 +493,11 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── Test observability (surfaced through MapViewTestExtensions, not the production API) ────────
 
         /// <summary>The in-flight fetch count summed across every source pipeline.</summary>
-        internal int InFlightCount
-        {
-            get
-            {
-                int n = 0;
-                for (int i = 0; i < _pipelines.Count; i++)
-                {
-                    // The source-less pipeline has no FeatureSource — contributes 0.
-                    if (_pipelines[i].IsSourceless) continue;
-                    n += _pipelines[i].FeatureSource.InFlightCount;
-                }
-
-                return n;
-            }
-        }
+        internal int InFlightCount => _sources.TotalInFlight;
 
         /// <summary>Pipelines that actually own a feature source, excluding the synthetic background pipeline.
         /// Zero is the only positive signal that a source was skipped — not-throwing/fetching/rendering all look the same otherwise.</summary>
-        internal int WiredFeatureSourceCount
-        {
-            get
-            {
-                int n = 0;
-                for (int i = 0; i < _pipelines.Count; i++)
-                    if (!_pipelines[i].IsSourceless) n++;
-                return n;
-            }
-        }
+        internal int WiredFeatureSourceCount => _sources.RealSourceCount;
 
         /// <summary>Loaded/loading (tile, source) records — what the per-frame loops iterate.</summary>
         internal int LoadedTileCount => _loaded.Count;
@@ -636,7 +518,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             into.Clear();
             foreach (var kv in _loaded)
             {
-                into.Add(new LoadedTileKey(_pipelines[kv.Key.Slot].SourceId, kv.Key.Tile));
+                into.Add(new LoadedTileKey(_sources.SourceIdOf(kv.Key.Slot), kv.Key.Tile));
             }
         }
 
@@ -719,7 +601,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 IsMixedZoom            = minZ != maxZ,
                 CoverMinZoom           = minZ,
                 CoverMaxZoom           = maxZ,
-                FractionalZoom         = _coverKeyZoom,
+                FractionalZoom         = _coverGate.LastZoom,
                 LoadedTileCount        = _loaded.Count,
                 PendingTileCount       = pending,
                 ConsumeBacklog         = backlog,
@@ -754,7 +636,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Invalidates the cached cover-selection key so the next <see cref="Tick"/> re-selects the
         /// cover. Called when the camera is re-wired (<see cref="Map.View.SetCamera"/>).</summary>
-        public void InvalidateCover() => _coverKeyInitialised = false;
+        public void InvalidateCover() => _coverGate.Invalidate();
 
         /// <summary>Rebuilds the per-tile object-to-world transforms (and refreshes backend state) for all
         /// loaded tiles from <paramref name="frame"/>. Called by MapView once per frame.</summary>
@@ -784,9 +666,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal Mesh[] GetTileMeshes(TileId id)
         {
             List<Mesh> all = null;
-            for (int s = 0; s < _pipelines.Count; s++)
+            for (int s = 0; s < _sources.Count; s++)
             {
-                if (_loaded.TryGetValue(new LoadedKey(id, _pipelines[s].Slot), out var lt) && lt.Meshes != null)
+                if (_loaded.TryGetValue(new LoadedKey(id, s), out var lt) && lt.Meshes != null)
                 {
                     all ??= new List<Mesh>(8);
                     all.AddRange(lt.Meshes);
@@ -801,9 +683,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal int[] GetTileMaterialIndices(TileId id)
         {
             List<int> all = null;
-            for (int s = 0; s < _pipelines.Count; s++)
+            for (int s = 0; s < _sources.Count; s++)
             {
-                if (_loaded.TryGetValue(new LoadedKey(id, _pipelines[s].Slot), out var lt) && lt.MaterialIndices != null)
+                if (_loaded.TryGetValue(new LoadedKey(id, s), out var lt) && lt.MaterialIndices != null)
                 {
                     all ??= new List<int>(8);
                     all.AddRange(lt.MaterialIndices);
@@ -860,29 +742,17 @@ namespace MapRenderer.Unity.Rendering.Tile
                 _prepared.Clear();
             }
 
-            if (!_coverKeyInitialised                         ||
-                cam.LookAt.Longitude    != _coverKeyLon       ||
-                cam.LookAt.Latitude     != _coverKeyLat       ||
-                cam.Zoom                != _coverKeyZoom      ||
-                cam.Heading.Degrees     != _coverKeyHeading   ||
-                cam.Tilt.Degrees        != _coverKeyTilt      ||
-                cfg.FramingViewportPx.x != _coverKeyViewportX ||
-                cfg.FramingViewportPx.y != _coverKeyViewportY)
-            {
-                _coverDirty = true;
-            }
+            _coverGate.MarkStaleIfMoved(in cam, in cfg);
 
-            // Drain any completed mid-flight-discard tasks so their NativeArrays are freed.
-            DrainPendingDisposal();
-            // Observe any completed mid-flight-released fetch tasks (no unobserved-exception flood).
-            DrainPendingFetchDisposal();
+            // Drain any completed mid-flight-discard work so its NativeArrays/fetch tasks are freed.
+            _pending.DrainCompleted();
 
             // Shared priority context, reused by the admission gate and PumpPending's sort, so enumeration order can't decide a race.
             var priorityCtx = TilePriorityContext.From(in cam, cfg.FramingViewportPx, cfg.Projection,
                 cfg.PriorityStrategy);
 
-            // The cover recompute is gated on _coverDirty alone — a clean camera must not re-run the descent.
-            if (_coverDirty)
+            // The cover recompute is gated on _coverGate alone — a clean camera must not re-run the descent.
+            if (_coverGate.IsDirty)
             {
                 CoverRecomputesLastTick = 1; // The full recompute (descent + diff) runs this Tick
 
@@ -906,11 +776,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                 for (int i = 0; i < _cover.Count; i++)
                 {
                     TileId id = _cover[i];
-                    for (int s = 0; s < _pipelines.Count; s++)
+                    for (int s = 0; s < _sources.Count; s++)
                     {
-                        var p = _pipelines[s];
-                        if (id.Z < p.MinZoom || id.Z > p.MaxZoom) continue; // source doesn't serve this zoom
-                        var key = new LoadedKey(id, p.Slot);
+                        if (!_sources.AdmitsZoom(s, id.Z)) continue; // source doesn't serve this zoom
+                        var key = new LoadedKey(id, s);
                         if (_loaded.ContainsKey(key)) continue; // already admitted — untouched (never re-queued)
                         if (_desiredSet.Add(key)) _desired.Add(key);
                     }
@@ -941,21 +810,12 @@ namespace MapRenderer.Unity.Rendering.Tile
                     if (_releaseQueued.Add(key)) _releaseQueue.Enqueue(key);
                 }
 
-                _coverKeyLon         = cam.LookAt.Longitude;
-                _coverKeyLat         = cam.LookAt.Latitude;
-                _coverKeyZoom        = cam.Zoom;
-                _coverKeyHeading     = cam.Heading.Degrees;
-                _coverKeyTilt        = cam.Tilt.Degrees;
-                _coverKeyViewportX   = cfg.FramingViewportPx.x;
-                _coverKeyViewportY   = cfg.FramingViewportPx.y;
-                _coverKeyInitialised = true;
-
-                _coverDirty = false;
+                _coverGate.Commit(in cam, in cfg);
 
                 sCoverSel.Dispose();
             }
 
-            // Runs every Tick, clean or dirty — admission is not gated on _coverDirty, so entries drain once the camera stills.
+            // Runs every Tick, clean or dirty — admission is not gated on _coverGate, so entries drain once the camera stills.
             AdmitFromDesired(in priorityCtx, cfg.MaxConcurrentTileLoads);
             PumpPending(cam, cfg.MaxConsumesPerTick, cfg.MaxMeshBuildsPerTick, cfg.MaxVerticesPerTick, in priorityCtx);
 
@@ -982,7 +842,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             foreach (var key in unsettled)
             {
                 TileId     id       = key.Tile;
-                string     sourceId = _pipelines[key.Slot].SourceId;
+                string     sourceId = _sources.SourceIdOf(key.Slot);
                 LoadedTile lt       = _loaded[key];
 
                 // (a) If fetch is still in-flight, spin until it completes and kick mesh build.
@@ -1020,7 +880,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 // A source-less record is only created, never kicked — kick inline or it falls invisible to the no-mesh settle below.
                 if (lt.FetchCompleted && lt.Step == BuildStep.None && lt.Decode == null &&
-                    _pipelines[key.Slot].IsSourceless)
+                    _sources.IsSourceless(key.Slot))
                 {
                     lt.Graph = KickSourcelessBackground(id, lt.TileOriginRender);
                     lt.Step  = BuildStep.Measure;
@@ -1146,7 +1006,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
 
             // Nearest-center-first paint order — the same priority the admission gate uses.
-            SortByPriority(_toRelease, in priorityCtx);
+            _sorter.Sort(_toRelease, in priorityCtx);
 
             int pending          = 0;
             int meshesConsumed   = 0;
@@ -1157,7 +1017,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 LoadedKey  key      = _toRelease[i];
                 TileId     id       = key.Tile;
-                string     sourceId = _pipelines[key.Slot].SourceId;
+                string     sourceId = _sources.SourceIdOf(key.Slot);
                 LoadedTile lt       = _loaded[key];
 
                 // (1) A completed PROLOGUE hands off to the graph — uncharged, already counted at its prologue kick.
@@ -1279,7 +1139,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
                 // (6) Kicks a source-less build, only created (never kicked) — rides the same condemned-skip + buildCap throttle.
                 if (lt.FetchCompleted && lt.Step == BuildStep.None && lt.Decode == null &&
-                    _pipelines[key.Slot].IsSourceless)
+                    _sources.IsSourceless(key.Slot))
                 {
                     if (_releaseQueued.Contains(key))
                     {
@@ -1594,24 +1454,24 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Releases a tile: scheduler release, unregister draw items, free meshes. Doesn't wait for
-        /// in-flight work — a still-running handle goes into <see cref="_pendingDisposal"/> so it never leaks.</summary>
+        /// in-flight work — a still-running handle goes into <see cref="_pending"/> so it never leaks.</summary>
         private void ReleaseTile(LoadedKey key)
         {
             if (_loaded.TryGetValue(key, out var lt))
             {
                 // Background records skip the cache transfer — a full-tile quad is trivial to rebuild on re-entry.
                 bool transferredToCache =
-                    _cacheEnabled && lt.Built && lt.Meshes != null && !_pipelines[key.Slot].IsSourceless;
+                    _cacheEnabled && lt.Built && lt.Meshes != null && !_sources.IsSourceless(key.Slot);
                 // Transfers meshes into PreparedTileCache instead of letting teardown destroy them — scoped to eviction, not restyle (docs/tile-pipeline-design.md §5.1).
                 if (transferredToCache)
-                    TransferBuiltMeshesToCache(key.Tile, _pipelines[key.Slot].SourceId, ref lt);
+                    TransferBuiltMeshesToCache(key.Tile, _sources.SourceIdOf(key.Slot), ref lt);
 
                 RenderTeardownRecord(ref lt);
                 _loaded.Remove(key);
             }
 
             // Route release to the owning pipeline — a record on source B never touches A; the source-less pipeline is a no-op.
-            _pipelines[key.Slot].FeatureSource?.Release(key.Tile);
+            _sources.ReleaseTile(key.Slot, key.Tile);
             // No symbol-release callback — the subsystem's next CollectLoadedTileKeys pull no longer reports it, and reconcile fades the symbols.
         }
 
@@ -1659,14 +1519,13 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// an active slot), else kicks a fetch. Shared by the capped per-Tick gate and the uncapped drain.</summary>
         private void AdmitTile(TileId id, int slot, IProjection projection)
         {
-            var p = _pipelines[slot];
             var key = new LoadedKey(id, slot);
 
             // The SINGLE projected SW-corner render origin, shared by the mesh bake and the tile transform.
             double3 origin = TileRenderOrigin.Project(id, projection);
 
             // A source-less record only creates a pending record — the kick moves to PumpPending, riding the same build cap as a real fetch.
-            if (p.IsSourceless)
+            if (_sources.IsSourceless(slot))
             {
                 _loaded[key] = new LoadedTile
                 {
@@ -1681,7 +1540,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             bool allCached = false;
             if (_cacheEnabled)
             {
-                ComputeDenseLayerIds(p.SourceId, _denseLayerIds);
+                ComputeDenseLayerIds(_sources.SourceIdOf(slot), _denseLayerIds);
                 // Seed from dense-layer COUNT: a zero-dense source (symbol-only) is never "all cached".
                 allCached = _denseLayerIds.Count > 0;
                 for (int d = 0; d < _denseLayerIds.Count; d++)
@@ -1707,7 +1566,7 @@ namespace MapRenderer.Unity.Rendering.Tile
                 {
                     using var sSchedReq = PmSchedulerReq.Auto();
                     // .Preserve() allows polling .IsCompleted across frames without exhausting the UniTask.
-                    fetchReq = p.FeatureSource.GetTile(id).Preserve();
+                    fetchReq = _sources.SourceAt(slot).GetTile(id).Preserve();
                 }
                 _loaded[key] = new LoadedTile
                 {
@@ -1719,7 +1578,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Admits from the head of <see cref="_desired"/> while the active set stays under
-        /// <paramref name="cap"/> — runs every Tick, or a cap reached mid-recompute would stall once <c>_coverDirty</c> goes false.</summary>
+        /// <paramref name="cap"/> — runs every Tick, or a cap reached mid-recompute would stall once <c>_coverGate</c> goes clean.</summary>
         private void AdmitFromDesired(in TilePriorityContext priorityCtx, int cap)
         {
             if (_desired.Count == 0) return;
@@ -1743,52 +1602,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (admitted > 0) _desired.RemoveRange(0, admitted);
         }
 
-        /// <summary>Sorts <paramref name="list"/> ascending by <see cref="TilePriority.Key"/>, mirroring the
-        /// Core algorithm. Shared by <see cref="AdmitFromDesired"/> and <see cref="PumpPending"/> so enumeration order can't decide a race.</summary>
-        private void SortByPriority(List<LoadedKey> list, in TilePriorityContext ctx)
-        {
-            int n = list.Count;
-            if (_priorityKeys.Length < n)
-                _priorityKeys = new double[math.max(n, _priorityKeys.Length * 2)];
-
-            double[] keys = _priorityKeys;
-            for (int i = 0; i < n; i++)
-            {
-                TileId tile = list[i].Tile;
-                keys[i] = TilePriority.Key(in tile, in ctx);
-            }
-
-            for (int i = 1; i < n; i++)
-            {
-                double    k    = keys[i];
-                LoadedKey item = list[i];
-                int       j    = i - 1;
-                while (j >= 0 && IsAfter(keys[j], list[j], k, item))
-                {
-                    keys[j + 1] = keys[j];
-                    list[j + 1] = list[j];
-                    j--;
-                }
-
-                keys[j + 1] = k;
-                list[j + 1] = item;
-            }
-        }
-
         /// <summary>Sorts <see cref="_desired"/> in place by the shared priority (helper so call sites read
         /// as intent, not mechanism).</summary>
-        private void SortDesiredByPriority(in TilePriorityContext ctx) => SortByPriority(_desired, in ctx);
-
-        /// <summary>True iff (keyA, a) sorts strictly after (keyB, b) — smaller priority key first, then
-        /// TileId (Z, X, Y), then Slot (mirrors <see cref="TilePriority.SortByPriority"/>'s tiebreak, extended for per-source Slot).</summary>
-        private static bool IsAfter(double keyA, LoadedKey a, double keyB, LoadedKey b)
-        {
-            if (keyA != keyB) return keyA > keyB;
-            if (a.Tile.Z != b.Tile.Z) return a.Tile.Z > b.Tile.Z;
-            if (a.Tile.X != b.Tile.X) return a.Tile.X > b.Tile.X;
-            if (a.Tile.Y != b.Tile.Y) return a.Tile.Y > b.Tile.Y;
-            return a.Slot > b.Slot;
-        }
+        private void SortDesiredByPriority(in TilePriorityContext ctx) => _sorter.Sort(_desired, in ctx);
 
         /// <summary>Builds a fully-Built record directly from a cache hit — TryTakes each layer's mesh and
         /// re-registers the non-null ones. No fetch, decode, build, or upload.</summary>
@@ -1840,7 +1656,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             if (!lt.FetchCompleted)
             {
                 ReleasedMidFetchCount++;
-                _pendingFetchDisposal.Add(lt.Request);
+                _pending.StashFetch(lt.Request);
             }
 
             // An unconsumed PROLOGUE build's result must have its NativeArrays disposed later — only a genuinely in-flight task is counted.
@@ -1848,7 +1664,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 if (!lt.MeshBuildTask.IsCompleted)
                     ReleasedMidFlightCount++;
-                _pendingDisposal.Add(lt.MeshBuildTask);
+                _pending.StashPrologue(lt.MeshBuildTask);
                 lt.MeshBuildTask = default;
             }
 
@@ -1857,7 +1673,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 if (!lt.Graph.IsStepComplete)
                     ReleasedMidFlightCount++;
-                _pendingGraphDisposal.Add(lt.Graph);
+                _pending.StashGraph(lt.Graph);
                 lt.Graph = null;
             }
 
@@ -1868,42 +1684,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             DestroyTrackedMeshes(ref lt); // Unity does not free a Mesh asset just because nothing references it
         }
 
-        /// <summary>Drains completed prologue tasks from the mid-flight-discard pen, disposing their
-        /// NativeArrays. Non-blocking poll — an incomplete task stays in the list for the next drain.</summary>
-        private void DrainPendingDisposal()
-        {
-            if (_pendingDisposal.Count > 0)
-            {
-                // Iterate backwards so we can remove in-place without index shifting.
-                for (int i = _pendingDisposal.Count - 1; i >= 0; i--)
-                {
-                    var handle = _pendingDisposal[i];
-                    if (!handle.IsCompleted)
-                        continue; // still in-flight; check again next Tick
-
-                    // Task completed (succeeded, faulted, or cancelled).
-                    if (handle.IsSucceeded)
-                        handle.GetResult().Dispose();
-                    // Faulted/cancelled: no output produced, nothing to dispose.
-
-                    _pendingDisposal.RemoveAt(i);
-                }
-            }
-
-            // The graph arm's twin sweep — a Burst job cannot fault, so IsStepComplete is the only gate.
-            for (int i = _pendingGraphDisposal.Count - 1; i >= 0; i--)
-            {
-                var graph = _pendingGraphDisposal[i];
-                if (!graph.IsStepComplete)
-                    continue; // still in-flight; check again next Tick
-
-                graph.Dispose();
-                _pendingGraphDisposal.RemoveAt(i);
-            }
-        }
-
         /// <summary>Observes a completed fetch's outcome once and hands the decode handle to the caller, who
-        /// now owns it (null on cancel/fault/absent) — the other consumption path is <see cref="DiscardFetchOutcome"/>.</summary>
+        /// now owns it (null on cancel/fault/absent) — the other consumption path is
+        /// <see cref="PendingDisposalQueue"/>'s own discard, for a fetch nobody consumes.</summary>
         private SharedDisposable<IDecodedTile> TakeDecodeFromFetch(UniTask<SharedDisposable<IDecodedTile>> req)
         {
             try
@@ -1927,28 +1710,6 @@ namespace MapRenderer.Unity.Rendering.Tile
             }
         }
 
-        /// <summary>
-        /// Observes a COMPLETED fetch task's terminal outcome exactly once and <b>throws the result
-        /// away</b> — for a tile nobody wants any more. Every outcome is swallowed silently: a 5xx here is
-        /// noise, not news.
-        /// <para><b>The <see langword="void"/> return type is load-bearing.</b> A discard site cannot bind
-        /// the handle, so caller-side ownership is compiler-enforced, not conventional. What it does NOT
-        /// enforce: nothing stops THIS method's own body from retaining or leaking what it observed — that
-        /// half is a per-record obligation belonging to the runtime lifetime teeth, not the signature.</para>
-        /// Precondition: <c>req.Status.IsCompleted()</c>.</summary>
-        private void DiscardFetchOutcome(UniTask<SharedDisposable<IDecodedTile>> req)
-        {
-            try
-            {
-                // A succeeded fetch for an unwanted tile still produced a decoded tile — release frees its Allocator.Persistent buffers.
-                req.GetAwaiter().GetResult()?.Release();
-            }
-            catch (System.Exception)
-            {
-                // Cancelled or faulted — expected on an abandoned tile; a faulted task has no lease to free.
-            }
-        }
-
         /// <summary>Bounded fetch-error logging — chaotic input can fail many tiles at once, so a per-tile
         /// warning would just relocate the flood. Surfaces the first error, then a periodic count.</summary>
         private void LogFetchErrorThrottled(System.Exception ex)
@@ -1967,22 +1728,6 @@ namespace MapRenderer.Unity.Rendering.Tile
                 Debug.LogWarning($"[TileManager] tile decode failed ({_decodeErrorCount} total): {ex.Message}");
         }
 
-        /// <summary>Drains completed tasks from the mid-flight FETCH holding pen, observing (and
-        /// discarding) each outcome silently. Non-blocking poll; called once per Tick.</summary>
-        private void DrainPendingFetchDisposal()
-        {
-            if (_pendingFetchDisposal.Count == 0) return;
-
-            for (int i = _pendingFetchDisposal.Count - 1; i >= 0; i--)
-            {
-                if (!_pendingFetchDisposal[i].Status.IsCompleted())
-                    continue; // still in-flight; check again next Tick
-
-                DiscardFetchOutcome(_pendingFetchDisposal[i]); // released → swallow silently
-                _pendingFetchDisposal.RemoveAt(i);
-            }
-        }
-
         /// <summary>Destroys every <see cref="Mesh"/> tracked in <paramref name="lt"/>.Meshes — not freed
         /// just because nothing references it — then nulls the field to prevent a double-free.</summary>
         private void DestroyTrackedMeshes(ref LoadedTile lt)
@@ -1998,7 +1743,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// tile renderers still reference layer materials.</summary>
         protected override void DoDispose()
         {
-            // Cancel first, before either pen drain waits on anything — a cancelled build settles in milliseconds instead of blocking.
+            // Cancel first, before the pen flush waits on anything — a cancelled build settles in milliseconds instead of blocking.
             _lifetimeCts.Cancel();
 
             // Every record goes through the single teardown funnel — cancel the fetch first, or the spin below waits on a request only Dispose cancels.
@@ -2006,39 +1751,14 @@ namespace MapRenderer.Unity.Rendering.Tile
             {
                 var lt = kv.Value; // foreach value is read-only; teardown needs a ref to null its Meshes
                 if (!lt.FetchCompleted)
-                    _pipelines[kv.Key.Slot].FeatureSource?.Release(kv.Key.Tile);
+                    _sources.ReleaseTile(kv.Key.Slot, kv.Key.Tile);
                 RenderTeardownRecord(ref lt);
             }
 
             _loaded.Clear();
 
-            // Drain the mid-flight-discard pen — park to completion, then dispose; must not leak on teardown.
-            for (int i = 0; i < _pendingDisposal.Count; i++)
-            {
-                var handle = _pendingDisposal[i];
-                UniTask<Processing.TilePrologueOutput> buildTask = handle.ToUniTask();
-                buildTask.WaitOffPlayerLoop(10000);
-
-                if (handle.IsSucceeded)
-                    handle.GetResult().Dispose();
-            }
-
-            _pendingDisposal.Clear();
-
-            // The graph arm's twin sweep — Complete() runs a not-yet-started job inline, no timeout needed.
-            foreach (var graph in _pendingGraphDisposal)
-                graph.Dispose();
-            _pendingGraphDisposal.Clear();
-
-            // The fetch pen, drained the same way — park, then observe-and-discard through the single abandonment funnel.
-            for (int i = 0; i < _pendingFetchDisposal.Count; i++)
-            {
-                var task = _pendingFetchDisposal[i];
-                task.WaitOffPlayerLoop(10000);
-                DiscardFetchOutcome(task);
-            }
-
-            _pendingFetchDisposal.Clear();
+            // The teardown loop above just re-filled the pens — flush AFTER it, or this drains pens that refill and never empty.
+            _pending.FlushAll();
 
             // Destroy every Mesh the PreparedTileCache still holds — SAME ordering as the teardown loop.
             _prepared.Dispose();
@@ -2047,19 +1767,11 @@ namespace MapRenderer.Unity.Rendering.Tile
             _instanced?.Dispose();
             _instanced = null;
 
-            DisposePipelines();
+            // After the teardown pass above, which releases fetches through this registry.
+            _sources.Dispose();
 
-            // Dispose the CTS LAST — both pen drains above have already completed, so no worker is parked.
+            // Dispose the CTS LAST — the pen flush above has already completed, so no worker is parked.
             _lifetimeCts.Dispose();
-        }
-
-        /// <summary>Disposes and clears every source pipeline — one <see cref="ITileFeatureSource.Dispose"/>
-        /// call per pipeline covers scheduler + owned source together. Idempotent.</summary>
-        private void DisposePipelines()
-        {
-            for (int i = 0; i < _pipelines.Count; i++)
-                _pipelines[i].FeatureSource?.Dispose();
-            _pipelines.Clear();
         }
     }
 }

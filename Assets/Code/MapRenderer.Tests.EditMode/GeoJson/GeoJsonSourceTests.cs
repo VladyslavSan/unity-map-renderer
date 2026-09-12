@@ -561,8 +561,8 @@ namespace MapRenderer.Tests.GeoJsons
                 "pipeline, and the map goes on fetching MVT for a style that now declares inline GeoJSON.");
             Assert.AreNotEqual(vector.GetHashCode(), geoJson.GetHashCode(),
                 "…and `type` must participate in the HASH as well. Today's diff never hashes a key — " +
-                "FindPipeline is a linear scan calling Equals directly, and SourceKey is a dictionary key " +
-                "nowhere — so this pins structural participation, not correctness: a key whose hash ignores " +
+                "SourceRegistry.Find is a linear scan calling Equals directly, and SourceKey is a dictionary " +
+                "key nowhere — so this pins structural participation, not correctness: a key whose hash ignores " +
                 "a field it compares is only correct while nothing hashes it, and the day something does, " +
                 "two keys that differ ONLY in that field land in the same bucket by construction.");
         }

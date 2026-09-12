@@ -299,12 +299,12 @@ namespace MapRenderer.Tests.Tiles
         /// Case 1 (Prologue): a tile released mid-flight while genuinely in its PROLOGUE step — held on
         /// <see cref="TileManager.MeshBuildGateForTest"/>, armed before any kick. At this instant NOTHING
         /// graph-arm exists yet (the worker has not even started); the pen is
-        /// <c>TilePrologueOutput.Dispose()</c> via <c>DrainPendingDisposal</c>'s <c>WorkHandle</c> sweep,
+        /// <c>TilePrologueOutput.Dispose()</c> via <c>PendingDisposalQueue.DrainCompleted</c>'s <c>WorkHandle</c> sweep,
         /// which only runs once the released worker actually produces a result — <see cref="LayerMeshBuildCounters.DebugTotalBuildsCreated"/>
         /// is the non-vacuity witness (R4): it can only advance AFTER the gate opens, because the columns
         /// it counts do not exist until the worker's <c>BuildGraphRequest</c> call runs.
         ///
-        /// <para><b>RED:</b> <c>DrainPendingDisposal</c> skips <c>GetResult().Dispose()</c> for a succeeded
+        /// <para><b>RED:</b> <c>PendingDisposalQueue.DrainCompleted</c> skips <c>GetResult().Dispose()</c> for a succeeded
         /// prologue task — <c>LayerMeshBuildCounters.DebugLiveBuilds</c> stays elevated above baseline forever.</para>
         /// </summary>
         [Test]
@@ -367,10 +367,10 @@ namespace MapRenderer.Tests.Tiles
                     "runs here.");
 
                 // Release the gate — the worker now runs (the record is already gone from _loaded, but the
-                // WorkHandle keeps running independently) and DrainPendingDisposal will dispose its result.
+                // WorkHandle keeps running independently) and PendingDisposalQueue.DrainCompleted will dispose its result.
                 // Bounded but generous: this poll cannot Await (the record is gone from _loaded), so it
                 // needs enough real wall-clock for a ThreadPool worker to actually run and be observed by a
-                // later Tick's DrainPendingDisposal — a plain LateUpdate() call is cheap enough that even
+                // later Tick's PendingDisposalQueue.DrainCompleted — a plain LateUpdate() call is cheap enough that even
                 // 100k iterations finish in well under a second.
                 meshGate.Set();
 
@@ -410,7 +410,7 @@ namespace MapRenderer.Tests.Tiles
         /// Case 2 (Measure): a tile released mid-flight while genuinely in its MEASURE step — the prologue
         /// runs INLINE (no async parking needed there; the measure step is what this test holds), gated on
         /// <see cref="TileManager.GraphDepsForTest"/>. <c>RenderTeardownRecord</c> stashes the still-live
-        /// <see cref="TileBuildGraph"/> in <c>_pendingGraphDisposal</c> rather than disposing it inline
+        /// <see cref="TileBuildGraph"/> via <c>_pending.StashGraph</c> rather than disposing it inline
         /// (which would <c>Complete()</c> — and block on — the gated job).
         ///
         /// <para><b>RED:</b> the pen skips <c>graph.Dispose()</c> — <c>TileBuildGraph.DebugLiveCount</c>
@@ -486,7 +486,7 @@ namespace MapRenderer.Tests.Tiles
                     view.LateUpdate();
 
                 Assert.AreEqual(graphBaseline, TileBuildGraph.DebugLiveCount,
-                    "once the gated job completes, the pen must drain: DrainPendingDisposal disposes the " +
+                    "once the gated job completes, the pen must drain: PendingDisposalQueue.DrainCompleted disposes the " +
                     "released graph on a later tick.");
                 Assert.AreEqual(requestsBaseline, LayerMeshBuildCounters.DebugLiveBuilds,
                     "the graph's own builds' columns must be freed with it.");
@@ -514,7 +514,7 @@ namespace MapRenderer.Tests.Tiles
         /// <see cref="MapViewTestExtensions.ReleasedMidFlightCount"/> does NOT count it (it is guarded on
         /// <c>!lt.Graph.IsStepComplete</c>) — this case asserts only the pen/drain shape, not that guard.
         ///
-        /// <para><b>RED:</b> <c>RenderTeardownRecord</c> skips <c>_pendingGraphDisposal.Add</c> for
+        /// <para><b>RED:</b> <c>RenderTeardownRecord</c> skips <c>_pending.StashGraph</c> for
         /// <c>Step == Write</c> — the released graph is never disposed, <c>TileBuildGraph.DebugLiveCount</c>
         /// stays elevated above baseline forever.</para>
         ///
@@ -573,7 +573,7 @@ namespace MapRenderer.Tests.Tiles
                     view.LateUpdate();
 
                 Assert.AreEqual(graphBaseline, TileBuildGraph.DebugLiveCount,
-                    "the pen must drain the complete-but-unconsumed graph — DrainPendingDisposal disposes it " +
+                    "the pen must drain the complete-but-unconsumed graph — PendingDisposalQueue.DrainCompleted disposes it " +
                     "(a Burst job cannot fault, so IsStepComplete is the only gate; no wait was needed here).");
                 Assert.AreEqual(requestsBaseline, LayerMeshBuildCounters.DebugLiveBuilds,
                     "the graph's own builds' columns must be freed with it.");

@@ -37,7 +37,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// no kick-allocated array any more to wrap zero-vertex — a graph-arm processor with nothing to settle
         /// simply leaves its slot empty). The task still Succeeds either way, so
         /// <see cref="TilePrologueOutput.Dispose"/> — called from the pen-drain funnel
-        /// (<c>TileManager.DrainPendingDisposal</c>) exactly once per prologue — is what frees whatever a
+        /// (<c>PendingDisposalQueue.DrainCompleted</c>) exactly once per prologue — is what frees whatever a
         /// released-before-consumed tile's requests still hold. No Canceled status, no second disposal
         /// path.</para></summary>
         /// <param name="decode">The caller-owned shared decode lease this pass reads (never released here).</param>

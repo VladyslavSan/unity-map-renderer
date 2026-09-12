@@ -72,9 +72,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         public int InFlightCount => _scheduler.InFlightCount;
 
-        /// <summary>Exact teardown ownership the old <c>TileManager.SetSources</c>/<c>DisposePipelines</c>
-        /// applied: the scheduler always disposes (non-owning of source/cache, but its own CTSs/maps are
-        /// this source's to free); the byte source disposes only if this instance owns it.</summary>
+        /// <summary>Exact teardown ownership <c>SourceRegistry</c>'s restyle diff and <c>Dispose</c> apply:
+        /// the scheduler always disposes (non-owning of source/cache, but its own CTSs/maps are this
+        /// source's to free); the byte source disposes only if this instance owns it.</summary>
         public void Dispose()
         {
             _scheduler.Dispose();

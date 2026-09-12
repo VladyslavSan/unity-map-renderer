@@ -102,7 +102,7 @@ Verified against source (2026-09-02):
   consumers (§5).
 - **The tile pump** (`TileManager.PumpPending`) is already a per-Tick polled state machine over
   `LoadedTile`: fetch in flight → `HasMeshBuild && !IsCompleted` → consume under budget. The mid-flight
-  release pen (`_pendingDisposal`) and the teardown drain already exist for `WorkHandle`s.
+  release pen (`PendingDisposalQueue`, UMR-112) and the teardown drain already exist for `WorkHandle`s.
 - **Main-thread anchors** in a build today: `Mesh.AllocateWritableMeshData` at kick (one blind `MeshDataArray`
   per layer, sized later by the worker's `SetVertexBufferParams`) and `ApplyAndDisposeWritableMeshData` at
   consume.
@@ -544,7 +544,7 @@ The four exits, extended:
 | exit | today (`WorkHandle`) | with graphs |
 |---|---|---|
 | (1) consumed | `GetResult()` → upload → dispose | `IsCompleted` at the pump → **`Complete()`** → upload each layer's mesh → `TileBuildGraph.Dispose()` (buffers freed, decode reference released). Never a read before `Complete()`. |
-| (2) released in flight | handle → `_pendingDisposal`; per-Tick poll; dispose on completion | `TileBuildGraph` → the pen; per-Tick poll on `Handle.IsCompleted`; then `Complete()` + `Dispose()`. Same pen, second element type. |
+| (2) released in flight | handle → `PendingDisposalQueue.StashPrologue`; per-Tick `DrainCompleted()` poll; dispose on completion | `TileBuildGraph` → `StashGraph`, the same queue's second pen; per-Tick poll on `Handle.IsCompleted`; then `Complete()` + `Dispose()`. |
 | (3) cancelled mid-work | the managed body checks the token and settles zero-vertex | **no in-job cancellation** — a scheduled job is finite and not interruptible, so there is nothing to cancel; the token gates the *next main-thread step* (the pump does not schedule measure after a cancelled prologue, does not allocate/schedule write after a cancelled measure, does not upload after a cancelled write). A cancelled unit goes to the pen like exit (2). |
 | (4) teardown | cancel, then park up to 10 s per stashed handle | cancel (gates future steps), then `Complete()` every pen entry synchronously and dispose. Bounded by in-flight CPU; no timeout. Order unchanged: destroy meshes → dispose backend. |
 
@@ -1752,11 +1752,13 @@ implemented.
 - `Assets/Code/MapRenderer.Unity/Rendering/Meshing/StyledFillTileBuilder.cs:423` `WriteGeometry` (pipeline
   call + managed stream loop `:470–503`); `StyledLineTileBuilder.cs:300–362` (per-ring `.Run()`s and managed
   `ProjectPoint` loops, `SubdivideCenterline` at `:473`).
-- `Assets/Code/MapRenderer.Unity/Rendering/Tile/TileManager.cs` — `LoadedTile` (`:194`), `_pendingDisposal`
-  (`:637`), `CaptureTelemetry`'s backlog poll (`:1080`), `AwaitInFlightMeshBuilds` (`:1548`), `PumpPending`
-  (`:1600`; state-machine body `:1646–1700`), `KickMeshBuild` (`:1827`), `KickSourcelessBackground` (`:1969`),
-  `ConsumeMeshBuild` (`:2026`), `ReleaseTile` (`:2217`), the pen stash inside `RenderTeardownRecord` (`:2577`),
-  `DoDispose` (`:2761`).
+- `Assets/Code/MapRenderer.Unity/Rendering/Tile/TileManager.cs` — `LoadedTile` (`:104`),
+  `CaptureTelemetry`'s backlog poll (`:577`), `AwaitInFlightMeshBuilds` (`:945`), `PumpPending` (`:979`),
+  `KickMeshBuild` (`:1199`), `KickSourcelessBackground` (`:1279`), `ConsumeMeshBuild` (`:1318`),
+  `ReleaseTile` (`:1458`), the pen stash inside `RenderTeardownRecord` (`:1648`), `DoDispose` (`:1744`).
+  **UMR-112:** the three release-time pens (formerly `_pendingDisposal` + two siblings) moved to
+  `Assets/Code/MapRenderer.Unity/Rendering/Tile/PendingDisposalQueue.cs`; `RenderTeardownRecord`'s stash
+  calls and `DoDispose`'s `_pending.FlushAll()` are what remain on `TileManager.cs` at the lines above.
 - `Assets/Code/MapRenderer.Unity/Rendering/Tile/PreparedTileCache.cs:201–214` — `Put` destroys the previous
   entry on key collision — which is why D7 existed, and, since one mesh per layer makes that collision
   impossible, why D7 is now moot (§3.6 consequence (1)); the cache is untouched by this design.

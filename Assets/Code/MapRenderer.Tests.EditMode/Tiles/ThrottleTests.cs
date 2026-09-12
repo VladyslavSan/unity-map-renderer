@@ -656,7 +656,7 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>
         /// S87 eviction teeth. A tile evicted MID-consume (ConsumeCursor part-way) must dispose both its
         /// already-uploaded layers' NativeArrays (per-mesh, during consume) AND its un-consumed remainder
-        /// (via the <c>_pendingDisposal</c> holding pen on cover change), with no double-dispose crash.
+        /// (via <c>PendingDisposalQueue</c>'s holding pen on cover change), with no double-dispose crash.
         /// Decisive: the combined fill+line <c>DebugLiveAllocCount</c> returns to its baseline after the
         /// partial-evict + teardown cycle — a leaked remainder (ReleaseTile not stashing a partial tile) or a
         /// missed per-mesh dispose would leave it above baseline; a use-after/double dispose would throw.

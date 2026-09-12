@@ -103,7 +103,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                     "Positive control: at least one tile must be released while its FETCH is in-flight. " +
                     "If 0, the race did not occur and the unobserved-exception assertion is vacuous.");
 
-                // Let the cancelled fetches fault on the ThreadPool, and Tick so DrainPendingFetchDisposal
+                // Let the cancelled fetches fault on the ThreadPool, and Tick so PendingDisposalQueue.DrainCompleted
                 // observes them. Without the fix, the dropped faulted tasks would go unobserved.
                 for (int f = 0; f < 300; f++)
                 {
@@ -123,8 +123,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 Assert.IsFalse(unobservedFired,
                     "A fetch cancelled mid-flight by cover churn must be OBSERVED, not dropped to UniTask's " +
                     "unobserved-exception finalizer. If this fires, the S84 console-flood bug is back: " +
-                    "TileManager.ReleaseTile must stash the in-flight fetch task (_pendingFetchDisposal) and " +
-                    "DrainPendingFetchDisposal / Dispose must observe it.");
+                    "TileManager.ReleaseTile must stash the in-flight fetch task (_pending.StashFetch) and " +
+                    "PendingDisposalQueue.DrainCompleted / FlushAll must observe it.");
             }
             finally
             {

@@ -2,11 +2,14 @@
 
 using System;
 using System.IO;
+using System.Linq;
+using System.Reflection;
 using System.Text.RegularExpressions;
 using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
+using MapRenderer.Unity.Rendering.Tile;
 
 namespace MapRenderer.Tests.Structure
 {
@@ -440,47 +443,100 @@ namespace MapRenderer.Tests.Structure
         /// characters, no boundary) — so a plain substring count would find those 19 kept references and could
         /// NEVER go green even after a flawless A7. <c>\bTileCache\b</c> excludes <c>PreparedTileCache</c>
         /// while still catching every standalone <c>TileCache</c> mention. The other four tokens have no
-        /// such embedding collision, so they use the plain substring matcher.</summary>
+        /// such embedding collision, so they use the plain substring matcher.
+        /// <para><b>UMR-112.</b> The pipeline registry (<see cref="SourceRegistry"/>) is exactly the code
+        /// that would plausibly reach for a byte fetcher, so the five forbidden-token checks now cover it
+        /// too. The required-token check for <c>ITileFeatureSource</c> is scoped to <c>SourceRegistry.cs</c>
+        /// alone — it holds all four remaining references; <c>TileManager.cs</c>'s own two are on a
+        /// pass-through factory field, so anchoring there is one rename from vacuous.</para></summary>
         [Test]
         public void TileManager_ConsumesNoByteSource()
         {
-            string path = Path.Combine(
+            string tileManagerPath = Path.Combine(
                 Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Tile", "TileManager.cs");
-            Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
-            string source = File.ReadAllText(path);
+            string registryPath = Path.Combine(
+                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Tile", "SourceRegistry.cs");
+            Assert.IsTrue(File.Exists(tileManagerPath), $"expected source file to exist at {tileManagerPath}");
+            Assert.IsTrue(File.Exists(registryPath), $"expected source file to exist at {registryPath}");
+            string tileManagerSource = File.ReadAllText(tileManagerPath);
+            string registrySource    = File.ReadAllText(registryPath);
 
-            Assert.AreEqual(0, CountOccurrences(source, "TileResponse"),
-                "TileManager.cs must contain ZERO 'TileResponse' occurrences — the byte-response type is now " +
-                "an MvtTileFeatureSource-internal detail (Epic A / A7).");
-            Assert.AreEqual(0, CountOccurrences(source, "IDataSource"),
-                "TileManager.cs must contain ZERO 'IDataSource' occurrences — the byte fetcher is wrapped " +
-                "BELOW the raised ITileFeatureSource seam, never named at the coordinator.");
-            Assert.AreEqual(0, CountOccurrences(source, "TileScheduler"),
-                "TileManager.cs must contain ZERO 'TileScheduler' occurrences — scheduling now lives inside " +
-                "MvtTileFeatureSource.");
-            Assert.AreEqual(0, CountOccurrences(source, "SharedTileDecode"),
-                "TileManager.cs must contain ZERO 'SharedTileDecode' occurrences — the type is deleted, and " +
-                "a surviving mention would be a stale comment describing a lifetime model that no longer exists.");
-            Assert.AreEqual(0, CountOccurrences(source, "DecodedTileLease"),
-                "TileManager.cs must contain ZERO 'DecodedTileLease' occurrences either — the coordinator " +
-                "holds only the polymorphic SharedDisposable<IDecodedTile>, never a concrete lease " +
-                "implementation (R2 deleted DecodedTileLease outright). Widened from the SharedTileDecode " +
-                "clause rather than replacing it: naming a concrete lease type would re-create exactly the " +
-                "coupling the old clause forbade.");
+            foreach (var (name, source) in new[] { ("TileManager.cs", tileManagerSource), ("SourceRegistry.cs", registrySource) })
+            {
+                Assert.AreEqual(0, CountOccurrences(source, "TileResponse"),
+                    $"{name} must contain ZERO 'TileResponse' occurrences — the byte-response type is now " +
+                    "an MvtTileFeatureSource-internal detail (Epic A / A7).");
+                Assert.AreEqual(0, CountOccurrences(source, "IDataSource"),
+                    $"{name} must contain ZERO 'IDataSource' occurrences — the byte fetcher is wrapped " +
+                    "BELOW the raised ITileFeatureSource seam, never named at the coordinator.");
+                Assert.AreEqual(0, CountOccurrences(source, "TileScheduler"),
+                    $"{name} must contain ZERO 'TileScheduler' occurrences — scheduling now lives inside " +
+                    "MvtTileFeatureSource.");
+                Assert.AreEqual(0, CountOccurrences(source, "SharedTileDecode"),
+                    $"{name} must contain ZERO 'SharedTileDecode' occurrences — the type is deleted, and " +
+                    "a surviving mention would be a stale comment describing a lifetime model that no longer exists.");
+                Assert.AreEqual(0, CountOccurrences(source, "DecodedTileLease"),
+                    $"{name} must contain ZERO 'DecodedTileLease' occurrences either — the coordinator " +
+                    "holds only the polymorphic SharedDisposable<IDecodedTile>, never a concrete lease " +
+                    "implementation (R2 deleted DecodedTileLease outright). Widened from the SharedTileDecode " +
+                    "clause rather than replacing it: naming a concrete lease type would re-create exactly the " +
+                    "coupling the old clause forbade.");
 
-            int standaloneTileCacheCount = Regex.Matches(source, @"\bTileCache\b").Count;
-            Assert.AreEqual(0, standaloneTileCacheCount,
-                "TileManager.cs must contain ZERO STANDALONE 'TileCache' occurrences (word-boundary match, " +
-                "excluding the 19 kept 'PreparedTileCache' references, which plan §D leaves untouched) — the " +
-                "byte-level LRU cache now lives inside MvtTileFeatureSource.");
+                int standaloneTileCacheCount = Regex.Matches(source, @"\bTileCache\b").Count;
+                Assert.AreEqual(0, standaloneTileCacheCount,
+                    $"{name} must contain ZERO STANDALONE 'TileCache' occurrences (word-boundary match, " +
+                    "excluding the 19 kept 'PreparedTileCache' references, which plan §D leaves untouched) — the " +
+                    "byte-level LRU cache now lives inside MvtTileFeatureSource.");
+            }
 
-            Assert.Greater(CountOccurrences(source, "ITileFeatureSource"), 0,
-                "TileManager.cs must reference ITileFeatureSource — the raised seam it now holds instead of " +
-                "IDataSource/TileScheduler.");
-            Assert.Greater(CountOccurrences(source, "SharedDisposable"), 0,
+            Assert.Greater(CountOccurrences(registrySource, "ITileFeatureSource"), 0,
+                "SourceRegistry.cs must reference ITileFeatureSource — the raised seam it now holds instead " +
+                "of IDataSource/TileScheduler.");
+            Assert.Greater(CountOccurrences(tileManagerSource, "SharedDisposable"), 0,
                 "TileManager.cs must reference SharedDisposable — R2's decode-provisioning reference count " +
                 "(SharedDisposable<IDecodedTile>) it threads through the mesh/symbol kick, and whose " +
                 "reference it owns and releases. Successor to the R1-era IDecodedTileHandle clause.");
+        }
+
+        /// <summary>UMR-112 §6.1 T8: <c>SourceRegistry</c>'s public surface is EXACTLY the ten members the
+        /// plan enumerates — no getter-per-field creep, no <c>SourcePipeline</c> escaping. Reflection-based,
+        /// not text-scraped: a grep on indentation over/undercounts (the private nested <c>SourcePipeline</c>
+        /// class's own fields sit at the same indent and inflate a naive count to 18).
+        /// <para><b>The bound has zero headroom by design.</b> An eleventh member is a finding that the seam
+        /// failed, not a number to bump — see §6.1's own note.</para></summary>
+        [Test]
+        public void SourceRegistry_SurfaceIsExactlyTenMembers()
+        {
+            Type type = typeof(SourceRegistry);
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly;
+
+            PropertyInfo[] properties = type.GetProperties(flags);
+            MethodInfo[]   methods    = type.GetMethods(flags).Where(m => !m.IsSpecialName).ToArray();
+
+            Assert.AreEqual(10, properties.Length + methods.Length,
+                $"SourceRegistry's public surface must be EXACTLY 10 members — found " +
+                $"{properties.Length} properties ({string.Join(", ", properties.Select(p => p.Name))}) + " +
+                $"{methods.Length} methods ({string.Join(", ", methods.Select(m => m.Name))}). An eleventh " +
+                "member is a STOP-and-report finding (§6.1), not a tooth to widen.");
+
+            // Matches SourcePipeline itself, an `out`/`ref` byref (`&`), an array, or any type nested inside
+            // a generic (e.g. IReadOnlyList<SourcePipeline>) — not just a bare-name match, which a widened
+            // (internal) SourcePipeline could dodge with any of those forms.
+            static bool Mentions(Type t) => t.Name.TrimEnd('&') == "SourcePipeline"
+                || (t.HasElementType && Mentions(t.GetElementType()))
+                || t.GetGenericArguments().Any(Mentions);
+
+            foreach (PropertyInfo p in properties)
+                Assert.IsFalse(Mentions(p.PropertyType),
+                    $"{p.Name} must not expose SourcePipeline — it is private for a reason.");
+            foreach (MethodInfo m in methods)
+            {
+                Assert.IsFalse(Mentions(m.ReturnType),
+                    $"{m.Name} must not return SourcePipeline — it is private for a reason.");
+                foreach (ParameterInfo p in m.GetParameters())
+                    Assert.IsFalse(Mentions(p.ParameterType),
+                        $"{m.Name}'s parameter '{p.Name}' must not take a SourcePipeline — it is private for a reason.");
+            }
         }
 
         /// <summary>Epic A / A7 (plan §F tooth 6, §G-1): pins the off-PlayerLoop invariant
@@ -632,13 +688,86 @@ namespace MapRenderer.Tests.Structure
                 "build and fetch is dropped without ever reaching the funnel.");
         }
 
+        /// <summary>UMR-112 §6.1/§6.7: <c>SetSources</c> must clear every slot-keyed collection
+        /// (<c>_loaded</c>, <c>_releaseQueue</c>, <c>_releaseQueued</c>, <c>_desired</c>, <c>_desiredSet</c>)
+        /// unconditionally, and <c>_sources.Rebuild</c> must follow that clear block.
+        /// <para><b>The clear-is-unconditional clause is the one that matters.</b> RED-verified (a
+        /// ordering-inversion injection compiles and runs green against the BEHAVIOURAL test
+        /// <c>RemovedSource_TilesDoNotSurviveARestyle</c>): the hazard §6.1 names — a stale slot-keyed
+        /// entry outliving a re-slot — is prevented by these five clears being unconditional, not by
+        /// their order relative to <c>Rebuild</c>. The ordering IS observable at runtime: <c>Rebuild</c>
+        /// calls caller-supplied code twice while mid-rebuild (<c>SourceSpec.CreateSource</c> for a new
+        /// pipeline, <c>ITileFeatureSource.Dispose</c> for a removed one), and
+        /// <c>SourceRegistrySlotInvariantTests.Rebuild_CallerFactoryObservesLoadedClearedFirst</c> pins that
+        /// window behaviourally through the former hook. This structural check stays alongside it because
+        /// that hook only fires for a NEW or REMOVED pipeline — it says nothing about whether an
+        /// unchanged pipeline's own clear is unconditional, which is this clause's whole job.</para>
+        /// <para><b>Clause 1 is conservative by design.</b> "Unconditionally reached" rejects ANY earlier
+        /// jump token (<c>return</c>/<c>continue</c>/<c>break</c>/<c>goto</c>) at any nesting depth, even
+        /// one that plainly does not make the clear conditional (a <c>break</c> closing an unrelated loop
+        /// above it). A future refactor that legitimately moves a jump-containing block above the clears
+        /// will red this tooth with nothing actually broken — check the jump's owning loop before assuming
+        /// a regression.</para>
+        /// <para><b>Clause 2 is currently unreachable, RED-verified twice over, deliberately kept.</b> The
+        /// <c>hasBackground</c> loop's <c>break</c> always precedes <c>_sources.Rebuild</c>, so any clear
+        /// moved after <c>Rebuild</c> trips clause 1 first — confirmed by injecting the ordering inversion
+        /// on <c>_loaded.Clear()</c> and again, isolated, on <c>_desiredSet.Clear()</c>; both reds landed
+        /// on clause 1, never clause 2. Clause 1 is what actually enforces the ordering today. Clause 2
+        /// stays as defence-in-depth: if a later refactor moves the <c>hasBackground</c> computation into
+        /// a helper call, that <c>break</c> disappears from this body and clause 2 becomes the only
+        /// guard.</para></summary>
+        [Test]
+        public void TileManagerSetSources_ClearsSlotKeyedStateUnconditionally_ThenRebuildsSources()
+        {
+            string path = Path.Combine(
+                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Tile", TileManagerPathTail);
+            Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
+            string source = File.ReadAllText(path);
+
+            string body = StripComments(
+                ExtractMethodBody(source, "internal void SetSources(", path));
+
+            const string rebuildForm = "_sources.Rebuild(";
+            string[] clearForms =
+            {
+                "_loaded.Clear()", "_releaseQueue.Clear()", "_releaseQueued.Clear()",
+                "_desired.Clear()", "_desiredSet.Clear()",
+            };
+
+            int lastClearIndex = -1;
+            foreach (string clearForm in clearForms)
+            {
+                Assert.AreEqual(1, CountOccurrences(body, clearForm),
+                    $"TileManager.SetSources must call '{clearForm}' EXACTLY once.");
+                AssertUnconditionallyReachedOnce(body, Regex.Escape(clearForm),
+                    $"'{clearForm}' in TileManager.SetSources",
+                    "a conditional clear can leave a slot-keyed entry alive across the registry rebuild — " +
+                    "the exact hazard §6.1 names. This clause, not the ordering below, is what actually " +
+                    "guards it.");
+                lastClearIndex = Math.Max(lastClearIndex, body.IndexOf(clearForm, StringComparison.Ordinal));
+            }
+
+            Assert.AreEqual(1, CountOccurrences(body, rebuildForm),
+                $"TileManager.SetSources must call '{rebuildForm}' EXACTLY once.");
+            Assert.Greater(body.IndexOf(rebuildForm, StringComparison.Ordinal), lastClearIndex,
+                $"TileManager.SetSources must call '{rebuildForm}' AFTER every slot-keyed clear — a rebuild " +
+                "that runs first re-slots the registry before the old state referencing the OLD slots is " +
+                "dropped.");
+        }
+
         /// <summary>D0 (funnel 2 — the abandoned fetch): the discard arm must be structurally incapable of
         /// handing a decode handle back to its CALLER. <c>DiscardFetchOutcome</c> returns
         /// <see langword="void"/>, so no discard SITE can bind, retain or re-consume what the fetch produced
         /// — caller-side ownership is compiler-enforced, not conventional. The two discard sites must call
-        /// it and must NOT call the owning arm (<c>TakeDecodeFromFetch</c>). Genuinely RED against the
-        /// pre-D0 source, which had ONE method, <c>ObserveFetchOutcome(req, logErrors:)</c>, returning the
-        /// handle to all four callers — two of which threw it away.
+        /// it and must NOT call the owning arm (<c>TileManager.TakeDecodeFromFetch</c>, a different file —
+        /// see below). Genuinely RED against the pre-D0 source, which had ONE method,
+        /// <c>ObserveFetchOutcome(req, logErrors:)</c>, returning the handle to all four callers — two of
+        /// which threw it away.
+        ///
+        /// <para><b>Relocated (UMR-112).</b> The fetch pen and its discard funnel moved from
+        /// <c>TileManager</c> into <see cref="PendingDisposalQueue"/> — same method, same invariant, new
+        /// home. <c>TakeDecodeFromFetch</c> stayed behind on <c>TileManager</c>, so the "must not call the
+        /// owning arm" clause is checked by absence rather than by reading a sibling file.</para>
         ///
         /// <para><b>Scope, narrowed in the D0 fix pass (arm 2 NIT 1).</b> <see langword="void"/> constrains
         /// the CALLER and nothing else: it does not stop <c>DiscardFetchOutcome</c>'s own body from
@@ -650,19 +779,19 @@ namespace MapRenderer.Tests.Structure
         public void TheFetchDiscardFunnel_CannotHandBackADecodeHandle()
         {
             string path = Path.Combine(
-                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Tile", TileManagerPathTail);
+                Application.dataPath, "Code", "MapRenderer.Unity", "Rendering", "Tile", "PendingDisposalQueue.cs");
             Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
             string source = File.ReadAllText(path);
             string stripped = StripComments(source);
 
             Assert.AreEqual(0, CountOccurrences(stripped, "ObserveFetchOutcome"),
-                "TileManager.cs must contain ZERO 'ObserveFetchOutcome' occurrences — the one method whose " +
-                "bool parameter was ALMOST the own-vs-discard discriminator is split into two whose " +
-                "signatures cannot be confused.");
+                "PendingDisposalQueue.cs must contain ZERO 'ObserveFetchOutcome' occurrences — the one " +
+                "method whose bool parameter was ALMOST the own-vs-discard discriminator is split into two " +
+                "whose signatures cannot be confused.");
             Assert.AreEqual(1, CountOccurrences(stripped, "private void DiscardFetchOutcome("),
-                "TileManager.cs must declare 'private void DiscardFetchOutcome(' exactly once — the VOID " +
-                "return type is the enforcement. The moment this method hands something back it stops " +
-                "being a funnel and becomes a fourth thing to remember at every drop site.");
+                "PendingDisposalQueue.cs must declare 'private void DiscardFetchOutcome(' exactly once — " +
+                "the VOID return type is the enforcement. The moment this method hands something back it " +
+                "stops being a funnel and becomes a fourth thing to remember at every drop site.");
             Assert.AreEqual(0, CountOccurrences(stripped, "SharedDisposable<IDecodedTile> DiscardFetchOutcome("),
                 "DiscardFetchOutcome must NEVER return SharedDisposable<IDecodedTile> — see above; this " +
                 "clause is the one that fails if a later change 'just returns it for convenience'.");
@@ -685,8 +814,15 @@ namespace MapRenderer.Tests.Structure
                 "while leaving the abandoned task's fault unobserved — the S84 UnityWebRequestException " +
                 "console flood, back through the method that exists to prevent it.");
 
+            // File-scoped, not per discard-site: TakeDecodeFromFetch stayed on TileManager (UMR-112), so a
+            // CALL from here is impossible, but a COPY of its body pasted into this file is not — this
+            // absence check is what actually rules that out.
+            Assert.AreEqual(0, CountOccurrences(stripped, "TakeDecodeFromFetch("),
+                "PendingDisposalQueue.cs must contain ZERO 'TakeDecodeFromFetch(' occurrences — that " +
+                "method is TileManager's owning-arm entry point; this file must only ever discard.");
+
             foreach (string discardSiteAnchor in new[]
-                     { "private void DrainPendingFetchDisposal(", "protected override void DoDispose()" })
+                     { "public void DrainCompleted(", "public void FlushAll(" })
             {
                 string body = StripComments(ExtractMethodBody(source, discardSiteAnchor, path));
                 Assert.Greater(CountOccurrences(body, "DiscardFetchOutcome("), 0,
@@ -698,10 +834,6 @@ namespace MapRenderer.Tests.Structure
                     "that legitimately `continue`s past a task that has not completed yet, so 'reached on " +
                     "every iteration' is not a property this site HAS. What every pen entry is eventually " +
                     "observed is D1's runtime leak teeth to prove, not this clause's.");
-                Assert.AreEqual(0, CountOccurrences(body, "TakeDecodeFromFetch("),
-                    $"the fetch-abandonment site anchored at '{discardSiteAnchor}' must NOT call " +
-                    "TakeDecodeFromFetch — that is the arm whose caller OWNS the handle, and this site has " +
-                    "nobody to hand it to.");
             }
         }
 

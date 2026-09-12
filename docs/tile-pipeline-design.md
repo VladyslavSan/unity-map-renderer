@@ -41,7 +41,7 @@ Two maintainer-raised problems, findings verified against source:
 | 3 | **Entities `AddTileLayer`: per-layer `RenderMeshArray` + structural changes** | Every consumed mesh creates a fresh one-element `RenderMeshArray` shared component → EG batch registration per entity, plus `CreateEntity` + a `ComponentTypeSet` migration (own comment: "PRIME SUSPECT"). | `RegisterMesh`/`RegisterMaterial` IDs + ID-based `MaterialMeshInfo` + prototype `Instantiate` + unregister-on-remove | §6 |
 | 4 | **One-mesh overshoot** (the only mesher fix) | Budget checked *before* each layer, so a single 100k+-vert water/landcover fill uploads whole — the vertex budget cannot cap it. Worst on exactly the tiles users look at (oceans at low zoom). | Cap verts per payload (~32k, split at feature boundaries); requires the two-phase kick | §4 |
 | 5 | **`KickMeshBuild` main-thread allocate loop** | One native MeshData alloc per this-source layer per kick — dozens/kick, most ending 0-vertex (allocated, carried, disposed unused). | Subsumed by the two-phase kick (#4). Measure-first via `PmMeshDataAllocate` | §4 |
-| 6 | **Cover recompute every frame while anything pends** | Static camera + pending tiles → full `SelectVisibleTiles` descent + `_coverSet` rebuild + cover×pipeline probes every frame **for zero effect** (~0.5–2 ms/frame during exactly the frames already under consume load). | Gate the recompute on `_coverDirty` alone | §3 |
+| 6 | **Cover recompute every frame while anything pends** | Static camera + pending tiles → full `SelectVisibleTiles` descent + `_coverSet` rebuild + cover×pipeline probes every frame **for zero effect** (~0.5–2 ms/frame during exactly the frames already under consume load). | Gate the recompute on the cover-key gate alone (shipped as `CoverKeyGate`, UMR-112) | §3 |
 | 7 | **GC collections from off-thread load work** | Per-tile `byte[]`, `MvtDecoder.Decode` object graphs on the pool, payload/closure allocs per kick — Mono GC stops the main thread regardless of which thread allocated. Hypothesis, not measured. | Profile with GC markers during a pan storm; enable incremental GC if confirmed; pool decode buffers | measure-first |
 | 8 | **BRG `Rebuild` full per-frame repack** (opt-in path) | Per frame: sort all items, repack 76 floats × N, 33 material-property reads × N, full `SetData`. Steady cost, not a spike. | Dirty-flag material props; repack transforms only on frame change; partial `SetData` | only if BRG becomes default |
 | 9 | **Restyle hitch** | Full teardown + Entities `World` rebuild + every cached mesh destroyed, one frame. Big but rare, user-initiated. | Accept; documented tradeoff | — |
@@ -53,8 +53,8 @@ Classification: #1, #2, #6 are **scheduling-only**; #3, #8 are **backend-only**;
 
 | # | Topic | Decision |
 |---|---|---|
-| D1 | Decomposition order | `SourcePipelineRegistry` → `PreparedTileBridge` → `TileMeshBuildEngine`; test surface exits to the test assembly in the engine step |
-| D2 | Dense layer-id cache | Lives on `SourcePipeline` (computed once in `ApplySpecs`), **not** in the bridge — the kick, the probe, and the transfer all read the same `int[]`, so the three-consumer agreement invariant becomes structural |
+| D1 | Decomposition order | `SourcePipelineRegistry` → `PreparedTileBridge` → `TileMeshBuildEngine`; test surface exits to the test assembly in the engine step. **UMR-112 shipped only the first step, narrower**: `SourceRegistry` (§1.2 below), never given an indexer — see that section's note |
+| D2 | Dense layer-id cache | Lives on `SourcePipeline` (computed once in `ApplySpecs`), **not** in the bridge — the kick, the probe, and the transfer all read the same `int[]`, so the three-consumer agreement invariant becomes structural. **Not built** — UMR-112's `SourceRegistry` does not carry a dense layer-id cache; `ComputeDenseLayerIds` stays on `TileManager` unchanged |
 | D3 | Symbol budgeting | Queue in `SymbolSubsystem` + explicit `PumpBuilds()` from `MapView.LateUpdate`; ≤1 build start/frame (configurable); atlas upload moves out of `TryBeginBuild` into the pump (≤1 upload/frame by construction) |
 | D4 | Symbol threading | Stage 1: decode+extract on the pool. Stage 2: shape+layout on the pool against an immutable per-tile snapshot (`IGlyphMetricsProvider` + `IGlyphAtlasView`) built on main **after** pass-1 appends. Atlas/cache **writes never leave the main thread**; no lock |
 | D5 | Two-phase kick | Measure task (worker, geometry into interim `TileMeshBuffers`) → main-thread exact-count `AllocateWritableMeshData(1)` per **non-empty chunk** → write task (worker). One `MeshDataArray` per chunk (a whole-array alloc conflicts with per-mesh resumable consume) |
@@ -63,7 +63,7 @@ Classification: #1, #2, #6 are **scheduling-only**; #3, #8 are **backend-only**;
 | D8 | Release budgeting | Deferred-release queue drained ≤`MaxReleasesPerTick` records/frame; re-validated against the live cover at dequeue (a tile that came back is un-queued, not destroyed) |
 | D9 | Batched removal | New `ITileRenderBackend.RemoveItems(ReadOnlySpan<int>)`; Entities implements it as **one** `EntityManager.DestroyEntity(NativeArray<Entity>)` per call (layers + emptied roots together) |
 | D10 | Entities vs BRG | **Fix Entities, keep it the ship default.** Prototype-entity + `Instantiate` + `RegisterMesh`/`RegisterMaterial` + ID-based `MaterialMeshInfo`, with unregister-on-remove. BRG stays the zero-alloc opt-in. (maintainer-accepted, §8) |
-| D11 | Cover gate | Recompute gated on `_coverDirty` alone; release-queue drain moves above the gate so it runs every frame |
+| D11 | Cover gate | Recompute gated on the cover-key gate alone (shipped as `CoverKeyGate`, UMR-112); release-queue drain moves above the gate so it runs every frame |
 | D12 | Budget-zero asymmetry | Unify: `MaxConsumesPerTick == 0` becomes **uncapped** like the other caps; tests get an explicit `internal bool BlockConsumeForTests` seam on the engine |
 
 ---
@@ -88,9 +88,23 @@ field changes. `SourceKey`/`SourceSpec` similarly become namespace-level `intern
 
 ### 1.2 `SourcePipelineRegistry` — `Rendering/Tile/SourcePipelineRegistry.cs`
 
-Moves out of `TileManager`: `SourcePipeline` (class), `SourceKey`, `SourceSpec`, the diff/keep/teardown body of
-`SetSources` step 2, `FindPipeline`, `DisposePipelines`, `SourceIdOf`, `InFlightCount`. **Plus (D2):** the dense
-layer-id computation (`ComputeDenseLayerIds` + scratch) is retired in favour of a per-source cached array.
+**Landed as `SourceRegistry` (UMR-112), narrower than this sketch.** `SourceKey`/`SourceSpec` stayed nested
+on `TileManager` (25 external call sites reference `TileManager.SourceSpec`, moving zero state — not worth
+the churn). `ComputeDenseLayerIds` and D2's cached array were not built; `SourceIdOf`/`InFlightCount` moved
+as planned. The sketch below is UNBUILT design history — read it for the diff/teardown shape, not the
+current API.
+
+**UMR-112 did not ship the indexer.** `public SourcePipeline this[int slot]`
+hands every caller the full pipeline — including the `ITileFeatureSource` and the mutable `MinZoom`/`MaxZoom`
+fields no caller should touch directly — so every future need ("just the source-id", "is this slot
+sourceless?") is satisfied by property-punching the returned object instead of adding an intention-revealing
+method. `SourceRegistry` exposes ten narrow, slot-keyed operations (`SourceIdOf`, `IsSourceless`,
+`AdmitsZoom`, `SourceAt`, `ReleaseTile`, …) and never returns `SourcePipeline` at all — a structural test
+(`TileProcessingStructureTests.SourceRegistry_SurfaceIsExactlyTenMembers`, UMR-112) pins the ten-member
+bound so a future "just add a getter" change fails loudly instead of silently reopening the indexer shape.
+
+Moves out of `TileManager`: `SourcePipeline` (class), the diff/keep/teardown body of `SetSources` step 2,
+`FindPipeline`, `DisposePipelines`, `SourceIdOf`, `InFlightCount`.
 
 ```csharp
 namespace MapRenderer.Unity.Rendering.Tile
@@ -118,7 +132,8 @@ namespace MapRenderer.Unity.Rendering.Tile
     internal sealed class SourcePipelineRegistry : System.IDisposable
     {
         public int Count { get; }
-        public SourcePipeline this[int slot] { get; }
+        // REJECTED at ship time (UMR-112) — `public SourcePipeline this[int slot] { get; }` sketched here
+        // originally. See the note above: ten narrow methods shipped instead; SourcePipeline never escapes.
 
         /// <summary>Diffs specs against existing pipelines by (SourceId, SourceKey): kept pipelines survive
         /// with warm caches, new specs build fresh ones, unmatched pipelines are torn down. Recomputes every
@@ -177,7 +192,10 @@ cache tests.
 
 Moves: `MeshBuildResult`, `KickMeshBuild`, `ConsumeMeshBuild`, `FinishConsume`, `AppendMeshes`, `AppendInts`,
 `DisposeWholeResult`, `_consumeScratch*`, `_pendingDisposal` + `DrainPendingDisposal` + the blocking drain from
-`DoDispose`. This is where every future consume-path fix (two-phase kick, mesher split) lands without touching
+`DoDispose`. **This engine was never built.** UMR-112 extracted only the three holding pens (this section's
+`_pendingDisposal` plus the graph and fetch pens) into `PendingDisposalQueue` — `DrainPendingDisposal` and
+`DrainPendingFetchDisposal` merged into one `DrainCompleted()`; the kick/consume machinery below stayed on
+`TileManager`, unmoved. This is where every future consume-path fix (two-phase kick, mesher split) lands without touching
 the lifecycle class again — the main payoff of the split. The signatures below already show the final two-phase
 form; the extraction step ships them with `KickMeasure` absent and today's single-phase `Kick` body (extraction
 is behaviour-preserving; §4 then changes only this class + the meshers). *(Post-A7: the live
@@ -253,6 +271,9 @@ archaeology is pruned during the moves — keep the *why*, drop the diffs git hi
 - **M2** — `SourcePipelineRegistry` + `DenseLayerIds`; consumers switch to `_registry[slot].DenseLayerIds`;
   delete `ComputeDenseLayerIds` + scratch. *Tooth:* existing multi-source + restyle suites; plus a new assertion
   that a restyle recomputes the dense set (a stale cache serves the OLD set and fails the completeness tests).
+  **Not built.** UMR-112 shipped the registry (§1.2) without a dense layer-id cache or an indexer —
+  `ComputeDenseLayerIds` stayed put, and slot-keyed access goes through named methods
+  (`SourceIdOf(slot)`, `IsSourceless(slot)`, …), never `_registry[slot].AnyField`.
 - **M3** — `PreparedTileBridge` (+ cache lock removal). *Tooth:* existing S82 cache suite passes unchanged;
   `CountMeshObjects` leak baseline unchanged across load→release→revisit.
 - **M4** — `TileMeshBuildEngine` + test-surface extraction + D12 budget-zero unification. *Tooth:* full EditMode
@@ -449,7 +470,9 @@ CoverRecomputesLastTick = 1;
 `pending` drops from the gate entirely — its only job was to keep Tick from early-outing *before* `PumpPending`,
 and the pump now runs unconditionally above the gate. Verified no hidden dependency: the request loop keys off
 `!_loaded.ContainsKey` (no-op on unchanged cover); the release loop keys off cover membership (finds nothing on
-unchanged cover). **Tooth:** style a map, hold the camera still, `BlockConsumeForTests = true` so a backlog
+unchanged cover). **UMR-112 renames** (illustrative pseudocode above kept as-shipped-then): `_coverDirty` is
+`CoverKeyGate.IsDirty`; `DrainPendingDisposal`/`DrainPendingFetchDisposal` merged into one call,
+`PendingDisposalQueue.DrainCompleted()`. **Tooth:** style a map, hold the camera still, `BlockConsumeForTests = true` so a backlog
 pends; 10 Ticks ⇒ `Σ CoverRecomputesLastTick(ticks 2..10) == 0` while `pending > 0`. Control: nudge zoom by 0.01
 ⇒ next Tick's counter == 1.
 
@@ -713,11 +736,11 @@ unregister); parity (GPU-snapshot byte-identical + Entities Hierarchy probes unc
 |---|---|---|---|---|
 | 1 ✅ DONE | Symbol Stage A: queue + ≤1 build/frame + upload coalescing + CTS | §2.1 | — | low (scheduling; attacks the worst stall) |
 | 2 ✅ DONE | Symbol Stage B: decode+extract to pool | §2.2 | 1 | low |
-| 3 ✅ DONE | Cover gate on `_coverDirty` alone + tooth | §3 | — | low (one line; suites arbitrate) |
+| 3 ✅ DONE | Cover gate on the cover-key gate alone (shipped as `CoverKeyGate`, UMR-112) + tooth | §3 | — | low (one line; suites arbitrate) |
 | 4 ✅ DONE | Release queue + `MaxReleasesPerTick` + `RemoveItems` seam + Entities batched destroy | §5 | 3 | medium |
 | 5 ✅ DONE | Entities `AddTileLayer` prototype/ID redesign + unregister-on-remove | §6 | — | medium (EG version detail) |
 | 6 | **Measure**: GC pan-storm profile (#7) + `PmMeshDataAllocate` capture — Editor session, no code | — | — | none (gates 9's alloc-half; do nothing on #7 until confirmed) |
-| 7 | Decompose M1+M2 (`LoadedTile` de-nest; `SourcePipelineRegistry` + dense-id cache) | §1.1–1.2 | — | low |
+| 7 ✅ PARTIAL | Decompose M1+M2 (`LoadedTile` de-nest; `SourcePipelineRegistry` + dense-id cache) — UMR-112 shipped the registry half as `SourceRegistry` (§1.2), without the dense-id cache | §1.1–1.2 | — | low |
 | 8 | Decompose M3+M4 (`PreparedTileBridge`; `TileMeshBuildEngine` + test-surface exit + D12 + comment prune) | §1.3–1.6 | 7 | medium (large mechanical move; leak suites are the net) |
 | 9 | Two-phase kick + `ILayerGeometry` chunking + `Mesh[]` cache values | §4 | 8, 6 (numbers) | high (mesher change; parity suite is the net) |
 | 10 | Symbol Stage C: snapshot + shaping off-thread | §2.3 | 2 | medium (the documented atlas hazard — snapshot defuses it structurally) |

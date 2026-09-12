@@ -302,7 +302,7 @@ namespace MapRenderer.Tests.Tiles
 
                 // Pan far east — evict the covered tile(s) while their graph is still genuinely in its
                 // Measure step (gate held). This tick must return PROMPTLY: RenderTeardownRecord must stash
-                // the in-flight graph in _pendingGraphDisposal, never call Dispose() (which would Complete()
+                // the in-flight graph via _pending.StashGraph, never call Dispose() (which would Complete()
                 // — and block — on the gated job) synchronously here.
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 var sw = System.Diagnostics.Stopwatch.StartNew();
@@ -340,7 +340,7 @@ namespace MapRenderer.Tests.Tiles
                 }
 
                 Assert.AreEqual(baselineGraphs, TileBuildGraph.DebugLiveCount,
-                    "once the gated job completes, the pen must drain: DrainPendingDisposal disposes the " +
+                    "once the gated job completes, the pen must drain: PendingDisposalQueue.DrainCompleted disposes the " +
                     "released graph on a later tick.");
                 Assert.AreEqual(baselinePayloads, MeshDataPayload.DebugLiveAllocCount,
                     "no MeshDataPayload leak once the pen has drained.");
@@ -361,7 +361,7 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary><b>RED injection:</b> in <c>RenderTeardownRecord</c>, replace the
-        /// <c>_pendingGraphDisposal.Add(lt.Graph); lt.Graph = null;</c> stash with an immediate
+        /// <c>_pending.StashGraph(lt.Graph); lt.Graph = null;</c> stash with an immediate
         /// <c>lt.Graph.Dispose()</c>. The assertion that actually catches it is
         /// <c>TileBuildGraph.DebugLiveCount &gt; baselineGraphs</c> right after eviction: an immediate
         /// <c>Dispose()</c> blocks until the gated job finishes, then decrements the live count before
@@ -473,8 +473,9 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        /// <summary><b>RED injection:</b> in <c>DoDispose</c>, replace the unconditional
-        /// <c>foreach (var graph in _pendingGraphDisposal) graph.Dispose();</c> sweep with one that skips a
+        /// <summary><b>RED injection:</b> in <c>PendingDisposalQueue.FlushAll</c> (called from
+        /// <c>DoDispose</c> via <c>_pending.FlushAll()</c>), replace the unconditional
+        /// <c>foreach (var graph in _graph) graph.Dispose();</c> sweep with one that skips a
         /// graph whose <c>IsStepComplete</c> is still false — the live-count assertion above catches the
         /// leak (this repo's build never hangs a headless run on a Complete() call, so there is no timeout
         /// hazard from testing the synchronous-block path directly).</summary>
