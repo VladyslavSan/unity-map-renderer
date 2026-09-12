@@ -113,6 +113,9 @@ namespace MapRenderer.Core.View
             double lodRatio  = _onScreenTilePx * 2.0 * tanV / vp.y;
             double worldSpan = 2.0 * WebMercator.WorldExtent;
 
+            // Pinhole pixel basis, for measuring a tile's actual projected on-screen size (the area-rule input).
+            var pixelBasis = new PixelBasis(pos, fwd, up, vp.y / (2.0 * tanV), near);
+
             _stack.Clear();
             _stack.Add(new TileId { Z = 0, X = 0, Y = 0 });
             while (_stack.Count > 0)
@@ -121,23 +124,25 @@ namespace MapRenderer.Core.View
                 TileId t    = _stack[last];
                 _stack.RemoveAt(last);
 
-                double nearDist;
+                double nearDist, onScreenPx;
                 // The whole-world tile is always partially visible, and (on a globe) its bounding sphere
                 // under-bounds it — so testing it can wrongly prune everything. Skip the test at z0.
-                if (t.Z == 0) nearDist = 0.0;
+                if (t.Z == 0) { nearDist = 0.0; onScreenPx = 0.0; }
                 else if (!TileVisible(in frustum, proj, origin, basis, occ, occCentre, camVec, dc, r2,
-                                      pos, t, t.Z >= z, out nearDist)) continue;
+                                      pos, in pixelBasis, t, t.Z >= z, out nearDist, out onScreenPx)) continue;
 
                 if (t.Z >= z) { reuseBuffer.Add(t); continue; } // near-field detail cap
                 if (t.Z == 0) { PushChildren(t); continue; }    // never LOD-stop the world tile
 
                 var ctx = new TileLodContext
                 {
-                    TileZoom    = t.Z,
-                    TargetZoom  = z,
-                    GroundSize  = worldSpan / (1L << t.Z),
-                    Distance    = nearDist,
-                    ScreenRatio = lodRatio,
+                    TileZoom         = t.Z,
+                    TargetZoom       = z,
+                    GroundSize       = worldSpan / (1L << t.Z),
+                    Distance         = nearDist,
+                    ScreenRatio      = lodRatio,
+                    OnScreenPx       = onScreenPx,
+                    TargetOnScreenPx = _onScreenTilePx,
                 };
                 if (_lod.StopAt(in ctx)) { reuseBuffer.Add(t); continue; } // far → coarse
                 PushChildren(t);
@@ -155,7 +160,8 @@ namespace MapRenderer.Core.View
 
         /// <summary>True iff tile <paramref name="t"/> meets the frustum (and, on a globe, is not entirely
         /// behind the horizon). Outputs <paramref name="nearDist"/> — the NEAREST render-space distance from the
-        /// camera to the tile's bound (its bounding sphere while descending on a globe, else the corner AABB).
+        /// camera to the tile's bound (its bounding sphere while descending on a globe, else the corner AABB) —
+        /// and <paramref name="onScreenPx"/>, the tile's true projected on-screen size in pixels.
         ///
         /// <para>The LOD metric is the nearest point, not the centre, on purpose: a huge coarse tile that merely
         /// grazes the frustum edge has a far centre but a NEAR edge, so a centre metric would emit it coarse even
@@ -165,15 +171,19 @@ namespace MapRenderer.Core.View
         /// <para>A globe tile is bounded by a SPHERE while descending (conservative — a coarse curved tile that
         /// contains the view isn't wrongly pruned) and by a tight corner AABB at the leaf (no ~0.7-tile
         /// over-cover). A flat atlas tile is always the tight AABB (no bulge, no occlusion).</para></summary>
+        /// <param name="onScreenPx">The tile's true projected on-screen size, in pixels.</param>
         private static bool TileVisible(in ViewFrustum frustum, IProjection proj, double3 origin, float3x3 basis,
                                         bool occ, double3 occCentre, double3 camVec, double dc, double r2,
-                                        double3 camPos, TileId t, bool leaf, out double nearDist)
+                                        double3 camPos, in PixelBasis pixelBasis, TileId t, bool leaf,
+                                        out double nearDist, out double onScreenPx)
         {
             double3 c  = RenderPoint(proj, origin, basis, t, 0.5, 0.5);
             double3 p0 = RenderPoint(proj, origin, basis, t, 0.0, 0.0);
             double3 p1 = RenderPoint(proj, origin, basis, t, 1.0, 0.0);
             double3 p2 = RenderPoint(proj, origin, basis, t, 0.0, 1.0);
             double3 p3 = RenderPoint(proj, origin, basis, t, 1.0, 1.0);
+
+            onScreenPx = OnScreenSize(in pixelBasis, c, p0, p1, p2, p3);
 
             if (occ)
             {
@@ -237,6 +247,53 @@ namespace MapRenderer.Core.View
         {
             double dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
             return math.sqrt(dx * dx + dy * dy + dz * dz);
+        }
+
+        /// <summary>The tile's projected on-screen size: the square root of the screen-space area of the
+        /// centre fan <c>c,p0,p1,p3,p2</c> (boundary order), summing each triangle's area <b>after</b> taking
+        /// its absolute value — a signed sum lets a folded (near-clamped) fan cancel and under-report.</summary>
+        private static double OnScreenSize(in PixelBasis camera, double3 c, double3 p0, double3 p1, double3 p2, double3 p3)
+        {
+            double2 pxC  = camera.ToPixels(c);
+            double2 pxP0 = camera.ToPixels(p0);
+            double2 pxP1 = camera.ToPixels(p1);
+            double2 pxP2 = camera.ToPixels(p2);
+            double2 pxP3 = camera.ToPixels(p3);
+
+            double area = TriangleArea(pxC, pxP0, pxP1) + TriangleArea(pxC, pxP1, pxP3)
+                        + TriangleArea(pxC, pxP3, pxP2) + TriangleArea(pxC, pxP2, pxP0);
+            return math.sqrt(area);
+        }
+
+        private static double TriangleArea(double2 a, double2 b, double2 c)
+            => 0.5 * math.abs((b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y));
+
+        /// <summary>The camera's pinhole pixel basis: forward/right/up axes plus the pixel scale, for turning a
+        /// render-space point into screen pixel coordinates (origin at frame centre). Depth is clamped to the
+        /// near plane so a point straddling the camera doesn't sign-flip into a near-zero or negative depth.</summary>
+        private readonly struct PixelBasis
+        {
+            private readonly double3 _pos, _forward, _right, _up;
+            private readonly double  _scale, _near;
+
+            public PixelBasis(double3 pos, double3 forward, double3 up, double scale, double near)
+            {
+                _pos     = pos;
+                _forward = math.normalize(forward);
+                _right   = math.normalize(math.cross(_forward, up));
+                _up      = math.cross(_right, _forward);
+                _scale   = scale;
+                _near    = near;
+            }
+
+            public double2 ToPixels(double3 point)
+            {
+                double3 toPoint = point - _pos;
+                double  depth   = math.dot(toPoint, _forward);
+                if (depth < _near) depth = _near;
+                return new double2(_scale * math.dot(toPoint, _right) / depth,
+                                   _scale * math.dot(toPoint, _up)    / depth);
+            }
         }
     }
 }

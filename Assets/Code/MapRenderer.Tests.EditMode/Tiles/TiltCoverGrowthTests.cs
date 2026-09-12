@@ -1,6 +1,7 @@
 // Engine-free (NUnit + Core only) → runs in BOTH the Unity EditMode runner and the fast core-tests project.
-// UMR-125: locks how many tiles the SHIPPED globe selector wiring emits as tilt increases, and records the
-// documented "count stays roughly constant under tilt" property as the defect it is today.
+// UMR-125: locks how many tiles the SHIPPED (default) globe selector wiring emits as tilt increases. The
+// default mode retains this growth by design — it is the better-looking mode under tilt; the opt-in
+// ProjectedArea mode (see ProjectedAreaLodTests.cs) trades this growth against visual quality.
 //
 // These are CHARACTERISATION tests. The exact counts below are deliberately brittle: any change to the LOD
 // stop rule, the near-field detail cap, the far-plane caps or the projection math moves at least one of them.
@@ -72,19 +73,19 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// Tooth B. <see cref="ScreenSpaceLodStrategy"/>'s summary claims the cover stays roughly constant
-        /// under tilt. That claim is false today, so the defect itself is what this asserts.
+        /// Tooth B. The default mode's cover grows under tilt (billboard approximation, no foreshortening) —
+        /// deliberately retained behaviour, not a defect: it is what buys the better-looking cover. See
+        /// <c>ProjectedAreaLodTests</c> for the opt-in mode that trades this growth for fewer tiles.
         /// </summary>
         [Test]
-        public void GlobeTiltSweep_CountGrowthIsTheKnownDefect()
+        public void DistanceMode_CoverGrowthUnderTiltIsRecordedBehaviour()
         {
             int atTilt0  = GlobeCover(0.0);
             int atTilt60 = GlobeCover(60.0);
 
             Assert.Greater(atTilt60, 2 * atTilt0,
-                "KNOWN DEFECT (UMR-125): ScreenSpaceLodStrategy's summary claims the tile count stays roughly "
-              + "constant under tilt. It does not — today 112 vs 24 (4.67x). When this assertion FAILS, the "
-              + "property has been restored: replace it with Assert.LessOrEqual and delete this message.");
+                "ScreenSpaceLodStrategy's cover grows well past 2x under tilt (today 112 vs 24, 4.67x) — a "
+              + "recorded tradeoff for the default's better-looking cover, not a defect to fix here.");
         }
 
         // ── Tooth C — the instrument ──────────────────────────────────────────────────────────────
@@ -92,9 +93,10 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>
         /// The tile's projected size on screen, in pixels — the square root of its screen-space quad area.
         /// Runs no selector: it takes ONE explicit tile, so a change to the stop rule cannot move it.
+        /// Internal so <c>ProjectedAreaLodTests</c> shares this instrument rather than duplicating it.
         /// </summary>
-        private static double ProjectedTilePx(IProjection projection, in CameraProperties cam,
-                                              double2 viewportPx, TileId tile)
+        internal static double ProjectedTilePx(IProjection projection, in CameraProperties cam,
+                                               double2 viewportPx, TileId tile)
         {
             var lookAt = new GeoCoordinate
             {

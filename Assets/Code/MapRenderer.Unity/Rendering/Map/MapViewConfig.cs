@@ -165,9 +165,15 @@ namespace MapRenderer.Unity.Rendering.Map
         public int OnScreenTilePx = 512;
 
         [Tooltip("Tile detail policy for the frustum selector. Flat = uniform single-zoom cover (previous " +
-                 "behaviour). ScreenSpaceLod = near full-detail, far progressively coarser (constant-ish tile " +
-                 "count under tilt; no tiny far-field tiles).")]
+                 "behaviour). ScreenSpaceLod (DEFAULT) = near full-detail, far progressively coarser; best " +
+                 "looking under tilt, most tiles. ProjectedArea = stops on the tile's true on-screen size; " +
+                 "fewest tiles under tilt, visibly coarser — trades quality for frame time.")]
         public TileLodMode LodMode = TileLodMode.ScreenSpaceLod;
+
+        [Tooltip("ProjectedArea only. 1.0 stops exactly at the target on-screen size; higher = coarser cover, " +
+                 "fewer tiles, lower visual quality. It cannot be tuned to match ScreenSpaceLod — the two " +
+                 "rules differ per tile, not by a constant.")]
+        public double ProjectedAreaAggressiveness = 1.0;
 
         [Tooltip("FLAT Web-Mercator far-plane cap (GeometryAwareFarPlane): the render + selection far distance " +
                  "grows with tilt but is clamped to altitude × this. Higher = see/select farther under tilt " +

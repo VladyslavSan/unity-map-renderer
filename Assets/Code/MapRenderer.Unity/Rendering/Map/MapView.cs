@@ -576,26 +576,70 @@ namespace MapRenderer.Unity.Rendering.Map
             };
         }
 
+        /// <summary>The selector's rebuild-detection inputs, hand-rolled rather than a tuple — DO NOT
+        /// "tidy" this back into one. UMR-125 measured a <c>System.ValueTuple</c> past 7 elements allocating
+        /// on Unity's Mono every tick: the 8th+ field wraps in a nested <c>ValueTuple</c> (the compiler's
+        /// <c>TRest</c>), and STORING or comparing that shape allocated. Internal (not private) only so
+        /// <c>ProjectedAreaLodWiringTests.SelectorInputsEquals_DistinguishesEveryField</c> can reach it.</summary>
+        internal readonly struct SelectorInputs : IEquatable<SelectorInputs>
+        {
+            public readonly bool        Globe;
+            public readonly TileLodMode Lod;
+            public readonly int         MinZoom;
+            public readonly int         MaxZoom;
+            public readonly int         OnScreenPx;
+            public readonly double      MercFarCap;
+            public readonly double      GlobeFarCap;
+            public readonly double      AreaAggressiveness;
+
+            public SelectorInputs(bool globe, TileLodMode lod, int minZoom, int maxZoom, int onScreenPx,
+                                  double mercFarCap, double globeFarCap, double areaAggressiveness)
+            {
+                Globe = globe; Lod = lod; MinZoom = minZoom; MaxZoom = maxZoom; OnScreenPx = onScreenPx;
+                MercFarCap = mercFarCap; GlobeFarCap = globeFarCap; AreaAggressiveness = areaAggressiveness;
+            }
+
+            /// <summary>Field-by-field only — no <see cref="EqualityComparer{T}"/>, no boxing, no
+            /// <c>System.ValueTuple</c> machinery, so this stays allocation-free on the per-tick path.</summary>
+            public bool Equals(SelectorInputs other)
+                => Globe == other.Globe && Lod == other.Lod && MinZoom == other.MinZoom
+                && MaxZoom == other.MaxZoom && OnScreenPx == other.OnScreenPx && MercFarCap == other.MercFarCap
+                && GlobeFarCap == other.GlobeFarCap && AreaAggressiveness == other.AreaAggressiveness;
+
+            public override bool Equals(object obj) => obj is SelectorInputs other && Equals(other);
+
+            public override int GetHashCode()
+                => HashCode.Combine(Globe, Lod, MinZoom, MaxZoom, OnScreenPx, MercFarCap, GlobeFarCap,
+                                    AreaAggressiveness);
+        }
+
         // ── S71: visible-tile selector, rebuilt only when a selection input (or the projection) changes ──
-        private (bool globe, TileLodMode lod, int minZoom, int maxZoom, int onScreenPx,
-            double mercFarCap, double globeFarCap)? _selectorInputs;
+        private bool           _hasSelectorInputs;
+        private SelectorInputs _selectorInputs;
 
         private void EnsureSelector()
         {
             var  tileSelection = _config.TileSelection;
             bool globe         = Camera.Projection is SphericalProjection;
-            var key = (globe, tileSelection.LodMode, tileSelection.MinZoom, tileSelection.MaxZoom,
-                tileSelection.OnScreenTilePx, tileSelection.MercatorFarPlaneCap, tileSelection.GlobeFarPlaneCap);
-            if (TileManager.Selector != null && _selectorInputs == key) return;
-            _selectorInputs = key;
+            var key = new SelectorInputs(
+                globe: globe, lod: tileSelection.LodMode, minZoom: tileSelection.MinZoom,
+                maxZoom: tileSelection.MaxZoom, onScreenPx: tileSelection.OnScreenTilePx,
+                mercFarCap: tileSelection.MercatorFarPlaneCap, globeFarCap: tileSelection.GlobeFarPlaneCap,
+                areaAggressiveness: tileSelection.ProjectedAreaAggressiveness);
+            if (TileManager.Selector != null && _hasSelectorInputs && key.Equals(_selectorInputs)) return;
+            _selectorInputs    = key;
+            _hasSelectorInputs = true;
 
             // One universal FrustumTileSelector for every projection (occlusion via IProjection). LOD strategy
             // from config; far-plane policy per projection — ray-sphere for a self-occluding globe
             // (curvature-correct: tight near, limb far), geometry-aware for the flat atlas. The camera gets the
             // SAME far so the rendered frustum is byte-for-byte the selected one.
-            ITileLodStrategy lod = tileSelection.LodMode == TileLodMode.ScreenSpaceLod
-                ? new ScreenSpaceLodStrategy()
-                : new FlatLodStrategy();
+            ITileLodStrategy lod = tileSelection.LodMode switch
+            {
+                TileLodMode.ScreenSpaceLod => new ScreenSpaceLodStrategy(),
+                TileLodMode.ProjectedArea  => new ProjectedAreaLodStrategy(tileSelection.ProjectedAreaAggressiveness),
+                _                          => new FlatLodStrategy(),
+            };
             IFarPlanePolicy far = Camera.Projection.TryGetHorizonOccluder(out _, out double occRadius)
                 ? new RaySphereFarPlane(occRadius, tileSelection.GlobeFarPlaneCap)
                 : new GeometryAwareFarPlane(tileSelection.MercatorFarPlaneCap);
