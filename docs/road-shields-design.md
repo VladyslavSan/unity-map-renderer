@@ -18,7 +18,7 @@ defective acceptance teeth. The reversals, recorded here rather than silently ab
 
 | Was | Is now | Why |
 |---|---|---|
-| Five gates, extractor-only scope | **Six gates** — **G6**, the sprite-atlas readiness race, is IN scope (**D6**) | A tile committed before the async sprite fetch resolves is permanently icon-free. The extractor fix alone therefore does **not** make shields render in the demo — the very claim this epic exists to deliver. Verified in source: `SymbolLabelSubsystem.TryBeginBuild:433` captures `_spriteAtlas` (may be null); `FetchSpriteSheetAsync:651-652` assigns it with no invalidation; the doc at `:252-255` admits the tile only "self-heals on its next rebuild". |
+| Five gates, extractor-only scope | **Six gates** — **G6**, the sprite-atlas readiness race, is IN scope (**D6**) | A tile committed before the async sprite fetch resolves is permanently icon-free. The extractor fix alone therefore does **not** make shields render in the demo — the very claim this epic exists to deliver. Verified in source (as of 2026-07-29): `SymbolLabelSubsystem.TryBeginBuild:433` captures `_spriteAtlas` (may be null); `FetchSpriteSheetAsync:651-652` assigns it with no invalidation; the doc at `:252-255` admits the tile only "self-heals on its next rebuild". |
 | D5 "the centred icon+text pair is **one symbol**"; the G5 row said D5 **fixes** G5 | D5 is a **named approximation** with a new, strictly-narrower harm profile; G5 is **mitigated**, not fixed | No flag-only formulation makes two independent collision candidates place/drop atomically. Claiming "one symbol" overstated it. The passenger text now also carries `IgnorePlacement = true`, so it can never *block* an unrelated label — the one harm that was removable at zero cost. It can still survive alone (a bare number), which is now a **pinned, tested** decision rather than a latent surprise. |
 | T9 "both boxes survive `LabelCollision`" was the G5 tooth | T9 is **replaced** — it was **disarmed** | `LabelCollision.cs:72` is `bool place = boxes[i].AllowOverlap;`, so a hand-built box with `AllowOverlap = true` already survives against **un-fixed** code. T9 tested existing `AllowOverlap` semantics, never the extractor. The replacement runs the **extractor** and feeds its real output to `LabelCollision`. |
 | D2: mid-arc is "stable under tile clipping" | Claim **dropped**. Anchor-clip semantics are now stated explicitly (§3 D2) with a recorded loss case and a tooth | Arc length is a function of the *buffered* decoded path; changing the clip changes the midpoint by definition. A buffer-dominated path can lose its only anchor to the `[0, extent)` clip. |
@@ -81,9 +81,9 @@ renders something visibly worse than today).
 | **G1** | `Core/Style/Symbol/LayoutProperties.cs:182` | `symbol-placement` is read via `.AsString(null)`. The shields' step expression is a JSON **array**, so `AsString` yields `null` and the property degrades to `Point` at every zoom. Only these 3 symbol layers use an expression here; the other 7 line-symbol layers use a literal `"line"` and work. |
 | **G2** | `Core/Style/Symbol/SymbolFeatureExtractor.cs:87` | `feature.GeometryType != wantGeometry` drops every LineString when placement is `Point`. Shield features are all LineString ⇒ 0 labels (probe [C]). |
 | **G3** | `SymbolFeatureExtractor.cs:107` | `if (!isLine && spriteAtlas != null)` — icons are skipped entirely under line placement (an I3 scope fence, documented in `Extract`'s XML doc). So even with G1+G2 fixed, at z ≥ 11 the shield sprite never emits (probe [D]: `icon=0`). |
-| **G4** | `SymbolFeatureExtractor.cs:151` + `Core/Text/Placement/LabelStagingMath.cs:289` | Line placement **always** produces a curved along-line label. `RotationAlignment` is stamped only on the point path (`:253`, `:270`), `CurvedStageInput` carries no alignment field, and `StageCurvedAnchor` computes `rotation = tangent + flip` unconditionally. The shields' `text-rotation-alignment: viewport` / `icon-rotation-alignment: viewport` are therefore ignored: road numbers would curve along the road instead of standing upright inside a shield. |
-| **G5** | `Core/Text/Placement/LabelCollision.cs:33` (`ComparePlacementOrder`) + `SymbolFeatureExtractor.cs:235/257` | A shield's number sits **centred on** its sprite, so the text box and the icon box always overlap. The extractor emits text at ordinal *N* and icon at *N+1*; both carry `symbol-sort-key` 0 and neither sets `*-allow-overlap` / `*-ignore-placement`; the greedy order is `(sortKey, FeatureIndex, TileKey)`. So **the text always places and the icon is always dropped** — at every zoom, under both placements. Without addressing G5 the fix ships bare road numbers, which is the reported bug. **D5 mitigates this; it does not fix it** — see D5. |
-| **G6** | `Unity/Text/SymbolLabelSubsystem.cs:433` (kick-time capture) + `:651-652` (late assignment) | The style's sprite sheet is fetched **asynchronously and independently** of tile loading. `TryBeginBuild` captures `_spriteAtlas` at kick time; it is `null` until the fetch resolves, and a build with a null atlas extracts **no icon labels at all**. When the fetch completes, nothing invalidates the tiles already built — the property doc at `:252-255` admits the tile only "self-heals on its next rebuild", and there is **no re-kick path** for an already-built, still-in-cover tile (verified: `TryBeginBuild` is called from exactly one line, `TileManager.cs:1434`, reached only when a record enters `_loaded` with a ready decode; `InvalidateCover()` skips loaded records; `ReconcileLoadedTiles` never rebuilds; a prepared-cache re-entry restores the *old* icon-free labels verbatim). At demo startup the tile fetch commonly beats the sprite fetch, so the z13 view shows bare numbers **permanently**, with G1–G5 all fixed. |
+| **G4** | `SymbolFeatureExtractor.cs:151` + `Core/Text/Placement/SymbolStagingMath.cs` | Line placement **always** produces a curved along-line label. `RotationAlignment` is stamped only on the point path (`:253`, `:270`), `CurvedStageInput` carries no alignment field, and `StageCurvedAnchor` computes `rotation = tangent + flip` unconditionally. The shields' `text-rotation-alignment: viewport` / `icon-rotation-alignment: viewport` are therefore ignored: road numbers would curve along the road instead of standing upright inside a shield. |
+| **G5** | `Core/Text/Placement/SymbolCollision.cs:33` (`ComparePlacementOrder`) + `SymbolFeatureExtractor.cs:235/257` | A shield's number sits **centred on** its sprite, so the text box and the icon box always overlap. The extractor emits text at ordinal *N* and icon at *N+1*; both carry `symbol-sort-key` 0 and neither sets `*-allow-overlap` / `*-ignore-placement`; the greedy order is `(sortKey, FeatureIndex, TileKey)`. So **the text always places and the icon is always dropped** — at every zoom, under both placements. Without addressing G5 the fix ships bare road numbers, which is the reported bug. **D5 mitigates this; it does not fix it** — see D5. |
+| **G6** | `Unity/Text/SymbolSubsystem.cs:476` (kick-time capture) + `:849` (late assignment) | The style's sprite sheet is fetched **asynchronously and independently** of tile loading. `TryBeginBuild` captures `_spriteAtlas` at kick time; it is `null` until the fetch resolves, and a build with a null atlas extracts **no icon labels at all**. When the fetch completes, nothing invalidates the tiles already built — the property doc at `:316-319` admits the tile only "self-heals on its next rebuild", and there is **no re-kick path** for an already-built, still-in-cover tile (verified: `TryBeginBuild` is called from exactly one line, `TileManager.cs:1264`, reached only when a record enters `_loaded` with a ready decode; `InvalidateCover()` skips loaded records; `ReconcileLoadedTiles` never rebuilds; a prepared-cache re-entry restores the *old* icon-free labels verbatim). At demo startup the tile fetch commonly beats the sprite fetch, so the z13 view shows bare numbers **permanently**, with G1–G5 all fixed. |
 
 > **G5 and G6 were not in the original brief.** G5 was found while sizing G3/G4; G6 was found by the
 > adversarial review. Both are load-bearing: G1–G4 alone produce numbers with no shields, and G1–G5
@@ -203,7 +203,7 @@ re-baked. The viewport-resolved case (D4, below) is untouched.
 **This is a named approximation, not a fix, and not "one symbol".** MapLibre treats a symbol's icon and text
 as **one instance** (`icon-optional` / `text-optional` default false ⇒ they place or drop together, with a
 combined box). This codebase models them as two independent collision candidates, and
-`WorldLabelRenderer.Emit` keys its mesh slot by `(TileKey, Slot, AtlasKind)`, so a single candidate cannot
+`WorldSymbolRenderer.Emit` keys its mesh slot by `(TileKey, Slot, AtlasKind)`, so a single candidate cannot
 span the glyph atlas and the sprite atlas. Real pairing therefore means either a candidate-level instance
 link or a per-**quad** `AtlasKind` with a split emit — both reach into the Burst staging/collision path and
 the SoA batch. Too much for this stage. **No flag-only, extractor-only formulation can make two independent
@@ -218,7 +218,7 @@ as icon-owns-collision:
 - the **icon** is emitted **first** and is the collision owner (normal box, normal blocking);
 - the **text** rides along with **both** `AllowOverlap = true` **and** `IgnorePlacement = true`.
 
-`AllowOverlap` alone was the first draft's choice and it was strictly worse. `LabelCollision.cs:72-83`
+`AllowOverlap` alone was the first draft's choice and it was strictly worse. `SymbolCollision.cs:72-83`
 places an `AllowOverlap` candidate unconditionally **and still inserts it as a blocker** unless it ignores
 placement (`:79`, `:123`). So an `AllowOverlap`-only passenger could *drop unrelated later labels* — it
 changed the survivor set for labels that have nothing to do with the shield. `IgnorePlacement = true` costs
@@ -233,8 +233,8 @@ unconditionally and blocks no-one.
 - The passenger text can never be dropped by collision, so a shield's number can overlap a neighbouring
   label in a dense scene. It is also a survivor every frame, so the fade/incumbency machinery treats it as
   continuously placed rather than fading out with its icon.
-- The icon and text keep **independent** cross-tile identities (`SymbolTileLabelBlockBaker.cs:48-76`,
-  `CrossTileLabelKey.cs:10-16`). Both dedup scans normally pick the same finest tile, so the pair stays
+- The icon and text keep **independent** cross-tile identities (`SymbolTileBlockBaker.cs`,
+  `CrossTileSymbolKey.cs:10-16`). Both dedup scans normally pick the same finest tile, so the pair stays
   together; D6 removes the one mechanism (a tile with text but no icons) that could have made them diverge.
 
 **Predicate breadth — attacked and held.** The predicate selects **exactly** the three shield layers across
@@ -257,12 +257,12 @@ were considered; the chosen one is the least invasive that is also correct.
 |---|---|
 | Rebuild the affected tiles when the atlas lands | No decode survives the kick (`SharedTileDecode`'s own doc: retention is plain GC reachability, dropped with the completing kick task), and `TileScheduler.Release` evicts bytes. A rebuild therefore needs a new TileManager re-kick API, a re-fetch, a re-decode and a per-frame budget — a second epic, and it churns meshes for a label-only problem. |
 | Block `MapView.SetStyle` on the sprite fetch before wiring sources | Simple, but a slow or hung sprite endpoint would then blank the **entire** map — fills and lines included — for a defect that only affects labels. |
-| **Park the symbol worker phase, holding the decode, until the fetch settles** ✅ | Self-contained in `SymbolLabelSubsystem`; no TileManager change, no re-fetch, no mesh churn, extraction still runs off-main. |
+| **Park the symbol worker phase, holding the decode, until the fetch settles** ✅ | Self-contained in `SymbolSubsystem`; no TileManager change, no re-fetch, no mesh churn, extraction still runs off-main. |
 
-**The mechanism.** `SymbolLabelSubsystem.SetStyle` already starts the fetch
-(`FetchSpriteSheetAsync(style, _buildCts.Token)`, `:378`). Keep its result as a `.Preserve()`d `UniTask`
+**The mechanism.** `SymbolSubsystem.SetStyle` already starts the fetch
+(`FetchSpriteSheetAsync(style, _buildCts.Token)`, `:439`). Keep its result as a `.Preserve()`d `UniTask`
 and read readiness the way this class already reads its reconcile worker
-(`_reconcileTask.Status == UniTaskStatus.Pending`, `:819`):
+(`_reconcileHandle.IsCompleted` on the `WorkHandle<bool>`, `:928`/`:994`):
 
 ```
 private bool SpritesSettled => _spriteFetchTask.Status != UniTaskStatus.Pending;
@@ -304,8 +304,8 @@ timeout, so a genuinely hung endpoint (connects, never responds — NOT the 404/
 leave `_spriteFetchTask` `Pending` forever, making the parking PERMANENT — zero symbol labels ever, for the
 whole style, plus an unbounded `_pendingSpriteQueue` (every parked build retains its
 `IDecodedTileHandle`). `SpriteFetchDeadlineSeconds` (**8s**, `internal const`
-`SymbolLabelSubsystem.SpriteFetchDeadlineSeconds`) bounds that: `SpritesSettled` also goes true once that
-many seconds have elapsed since the fetch started (`SymbolLabelSubsystem.NowSeconds`, a test-overridable
+`SymbolSubsystem.SpriteFetchDeadlineSeconds`) bounds that: `SpritesSettled` also goes true once that
+many seconds have elapsed since the fetch started (`SymbolSubsystem.NowSeconds`, a test-overridable
 clock — `NowSecondsOverride` — mirroring `GlyphSourceFactoryOverride`/`SpriteSourceFactoryOverride`),
 regardless of the fetch's own status. Once tripped, `PumpBuilds`' existing pending-drain (already tolerant
 of a null `_spriteAtlas` — the T11 path) dispatches every parked build with whatever atlas state exists — a
@@ -370,7 +370,7 @@ runner and `Tools/core-tests`. Counts are structural or independently derived in
 | T6 | `AlignmentResolution.Resolve` — `(Auto, Line)`/`(Auto, LineCenter)` == `Map`, `(Auto, Point)` == `Viewport`, `Map`/`Viewport` pass through | the helper does not exist (guards the fix) |
 | T7 | map-aligned line layer, **non-empty output** required: `labels.Count` equals the independently counted number of eligible decoded paths (≥ 2 points), and one identified record matches field-for-field on paint, `SpacingPx`, `MaxAngleDeg`, `KeepUpright`, `AllowOverlap`, `IgnorePlacement`, `TranslatePx`, `TranslateAnchor`, `SortKey`, contiguous `FeatureIndex` ordinals, `PathRender.Length`, non-empty `LineAnchors` | — (guards the invariant; a regression that drops every map-aligned label now fails) |
 | T8 | a map-aligned **icon** line layer emits zero icon labels with an atlas supplied (the surviving fence), with > 0 features selected | — (guards the fence) |
-| T9 | **extractor → collision**: run the real extractor over a centred-pair tile, build `LabelBox`es from its emitted labels' own flags/ordinals with two overlapping boxes, run `LabelCollision.SelectSurvivors`; assert both survive **and** that the emitted order is icon-then-text | un-fixed emits text-then-icon with both flags false, so the collision drops the icon. (The old hand-built version of this tooth was **disarmed** — see §0) |
+| T9 | **extractor → collision**: run the real extractor over a centred-pair tile, build `SymbolBox`es from its emitted labels' own flags/ordinals with two overlapping boxes, run `SymbolCollision.SelectSurvivors`; assert both survive **and** that the emitted order is icon-then-text | un-fixed emits text-then-icon with both flags false, so the collision drops the icon. (The old hand-built version of this tooth was **disarmed** — see §0) |
 | T12 | **three candidates**: a higher-priority blocker A, the shield icon I, its passenger text T, all overlapping, plus a later label B. Assert A places, **I is dropped**, **T places anyway** (the accepted bare number), and **B still places** (T does not block it) | the `IgnorePlacement`-less version drops B; pins the D5 approximation as a decision |
 | T13 | the two US shield layers select **zero** features from the Berlin fixture | — (records *why* synthetic features exist; alarms if the fixture is ever swapped) |
 | T14 | anchor-clip semantics: a synthetic path from `x = -1000` to `x = 100` under point placement emits **zero** labels (mid-arc in the buffer — the accepted loss); a path whose mid-arc is in-tile emits exactly one, at the mid-arc point; under line placement, only the in-tile anchors of an edge-crossing path emit | — (pins the semantics D2 now states) |
@@ -379,10 +379,10 @@ runner and `Tools/core-tests`. Counts are structural or independently derived in
 | T11 **[Unity]** | the same drive, but the gate resolves with `HasData == false` (a 404): the parked build still drains and commits its **text** labels | catches the obvious wrong fix (waiting on `_spriteAtlas != null`), which hangs forever |
 | T16 **[Unity]** | (added post-review, REQUIRED 1) a gate that is **never** resolved — a NEVER-completed `UniTaskCompletionSource<SpriteResponse>`, simulating a hung endpoint with no HTTP timeout: drive one tile build; assert no labels commit and the pending queue holds it while under `SpriteFetchDeadlineSeconds`; advance the (test-overridden) clock past the deadline WITHOUT ever resolving the gate; assert the build now commits (text, no icon) **and** the pending queue drains to zero | before the deadline existed, this scenario parked forever — zero labels ever, unbounded `_pendingSpriteQueue` growth |
 
-T10/T11/T16 are **[Unity]-only by necessity**: `SymbolLabelSubsystem` is engine-bound (`Texture2D`, `Camera`,
+T10/T11/T16 are **[Unity]-only by necessity**: `SymbolSubsystem` is engine-bound (`Texture2D`, `Camera`,
 `Debug`) and `FetchSpriteSheetAsync` hops `UniTask.SwitchToMainThread()` before constructing a `Texture2D`,
 so they must be `[UnityTest]` and must **not** be added to `Tools/core-tests/core-tests.csproj`. All three
-freeze `SymbolLabelSubsystem.NowSecondsOverride` in `[SetUp]` so their frame-pump loops never race real
+freeze `SymbolSubsystem.NowSecondsOverride` in `[SetUp]` so their frame-pump loops never race real
 wall-clock time against `SpriteFetchDeadlineSeconds` — a deadline trip mid-test on a slow CI machine would
 otherwise fail looking exactly like a real D6 regression.
 
@@ -392,7 +392,7 @@ otherwise fail looking exactly like a real D6 regression.
 
 | Item | Why it is out of scope |
 |---|---|
-| ~~**True symbol-instance pairing**~~ | **NO LONGER DEFERRED — this is §10 (stage 3).** The row's original reasoning (an instance link *or* a per-quad `AtlasKind` split emit) turned out to be a false dilemma: the pair is one `LabelCandidate` spanning both halves' boxes with a per-candidate EMIT RANGE, so `WorldLabelRenderer.Emit` is not touched at all. D5/T12's accepted bare number is **reversed** there. |
+| ~~**True symbol-instance pairing**~~ | **NO LONGER DEFERRED — this is §10 (stage 3).** The row's original reasoning (an instance link *or* a per-quad `AtlasKind` split emit) turned out to be a false dilemma: the pair is one `SymbolCandidate` spanning both halves' boxes with a per-candidate EMIT RANGE, so `WorldSymbolRenderer.Emit` is not touched at all. D5/T12's accepted bare number is **reversed** there. |
 | ~~**Map-aligned line icons** (`road_one_way_arrow*`)~~ | **NO LONGER DEFERRED — built as P-B** (`docs/labels-and-symbols-design.md` §6). Emitted as one-glyph curved labels + `icon-rotate`; D4's fence is lifted and T8 is reversed into tooth A2. |
 | **Point placement on Polygon** (centroid / pole of inaccessibility) | Would add labels to unguarded `place` / `airport` / `poi_transit` layers. Deliberate gap (D2). |
 | **Display-zoom re-evaluation of `symbol-placement`** | The D1 known limit — the visible step-boundary pop, pinned by T15. Belongs with the wider "camera-property re-evaluation" epic. |
@@ -409,12 +409,12 @@ otherwise fail looking exactly like a real D6 regression.
 Core: `Style/Symbol/LayoutProperties` (`SymbolPlacement`, `ParsePlacement`, `ParseAlignment`),
 `Style/Symbol/SymbolFeatureExtractor` (`Extract` — the placement/geometry gate, the icon fence, the line and
 point branches), `Style/Symbol/IconImageResolver`, `Text/AlignmentMode` (+ the new `AlignmentResolution`),
-`Text/Placement/LineAnchorPlacement` / `LineAnchor`, `Text/Placement/LabelCollision`,
-`Text/Placement/LabelStagingMath` (`StageCurvedAnchor`). Unity: `Text/SymbolLabelSubsystem`
+`Text/Placement/LineAnchorPlacement` / `LineAnchor`, `Text/Placement/SymbolCollision`,
+`Text/Placement/SymbolStagingMath` (`StageCurvedAnchor`). Unity: `Text/SymbolSubsystem`
 (`TryBeginBuild`, `SymbolTileWorkerPass.RunWorkerAndHandoff`, `PumpBuilds`, `FetchSpriteSheetAsync` — D6),
 `Rendering/Tile/Processing/TileSymbolLayerProcessor` (the atlas is a ctor arg — D6 defers its construction),
 `Text/StyledSymbolTileBuilder` (the `Placement == Point` vs curved branches),
-`Text/Placement/WorldLabelRenderer` (`Emit`'s `(TileKey, Slot, AtlasKind)` slot key — the constraint behind
+`Text/Placement/WorldSymbolRenderer` (`Emit`'s `(TileKey, Slot, AtlasKind)` slot key — the constraint behind
 D5). Style: `Assets/StreamingAssets/Fixtures/liberty.json` (the 3 shield layers). Related:
 `docs/labels-and-symbols-design.md` §3 (curved along-line text) and §5 (icon support — the I3 fence this
 lifts), `docs/maplibre-spec.md` (symbol support matrix).
@@ -565,7 +565,7 @@ attacked directly and survived **more strongly** than §9 originally claimed:
   `ZTest Always` — not merely "ZWrite off"; there is no depth path at all, so submission order alone paints.
   (This retires the "premise to re-verify" note the plan carried.)
 - **No submission path bypasses `material.renderQueue`.** Labels draw through a plain `MeshRenderer` tree
-  (`WorldLabelRenderer`), explicitly **not** an `ITileRenderBackend`, so no BRG/command-buffer path can
+  (`WorldSymbolRenderer`), explicitly **not** an `ITileRenderBackend`, so no BRG/command-buffer path can
   reorder them; and the project overrides neither `SortingCriteria` nor `TransparencySortMode`.
 - **Live GPU proof already exists.** `SymbolLayerOrderSnapshotTests` reads back pixels showing that swapping
   `renderQueue` between two symbol **text** materials flips the composite — the same mechanism D7 uses for
@@ -639,8 +639,9 @@ comment-value fix, nothing else — no assertion, no input, no baseline, no beha
 > — "no `poi_*` / `place` / `airport` / `label_*` layer changes" — was true of Stage 3 and is **false today**:
 > those are precisely the layers P-A changed. The deferred item at the foot of this section ("Pairing every
 > icon+text symbol, not just CENTRED ones") is **done**. Current SSOT:
-> `docs/labels-and-symbols-design.md` §7. Nothing below has been rewritten — a shipped stage's record should
-> not be edited to match later work — so where this section and §7 disagree, §7 wins.
+> `docs/labels-and-symbols-design.md` §7. Nothing below has been rewritten to match later behaviour — a shipped
+> stage's record should not be edited to match later work; dead identifier names were retargeted at their
+> current spellings — so where this section and §7 disagree, §7 wins.
 
 Stage 2 removed the "badge alone" symptom. The remaining one is **"only the number, no badge"** — the G5/D5
 residual, which §3 D5 named an approximation and §6 deferred. This stage fixes it, and retires D5.
@@ -650,34 +651,34 @@ entities through three systems, and D5 patched only the first, one-directionally
 
 | System | Today | Consequence |
 |---|---|---|
-| Collision (`LabelCollision.ComparePlacementOrder` + the greedy) | two candidates, ordinals *N* (icon) and *N+1* (text); the text is force-fed `AllowOverlap` + `IgnorePlacement` so it always places | the icon can lose to a higher-priority label while its number still draws — **the bare number** |
-| Cross-tile dedup (`DedupKey` in `SymbolLabelReconciler.Run`) | icon key `(cell, layer, ∅, iconImage)`, text key `(cell, layer, text, ∅)` — two independent finest-zoom scans | the two halves can be selected from **different tiles**, so the number sits metres off its badge |
+| Collision (`SymbolCollision.ComparePlacementOrder` + the greedy) | two candidates, ordinals *N* (icon) and *N+1* (text); the text is force-fed `AllowOverlap` + `IgnorePlacement` so it always places | the icon can lose to a higher-priority label while its number still draws — **the bare number** |
+| Cross-tile dedup (`DedupKey` in `SymbolReconciler.Run`) | icon key `(cell, layer, ∅, iconImage)`, text key `(cell, layer, text, ∅)` — two independent finest-zoom scans | the two halves can be selected from **different tiles**, so the number sits metres off its badge |
 | Fade (`SymbolPlacementSystem.PointFadeId` → `_fadeOpacity` / `_placedLastFrame`) | one opacity record per half | the halves ease in/out **independently** |
 
 MapLibre treats a symbol's icon and text as ONE instance: `icon-optional` / `text-optional` default false ⇒
 they place or drop together, with a combined box.
 
-### D8 — the pair is ONE `LabelCandidate` over BOTH boxes, with a per-candidate EMIT RANGE
+### D8 — the pair is ONE `SymbolCandidate` over BOTH boxes, with a per-candidate EMIT RANGE
 
-The blocker every prior pass recorded — *"`WorldLabelRenderer.Emit` keys its mesh slot by
+The blocker every prior pass recorded — *"`WorldSymbolRenderer.Emit` keys its mesh slot by
 `(TileKey, Slot, AtlasKind)`, so one candidate cannot span the glyph atlas and the sprite atlas"* — is real
-and is **verified still true** (`WorldLabelRenderer.cs:216`). Its stated consequence ("so pairing needs
-either an instance link on `LabelCandidate` or a per-quad `AtlasKind` with a split emit") is a false
+and is **verified still true** (`WorldSymbolRenderer.cs:238`). Its stated consequence ("so pairing needs
+either an instance link on `SymbolCandidate` or a per-quad `AtlasKind` with a split emit") is a false
 dilemma. A candidate does not have to own exactly one `CandidateEmit`:
 
-- `LabelCandidate` already spans a **contiguous range of boxes** (`BoxStart`/`BoxCount`) and
-  `LabelCollision.SelectSurvivors` already places it **all-or-nothing**: every box is TESTED before ANY is
+- `SymbolCandidate` already spans a **contiguous range of boxes** (`BoxStart`/`BoxCount`) and
+  `SymbolCollision.SelectSurvivors` already places it **all-or-nothing**: every box is TESTED before ANY is
   inserted, and a placed candidate inserts them all. That is *exactly* MapLibre's combined-box semantics —
   and it is the machinery curved along-line labels already run on.
 - So the pair becomes **one candidate with two boxes** (icon AABB, text AABB — each keeping its own
-  `*-padding`), and `LabelCandidate` gains `EmitStart`/`EmitCount` — a range into the staged
+  `*-padding`), and `SymbolCandidate` gains `EmitStart`/`EmitCount` — a range into the staged
   `CandidateEmit` pool, mirroring `BoxStart`/`BoxCount`. The pair emits **two** `CandidateEmit`s, each with
-  its own `Slot`/`AtlasKind`/quad range. **`WorldLabelRenderer` is not touched.**
+  its own `Slot`/`AtlasKind`/quad range. **`WorldSymbolRenderer` is not touched.**
 
 **Rejected — per-quad `AtlasKind` + a split emit.** Merging the two halves' quads into ONE emit needs
 per-QUAD `Color`, `TextSizePx`, `PaddingPx` and `TranslatePx` (the halves differ in all four:
 `text-color`/`icon-opacity`, text size vs. the pre-baked icon scale, `text-padding`/`icon-padding`, and
-`text-translate` vs. the icon's own untranslated anchor — `SymbolFeatureExtractor.EmitIconLabel:460` leaves
+`text-translate` vs. the icon's own untranslated anchor — `SymbolFeatureExtractor.EmitIcon:839` leaves
 `TranslatePx` at zero, so the two halves already differ). `PlacedQuad` carries colour and size per quad, but `StagePoint` fills
 them from ONE `PointStageInput` — so this route means a per-quad style table through the Burst staging SoA.
 Strictly more blast radius for strictly less fidelity.
@@ -685,7 +686,7 @@ Strictly more blast radius for strictly less fidelity.
 **Rejected — an instance link honoured inside the collision greedy** (candidate *B* inherits candidate
 *A*'s survivor bit). The follower cannot insert its box in time to block anything (its verdict is only
 known after the greedy has passed it), so the text stops participating in collision at all; only the
-owner's box is ever tested; and it needs a `LabelIndex → survivor` scratch plus a second pass inside the
+owner's box is ever tested; and it needs a `SymbolIndex → survivor` scratch plus a second pass inside the
 per-frame collision job. Weaker semantics, more risk, in the hottest path.
 
 **Rejected — a shared `FadeId` + an AND-harvest** (both halves stay independent candidates; a fade id
@@ -702,7 +703,7 @@ its `(cell, layer, iconImage)` key is the one the badge already dedups on. The t
 - **One candidate ⇒ one `FadeId`** — the owner's, unchanged. Both halves draw at that one opacity, so they
   can no longer ease apart. `PointFadeId` is **not modified**.
 - **One dedup entry** — the reconciler skips riders in its scan and emits a winning owner's rider
-  immediately after it (same block, same tile). `CrossTileLabelKey` and `DedupKey` are **not modified**.
+  immediately after it (same block, same tile). `CrossTileSymbolKey` and `DedupKey` are **not modified**.
 
 Not widening the keys is the point: a lone text label and a lone icon label keep byte-identical identities,
 so the "icon-only and text-only labels are unaffected" invariant is structural rather than argued. It also
@@ -710,8 +711,8 @@ gives the right cross-tile answer for free — a tile holding the *complete* pai
 only the icon share ONE key, so finest-zoom-wins picks a whole symbol from one tile instead of assembling a
 Frankenstein from two.
 
-Both rules land in **one** implementation. `SymbolLabelReconciler.Run` is already the single dedup impl the
-production path runs; `SymbolTileLabelStore`'s plain `CollectInto` overload still carries a hand-written
+Both rules land in **one** implementation. `SymbolReconciler.Run` is already the single dedup impl the
+production path runs; `SymbolTileStore`'s plain `CollectInto` overload still carries a hand-written
 third copy of the scan with **zero non-test callers**, so its dedup branch is **routed through the
 reconciler** here rather than being taught D9's rules a third time (its `quantizeMeters ≤ 0` no-dedup branch
 stays — it is live test surface and needs no pairing work, since nothing is deduped and list order already
@@ -731,16 +732,16 @@ overlap exactly, and the collision pass drops the loser. Accepted.
 ### D10 — where the pair is decided, and how it survives a half-built label
 
 The extractor already computes the `centredPair` predicate (§3 D5) and already emits icon-then-text
-adjacently (`SymbolFeatureExtractor.EmitAtAnchor:425`). It now stamps a `LabelPairRole`
-(`Owner`/`Rider`/`None`) + a `PairId` on the two `SymbolLabel`s instead of forcing the passenger's overlap
+adjacently (`SymbolFeatureExtractor.EmitAtAnchor:785`). It now stamps a `SymbolPairRole`
+(`Owner`/`Rider`/`None`) + a `PairId` on the two `SymbolFeature`s instead of forcing the passenger's overlap
 flags — **the D5 forcing is deleted**; a pair's text carries its authored `text-allow-overlap` /
 `text-ignore-placement` again, and the pair candidate's flags are the AND of the two halves'.
 
 The roles are a *proposal*, not a fact: `StyledSymbolTileBuilder` **skips** a label whose shaping throws
 (per-label isolation, `:254`), and the baker tolerates `null` slots — so a rider can go missing. One shared
-engine-free resolver, `LabelPairing`, decides the truth from a list: index *i* is a paired owner iff
+engine-free resolver, `SymbolPairing`, decides the truth from a list: index *i* is a paired owner iff
 `labels[i+1]` exists, is non-null, is a `Rider`, and matches on `PairId` (+ `TileKey`/`MaterialIndex` for
-`LabelInstance`, since `FeatureIndex` restarts per layer). A half-built pair **dissolves into two ordinary
+`ShapedSymbol`, since `FeatureIndex` restarts per layer). A half-built pair **dissolves into two ordinary
 labels** — never an owner bound to a stranger. The baker and the reconciler both call it, so they cannot
 disagree.
 
@@ -751,9 +752,9 @@ the gather compacts point records in winner order (`SymbolGatherJob.cs:143`). Th
 badge with no number — never a bare number, never a stranger); a debug assert on the mirror-rebuild path
 surfaces the impossible case loudly.
 
-**Rejected — folding both halves into one block record** (a `PointPair` record kind, or a second `Points`
+**Rejected — folding both halves into one block record** (a paired point-record kind, or a second `Points`
 entry addressed from the owner's record). It removes the adjacency contract, but adds a record kind or a
-pool to `SymbolTileLabelBlock`, the baker, **`SymbolGatherJob`** (new remap), the mirror, the batch, and the
+pool to `SymbolTileBlock`, the baker, **`SymbolGatherJob`** (new remap), the mirror, the batch, and the
 parity oracle. The adjacency route changes the gather by **zero lines**.
 
 ### D11 — `icon-optional` / `text-optional`: DEFERRED, not shipped in this stage
@@ -774,10 +775,10 @@ never trip the centred predicate.
 
 ### Invariant
 
-**Only a centred icon+text pair changes behaviour.** Concretely: `CrossTileLabelKey`, `DedupKey`,
-`PointFadeId` and `WorldLabelRenderer` are unmodified; a text-only or icon-only label produces a
+**Only a centred icon+text pair changes behaviour.** Concretely: `CrossTileSymbolKey`, `DedupKey`,
+`PointFadeId` and `WorldSymbolRenderer` are unmodified; a text-only or icon-only label produces a
 byte-identical `PointStageInput` (`FadeId` included) and a candidate with `BoxCount == 1`,
-`EmitCount == 1`, `EmitStart == LabelIndex`; every curved label is untouched; no `poi_*` / `place` /
+`EmitCount == 1`, `EmitStart == SymbolIndex`; every curved label is untouched; no `poi_*` / `place` /
 `airport` / `label_*` layer changes its emit order, `FeatureIndex` ordinals, identity or placement; **no
 snapshot is re-baked.**
 
@@ -797,10 +798,11 @@ accepted behaviour; that decision is now withdrawn, so restating them would be d
    the icon drops, **the text places anyway** (the accepted bare number) and blocks nothing. Replaced by a
    tooth asserting the icon and the text drop **together** — the exact inverse. A reviewer distinguishes
    this from a re-bake by that inversion: the new tooth cannot pass against the old code.
-2. **`CentredPair_EmitsAdjacentIconThenText`** (T5) and
-   **`SymbolFeatureExtractorIconTests.Extract_TextAndIcon_YieldsTwoLabels_CentredPair_IconFirstThenText`**
-   *(P-A renamed this to `…_YieldsTwoLabels_IconFirstThenText` — its layer uses default anchors, so the
-   conjuncts P-A retired were inert at its values and it never discriminated the centred predicate)*
+2. **`CentredPair_EmitsAdjacentIconThenText`** (T5) and the extractor's icon+text-pair test
+   (`SymbolFeatureExtractorIconTests.cs:139`, today `Extract_TextAndIcon_YieldsTwoSymbols_IconFirstThenText`
+   *— P-A dropped its `_CentredPair` clause before the Label→Symbol rename, so no single name spans both
+   changes; its layer uses default anchors, so the conjuncts P-A retired were inert at its values and it never
+   discriminated the centred predicate)*
    assert the passenger text carries forced `AllowOverlap && IgnorePlacement`. The forcing is deleted, so
    they now assert the AUTHORED flags plus the pair roles. Strictly stronger (they gain the role
    assertions); RED against today's tree at the flag lines, with no new API involved.
@@ -815,17 +817,17 @@ live in the implementation plan; the falsifiable claims are:
 | # | Assertion | Goes RED against |
 |---|---|---|
 | P1 | the extractor stamps `Owner` on the icon / `Rider` on the text of a centred pair and `None` on every non-centred icon+text feature (which keeps text-then-icon order) | today's code (no roles); a shallow impl that stamps every icon |
-| P2 | `LabelPairing` dissolves a pair whose rider is null / missing / `PairId`-mismatched, and never pairs `[Owner(A), Rider(B)]` | a naive adjacency-only resolver |
+| P2 | `SymbolPairing` dissolves a pair whose rider is null / missing / `PairId`-mismatched, and never pairs `[Owner(A), Rider(B)]` | a naive adjacency-only resolver |
 | P3 | **the bare number is gone**: real extractor → real bake → real staging yields ONE candidate, `BoxCount == 2`, `EmitCount == 2`, emits `(Icon, Text)`; with a higher-priority blocker over the icon box, `SelectSurvivors` drops the pair and **zero text quads** are emitted | today (two candidates; the text survives) — the inverse of T12 |
 | P4 | a placed pair BLOCKS through both boxes: a later label overlapping only the TEXT box is dropped | today (the passenger ignores placement) |
 | P5 | both halves fade as one: the pair has a single `FadeId` == the icon's existing `PointFadeId`, and the text half contributes no candidate and no second fade record | today (two ids, two records) |
 | P6 | cross-tile: tile A holds the complete pair, finer tile B holds only its icon ⇒ every emitted label comes from ONE tile, and no rider is emitted without its owner | today (icon from B, text from A — two tile keys) |
-| P7 | icon-only / text-only / curved labels: byte-identical `PointStageInput` incl. `FadeId`, and `BoxCount == EmitCount == 1` with `EmitStart == LabelIndex` | any identity-key widening |
+| P7 | icon-only / text-only / curved labels: byte-identical `PointStageInput` incl. `FadeId`, and `BoxCount == EmitCount == 1` with `EmitStart == SymbolIndex` | any identity-key widening |
 | P8 | the staged stream stays well-formed with a pair present: `TryFindRangeTilingViolation` false, fade ids unique | an impl that also stages the rider as its own candidate |
 | ~~P9~~ | **NOT BUILT** — `icon-optional` / `text-optional` are unparsed; D11 is deferred, so this tooth does not exist. Listed only so a reader diffing the teeth table against the test files does not go hunting for it. | — |
 | P10 **[Unity]** | a Tick over a scene containing a pair draws quads into BOTH the text and the icon world mesh of that `(tile, slot)`, and `LastCandidateCount` is one LOWER per pair than the pre-change count | an emit loop that reads only `EmitStart` |
-| P11 **[Unity]** | no new per-frame managed allocation: steady-state Ticks over a pair-bearing scene are `Is.Not.AllocatingGCMemory` (extends `LabelPlacementAllocTests`) | any per-frame allocation added to the pair path |
-| P12 **[Unity]** | the gather/bake parity oracle (`SymbolLabelBatchBuilder` vs. `SymbolTileLabelBlockBaker`, `SymbolGatherParityTests`) still matches field-for-field on a fixture containing a pair | oracle drift |
+| P11 **[Unity]** | no new per-frame managed allocation: steady-state Ticks over a pair-bearing scene are `Is.Not.AllocatingGCMemory` (extends `SymbolPlacementAllocTests`) | any per-frame allocation added to the pair path |
+| P12 **[Unity]** | the gather parity oracle (`SymbolGatherParityTests.BuildExpectedBatch` vs. `SymbolPlacementSystem.GatherIntoMirror`) still matches field-for-field on a fixture containing a pair | oracle drift |
 | P13 | **no orphan rider**, INTRA-tile: an active tile and a departing tile hold the same pair ⇒ the departing owner is claim-skipped and its rider drops **with it** (output = the active tile's 2 labels, one `TileKey`); and, over the whole output of both scans, every `Rider` is immediately preceded by its matching `Owner`. Re-run with the departing tile alone ⇒ its pair survives intact | dropping the departing scan's owner-decision carry (an orphan rider reaches the plan); and a naive "drop every departing rider" fix |
 
 Every tooth above asserts a count, a flag or an identity. That the badge and its number now **survive or
@@ -840,17 +842,17 @@ multi-box candidate already gives MapLibre's combined box"* — was attacked aga
 against this prose) and held on every axis. Recorded so a later reader knows these were probed:
 
 - **The "false dilemma" call is itself confirmed.** The reviewer that first raised the
-  instance-link-or-per-quad-`AtlasKind` dilemma **retracted it**: `WorldLabelRenderer.Emit` keys its slot
-  off `CandidateEmit`'s own fields, never off `LabelCandidate`, so an emit RANGE leaves the draw side
+  instance-link-or-per-quad-`AtlasKind` dilemma **retracted it**: `WorldSymbolRenderer.Emit` keys its slot
+  off `CandidateEmit`'s own fields, never off `SymbolCandidate`, so an emit RANGE leaves the draw side
   untouched. Every prior pass had accepted the dilemma as a constraint.
-- **All-or-nothing is real, not assumed.** `LabelCollision.SelectSurvivors:216-234` tests every box in the
+- **All-or-nothing is real, not assumed.** `SymbolCollision.SelectSurvivors:216-234` tests every box in the
   range before inserting ANY — the property that makes two overlapping boxes in ONE candidate legal and
   two independent candidates self-blocking. Curved along-line labels already ship on it.
 - **`MaxCandidates` covers the emit pool exactly**; the derivation (a pair reserves 2 across its two records
   and uses exactly 2) was re-checked independently, so `PreSizeStageOutputs` genuinely needs no change.
 - **"The rider is the next point record" is a property, not an assertion:** `SymbolGatherJob`'s
   point-compaction preserves winner-list order, and the reconciler emits owner→rider adjacently.
-- **`CentredPair` is structurally unreachable from the curved path**, so "a curved label is never paired"
+- **`pairedInstance` is structurally unreachable from the curved path**, so "a curved label is never paired"
   needs no guard beyond the fence.
 - **P3/P4 close exactly the gap T12 recorded as accepted** — this eliminates the bare-number symptom rather
   than relabelling it.
@@ -859,12 +861,12 @@ against this prose) and held on every axis. Recorded so a later reader knows the
 
 | Item | Why |
 |---|---|
-| ~~**Pairing every icon+text symbol, not just CENTRED ones**~~ — **DONE, stage P-A (2026-08-03)** | Was: `poi_*`, `label_city/town/village`, `airport`, `poi_transit` all pair in MapLibre but offset or re-anchor their text, so pairing them was left outside this stage's fence. P-A shipped it. Two of the reasons recorded here proved wrong on contact: no snapshot re-bake was needed (no pixel snapshot reaches `SymbolFeatureExtractor` — they build labels through `SymbolLabelBatchBuilder`), and it did not want its own eyeball first, because the maintainer had already reported the artefact ("dots are still visible without text"). See `docs/labels-and-symbols-design.md` §7. |
+| ~~**Pairing every icon+text symbol, not just CENTRED ones**~~ — **DONE, stage P-A (2026-08-03)** | Was: `poi_*`, `label_city/town/village`, `airport`, `poi_transit` all pair in MapLibre but offset or re-anchor their text, so pairing them was left outside this stage's fence. P-A shipped it. Two of the reasons recorded here proved wrong on contact: no snapshot re-bake was needed (no pixel snapshot reaches `SymbolFeatureExtractor` — they build labels through `SymbolGatherPlan.Build`), and it did not want its own eyeball first, because the maintainer had already reported the artefact ("dots are still visible without text"). See `docs/labels-and-symbols-design.md` §7. |
 | **MapLibre's optional FALLBACK semantics** (place the pair; if it fails, retry without the optional half) | Needs a placement retry pass. D11 approximates by outcome. |
 | **A curved (along-line) label paired with an icon** | Line-placement icons are still fenced to the viewport-aligned upright case (D4/T8); a pair only exists on the point path. |
 | **A union AABB instead of two boxes** | Two boxes are strictly more faithful and cost the same. |
 | **Instances with more than two halves** | Nothing needs it; `EmitStart`/`EmitCount` already generalises if something ever does. |
-| **Removing the "rider is the next point record" adjacency contract** (a `PointPair` block record) | See D10's rejection: it buys robustness the resolver + the job's guard + the debug assert already provide, at the cost of a `SymbolGatherJob` change. |
+| **Removing the "rider is the next point record" adjacency contract** (a paired point-record block) | See D10's rejection: it buys robustness the resolver + the job's guard + the debug assert already provide, at the cost of a `SymbolGatherJob` change. |
 
 ---
 
@@ -990,8 +992,8 @@ Every label whose resolved `text-anchor` has a vertical-centre component — `ce
 | `label_village/town/city/city_capital` | bottom | ❌ unchanged | — |
 | `waterway_line_label`, `water_name_line_label`, `highway-name-*` | center, but **curved** | ❌ unchanged | `CurvedTextLayout` has no block anchor at all |
 
-The collision box moves with the quads by construction — `LabelBox.Build` is the single site and takes
-`TextLayoutResult.BoundsMin/Max` (`LabelStagingMath.cs:146`). For a §10 pair this is inert: the two boxes are
+The collision box moves with the quads by construction — `SymbolBox.Build` is the single site and takes
+`TextLayoutBounds.Min`/`Max` (`SymbolStagingMath.cs:166`). For a §10 pair this is inert: the two boxes are
 tested **all-or-nothing** in one candidate, so the pair still places or drops atomically; only the text half's
 screen rect shifts up by the same 0.133 em, which cannot change the pair's own verdict.
 
@@ -999,7 +1001,7 @@ screen rect shifts up by the same 0.133 em, which cannot change the pair's own v
 
 Non-centre vertical anchors (`top`, `bottom`, and the four corners) are **byte-identical**; horizontal
 anchoring, justify, wrap, letter-spacing, `text-offset`, `text-radial-offset`, RTL and every curved label **on
-the map** are **byte-identical**; `IconQuadLayout`, `LabelBox`, the collision/pairing/fade/dedup path and every
+the map** are **byte-identical**; `IconQuadLayout`, `SymbolBox`, the collision/pairing/fade/dedup path and every
 Unity type are **unmodified**. Two existing test files change because they encode the old vertical formula
 (below); a third — `WorldCurvedAbRenderSnapshotTests` — moves for a *different* reason found during the gate
 and recorded below, and its move was admitted only after a measured translation proof. Any *fourth* test that

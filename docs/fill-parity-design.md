@@ -75,7 +75,7 @@ was scoped against, kept as written so the stages below can be read against it. 
 
 ### 2.1 The sprite sheet is private to the symbol subsystem
 
-`SymbolLabelSubsystem` owns `_spriteSheet`/`_spriteAtlas` and fetches them **fire-and-forget** from its own
+`SymbolSubsystem` owns `_spriteSheet`/`_spriteAtlas` and fetches them **fire-and-forget** from its own
 `SetStyle` (`FetchSpriteSheetAsync`). Fill materials are built eagerly and once, synchronously, in
 `MapView.SetStyle` → `Layers.Build` → `FillRenderLayer.TryCreate`. So at fill-material-bind time the sheet
 provably does not exist yet.
@@ -86,8 +86,8 @@ that `SetStyle`s a sprite-bearing style would start blocking on a live network f
 not worth trading for it.
 
 **Adopted — late resolve through a notification seam, ownership left where it is (for now).** The *data* is
-already reachable from the composition root: `SymbolLabelSubsystem` exposes `SpriteAtlas` (line 256) and
-`IconTexture` (line 250), and `MapView` holds `Symbols`. So P1 does **not** need to move ownership — it needs
+already reachable from the composition root: `SymbolSubsystem` exposes `SpriteAtlas` (line 319) and
+`IconTexture` (line 315), and `MapView` holds `Symbols`. So P1 does **not** need to move ownership — it needs
 a push from `MapView` to `Layers` when the sheet arrives.
 
 A full hoist would drag the hard parts with it: the fetch is cancelled via the subsystem's `_buildCts`, the
@@ -176,7 +176,7 @@ Each stage is one revertible commit on `feat/fill-parity`, gated on `./Tools/run
 
 | # | Stage | Scope |
 |---|---|---|
-| **P1** | Sprite-ready notification seam | `MapView` pushes the arriving sheet to `Layers`; ownership, fetch and cancellation scope stay in `SymbolLabelSubsystem` (§2.1). **Behaviour-preserving** — no visual change, no new fetch. |
+| **P1** | Sprite-ready notification seam | `MapView` pushes the arriving sheet to `Layers`; ownership, fetch and cancellation scope stay in `SymbolSubsystem` (§2.1). **Behaviour-preserving** — no visual change, no new fetch. |
 | **P2** | `fill-pattern` render | §3's uniform contract + `MaterialFactory` bind + late resolve + shader sampling. **Kills the black regions.** |
 | **P3** | `fill-sort-key` | Parse (`Fill/PropertyNames` + a new `Fill/LayoutProperties`) + order features within a layer before meshing. Works because these fills run `ZWrite Off` / `LEqual`, so coincident coplanar triangles never depth-reject and the last rasterized wins. **Stable** sort (declared index as tiebreak — `Array.Sort` is an introsort); absent key ⇒ no sort at all, keeping existing meshes byte-identical. |
 | **P4** | `fill-opacity` data-driven | Multiply the evaluated per-feature opacity into the baked COLOR stream alpha; colour is already baked per-feature, so this is the same loop. **Must set `_Opacity = 1` on the material when baking** — the fragment does `alpha *= vColor.a * _Opacity`, so leaving the uniform bound double-applies. Exactly the precedent `BindLinePaintToApplier` sets for data-driven `Width` (`MaterialFactory.cs:168-169`). |
@@ -354,7 +354,7 @@ Four things the plan did not anticipate. All are fixed in P2; recorded because e
 teeth that were planned for it.
 
 1. **The sprite fetch was gated behind "style has symbol layers."**
-   `SymbolLabelSubsystem.SetStyle` returned early — `if (_layersBySource.Count == 0) return;` — *before*
+   `SymbolSubsystem.SetStyle` returned early — `if (_layersBySource.Count == 0) return;` — *before*
    kicking off `FetchSpriteSheetAsync`. Correct while the sheet was an icons-only resource; a silent
    feature-killer the moment `fill-pattern` resolves against the same sheet. A style with pattern fills and
    no symbol layers would never fetch a sheet, so every pattern layer would clip forever with no error.
@@ -375,7 +375,7 @@ teeth that were planned for it.
 4. **`ShaderProperties/Fill/PropertyNames` is the CBUFFER set, not "fill shader properties."** The
    structural parity guards (`SharedUnionFillNames_EqualsFillCbuffer`) enforce registry ↔ CBUFFER equality,
    and a texture is not a CBUFFER member. `_PatternMap` therefore lives in a sibling `TexturePropertyId`
-   rather than weakening that guard — the same posture as `WorldLabelRenderer.AtlasPropId`.
+   rather than weakening that guard — the same posture as `WorldSymbolRenderer.AtlasPropId`.
 
 ## 6b. Pattern sizing — and why the pattern coordinate is world-space
 

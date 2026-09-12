@@ -1,7 +1,7 @@
 // Unity EditMode only — real Camera/Mesh/GameObject/Texture2D (WorldSymbolRenderer's SceneTileTree creates
 // real GameObjects). NOT registered in core-tests.csproj.
 //
-// The symbol-draw-backend-rework corrective (docs/.utmp/symbol-draw-backend-rework.md §3/§4/§6/§7): A1
+// The symbol-draw-backend-rework corrective (design §3/§4/§6/§7): A1
 // (876e7103) grouped world symbols into a bespoke FLAT Dictionary<(TileKey,Slot,Kind)> of root-parented
 // GameObjects, each re-writing the tile's floating-origin transform every frame. This pins the FIX — symbols
 // now join the SAME root → per-tile-container → per-symbol-layer-node → text/icon-sibling-children tree the

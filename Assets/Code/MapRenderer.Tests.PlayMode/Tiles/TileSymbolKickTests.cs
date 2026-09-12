@@ -134,7 +134,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             view.TileManager.SymbolWorkerFactory = spy;
             try
             {
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillAndSymbolStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillAndSymbolStyle(), symbolsIntentionallyUnwired: true);
 
                 const int recorderCapacity = 64;
                 using var decodeRecorder = ProfilerRecorder.StartNew(
@@ -184,7 +184,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             view.TileManager.SymbolWorkerFactory = spy;
             try
             {
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillAndSymbolStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillAndSymbolStyle(), symbolsIntentionallyUnwired: true);
                 yield return PumpUntilSettled(view);
 
                 Assert.IsTrue(view.AllTilesSettled(),
@@ -224,7 +224,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             view.TileManager.SymbolWorkerFactory = spy;
             try
             {
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: TwoSourceStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: TwoSourceStyle(), symbolsIntentionallyUnwired: true);
                 yield return PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "sanity: both sources' tiles must settle.");
 
@@ -260,7 +260,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             view.TileManager.SymbolWorkerFactory = spy;
             try
             {
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: TwoSourceStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: TwoSourceStyle(), symbolsIntentionallyUnwired: true);
                 yield return PumpUntilSettled(view);
                 Assert.IsTrue(view.AllTilesSettled(), "sanity: both sources' tiles must settle.");
 

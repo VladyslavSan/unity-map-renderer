@@ -4,7 +4,7 @@
 //
 // The extensible SOURCE half of the kit. Shaped so an MVT/URL source kind can slot in later (a new
 // VisualSource subclass) without touching VisualScene — v1 implements only the inline-geojson kind
-// (docs/../geojson-visual-kit-plan.md §1 decision 2).
+// (the geojson-visual-kit plan §1 decision 2).
 
 #if UNITY_EDITOR
 namespace MapRenderer.Tests

@@ -59,7 +59,7 @@ changes (different sources, different source-layers, structural layer changes).
 
 `MapView.SetStyle`; `RenderLayerSet.ClearLayers` / `RenderLayerSet.Build`; `RenderLayerFactory`;
 `TileManager.SetSources` (the `SourceKey` warm-reuse — the one place partial warm reuse already lives);
-`SymbolLabelSubsystem.SetStyle`; the material appliers (`ZoomStyleApplier`, `MapMaterialSet`).
+`SymbolSubsystem.SetStyle`; the material appliers (`ZoomStyleApplier`, `MapMaterialSet`).
 
 ---
 

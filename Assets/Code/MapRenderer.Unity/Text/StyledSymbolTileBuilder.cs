@@ -62,8 +62,8 @@ namespace MapRenderer.Unity.Text
             public readonly int               MaterialIndex;
             public readonly FontStack         FontStack;
             public readonly List<SymbolFeature> Symbols;
-            public ExtractedLayer(int materialIndex, FontStack fontStack, List<SymbolFeature> labels)
-            { MaterialIndex = materialIndex; FontStack = fontStack; Symbols = labels; }
+            public ExtractedLayer(int materialIndex, FontStack fontStack, List<SymbolFeature> symbols)
+            { MaterialIndex = materialIndex; FontStack = fontStack; Symbols = symbols; }
         }
 
         /// <summary>
@@ -91,11 +91,11 @@ namespace MapRenderer.Unity.Text
             {
                 StyleLayer layer = symbolLayers[l];
                 if (layer == null) continue;
-                var labels = new List<SymbolFeature>();
-                SymbolFeatureExtractor.Extract(layer, tile, tileId, zoom, projection, labels, spriteAtlas);
-                if (labels.Count == 0) continue;
+                var symbols = new List<SymbolFeature>();
+                SymbolFeatureExtractor.Extract(layer, tile, tileId, zoom, projection, symbols, spriteAtlas);
+                if (symbols.Count == 0) continue;
                 int materialIndex = (materialIndices != null && l < materialIndices.Count) ? materialIndices[l] : 0;
-                result.Add(new ExtractedLayer(materialIndex, new FontStack { Names = layer.Layout.TextFont }, labels));
+                result.Add(new ExtractedLayer(materialIndex, new FontStack { Names = layer.Layout.TextFont }, symbols));
             }
             return result;
         }

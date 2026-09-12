@@ -668,9 +668,9 @@ namespace MapRenderer.Tests.Style
         }
 
         // §10 D8 test helper (shared with SymbolPairPredicateTests — see SymbolTestFixtures.StageInputFor).
-        private static PointStageInput StageInputFor(SymbolStyle.SymbolFeature label, SymbolKind atlasKind,
+        private static PointStageInput StageInputFor(SymbolStyle.SymbolFeature symbol, SymbolKind atlasKind,
             float2 boundsMin, float2 boundsMax, float2 screenPx, float textSizePx)
-            => SymbolTestFixtures.StageInputFor(label, atlasKind, boundsMin, boundsMax, screenPx, textSizePx);
+            => SymbolTestFixtures.StageInputFor(symbol, atlasKind, boundsMin, boundsMax, screenPx, textSizePx);
 
         // A single synthetic quad standing in for a shaped text run (SymbolFeature carries no Layout — shaping is
         // Unity-side) — its exact footprint is irrelevant to these teeth, only that quads.Length > 0.

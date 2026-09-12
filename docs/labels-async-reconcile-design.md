@@ -11,8 +11,8 @@ pipeline). Proprietary / all rights reserved.
 
 Live z14-15 profile, moving camera: `MapRenderer.Symbol.BatchBuild.Collect.Dedup` ≈ **10.8 ms** — the whole
 per-frame label CPU cost. `Collect.Classify` ≈ 0.7 ms, `SoA` ≈ 0.7 ms. So the bottleneck is the **per-frame
-cross-tile dedup** (`SymbolTileLabelStore.CollectInto`): for every on-screen point label, every frame, hash a
-`CrossTileLabelKey` (which contains the label's **text string**) into a dictionary to pick the finest-zoom
+cross-tile dedup** (`SymbolTileStore.CollectInto`): for every on-screen point label, every frame, hash a
+`CrossTileSymbolKey` (which contains the label's **text string**) into a dictionary to pick the finest-zoom
 winner.
 
 Two facts make this the wrong shape:
@@ -26,7 +26,7 @@ Two facts make this the wrong shape:
 
 **Why not "just make the per-frame dedup incremental" (the reverted D2):** D2 maintained the winner set with a
 persistent incremental index that *cold-reseeds on every zoom-quantize change*. A moving camera zooms
-constantly, so it rebuilt the whole index (`new Contender`/`WinnerRecord` per label) every frame — **~2× worse**
+constantly, so it rebuilt the whole index (a fresh contender/winner record per label) every frame — **~2× worse**
 than the plain dict dedup. Right target, wrong mechanism; reverted (`e3a9208e`). Do **not** revive an
 incremental winner index.
 
@@ -71,16 +71,16 @@ paper before any code.
 
 ### 3.1 Invalidation events — what dirties the state (must be EXHAUSTIVE)
 
-A missed trigger = stale labels on screen. Every `SymbolTileLabelStore` mutation that changes the active/
+A missed trigger = stale labels on screen. Every `SymbolTileStore` mutation that changes the active/
 departing membership OR a tile's label content dirties the set. The reverted D2 already mapped these 13
-lifecycle points — reuse the **map**, not the code (mark dirty instead of `IndexAddTile`):
+lifecycle points — reuse the **map**, not the code (mark dirty instead of incrementally indexing each tile add):
 
 - `BeginBuild` (a rebuild starts — stale labels stay until commit), `CompleteBuild` (new labels land / replace),
 - `Release` (→ cached / true-evict), `Restore` (cache hit re-enters), the `ReconcileActiveSet` departing stamp,
 - `EnqueueCached` FIFO evict, `PurgeExpiredDeparting`, `Clear` / `SetStyle` (restyle — full rebuild),
 - **NO zoom trigger at all.** *(LANDED — Stages 3/3b, `08e7fbf3`/`3f6aa95d`.)* The dedup grid was decoupled from
-  `MetersPerPixel` — but NOT onto integer tile zoom as originally sketched here. It is now a **fixed geo grid**
-  (`CrossTileLabelKey.CanonicalGridMeters = 4.0`), so the dedup answer is a pure function of the tile set with
+  `MetersPerPixel` — but NOT onto integer tile zoom as originally sketched here. It is now a **fixed render-space
+  grid** (`CrossTileSymbolKey.CanonicalGridMeters = 4.0`), so the dedup answer is a pure function of the tile set with
   **zero** zoom dependence (neither fractional nor a zoom *step* dirties it). The fixed grid is correct because
   parent/child overlap doesn't happen today; merging distinct-but-close features is the collision pass's job. This
   is stronger than the integer-zoom plan (which would still swap grids per band, breaking the seamless same-cell
@@ -93,16 +93,19 @@ Each fires "mark dirty (bump generation)". Coalesce: many events between two pic
 ### 3.2 Input snapshot + native-block lifetime — THE sharp edge
 
 The worker reads tiles' label lists while the main thread may **release/dispose a tile and its baked
-`SymbolTileLabelBlock`**. Reading a disposed block off-thread is a use-after-free. This is the same hazard
+`SymbolTileBlock`**. Reading a disposed block off-thread is a use-after-free. This is the same hazard
 D3's B2 atomicity fought and the one flagged for moving symbol decode off-thread (the shared glyph atlas).
 
-Contract options (decide in the plan):
-- **Snapshot managed refs** (`LabelInstance` list) at schedule time — cheap and safe *if* `LabelInstance` is
-  immutable post-build (verify).
+Contract options considered:
+- Snapshot managed refs (a managed symbol list) at schedule time — cheap and safe only if that list is
+  immutable post-build.
 - **Native blocks need a borrow guard:** a refcount, or a "not-disposed-while-a-reconcile-borrows-it" rule, so
-  the store cannot free a block the in-flight worker is reading. Simplest safe form: the dedup snapshot holds
-  the winning labels *by managed value* it needs, and the block/native slice is resolved on the **main thread**
-  at pickup (not on the worker) — so the worker never touches a `NativeArray`. Prefer this if feasible.
+  the store cannot free a block the in-flight worker is reading.
+
+**Resolved: the former (refcount/borrow-guard).** `SymbolSnapshot` (built by `SymbolTileStore.CaptureSnapshot`)
+holds each collected tile's baked block behind a `SharedDisposable` pin acquired on the main thread; the pin
+lets the worker read the block's native columns safely without disposing them, and releases on the snapshot's
+`Clear()`.
 
 ### 3.3 Generation / coalescing — one in-flight, apply-stale (LOCKED — implemented Stage 4b)
 
@@ -128,14 +131,14 @@ Two guards make the apply safe:
 
 The swap is a *reconcile*, not a hard replace: diff A vs B → labels only in B **fade in**, labels only in A
 **fade out** (they become departing), labels in both keep their fade/incumbency state. Feed this through the
-existing departing/fade state machine (`LabelPlacementSystem`'s `RecordDeparting` + fade triggers) so nothing
+existing departing/fade state machine (`SymbolPlacementSystem`'s per-symbol departing flag + fade triggers) so nothing
 pops. This is the other half of "label system as a state machine" and the trickiest interaction — cross-frame
 label *identity* (a label must be recognized as "the same" across an A→B swap to keep its fade) is the key
 sub-problem (see `labels-and-symbols-design.md` on cross-tile identity / `FadeId`).
 
 > **Identity: SOLVED — one canonical id.** *(LANDED — Stage 3b, `3f6aa95d`.)* The dedup identity and the point
 > fade identity are now the **same** canonical cell — `PointFadeId` and the store `DedupKey` both quantize to
-> `CrossTileLabelKey.CanonicalGridMeters` (4.0 m) over `(cell, layer, interned text, interned icon)`. Because that
+> `CrossTileSymbolKey.CanonicalGridMeters` (4.0 m) over `(cell, layer, interned text, interned icon)`. Because that
 > id is fixed and camera-independent, a point label keeps its identity across an A→B set swap by construction — the
 > reconcile diff can key A↔B matching directly on this id, no bespoke identity scheme. (Curved/line labels keep
 > `LineFadeId` — never deduped, per-anchor.) The deeper "fade id IS the literal interned-int" (Design Y) is
@@ -146,7 +149,7 @@ sub-problem (see `labels-and-symbols-design.md` on cross-tile identity / `FadeId
 ## 4. Off-main mechanics + the GC caveat
 
 - **Scheduling:** the dedup is plain managed C# over label lists (no Unity API, no Burst — it's a `Dictionary`
-  + `LabelInstance`), so it runs on a worker via the repo's linear-async idiom (UniTask
+  keyed on interned text/icon ids), so it runs on a worker via the repo's linear-async idiom (UniTask
   `SwitchToThreadPool` → work → `SwitchToMainThread` to pick up), the same pattern as the async tile pipeline
   (off-main-thread-principle). Pump/pickup on the main-thread label update.
 - **GC caveat (do not over-promise):** off-main removes *CPU time* from the render thread, but Unity's Mono GC
@@ -161,13 +164,13 @@ sub-problem (see `labels-and-symbols-design.md` on cross-tile identity / `FadeId
 ## 5. Salvage from the reverted D2/D3, and scope fences
 
 **Salvage (cherry-pick from history `6e39e282`/`962c1349`):**
-- The `LabelStagingMath` **finite-`SortKey` / NaN collision-order fix** (D2 edit 0) — a real, orthogonal
+- The `SymbolStagingMath` **finite-`SortKey` / NaN collision-order fix** (D2 edit 0) — a real, orthogonal
   hardening in the *placement* path (a NaN sort key makes the collision comparator intransitive →
   nondeterministic survivor set). Independent of aggregation; re-land it.
 - The **13-mutation-point map** (§3.1) — knowledge, not code.
 - The **`source→int` interning** pattern — extend to text interning (§4).
 
-**Do NOT reuse:** the incremental winner index (`CellState`/`Contender`/`WinnerRecord`/delta log), the native
+**Do NOT reuse:** the incremental winner index (its cell-state/contender/winner-record bookkeeping and delta log), the native
 tombstone/compaction mirror (D3), or any "maintain the set incrementally" machinery. That is the reverted
 regression.
 
@@ -178,12 +181,13 @@ build/reconcile hooks. NOT the tile pipeline / camera / projection / fill-line m
 
 ## 6. Open questions (resolve in the plan)
 
-- **Native-block lifetime (§3.2):** refcount/borrow-guard vs "resolve native on main-thread at pickup." The
-  latter is safer; confirm the dedup can produce a purely-managed result the main thread turns into native.
+- ~~**Native-block lifetime (§3.2):** refcount/borrow-guard vs "resolve native on main-thread at pickup."~~
+  **RESOLVED.** The former: `SymbolSnapshot` pins each block on the main thread at capture, and the pin lets
+  the worker read its native columns safely without disposing them. See §3.2's note.
 - ~~**Cross-frame label identity across an A→B swap (§3.4):**~~ **RESOLVED (Stage 3b).** One canonical fixed-grid
   id serves dedup + fade; a point label keeps its identity across a swap by construction. See §3.4's note.
 - **When parent/child overlap lands (future):** the dedup grid must go back to zoom-scaled + finest-zoom-wins.
-  Localized to the one `CrossTileLabelKey.CanonicalGridMeters` use + the store's grid input (a seam comment marks
+  Localized to the one `CrossTileSymbolKey.CanonicalGridMeters` use + the store's grid input (a seam comment marks
   it) — *not* integer-zoom keying (that approach was rejected; see §3.1).
 - **Curved (line) labels:** never dedup — they pass straight through (keep `LineFadeId`). Confirm they ride the
   state machine as trivial always-winners with no reconcile churn.

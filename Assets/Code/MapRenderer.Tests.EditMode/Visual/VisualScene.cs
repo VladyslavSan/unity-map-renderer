@@ -368,18 +368,18 @@ namespace MapRenderer.Tests
                     "bounded readiness spin has no target frame count to pump toward.");
 
             int expected = _expectedSymbolQuads.Value;
-            var labels = _mapView.View.SymbolPlacementSystem;
+            var placement = _mapView.View.SymbolPlacementSystem;
             for (int f = 0; f < SymbolReadinessCeiling; f++)
             {
                 _mapView.LateUpdate();
-                if (labels.LastQuadCount >= expected && labels.LastSurvivorCount >= expected) return;
+                if (placement.LastQuadCount >= expected && placement.LastSurvivorCount >= expected) return;
             }
 
             throw new InvalidOperationException(
                 $"VisualScene symbol readiness spin exhausted its {SymbolReadinessCeiling}-frame ceiling " +
                 $"without reaching {expected} placed+surviving quads — observed " +
-                $"LastQuadCount={labels.LastQuadCount}, LastSurvivorCount={labels.LastSurvivorCount}, " +
-                $"LastInputSymbolCount={labels.LastInputSymbolCount}. This is a genuine pipeline finding " +
+                $"LastQuadCount={placement.LastQuadCount}, LastSurvivorCount={placement.LastSurvivorCount}, " +
+                $"LastInputSymbolCount={placement.LastInputSymbolCount}. This is a genuine pipeline finding " +
                 "(geojson→symbol produced fewer labels than authored), not a flake to retry around.");
         }
 

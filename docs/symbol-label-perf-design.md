@@ -10,7 +10,7 @@ tile-coverage pre-cull that already landed).
 
 ## 1. The problem
 
-Live Play-mode profile, camera moving:
+Live Play-mode profile, camera moving, at the time this document was opened (before this epic's fixes):
 
 ```
 PlayerLoop                              16.61 ms
@@ -19,21 +19,21 @@ PlayerLoop                              16.61 ms
     …BatchBuild.SoA                      8.98 ms
 ```
 
-`SymbolLabelSubsystem.CurrentBatch` runs **every frame** and rebuilds the entire label batch from scratch:
+`SymbolSubsystem.CurrentBatch` ran **every frame** and rebuilt the entire symbol batch from scratch:
 
-- **Collect** (`SymbolTileLabelStore.CollectInto`) — the A-3 cross-tile point-label dedup over all active
+- **Collect** (`SymbolTileStore.CollectInto`) — the A-3 cross-tile point-symbol dedup over all active
   tiles (dedup grid = `MetersPerPixel(zoom)`).
-- **SoA** (`SymbolLabelBatchBuilder.Build`) — converts the managed `LabelInstance` graph of every active tile
-  into the blittable `SymbolLabelBatch`: glyph-quad copies, sRGB→linear vertex colours, fade-id string hashes,
-  world anchors, per-tile world origins, and the point/curved stage inputs.
+- **SoA** — converted each active tile's managed symbol data into a blittable `SymbolBatch`: glyph-quad
+  copies, sRGB→linear vertex colours, fade-id string hashes, world anchors, per-tile world origins, and
+  the point/curved stage inputs.
 
 **Symptom:** camera **still** → acceptable (the landed tile-coverage pre-cull, `d5e712c0`, trims off-screen
-/ tilt tiles). Camera **moving** → the visible set churns and grows, and the whole visible set is
+/ tilt tiles). Camera **moving** → the visible set churned and grew, and the whole visible set was
 re-converted from managed carriers every frame — 95% of the frame in a full rebuild.
 
-There is also a **second, un-profiled copy of the same data**: after `Build`, `SymbolPlacementSystem`
-mirrors the managed SoA into the Burst-job NativeLists (`RefreshBatchMirror`, keyed on `BuildId`) every
-frame. So the per-frame label data is materialised **twice**.
+There was also a **second, un-profiled copy of the same data**: after the SoA build, `SymbolPlacementSystem`
+mirrored it into the Burst-job NativeLists (`GatherIntoMirror`, keyed on `BuildId`) every frame. So the
+per-frame symbol data was materialised **twice**.
 
 ## 2. Root cause — the work is camera-independent but recomputed every frame
 
@@ -66,7 +66,7 @@ conversion per frame — bake it once, at tile build.**
 ## 4. Shared foundation — build-time bake (all options build on this)
 
 Bake each tile's blittable representation **once, on the existing bytes-ready build hook** (already off the
-main thread), and hold it on the tile's `SymbolTileLabelStore` entry with the same lifecycle as its labels
+main thread), and hold it on the tile's `SymbolTileStore` entry with the same lifecycle as its symbols
 (built on bytes-ready, kept warm in the prepared cache, dropped on eviction). This lifts the entire
 `SoA.Hash` + `SoA.Copy` work — ~8.98 ms — out of the per-frame path to once-per-tile. Every option below is
 a different answer to *what remains per-frame* after the bake.
@@ -76,7 +76,7 @@ a different answer to *what remains per-frame* after the bake.
 | | Approach | Kills the per-frame residual via | Risk | Byte-identical |
 |---|---|---|---|---|
 | **A** | build-time bake (managed) | — leaves concat + re-dedup per frame | low | yes |
-| **B** | bake **native** + Burst gather | native memcpy into the job NativeLists; also collapses the `RefreshBatchMirror` double-copy | low | yes |
+| **B** | bake **native** + Burst gather | native memcpy into the job NativeLists; also collapses the `GatherIntoMirror` double-copy | low | yes |
 | **D** | persist batch, patch **O(delta)** on tile changes | concat/dedup only on a tile-set delta | med | testable |
 | **E** | **per-tile persistent draws** | draw never aggregates; only collision inputs stay per-frame | high | point/icon yes; curved carved out |
 | **C** | reduce label **volume** (LOD/budgets) | fewer labels enter at all | — | **no** — visual change |
@@ -91,17 +91,17 @@ enough, or should downstream iterate per-tile blocks in place?
 Bake the block into **native** buffers (`NativeArray<PointStageInput>/<CurvedStageInput>` + flat
 quad/glyph/anchor/worldpoint/fade-id pools — all already-blittable types). Per frame, a Burst `.Run()` gather
 takes the collected winners `(blockId, localIndex)` and compacts them straight into the job-input NativeLists
-— replacing **both** `Build` **and** `RefreshBatchMirror`. Keep the managed `CollectInto` dedup + collected
+— replacing **both** `Build` **and** `GatherIntoMirror`. Keep the managed `CollectInto` dedup + collected
 order (parity-safe → byte-identical by construction; it only records `(blockId, localIndex)`, does no SoA
 work). Bake the dedup key components (anchor, layer, 64-bit text+icon hash) so per-frame stops re-hashing
 strings. **SoA → ~0; the second mirror copy is gone; Collect shrinks.** Stretch (gated on the snapshot +
-collision-differential tests): `LabelCollision.ComparePlacementOrder` is a strict total order, so the
+collision-differential tests): `SymbolCollision.ComparePlacementOrder` is a strict total order, so the
 survivor mesh depends on the candidate *set* not collected order — which unlocks moving the dedup itself into
 a Burst hashmap job later.
 
 ### D — persistent, incrementally-maintained batch (O(delta))
 Keep **one persistent batch** (SoA + dedup index) and patch it only when the active tile set changes (commit
-inserts a block, release removes, rebuild replaces) at the `SymbolTileLabelStore` mutation points
+inserts a block, release removes, rebuild replaces) at the `SymbolTileStore` mutation points
 (`CompleteBuild` / `BeginBuild` / `Release` / `Restore`). Between deltas the structure — and the native
 mirror — are untouched, so a large visible set held steady while panning pays **~0** aggregation. Escapes
 constraint #2 honestly: cost is O(structural delta) *every* frame, always applied, not a stillness predicate
@@ -116,7 +116,7 @@ long pan). Sequential with A: A bakes the block, D persists + patches it.
 
 ### E — per-tile persistent draws (decouple collision from draw)
 The world-anchored migration already made point/icon quads camera-independent geometry, yet
-`WorldLabelRenderer` rebuilds each slot's mesh from survivors every frame. Instead, build each tile's label
+`WorldSymbolRenderer` rebuilds each slot's mesh from survivors every frame. Instead, build each tile's label
 quad geometry as a **persistent per-tile static mesh at tile-build time** and draw it directly like fill/line;
 the per-frame collision pass produces only a small per-label **visibility + opacity** result that masks/fades
 the static mesh (static vertex buffer + per-frame dynamic **index** buffer in collision-sorted order +
@@ -136,7 +136,7 @@ stack on any of the above. (Left as an open lever — the assigned proposer did 
 ## 6. Recommended architecture & phased path
 
 1. **Phase 1 — A realized as B** (native per-tile bake + Burst gather). The low-risk, high-confidence first
-   move: removes ~9 ms of SoA **and** the `RefreshBatchMirror` double-copy from the per-frame path, stays
+   move: removes ~9 ms of SoA **and** the `GatherIntoMirror` double-copy from the per-frame path, stays
    byte-identical (managed dedup + collected order preserved), and is the enabling refactor every other
    option sits on. **Re-profile after it lands.**
 2. **Phase 2 — only if the residual concat/dedup is still heavy on a large panning set:** escalate to **D**
@@ -159,7 +159,7 @@ attack the residual, and should be driven by a fresh profile rather than taken o
 - **Baked text/icon key = 64-bit hash** (B): astronomically-low dedup collision risk; note as a parity caveat.
 - **Curved labels** (E): camera-dependent arc-walk can't be static — sizing the point/icon vs curved split on
   the live scene is the key unknown for E's payoff.
-- **Compaction** (D): tombstone/compact (or a block-indexed `LabelStageJob`) must keep the Burst mirror valid.
+- **Compaction** (D): tombstone/compact (or a block-indexed `StageJob`) must keep the Burst mirror valid.
 - **Coverage pre-cull + departing/fade interplay** (all): a culled tile skips the gather but keeps its baked
   block; departing/coverage-fade flags must ride the baked/persistent representation.
 
@@ -193,7 +193,7 @@ frame. D3 optimized a copy that was already cheap; it removed ~0 ms.
 
 **D2 targeted the right thing (the dedup) with the wrong mechanism, and REGRESSED it.** Its incremental winner
 index cold-reseeds on every zoom-quantize change — and a moving camera zooms constantly — so `Reseed` rebuilds
-the entire index (`new Contender`/`WinnerRecord`/`TileContribution` **per label, per frame**) + GC churn:
+the entire index (new per-record contender, winner and tile-contribution objects **per label, per frame**) + GC churn:
 strictly more work than the dict dedup it replaced. **D2+D3 were reverted** (`e3a9208e`), kept in history as a
 documented negative result. Baseline is D1 (10 ms, stable).
 
@@ -210,11 +210,13 @@ a later update (dedup once per tile-set change, on a worker; process the cached 
 `off-main-thread-principle` + the pull/reconcile label-smoothness direction, now made concrete. **Full design:
 [`labels-async-reconcile-design.md`](labels-async-reconcile-design.md).** Cheap orthogonal wins that compose
 with it: intern label text → int (kill the per-frame string hash), and reuse buffers (off-main doesn't dodge
-Unity's stop-the-world GC). Salvage from the reverted D2/D3: the `LabelStagingMath` finite-`SortKey`/NaN
+Unity's stop-the-world GC). Salvage from the reverted D2/D3: the `SymbolStagingMath` finite-`SortKey`/NaN
 collision-order fix (real, orthogonal), and the map of the 13 tile-lifecycle mutation points (where the
 invalidation events fire).
 
 ## 10. The post-reconcile residual — what is expensive NOW (2026-07-25)
+
+The table below records the 2026-07-25 state; see §10.9 for where `GatherIntoMirror` moved.
 
 The async reconcile ([`labels-async-reconcile-design.md`](labels-async-reconcile-design.md), Stages 1–4,
 `9bf19457`) hit its target: the per-frame dedup is gone and `BatchBuild` is down to ≤ 1.8 ms. The maintainer's
@@ -240,7 +242,7 @@ decides — do not plan them speculatively.
 **Claim:** `GatherIntoMirror` is a pure function of the winner *set* — `plan.BlockId` / `LocalIndex` /
 `Departing` / `Blocks` all come from `_frontResult`, the reconcile output, which changes **only on a front swap**
 (a tile event). The only per-frame inputs are the `CoverageFading` / `Dropped` byte masks
-(`LabelTileCoverageFilter.ClassifyActive`) — and `Departing`, which is set-derived but stays a per-frame write
+(`SymbolTileCoverageFilter.ClassifyActive`) — and `Departing`, which is set-derived but stays a per-frame write
 because it is free. So: rebuild the heavy pools (quads / glyphs / anchors / fade-ids / world points + every
 `*Start`/`*Count` remap) **only when the set version changes**; every frame write just the three per-record byte
 masks. `Gather` 5.12 → ~0.1 ms is the **memo-hit-frame** figure — see the honest hit-rate note below.
@@ -263,14 +265,14 @@ same honesty the async reconcile is built on (`labels-async-reconcile-design.md`
 cliff and no "skip when nothing changed" predicate over camera state.
 
 **Verified preconditions** (checked against source before committing to this):
-- The mirror `_m*` pools are written **only** in `GatherIntoMirror` / `RefreshBatchMirror`; downstream
-  (`LabelStageJob`, `RunCollision`) reads them and writes the separate `_sj*` pools, and the in-place candidate
+- The mirror `_m*` pools are written **only** in `GatherIntoMirror`; downstream (`StageJob`, the collision
+  schedule/harvest pair) reads them and writes the separate `_sj*` pools, and the in-place candidate
   sort touches `_stageCandidates`, not the mirror. So a retained mirror cannot be corrupted between frames.
 - `_orderedBlocks` is copied wholesale from the reconcile result, and blocks are **pinned** while a snapshot is in
   service — so a block's contents cannot change under a retained mirror without a front swap.
 
 **Design notes (as landed):**
-- The key is `SymbolLabelSubsystem._frontSetVersion` — a monotonic `int` bumped on every change to `_frontResult`'s
+- The key is `SymbolSubsystem._frontSetVersion` — a monotonic `int` bumped on every change to `_frontResult`'s
   CONTENT: the successful reconcile swap (`PickupCompletedReconcile`), and the `SetStyle`/`Dispose` clears.
   Stamped onto `SymbolGatherPlan.WinnerSetVersion` at `Build` time.
 - **`_store.CollectGeneration` was considered and rejected as the key** (this design note originally suggested
@@ -290,7 +292,7 @@ cliff and no "skip when nothing changed" predicate over camera state.
 - A same-version frame is three `NativeArray<byte>.Copy` memcpys (the masks) + a subtraction (`DroppedCount`),
   not a per-record loop — the record count that mattered for the ~0.1 ms target.
 
-**Acceptance teeth (all landed, `LabelGatherMemoTests` + two integration tests in `SymbolLabelReconcileAsyncTests`):**
+**Acceptance teeth (all landed, `SymbolGatherMemoTests` + two integration tests in `SymbolReconcileAsyncTests`):**
 - N ticks with no tile event ⇒ mirror byte-identical to a fresh `GatherIntoMirror` over the same plan
   (`CopyMirrorInto` is the sanctioned seam), with `MirrorRebuildCount` proving the memo actually engaged.
 - A version change invalidates (unit); a REAL front swap through the production subsystem invalidates
@@ -311,10 +313,10 @@ cliff and no "skip when nothing changed" predicate over camera state.
 - **R2 — native fade state. LANDED, but NARROWED — see §10.6.** As drafted here it proposed moving all four
   managed containers (`_fadeOpacity`, `_seenFade`, `_forceFadeOut`, `_placedLastFrame`) to native ones. Only
   `_placedLastFrame` actually moved; the other three have no Burst consumer and moving them would have been a
-  pessimisation. `ResolveIncumbency` is deleted, not "made Burstable".
+  pessimisation. The incumbency-resolve step is deleted, not "made Burstable".
 - **R3 — deferred collision (the old B-4b).** Reclaim the 4.06 ms `JobHandle.Complete` stall by scheduling the
   collision and consuming its survivors on the **next** frame. **Fence:** defer *only the collision* — Project +
-  Stage must stay current-frame, because `LabelStageJob` consumes this frame's `Screen`/`Depth`/`Valid` and
+  Stage must stay current-frame, because `StageJob` consumes this frame's `Screen`/`Depth`/`Valid` and
   produces screen-derived rotation/size + the curved arc-walk that the world quads are built from (the same
   camera-dependence §5 option E carves curved labels out for). Deferring the whole chain lags curved glyphs along
   their line under motion. Cost of R3: the collision sorts `_stageCandidates` in place, so last frame's survivor
@@ -322,7 +324,7 @@ cliff and no "skip when nothing changed" predicate over camera state.
 - **R4 — cheap main-thread scraps in `Collide`.** The grid clear is a managed `for` over `W*H` cells with
   per-element bounds checks (fold into the job / memset), and `NodeUpperBoundByCandidates` walks every
   candidate's box references on the main thread. ~1 ms, low risk, no architecture change.
-- **Not a lever yet:** `LabelCollisionJob` itself (4.05 ms, single-threaded greedy) — inherently serial by
+- **Not a lever yet:** `CollisionJob` itself (4.05 ms, single-threaded greedy) — inherently serial by
   design; attack it only if the re-profile leaves it dominant after R3 hides the wait.
 
 ### 10.4 OUTCOME — R1 measured: faster when still, UNCHANGED under motion (2026-07-25)
@@ -337,9 +339,9 @@ Maintainer Play-mode re-profile of R1, both scenarios as §10.2 required:
 was right in kind and wrong in degree: it assumed tile events are occasional. They are not.
 
 **Why the memo is structurally dead under motion.** Every tile-lifecycle path dirties the store, and while
-panning they fire continuously and overlap: `BeginBuild` (`SymbolTileLabelStore.cs:156`), `CompleteBuild`
-(`:195`), `Release` (`:213`), the cached-FIFO evict (`:222`), `Restore` (`:233`), and `PurgeExpiredDeparting`
-(`:606`) — the last running *every frame*, dirtying whenever any departing tile's grace expires. So
+panning they fire continuously and overlap: `BeginBuild`, `CompleteBuild`, `Release`, the cached-FIFO evict,
+`Restore`, and `PurgeExpiredDeparting` (all in `SymbolTileStore.cs`) — the last running *every frame*,
+dirtying whenever any departing tile's grace expires. So
 `CollectGeneration` moves ~every frame ⇒ a reconcile is always in flight ⇒ a front swap always lands ⇒
 `_frontSetVersion` always moves. The memo never gets a quiet frame to hit on.
 
@@ -378,14 +380,14 @@ byte-identity teeth the async version needs to prove itself against.
 
 **The two real wrinkles** (resolve in the plan, do not hand-wave):
 
-1. **Burst cannot hold `SymbolTileLabelBlock[]`** — a managed array of class instances each owning
+1. **Burst cannot hold `SymbolTileBlock[]`** — a managed array of class instances each owning
    `NativeArray`s. The job needs either a flattened pointer table (`NativeArray` of block descriptors with
    `[NativeDisableUnsafePtrRestriction]` pointers + lengths) or, more invasively, a shared bake-time mega-buffer
    so the gather becomes pure index arithmetic. The pointer table is the smaller step; the mega-buffer is the
    cleaner end state. **This choice is the crux of the stage.**
 2. **The per-frame masks must follow the DISPLAYED set, not the newest front.** With an async gather the live
    mirror corresponds to an *older* winner set than the current reconcile front, so
-   `LabelTileCoverageFilter.ClassifyActive` must classify the displayed snapshot — otherwise the masks index a
+   `SymbolTileCoverageFilter.ClassifyActive` must classify the displayed snapshot — otherwise the masks index a
    set the mirror is not built from. R1's `plan.WinnerCount == _mirrorCount` backstop would catch the mismatch, but
    catching it is not the same as being correct: the classify input has to be the displayed set by construction.
 
@@ -419,9 +421,9 @@ native ones. Applying a "who reads this from Burst?" test to each, only **one** 
 
 | container | callers | in-stage Burst consumer? | moved? |
 |---|---|---|---|
-| `_placedLastFrame` | `ResolveIncumbency` (→ `LabelStageJob`), `Emit` | **yes** | **yes** |
-| `_fadeOpacity` | `EaseFade`, `DecayUnseenFadeRecords`, `MarkFadeOutIfAlive`, `TryForceFadeOut` | no | no |
-| `_seenFade` | `Emit`, `DecayUnseenFadeRecords` | no | no |
+| `_placedLastFrame` | incumbency resolve (→ `StageJob`), `Emit` | **yes** | **yes** |
+| `_fadeOpacity` | `EaseFade`, `DecayUnseenFadeSymbols`, `MarkFadeOutIfAlive`, `TryForceFadeOut` | no | no |
+| `_seenFade` | `Emit`, `DecayUnseenFadeSymbols` | no | no |
 | `_forceFadeOut` | `GatherSymbolPoints`, `MarkFadeOutIfAlive`, `TryForceFadeOut`, `Emit` | no | no |
 
 The other three are touched **exclusively by managed main-thread code**. Moving them buys nothing and plausibly
@@ -431,14 +433,14 @@ here is not headless-gateable, it would only have surfaced at the maintainer's r
 container moves to native storage only when the Burst consumer that reads it lands in the same stage.** The three
 belong to the later emit-job stage, where their cost can be attributed and their Burst correctness proven.
 
-**The shape.** `ResolveIncumbency` — two managed main-thread loops running once per visible record (~30-40 k in
-the profiled scene, inside `Symbol.Project`) — is **deleted**. `LabelStageJob` (an `IJob`, `.Run()`) resolves
+**The shape.** The old incumbency-resolve step — two managed main-thread loops running once per visible record (~30-40 k in
+the profiled scene, inside `Symbol.Project`) — is **deleted**. `StageJob` (an `IJob`, `.Run()`) resolves
 incumbency itself, per arm, because the two arms consume it differently:
 
 - **Point arm:** inlines `Placed.Contains(s.FadeId)`. `_stagePointWasPlaced` is deleted outright (field, alloc,
   resize, fill loop, job field, Dispose).
 - **Curved arm:** the resolve loop moves to the top of `Execute()`, still filling the `AnchorWasPlaced` byte
-  array. It **cannot** inline, and this is structural, not a preference: `LabelStagingMath.StageCurved` takes a
+  array. It **cannot** inline, and this is structural, not a preference: `SymbolStagingMath.StageCurved` takes a
   `ReadOnlySpan<byte>`, lives in `MapRenderer.Core` — whose asmdef references only `Unity.Mathematics` and
   UniTask — and is compiled **verbatim** into the engine-free `Tools/core-tests` project. A `NativeHashSet` in
   that signature would demand a Collections shim there. The per-arm hybrid is the only design that keeps `Core`
@@ -451,8 +453,8 @@ site and never cached — the `ReadOnly` captures a raw pointer + safety handle 
 would dangle the first time `Add()` grows the set.
 
 **Coverage this stage had to create.** Nothing tested the `_placedLastFrame` → `WasPlacedLastFrame` path
-end-to-end (`LabelCandidateCollisionTests` sets the flag by hand; `LabelStageJobTests` fed it as a raw input;
-`LabelProjectionJobTests` deliberately arranges distinct sort keys so incumbency is a no-op), and **every**
+end-to-end (`SymbolCandidateCollisionTests` sets the flag by hand; `SymbolStageJobTests` fed it as a raw input;
+`SymbolProjectionJobTests` deliberately arranges distinct sort keys so incumbency is a no-op), and **every**
 existing differential case passed `wasPlaced = {0,0}` — so the curved arm's incumbency term had never been
 exercised at all. Both were added and RED-verified against an injected defect (both `Placed.Contains` calls
 replaced by constants): the point-arm test failed `Expected: 2, But was: 3`, and 8 of 14
@@ -482,8 +484,8 @@ replaced by constants): the point-arm test failed `Expected: 2, But was: 3`, and
   `Grow`-doubled — an asymmetry invisible unless you read both. A debug-only assert in `RunStageJob` would make a
   future mirror change fail loudly instead of silently under-filling (or reading out of bounds in a player with
   safety checks off) — same spirit as `AssertMemoPlanMatchesMirror`.
-- **Nits deferred:** the `Allocator.Temp` set round-trip in `LabelStageJobTests`' case body (removable in favour
-  of a byte literal), and the A-5/R2 rationale appearing three times in `LabelStageJob` (class summary + two
+- **Nits deferred:** the `Allocator.Temp` set round-trip in `SymbolStageJobTests`' case body (removable in favour
+  of a byte literal), and the A-5/R2 rationale appearing three times in `StageJob` (class summary + two
   field comments).
 
 ### 10.7 Measured: carrying incumbency forward does NOT change the winners (2026-07-25)
@@ -491,7 +493,7 @@ replaced by constants): the point-arm test failed `Expected: 2, But was: 3`, and
 R3 (deferred collision) needs to know whether a test that ticks **twice** selects the same labels as one that
 ticks once. It does not obviously: with the collision deferred, tick 2 stages with a non-empty
 `_placedLastFrame`, so the A-5 incumbency term enters `ComparePlacementOrder` and could reorder the greedy pass.
-`LabelCollision.cs:140-142` *claims* it cannot — "incumbency only ever RAISES priority, last frame's survivor set
+`SymbolCollision.cs:142-143` *claims* it cannot — "incumbency only ever RAISES priority, last frame's survivor set
 is a one-step fixed point (no oscillation)". That is a comment, not a measurement, and it sits in the same file
 as the `FadeId` tiebreak that exists precisely because an A-5 feedback **limit cycle** did once occur
 (`line-label-overlap-crosstile-identity`). So it was measured.
@@ -523,7 +525,7 @@ motion, where frame N+1's candidate set genuinely differs from frame N's — tha
 
 ### 10.8 R3 (LANDED) — the collision verdict applies one frame late
 
-`LabelCollisionJob` always ran on a worker; `RunCollision` simply blocked on it, so **4.06 ms of the 5.03 ms
+`CollisionJob` always ran on a worker; the main-thread caller simply blocked on it, so **4.06 ms of the 5.03 ms
 `Symbol.Collide` marker was the main thread idling**. R3 schedules at the end of frame N and harvests the
 survivors at the top of frame N+1. Nothing moved to a thread — the *wait* was removed.
 
@@ -551,10 +553,10 @@ settled scene (guaranteed by §10.7's measured one-step fixed point). Not preser
 verdict latency under motion, nothing on the very first `Tick`, emit order as above, and `LastSurvivorCount`
 now describing the previous frame.
 
-**FadeId became the authoritative display key,** so `LabelCandidate.FadeId`'s documented uniqueness contract is
+**FadeId became the authoritative display key,** so `SymbolCandidate.FadeId`'s documented uniqueness contract is
 now load-bearing for what the user sees rather than only for the opacity record. A debug-only per-frame
 duplicate assert enforces it. **The assert immediately justified itself**, self-reporting two colliding
-fixtures (`WorldLabelGroupingTests`, `LabelPlacementAllocTests`) that a manual sweep had missed on top of the
+fixtures (`WorldSymbolGroupingTests`, `SymbolPlacementAllocTests`) that a manual sweep had missed on top of the
 two already known — which is why §2.5 of the plan was rewritten to call the sweep best-effort and name the
 assert as the real mechanism. Its scope limit is real and recorded: it sees one frame's candidates, so
 sequential id reuse across frames is invisible to it, and no cross-frame check is proposed because stable
@@ -589,24 +591,24 @@ that its expected values are unchanged.** A disarmed test reads identically to a
 ### 10.9 R (LANDED) — the gather itself as a synchronous Burst job (Stage 1 of 2)
 
 `SymbolPlacementSystem.GatherIntoMirror`'s two managed loops (compact each winner's pre-baked
-`SymbolTileLabelBlock` slice into the native mirror, remapping every `Detail`/`*Start` field by a running pool
+`SymbolTileBlock` slice into the native mirror, remapping every `Detail`/`*Start` field by a running pool
 offset) are now one `[BurstCompile(CompileSynchronously = true)] IJob` (`SymbolGatherJob`,
-`Assets/Code/MapRenderer.Jobs/SymbolGatherJob.cs`), run **synchronously** (`.Run()`) in the exact same place the
+`Assets/Code/MapRenderer.Jobs/Symbols/SymbolGatherJob.cs`), run **synchronously** (`.Run()`) in the exact same place the
 managed loops ran — inside `PmGather.Auto()`, strictly before `TickCore`. This is Stage 1 of 2 (§10.5): stage 2
 (async, back buffer + swap) is fenced out; stage 1 exists because it is **byte-identical and therefore
 testable**, which the async version is not by construction.
 
-**Storage decision (a′) — a per-frame view table, block storage untouched.** `SymbolTileLabelBlock` keeps its
+**Storage decision (a′) — a per-frame view table, block storage untouched.** `SymbolTileBlock` keeps its
 19 `NativeArray<T>` fields exactly as they are. Immediately before the job runs, `BuildBlockViews`
 (`SymbolPlacementSystem.cs`) builds a reusable `NativeList<BlockView>` — one entry per
-`plan.Blocks[0, plan.BlockCount)` — where `BlockView` (`Assets/Code/MapRenderer.Jobs/BlockView.cs`)
+`plan.Blocks[0, plan.BlockCount)` — where `BlockView` (`Assets/Code/MapRenderer.Jobs/Symbols/BlockView.cs`)
 holds 19 typed **non-owning `UnsafeList<T>` views**, each built via
 `new UnsafeList<T>((T*)NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr(array), array.Length)`. Two options were
 rejected, on call-site count AND on lifetime safety:
 
 - **(b) convert block storage itself to `UnsafeList<T>`** — ≈110 call sites outside the gather (block field
   decls, the baker's allocations/writes, `DoDispose`'s `IsCreated` guards, the leak-baseline fixtures, ~30
-  `SymbolTileLabelBlockBakerTests` assertion sites) vs. (a′)'s ≈0. Worse: it would delete the Editor
+  `SymbolTileBlockBakerTests` assertion sites) vs. (a′)'s ≈0. Worse: it would delete the Editor
   `AtomicSafetyHandle` detection every block read has TODAY (`NativeArray<T>` carries a safety handle;
   `UnsafeList<T>` does not) — for every reader, baker and tests included — in exchange for nothing (a′) doesn't
   already give.
@@ -615,8 +617,8 @@ rejected, on call-site count AND on lifetime safety:
   here.
 
 Under (a′), the unsafe surface is confined to ONE function (`BuildBlockViews`) and ONE job. `BuildBlockViews`
-itself still goes through `NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr`, which performs
-`AtomicSafetyHandle.CheckRead` — so a disposed block is still caught, in the Editor, at the moment the view is
+itself still goes through `NativeArrayUnsafeUtility.GetUnsafeReadOnlyPtr`, which performs an
+`AtomicSafetyHandle` read check — so a disposed block is still caught, in the Editor, at the moment the view is
 taken, on the main thread, with a real stack — a materially better failure mode than a job silently reading
 freed memory. Stage 1 is safe by construction: `.Run()` executes inline on the calling thread, so no view can
 outlive the block it points into.
@@ -624,8 +626,8 @@ outlive the block it points into.
 **Stage 2's lifetime obligation, recorded now so its planner doesn't rediscover it.** Once the gather is
 scheduled ahead of a front swap, the view table's raw pointers DO outlive the frame, and the front snapshot
 whose blocks they point into may be demoted and released in between. Four obligations, none optional: (1) pin
-the snapshot the gather reads, independently of the front pin, via the store's existing
-`Pin`/`ReleasePins`/`DisposeOrDefer` refcount — taken at schedule, released when the mirror that job produced
+the snapshot the gather reads, independently of the front pin, via the store's existing pin-acquire /
+`ReleasePins` refcount — taken at schedule, released when the mirror that job produced
 leaves service (not at apply); (2) a debug-only generation stamp on the view table, checked at apply — no
 safety handle catches a cross-frame violation, so the invariant needs its own assert; (3) `ClassifyActive` must
 classify the DISPLAYED set, not the newest front (§10.5 wrinkle 2); **(4) — found in review, not in the
@@ -639,7 +641,7 @@ double-buffer BOTH containers, the same way the mirror lists themselves will nee
 - **Pin scope is wider than referenced blocks.** `BuildBlockViews` takes pointers from every block in
   `plan.Blocks[0, plan.BlockCount)`, including blocks no winner references this frame — the managed gather
   only ever touched referenced blocks. Safe today (the paired front/back snapshots already pin the WHOLE
-  ordered set, `SymbolLabelSubsystem.cs:670-673`), but stage 2's pin accounting must cover the whole ordered
+  ordered set, `SymbolTileStore.cs:239-256`'s `CaptureSnapshot`), but stage 2's pin accounting must cover the whole ordered
   set, not just the referenced subset, or it will under-pin relative to what stage 1 silently relied on.
 - **Per-record view copy cost.** `BlockView block = BlockViews[BlockId[r]]` copies 19 `UnsafeList<T>`
   fields (~608 B) per winner, twice per winner (pass 1 and pass 2). Burst will likely SROA this away — but if
@@ -649,8 +651,8 @@ double-buffer BOTH containers, the same way the mirror lists themselves will nee
   `AtomicSafetyHandle` checks that `ENABLE_UNITY_COLLECTIONS_CHECKS` only pays in the Editor — the measured win
   may not transfer 1:1 to a player build, where those checks were never being paid. Not previously in this doc;
   recorded now.
-- **`SymbolLabelBatchDiff` does not compare `RecordDropped`** (`SymbolLabelBatchDiff.cs:31-40` — Departing and
-  CoverageFading only). Pre-existing gap in the parity oracle, not introduced by this stage; `RecordDropped`
+- **`SymbolBatchDiff` does not compare `SymbolDropped`** (`SymbolBatchDiff.cs:39-40` — Departing and
+  CoverageFading only). Pre-existing gap in the parity oracle, not introduced by this stage; `SymbolDropped`
   coverage lives in `SymbolGatherPlanDropMaskTests` instead.
 
 **Job shape.** One self-sizing `IJob`: pass 1 totals the per-pool sizes, pass 2 resizes the 19 output
@@ -658,18 +660,18 @@ double-buffer BOTH containers, the same way the mirror lists themselves will nee
 inside a Burst job (as opposed to `Allocator.Temp` scratch created inside the job, `EarcutJob`'s precedent) has
 its OWN in-repo precedent: `GlobeFillSubdivideJob<TProj>.Execute` calls `OutVerts.Add(...)` on a
 `NativeList<GlobeFillVertex>` allocated by its caller (`StyledFillTileBuilder.cs:268`) — confirmed by reading
-both sites, not merely cited. `LabelStageJob`'s doc comment ("Burst cannot grow a container mid-run") does not
+both sites, not merely cited. `StageJob`'s doc comment ("Burst cannot grow a container mid-run") does not
 contradict this: it describes ITS OWN fixed-length `NativeArray` outputs (that job's caller doesn't know the
 per-record counts either, so it sizes to the worst case) — `SymbolGatherJob` computes the exact counts in its
 OWN pass 1 before pass 2 needs the resize, so its growth is single-shot and bounded, not per-element. The comment
-was reworded (`LabelStageJob.cs`) so the two jobs' docs don't read as contradicting each other.
+was reworded (`StageJob.cs`) so the two jobs' docs don't read as contradicting each other.
 
 **Invariant — byte-identical, confirmed, not merely claimed.** `SymbolGatherParityTests.Gather_MatchesBuildOracle_FieldByField`
-(the differential oracle — `SymbolLabelBatchBuilder.Build`, a completely independent managed implementation
-that never touches a block, a view, or the job) passed unchanged against the new Burst gather. Its
+(the differential oracle — an independent managed `Build` implementation, independent of the gather, not of
+the bake) passed unchanged against the new Burst gather. Its
 independence claim needs one qualifier: it is a real, independent oracle for the gather's compaction/remap
 spine (winner order, the `(blockId, localIndex)` mapping, the running-offset arithmetic this stage rewrites)
-— that is what its two RED-verify siblings actually probe — but `SymbolTileLabelBlockBaker.Bake` and the
+— that is what its two RED-verify siblings actually probe — but `SymbolTileBlockBaker.Bake` and the
 oracle's own `Build` share the `BuildPointInput`/`BuildCurvedInput` per-label field helpers, so a bug INSIDE
 those helpers would produce matching wrong values on both sides and this test cannot catch it. Not a gap this
 stage introduces (the job never touches those helpers); recorded so a future reader doesn't cite the test as
@@ -728,7 +730,7 @@ own message's claim was previously unenforced).
 **Review nits, applied:** `CopyView`'s `UnsafeList<T>` parameter dropped its `in` (the type isn't a readonly
 struct, so `in` forced a per-element defensive copy in the hottest loop of the stage — the repo's
 `in ⟺ readonly struct` gate); `BuildBlockViews` moved to below `GatherIntoMirror` so its own doc comment isn't
-stranded reading as `GatherIntoMirror`'s; the "its caller's pass 1" wording (`LabelStageJob.cs` and this
+stranded reading as `GatherIntoMirror`'s; the "its caller's pass 1" wording (`StageJob.cs` and this
 section) corrected to "its own pass 1" — pass 1 is inside `SymbolGatherJob.Execute`, the caller computes
 nothing.
 
@@ -818,10 +820,10 @@ ratio inverted the working assumption (that quads dominate the loop) and pointed
 lookups instead.
 
 **The defect.** `EaseFade` stored every identity it computed, including the ones that had eased to 0.
-`DecayUnseenFadeRecords` — the only collector — drops ids **not seen this frame**, and a staged candidate is
+`DecayUnseenFadeSymbols` — the only collector — drops ids **not seen this frame**, and a staged candidate is
 always seen. So every candidate that never places parked a permanent 0, and `_fadeOpacity` grew toward the
 candidate count instead of the visible-label count. The whole sweep then walked ~30 k keys per frame to decay a
-few hundred live ones. The floor rule that fixes it already existed just below, inside `DecayUnseenFadeRecords`
+few hundred live ones. The floor rule that fixes it already existed just below, inside `DecayUnseenFadeSymbols`
 itself; it had simply never reached the hot path.
 
 **The fix**, in `SymbolPlacementSystem.EaseFade`:
@@ -841,14 +843,14 @@ itself; it had simply never reached the hot path.
   guard* by leaving a guarded sub-epsilon fade-in unmarked, so the sweep decays it straight back. The invariant
   that makes both correct is **seen ⟺ stored**, which is only enforceable where the store happens.
 
-**Teeth.** `LabelFadeTests.Tick_StableCollisionLoser_LeavesNoFadeRecordBehind`, sited on the existing stable-loser
+**Teeth.** `SymbolFadeTests.Tick_StableCollisionLoser_LeavesNoFadeRecordBehind`, sited on the existing stable-loser
 fixture because that fixture already establishes the precondition this needs — a candidate staged every frame
 and placed by none. A bare count assertion would be the epic's sixth vacuous tooth, so it also asserts the
 precondition (`LastCandidateCount == 2` while `LastQuadCount == 1`, i.e. the loser really is still staged) and
 **stability across further ticks**, which rejects a periodic-clear implementation that a single sample accepts.
 RED-verified against the real defect (unconditional store).
 
-**Telemetry.** `SymbolLiveFadeRecords` (`LabelPlacementTelemetrySnapshot.LiveFadeRecordCount` → `MapTelemetryPanel`) —
+**Telemetry.** `SymbolLiveFade` (`SymbolPlacementTelemetrySnapshot.LiveFadeSymbolCount` → `MapTelemetryPanel`) —
 genuine production instrumentation, not a test seam: it is the exact number whose absence hid this, and it sits
 next to `SymbolCollisionCandidates` so the failure mode is legible at a glance (if it tracks candidates rather
 than placed quads, invisible identities are being retained again).
@@ -874,10 +876,10 @@ lookups more than it suggested. Record the miss: the prediction was too pessimis
 
 **Second increment — the placed set was being re-probed per candidate.** With the fade map fixed, the residual
 1.58 ms was still three hash lookups per candidate over 30 854 candidates. One of them was redundant:
-`LabelStageJob` already resolves `Placed.Contains(FadeId)` in Burst and carries it on `LabelCandidate.
+`StageJob` already resolves `Placed.Contains(FadeId)` in Burst and carries it on `SymbolCandidate.
 WasPlacedLastFrame`, and `HarvestCollision` — the set's sole writer — runs *before* the stage job, so the
 contents cannot differ between them. The emit loop was recomputing a bool already in the struct it had loaded,
-paying an `AtomicSafetyHandle.CheckRead` per probe in the Editor. Plus an early-out: a candidate neither placed
+paying an `AtomicSafetyHandle` read check per probe in the Editor. Plus an early-out: a candidate neither placed
 nor holding a fade record produces nothing (`EaseFade` eases 0→0, stores nothing, `_seenFade` untouched, caller
 `continue`s), so skipping it is exactly equivalent. Per candidate **3 lookups → 1** on the ~28 k that produce
 nothing, **→ 2** on the ~2.5 k that draw.
@@ -887,14 +889,14 @@ curved labels comes from a sliced array with a trailing centred-fallback slot �
 hides, and the same blind spot that let three curved offsets be hardcoded to `0` earlier in this epic. The
 pairing was verified by source trace (whole-range element-wise fill, identical slices, same index in
 `StageCurved`), *and* by inverting the bit for curved candidates only: **13 failures, all curved-specific** — 5
-`WorldCurvedAbRenderSnapshotTests` golden images, 6 `LabelPlacementStructureTests`, the curved-only drop-mask
+`WorldCurvedAbRenderSnapshotTests` golden images, 6 `SymbolPlacementStructureTests`, the curved-only drop-mask
 parity test, the curved world-emit alloc test. Had that come back green it would have meant curved emit is
 *untested*, not that the change is safe — run the targeted inversion, not the global one, precisely because the
 global one tells you nothing about the arm you were worried about.
 
 ### 10.11.1 NEGATIVE RESULT — the grow-only index cache (landed `ce28dd33`, REVERTED)
 
-With triage ruled out, the arithmetic *appeared* to localise the remaining 1.50 ms: `WorldLabelRenderer.Emit`
+With triage ruled out, the arithmetic *appeared* to localise the remaining 1.50 ms: `WorldSymbolRenderer.Emit`
 does **14 `NativeList.Add` per quad** (4 vertices, 4 opacity, 6 indices) = **35 098 per frame** at 2 507 quads;
 at an assumed ~40 ns each under collections-checks that is ~1.4 ms, matching almost exactly. Six of the fourteen
 looked free: the k-th quad always occupies vertices `4k..4k+3`, so its indices are `4k + {0,1,2, 0,2,3}` — a

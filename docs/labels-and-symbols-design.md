@@ -47,7 +47,7 @@ shared label list; the main-thread tail (`RunTailAsync`) first collects every pr
 ranges and awaits them (the build's ONE suspension point), then runs the per-layer `CompleteOnMain` loop —
 synchronous, no atlas mutation — started by `PumpBuilds`' once-per-frame drain of the pool→main
 `ConcurrentQueue` handoff (`_handoffQueue`). Finished per-tile labels land in
-`SymbolTileLabelStore`, which:
+`SymbolTileStore`, which:
 
 - keeps an **active** set (in cover) and a **cached** set (out of cover, kept warm for cache-hit re-entry);
 - bumps a monotonic **`Version`** on every set-changing mutation — the key the fast clock uses to know whether
@@ -56,7 +56,7 @@ synchronous, no atlas mutation — started by `PumpBuilds`' once-per-frame drain
 **Per-label build isolation.** One label whose build throws must NOT blank the whole tile's symbols. The
 per-label body in `StyledSymbolTileBuilder.Shape` (shape → layout → `output.Add`) is wrapped in a
 `catch … when (!(ex is OperationCanceledException) && !ct.IsCancellationRequested)` that skips + counts the one
-label (`SkippedLabelCount` telemetry, throttled once-per-session warn) and lets the rest build + commit. The
+label (`SkippedSymbolCount` telemetry, throttled once-per-session warn) and lets the rest build + commit. The
 trigger this fixes is the deferred single-run bidi: `CodepointTextShaper` throws on mixed strong-direction text
 (RTL+LTR), which the liberty `["concat", name:latin, " ", name:nonlatin]` place field produces for every
 Arabic/Hebrew-region place — without isolation every low-zoom world tile (which spans an RTL region) rendered
@@ -86,9 +86,11 @@ anchor clip, **not** closed by it. (2) the regression test
 `[0,extent)` boundary logic but not the real OpenFreeMap z0 place layer's actual coordinates — a real-tile smoke
 check is worth adding to the epic.
 
-So a `LabelInstance` exists per `(tile, feature)` once its tile's bytes are decoded and shaped. It carries
-`AnchorRender` (point) or `PathRender` + `LineAnchors` (curved), its `TileKey` (packed z/x/y), text, paint, and
-style-evaluated sizes. Nothing here depends on the camera.
+So a `ShapedSymbol` exists per `(tile, feature)` once its tile's bytes are decoded and shaped, held in the
+build's `SymbolTileBuffer` — one dense `Symbols` list plus the pooled columns (`Quads`, `Glyphs`, `Anchors`,
+`Path`/`PathUp`) each symbol's own span indexes into. It carries `AnchorRender` (point) or a `Path`/`Anchors`
+span (curved), its `TileKey` (packed z/x/y), text, material index, and style-evaluated sizes. Nothing here
+depends on the camera.
 
 ## 1.2 Per-frame driver — `MapView.LateUpdate`
 
@@ -96,93 +98,102 @@ Runs in `LateUpdate` so it sees this frame's committed camera (input mutates the
 is load-bearing:
 
 ```
-1. Camera.SyncToCamera()                       // commit this frame's pose
-   cameraProperties = Camera.CurrentProperties // ONE snapshot — tiles + labels share it
-   sceneFrame       = BuildSceneFrame(...)     // floating origin: origin = look-at, + ENU rebase
+1. Camera.SyncToCamera()                        // commit this frame's pose
+   cameraProperties = Camera.CurrentProperties  // ONE snapshot — tiles + symbols share it
+   sceneFrame       = BuildSceneFrame(...)      // floating origin: origin = look-at, + ENU rebase
 
-2. TileManager.InstancedRebuild(sceneFrame)    // place tile meshes relative to the origin
-   TileManager.Tick(cameraProperties, ...)     // the slow clock (§1.1) — cover select + request/release
+2. Layers.ApplyZoom(...)                        // zoom uniforms, px→device basis, before anything else moves
+   TileManager.InstancedRebuild(sceneFrame)     // place tile meshes relative to the origin
+   TileManager.Tick(cameraProperties, ...)      // the slow clock (§1.1) — cover select + request/release
 
-3. if the style has symbol layers:
-     TileManager.CollectLoadedTileKeys(scratch) // PULL the current loaded set
-     _symbols.ReconcileLoadedTiles(scratch)     // release departed / restore cache-hit labels
-     _symbols.PumpBuilds()                       // start ≤N queued builds, coalesce one atlas upload
-     Labels.Tick(sceneFrame, _symbols.CurrentBatch(), atlas, dt, layerMaterials, _symbols.Version)
+3. if SymbolSubsystem.HasSymbolLayers:
+     TileManager.CollectLoadedTileKeys(scratch)         // PULL the current loaded set
+     SymbolSubsystem.ReconcileLoadedTiles(scratch, now) // release departed / restore cache-hit symbols
+     SymbolSubsystem.PumpBuilds()                        // start ≤N queued builds, coalesce one atlas upload
+     plan = SymbolSubsystem.CurrentBatch(sceneFrame, minCoverage, now)  // this frame's winner plan (§1.5)
+     SymbolPlacementSystem.Tick(sceneFrame, plan, atlas, dt, layerMaterials, iconTexture)
    else:
-     Labels.Tick(sceneFrame, LabelInstances, atlas, dt)   // demo/synthetic fallback
+     nothing to place — a style with no symbol layers skips this step entirely.
 ```
 
-Tiles and labels are placed against the **same** `sceneFrame` and `cameraProperties` snapshot, so they can
+Tiles and symbols are placed against the **same** `sceneFrame` and `cameraProperties` snapshot, so they can
 never diverge.
 
-## 1.3 The batch — `SymbolLabelSubsystem.CurrentBatch()`
+## 1.3 The winner plan — `SymbolSubsystem.CurrentBatch()`
 
-The bridge between the two clocks: a blittable `SymbolLabelBatch` (Structure-of-Arrays), rebuilt **every frame**
-from the current collected set. The rebuild is **allocation-free** (both `CollectInto` and the builder reuse
-their buffers), so the cost is CPU only — the cross-tile dedup + the `LabelInstance → SoA` conversion. Each
-rebuild, `SymbolLabelBatchBuilder`:
+The bridge between the two clocks: `CurrentBatch` returns a `SymbolGatherPlan` — one entry per cross-tile
+dedup winner, in final render order, pointing at its pre-baked `SymbolTileBlock` symbol via `BlockId`/
+`LocalIndex`, plus three per-frame overrides (`Departing`, `CoverageFading`, `Dropped`) applied at plan-fill
+time. This replaces the fully-built Structure-of-Arrays batch this section used to describe: gathering the
+real per-symbol SoA now happens later, inside `SymbolPlacementSystem`'s native mirror.
 
-- flattens each label into the SoA in collected order (so collision ordinals — and the mesh — stay
-  byte-identical);
-- resolves the managed-only bits (glyph quads, sRGB→linear colour, fade ids).
+The plan is rebuilt **every frame** from the reconciled tile set (§1.1; the reconcile itself is now async —
+`docs/labels-async-reconcile-design.md`), reusing its native lists (allocation-free once warm). Between the
+cross-tile dedup and the plan fill, `CurrentBatch` also runs the tile-coverage pre-cull (§1.5) — it now
+**masks** rather than compacts: every collected winner stays resident (`WinnerCount` counts them all) and a
+`Dropped` winner is hard-skipped downstream, in `SymbolPlacementSystem.GatherSymbolPoints`.
 
-Between the cross-tile dedup and the SoA build, `CurrentBatch` also runs the tile-coverage pre-cull (§1.5) —
-a low-coverage tile's active labels never reach the builder at all.
-
-The batch carries a **`BuildId`** bumped on every rebuild; `SymbolPlacementSystem` mirrors it into native buffers
-only when `BuildId` changes.
+The plan carries a **`WinnerSetVersion`**, bumped on every front-content change (reconcile swap / restyle /
+dispose); `SymbolPlacementSystem` mirrors it into native buffers only when the version changes.
 
 ## 1.4 The per-frame placement loop — `SymbolPlacementSystem.Tick`
 
 Everything camera-dependent lives here, over reused buffers (no per-frame GC). Stages:
 
 ```
-Tick(sceneFrame, batch, atlas, dt, materials, version)
+Tick(sceneFrame, plan, atlas, dt, materials, spriteTexture)
  │
- ├─ B-1 static-frame skip  ── if version + camera + sceneFrame + fades ALL unchanged since the last
- │                             real build → re-submit the cached meshes and RETURN. (Idle map = no work.)
- │
+ ├─ PmGather        → GatherIntoMirror(plan)  : mirror the plan's (§1.3) native winner rows into per-Tick
+ │                                               buffers, memoized on WinnerSetVersion
+ ├─ PmCollideHarvest → HarvestCollision()     : complete LAST Tick's scheduled collision job and re-key its
+ │                                               survivors by FadeId (B-4, Track B below)
  ├─ PmProject
+ │   ├─ PmGatherPoints
+ │   │   └─ GatherSymbolPoints(...) : flatten un-Dropped winners' world points; a culled winner's offset
+ │   │                                is set to -1 (B-3 distance cull, then S3 horizon cull — the
+ │   │                                tile-coverage pre-cull already ran upstream, in CurrentBatch, §1.5)
  │   ├─ PmProjectPositions
- │   │   ├─ GatherSymbolPoints(...)   : flatten un-culled records' world points; a culled record's offset
- │   │   │                              is set to -1 (B-3 distance cull, then S3 horizon cull — the
- │   │   │                              tile-coverage pre-cull already ran upstream, in CurrentBatch, §1.5)
- │   │   └─ ProjectSymbols(...)       : Burst SymbolProjectionJob — world → screen/depth for all at once
+ │   │   └─ ProjectSymbols(...)     : Burst SymbolProjectionJob — world → screen/depth for all at once
  │   └─ PmStage
- │       └─ RunStageJob(...)          : Burst LabelStageJob — collision boxes + rotated-glyph quads
- │                                      (skips any record whose gather offset is -1)
- ├─ PmCollide
- │   └─ RunCollision(...)             : Burst LabelCollisionJob — greedy, sort-key-driven survivor selection
- │                                      (global across point + curved labels; uniform-grid accelerated)
- ├─ PmEmit
- │   └─ A-4 fade + per-slot quad assembly : ease each survivor's opacity toward 1 (placed) / 0 (suppressed);
- │                                          emit its quads into its material slot's bucket
- └─ PmBuildSubmit
-     └─ BuildAndSubmit(...)           : one Burst SymbolBillboardJob → mesh upload → Graphics.RenderMesh
-                                        (one draw per non-empty material slot)
+ │       └─ RunStageJob(...)        : Burst StageJob — collision boxes + rotated-glyph quads (skips any
+ │                                    winner whose gather offset is -1)
+ ├─ PmEmit  (reads LAST Tick's collision verdict — this Tick's is only scheduled below, not yet complete)
+ │   ├─ PmEmitLoop  → A-4 fade + per-slot quad assembly : ease each candidate's opacity toward 1 (placed
+ │   │                last Tick) / 0 (dropped/suppressed); emit its quads via WorldSymbolRenderer.Emit
+ │   └─ PmEmitDecay → DecayUnseenFadeSymbols(...) : ease out any fade id absent from this Tick
+ └─ PmCollide → ScheduleCollision(...)  : schedule THIS Tick's Burst CollisionJob (greedy, sort-key-driven,
+                                          uniform-grid) — its verdict is harvested next Tick's PmCollideHarvest
+
+then, every Tick regardless: WorldSymbolRenderer.EndFrame(...) builds + submits every non-empty material
+slot's mesh (Graphics.RenderMesh), hiding any slot left empty this Tick.
 ```
 
-Four fade-out triggers happen **before** any projection/staging/collision, in `GatherSymbolPoints`:
+Five fade-out triggers happen **before** any projection/staging/collision, classified by `GatherTrigger` and
+applied in `GatherSymbolPoints`:
 
-1. **Departing** (`RecordDeparting`): the record's tile is leaving cover (§1.6). Fades out unconditionally.
-2. **Coverage-fading** (`RecordCoverageFading`): the record's tile just dropped below the §1.5 coverage
-   threshold and is easing out over the grace window before it is dropped from the build entirely. Set by the
-   §1.5 pre-cull; a still-loaded, in-cover tile (distinct from `RecordDeparting`'s leaving-cover meaning).
-3. **B-3 distance cull** (`LabelViewDistance`): drop an individual label beyond a horizon radius.
-4. **S3 horizon cull** (`HorizonCull`): drop a label whose anchor is hidden behind the globe's own bulk
-   (no-op under a planar projection).
+1. **Departing** (`SymbolDeparting`): the winner's tile is leaving cover (§1.6). Fades out unconditionally.
+2. **Coverage-fading** (`SymbolCoverageFading`): the winner's tile just dropped below the §1.5 coverage
+   threshold and is easing out over the grace window before it is dropped from the plan entirely. Set by the
+   §1.5 pre-cull; a still-loaded, in-cover tile (distinct from `SymbolDeparting`'s leaving-cover meaning).
+3. **B-3 distance cull** (`GatherTrigger.Distance`): drop an individual symbol beyond a threshold fraction of
+   the camera's far plane (`SymbolMaxDistanceFraction × CurrentFarMetres`, computed once per Tick).
+4. **Zoom** (`GatherTrigger.Zoom`): drop a symbol outside its own live zoom range.
+5. **S3 horizon cull** (`GatherTrigger.Horizon`): drop a symbol whose anchor is hidden behind the globe's own
+   bulk (no-op under a planar projection).
 
-A triggered record is **not** hard-dropped while its fade is still alive: gather keeps STAGING it (re-projected
+A triggered winner is **not** hard-dropped while its fade is still alive: gather keeps STAGING it (re-projected
 to its live position) and forces its opacity toward 0 in emit — so it eases OUT in place instead of popping.
 Only once fully faded does gather set its offset to `-1` (the Burst stage job's "skip"). This soft-cull is the
-single mechanism behind all three; no job changed to add any of them.
+single mechanism behind all five; no job changed to add any of them.
 
 **`SymbolPlacementSystem`'s own identity** (moved from its class doc, UMR-118): it is a plain class (NOT a
 MonoBehaviour) — the "placed every frame" path (`ARCHITECTURE.md` §"Two geometry classes"), structurally
 distinct from the static per-`(tile,layer)` `ITileRenderBackend` meshes it never touches
 (`SymbolPlacementStructureTests` grep-checks this). Every on-screen symbol's screen-space AABB (`SymbolBox`,
 `text-padding` applied) runs through `SymbolCollision.SelectSurvivors` — greedy, sort-key-driven,
-permutation-invariant selection — BEFORE the world emit, over reused arrays (no per-frame managed allocation).
+permutation-invariant selection — over reused arrays (no per-frame managed allocation). This Tick's collision
+is *scheduled*, not run inline (see the pipeline above): the world emit reads the PREVIOUS Tick's
+already-harvested verdict, and the current Tick's own verdict is harvested at the START of the next one.
 A slot that produces no quads this Tick (no atlas, empty batch, everything culled/suppressed) is HIDDEN, not
 left drawing stale content — the mirror image of the pre-E2 Editor blink; `WorldSymbolRenderer.EndFrame` owns
 this per-slot show/hide.
@@ -199,45 +210,48 @@ slivers a radius keeps.
 **Where it runs.** Originally the cull ran post-build (flagged in `SymbolPlacementSystem.Tick`, applied in
 gather) to preserve a per-batch version cache that has since been removed (`cb0786c7`) — once that cache was
 gone, nothing justified paying for the SoA build (glyph/quad copies, sRGB→linear, fade-id hashing) on a tile
-whose labels were about to be discarded. The cull now runs in `SymbolLabelSubsystem.CurrentBatch`, **after**
-the A-3 cross-tile dedup and **before** `SymbolLabelBatchBuilder.Build`:
+whose labels were about to be discarded. That original rationale still explains why the cull runs where it
+does, but the mechanism it runs inside has since moved off-main (`docs/labels-async-reconcile-design.md`): the
+cull now runs in `SymbolSubsystem.CurrentBatch`, **after** picking up the async reconciler's cross-tile dedup
+and **before** filling the gather plan:
 
 ```
 CurrentBatch(frame, minCoverage, now)
-    _store.CollectInto(_batchCollect, quantize, out activeCount)        // A-3 dedup (§1.1)
-    activeCount = LabelTileCoverageFilter.FilterActive(                 // ◄── pre-build cull (this section):
-        _batchCollect, activeCount, projection, frame.SceneOriginRender, viewProj, viewportLogicalPx,
-        frame.Rebase, minCoverage,                                      //     classify Keep / Fade / Drop,
+    PickupCompletedReconcile(); ScheduleReconcileIfDirty()   // pick up the off-main A-3 dedup (§1.1)
+    SymbolTileCoverageFilter.ClassifyActive(                 // ◄── pre-build cull (this section):
+        blockTileKeys, frontResult.BlockId, frontResult.IsDeparting,    //   PER BLOCK — one classification per
+        projection, frame.SceneOriginRender, viewProj, viewportLogicalPx, //  (source, tile), fanned out to
+        frame.Rebase, minCoverage,                                        //  every winner sharing that block
         _coverageAbovePrev, _coverageAboveThisFrame, _coverageDepartingUntil, _coverageFadingTiles,
-        now, DepartingGraceSeconds, _tileDecisionScratch, out culled)   //     Drop-only labels leave the list
+        now, DepartingGraceSeconds, _tileDecisions, _blockDecision, _planDecision, out culled)
     swap(_coverageAbovePrev, _coverageAboveThisFrame); PurgeExpiredCoverageDeadlines(now)
-    SymbolLabelBatchBuilder.Build(_batch, _batchCollect, slotCount, projection, activeCount,
-        _coverageFadingTiles)                                           // SoA build; flags RecordCoverageFading
+    _gatherPlan.Build(frontResult.BlockId, frontResult.LocalIndex,      // MASKS Dropped winners in place — every
+        frontResult.IsDeparting, _planDecision, frontResult.OrderedBlocks, frontSetVersion) // winner stays
+                                                                         // resident (§1.3); flags CoverageFading
 ```
 
 Cull **after** dedup, not before/inside it: culling pre-dedup would change dedup *winners* — a <5%-coverage
-child tile culled ahead of its A-3 pass would let its >5% parent win the finest-zoom-wins tiebreak
-(`z = TileKey>>44`) and render a label that is hidden today. Cull-after-dedup preserves winners exactly and
-keeps `SymbolTileLabelStore`/`CollectInto` untouched.
+child tile culled ahead of the A-3 pass would let its >5% parent win the finest-zoom-wins tiebreak
+(`z = TileKey>>44`) and render a symbol that is hidden today. Cull-after-dedup preserves winners exactly and
+keeps `SymbolTileStore`/`CollectInto` untouched.
 
-**Scope: active labels only** (`_batchCollect[0, activeCount)`) — the departing tail (§1.6, tiles leaving
-cover retained for a fade-out) is untouched by this filter regardless of its own tile's coverage.
+**Scope: active winners only.** A departing winner (§1.6, a tile leaving cover retained for a fade-out) is
+left at `Keep` unconditionally and never classified — a departing-only block touches none of this filter's
+cross-frame state (deadline stamp, above-set, fading-set), regardless of its own tile's coverage.
 
-The filter itself is an engine-free Core seam, **`LabelTileCoverageFilter.FilterActive`** — every dependency
-(`LabelInstance`, `TileId.ToLonLat`, `SymbolFeatureExtractor.UnpackTileKey`, `IProjection`/`GeoCoordinate`,
-`LabelTileCoverage.ScreenCoverage`/`IsCulled`) is Core, so it compiles into `Tools/core-tests`
-(`LabelTileCoverageFilterTests`) for a fast, RED-verifiable loop over the compaction (active-cull +
-departing-preserve + activeCount recount). It resolves each unique `TileKey`'s corners
-(`TileId.ToLonLat → IProjection.Project`, ring TL/TR/BR/BL — globe-correct, no flat-earth `MercatorBounds`
-shortcut) and coverage (`LabelTileCoverage.ScreenCoverage`/`IsCulled`, same metric as before) ONCE per call via
-a reused scratch cache (`_tileDecisionScratch`, decided once per tile), then compacts the active range in
-place. Each tile is classified **Keep / Fade / Drop** (a `null` label is never culled — `Build`'s null-guard
-expects it to pass through):
+The filter itself is an engine-free Core seam, **`SymbolTileCoverageFilter.ClassifyActive`** — Core, so it
+compiles into `Tools/core-tests` (`SymbolTileCoverageFilterTests`) for a fast, RED-verifiable loop. It
+classifies **per BLOCK, not per winner**: every winner produced from one baked `(source, tile)` block shares
+that block's tile key, so the classifier resolves each unique tile's coverage ONCE (`SymbolTileCoverage`,
+same metric as before, via a reused per-call cache) and fans the decision out to every winner sharing that
+block — O(blocks) tile work plus an O(winners) fan-out. Each tile is classified **Keep / Fade / Drop**:
 
 - **Keep** (`≥ threshold`): stays active; the A-4 fade eases it *in* if it is new. Clears any live fade deadline.
-- **Fade** (`< threshold` but was visible): stays in the build, its tile added to `_coverageFadingTiles` so
-  `Build` sets `RecordCoverageFading` → gather's 4th trigger (§1.4) eases it *out* in place instead of popping.
-- **Drop** (`< threshold`, steady/never-visible/grace-expired): removed from the list pre-build — the perf win.
+- **Fade** (`< threshold` but was visible): every winner on the tile stays resident in the plan, MASKED
+  `CoverageFading` → gather's trigger 2 (§1.4) eases it *out* in place instead of popping.
+- **Drop** (`< threshold`, steady/never-visible/grace-expired): every winner on the tile stays resident too —
+  D1's masking model keeps `WinnerCount` unchanged — but is MASKED `Dropped` and hard-skipped downstream,
+  in `SymbolPlacementSystem.GatherSymbolPoints`, which is where the perf win is realized.
 
 **Fade-then-drop, not pop.** A tile crossing below threshold must fade out like every other cull (§1.4), so
 the filter keeps a small amount of reused, alloc-free cross-frame state on the subsystem: `_coverageAbovePrev`
@@ -252,7 +266,7 @@ from `MapView.LateUpdate` (`Time.timeAsDouble`, shared with `ReconcileLoadedTile
 
 ```
 ScreenCoverage(4 render corners, sceneOrigin, viewProj, viewport)
-    → project each corner to screen (LabelScreenProjection.TryProjectPoint)
+    → project each corner to screen (SymbolScreenProjection.TryProjectPoint)
     → if ANY corner is behind the near plane (or viewport degenerate): return +∞   ("never cull")
     → else: |shoelace(4 screen corners)| / viewportArea                            (fraction of screen)
 
@@ -261,47 +275,47 @@ IsCulled(coverage, minCoverage)  →  minCoverage > 0 && coverage < minCoverage
 
 `minCoverage ≤ 0` (or a null projection) disables the cull (the kill-switch, same convention as before); `+∞`
 is never below a finite threshold, so a near-plane-straddling tile is always kept. Default
-`MapViewConfig.LabelTileCoverageCull = 0.05` (threaded through `MapView.LateUpdate` → `CurrentBatch`) — a
-maintainer eyeball-tunable. Telemetry: `SymbolLabelSubsystem.LastTileCoverageCulledCount` (the Drop count,
+`MapViewConfig.SymbolTileCoverageCull = 0.05` (threaded through `MapView.LateUpdate` → `CurrentBatch`) — a
+maintainer eyeball-tunable. Telemetry: `SymbolSubsystem.LastTileCoverageCulledCount` (the Drop count,
 moved from `SymbolPlacementSystem`) + `SymbolPlacementSystem.LastCoverageFadingCulledCount` (the fully-faded
 coverage-fade count, the gather-side companion).
 
 **Behaviour vs the old post-build cull:** the *rendered set* is unchanged (a tile below threshold is hidden
 either way; cull stays after the A-3 dedup so winners are preserved), and static-frame GPU snapshots are
 byte-identical (no re-bake). The one change is the **transition is preserved**: a tile crossing below threshold
-**fades out** over the grace window (via `RecordCoverageFading`, §1.4) exactly like the old gather cull did,
+**fades out** over the grace window (via `CoverageFading`, §1.4) exactly like the old gather cull did,
 rather than popping — only a tile that was *never* on screen is dropped silently (nothing to pop). This was a
 correction over a first (pop) cut of this stage; matches the rest of the label system, all of which fades.
 
 **Deferred / follow-ups:** a green/red survived-vs-culled debug overlay (tune the threshold by eye);
 tilt-scaling the threshold; explicit hysteresis *on the threshold itself* (distinct from the fade grace);
 culling ahead of the A-3 dedup (would change dedup winners — see above). Telemetry is surfaced through
-`SymbolStoreTelemetrySnapshot.CoverageDroppedLabels` / `LabelPlacementTelemetrySnapshot.CoverageFadingLabels` → the `MapTelemetryPanel` (beside the
+`SymbolStoreTelemetrySnapshot.CoverageDroppedSymbols` / `SymbolPlacementTelemetrySnapshot.CoverageFadingSymbols` → the `MapTelemetryPanel` (beside the
 distance cull), so the threshold is tunable by watching the live drop/fade counts. `viewProj` and the logical
 viewport are single shared definitions (`SymbolPlacementSystem.ViewProj(Camera)` + `MapCamera.ViewportLogicalPx`)
 read by both `CurrentBatch` and `Tick`.
 
 ## 1.6 Retain-as-departing — fading a tile out when it leaves cover
 
-The B-3 distance / S3 horizon culls fade a record still *in* the batch (§1.4; the tile-coverage pre-cull, §1.5,
-now pops instead — it runs before the batch even exists). A normal **tile unload** is different: the tile
-leaves cover, its labels leave the collected set, the batch rebuilds without them, and they would pop. The fix
-keeps them in the batch for a grace window.
+The B-3 distance / S3 horizon culls fade a winner still *in* the plan (§1.4; the tile-coverage pre-cull, §1.5,
+now masks Fade/Drop instead of popping — it runs before the plan is even filled). A normal **tile unload** is
+different: the tile leaves cover, its symbols leave the collected set, the plan rebuilds without them, and they
+would pop. The fix keeps them in the plan for a grace window.
 
-When a tile leaves cover, `SymbolTileLabelStore` releases it to the **warm cached side** and, if a grace window
+When a tile leaves cover, `SymbolTileStore` releases it to the **warm cached side** and, if a grace window
 is set, stamps it **departing** (`key → wall-clock expiry`). While departing:
 
-- `CollectInto` still emits its labels — appended **after** the active ones — and reports the split via
-  `out activeCount`. A departing point label whose cross-tile identity is already claimed by an active label is
+- `CollectInto` still emits its winners — appended **after** the active ones — and reports the split via
+  `out activeCount`. A departing point winner whose cross-tile identity is already claimed by an active winner is
   skipped (the active copy shows → seamless tile-to-tile transfer, no fade).
-- `SymbolLabelBatchBuilder.Build(…, activeCount)` flags every record at index ≥ `activeCount` as
-  `RecordDeparting`, which gather treats as an unconditional fade-out trigger.
+- `SymbolGatherPlan.Build` copies each winner's `IsDeparting` flag straight into its `Departing` mask, which
+  gather treats as an unconditional fade-out trigger.
 - The store **purges** the stamp once `now ≥ expiry`. The grace (`DepartingGraceSeconds`, derived from
-  `FadeDurationSeconds`) exceeds the fade, so a purge only ever drops an already-invisible label. Re-entry
+  `FadeDurationSeconds`) exceeds the fade, so a purge only ever drops an already-invisible winner. Re-entry
   within grace clears the stamp (via `RemoveCached`, the single "leaves cached" chokepoint that keeps the
-  invariant *departing ⊆ cached*) → the label fades back in.
+  invariant *departing ⊆ cached*) → the winner fades back in.
 
-Because a departing label is a **real batch record**, it re-projects to its live position every frame — so it
+Because a departing winner is a **real plan entry**, it re-projects to its live position every frame — so it
 eases out correctly even while the camera pans. The wall-clock is threaded from `MapView.LateUpdate`
 (`Time.timeAsDouble`). Telemetry: `LastDepartingCulledCount`, `DepartingTileCount`.
 
@@ -345,9 +359,10 @@ Membership is **pulled**: each frame the subsystem asks `TileManager` for the cu
 build; a tile-with-labels no longer in the set → hand to the fade-out path (A-4), not an instant drop;
 present-and-built → no-op. Self-healing (a missed change is corrected next frame) with no reentrancy. Bytes stay
 a push, but only as a pure *data* event (`SymbolTileBytesReady`); the fragile *lifecycle* callbacks are deleted.
-The `SymbolTileLabelStore` survives as the reconcile backing store. Surface: `LoadedTileKeys(version)`, cheap to
-call every frame (reconcile early-outs when the version is unchanged → feeds B-1). *Teeth:* reconcile is
-idempotent; a removed tile is no longer collected; the zoom-out-then-in case works without any release callback.
+The `SymbolTileStore` survives as the reconcile backing store — this A-1 description is the foundation the
+reconcile has since moved off-main onto (`docs/labels-async-reconcile-design.md`); the pull/no-reentrancy
+invariant it states still holds. *Teeth:* reconcile is idempotent; a removed tile is no longer collected; the
+zoom-out-then-in case works without any release callback.
 
 **A-2 — Stable WORLD line anchors (fix labels sliding on zoom).** Compute anchors **once at build time in
 tile/world space** — positions along the line spaced by `symbol-spacing` at a reference scale — and carry each
@@ -360,13 +375,14 @@ id.
 **A-3 — Cross-tile symbol identity + dedup (seamless no-op replacement).** A stable cross-tile id =
 `hash(quantize(worldAnchor), resolvedText, layerId)`, where `worldAnchor` is `AnchorRender` (pre-RTC
 world/mercator — the same for a geo point at any zoom), quantized to ~1px-at-max-zoom so tiny reprojection
-differences between zoom levels collapse to one id. A `Dictionary<CrossTileLabelKey, DedupEntry>` inside
-`SymbolTileLabelStore` maps id → chosen instance; at
-**collection** time, when the same id appears in parent + child tiles, pick one deterministically (finest zoom,
-then lowest tile key). Same id across a tile swap ⇒ the record **persists** ⇒ opacity stays 1 ⇒ no fade cycle,
-a true no-op — and the label count drops by the duplicate factor. Line labels in v1: key each *placed world
-anchor* as its own id; if noisy, fall back to excluding line labels from dedup. *Teeth:* two overlapping loaded
-tiles carrying the same point symbol → one placement; the id is stable across a simulated parent→child swap.
+differences between zoom levels collapse to one id. This now runs off-main, inside `SymbolReconciler`
+(`Dictionary<DedupKey, DedupEntry>`, keyed the same way as `CrossTileSymbolKey.For` — see
+`docs/labels-async-reconcile-design.md`); at **collection** time, when the same id appears in parent + child
+tiles, pick one deterministically (finest zoom, then lowest tile key). Same id across a tile swap ⇒ the winner
+**persists** ⇒ opacity stays 1 ⇒ no fade cycle, a true no-op — and the symbol count drops by the duplicate
+factor. Line labels in v1: key each *placed world anchor* as its own id; if noisy, fall back to excluding line
+labels from dedup. *Teeth:* two overlapping loaded tiles carrying the same point symbol → one placement; the
+id is stable across a simulated parent→child swap.
 
 **A-4 — Placement state machine + fade.** The placement layer holds a persistent record per cross-tile id:
 `{ opacity, lastPlaced, lastScreenPlacement }`. Each `Tick`: gather this frame's candidates (post A-3 dedup) →
@@ -386,11 +402,11 @@ state are all unchanged since last frame, reuse the last frame's built billboard
 project/collide/build entirely. Kills the idle `Project` and removes the idle blink at the root. "No active
 fades" is part of the unchanged test, so fades still animate.
 
-**B-2 — Burst-jobified projection.** For the moving case at ~20k labels: gather candidate world anchors into a
+**B-2 — Burst-jobified projection *(landed, `SymbolProjectionJob`)*.** For the moving case at ~20k labels: gather candidate world anchors into a
 `NativeArray<double3>` and project (+ cull) them in a Burst job → screen + mask; the managed greedy collision
 stays (it is serial). Attacks the per-anchor matrix-mul cost that dominates `Project` when the camera moves.
 
-**B-3 — Horizon / far-distance label culling.** In a tilted view the far half of the frustum compresses a huge
+**B-3 — Horizon / far-distance label culling *(landed, `CullJob`)*.** In a tilted view the far half of the frustum compresses a huge
 ground area into a thin horizon band, where labels pile up, get collision-discarded, and jitter (projection is
 numerically unstable as depth → the far plane). Cull labels near/beyond the horizon **before** projecting:
 prefer (a) a **world-space ground distance** from the look-at beyond a pitch-dependent threshold (pre-projection
@@ -400,7 +416,7 @@ they stop being legible well before tiles stop drawing (MapLibre has an analogou
 symbols). Pairs with B-1: fewer candidates per frame *and* the static-skip avoids redoing them when idle.
 *(This is the per-label radius companion to the per-tile coverage cull in §1.5.)*
 
-**B-4 — Pipelined (deferred) placement — decouple the decision from the render (biggest moving-case lever).**
+**B-4 — Pipelined (deferred) placement — decouple the decision from the render *(landed, `SymbolPlacementSystem`)*.**
 Move the expensive collision/culling **off** the main-thread critical path into the frame "loophole" (the
 worker-thread time after LateUpdate, while the render thread submits) by making the placement DECISION one frame
 stale — the MapLibre placement/render split mapped onto Unity's job timeline. Every frame (cheap, on-path):
@@ -504,14 +520,14 @@ different anchors/rotations instead of N sharing one. New work is two pure Core 
   >    per-glyph alternative while a cap-glyph-only tooth stays green.
   > 2. **The rationale attributed the wrong cause.** The Burst job needs no change because the cell→screen/world
   >    map is **linear and homogeneous about the anchor** (`BillboardMath.BuildWorldQuad`,
-  >    `LabelBox.BuildRotatedGlyph`), so cell `y = 0` lands on the anchor under every branch and the tangent
+  >    `SymbolBox.BuildRotatedGlyph`), so cell `y = 0` lands on the anchor under every branch and the tangent
   >    rotation is correct for **any** vertical placement of the cell. Baseline-anchoring was never what made
   >    that work — it was one arbitrary choice among many that the linearity permits. (The retired
   >    `BillboardMath.BuildQuad` this sentence named no longer exists; the two live sites are those above.)
 
-**Placement (`SymbolPlacementSystem`, per frame):** `SymbolLabel`/`LabelInstance` carry a `PathRender`
-(`double3[]`) for line labels (null for point labels — `AnchorRender` untouched) plus `SymbolPlacement` +
-`SymbolSpacingPx`. Project each path vertex with `TryProjectAnchor` (skip the label if any vertex is behind the
+**Placement (`SymbolPlacementSystem`, per frame):** each build's `ShapedSymbol` carries a `Path`/`PathUp` span
+(in its `SymbolTileBuffer`) for line labels (empty for point labels — `AnchorRender` untouched) plus
+`Placement` + the extractor's evaluated `SpacingPx`. Project each path vertex with `TryProjectAnchor` (skip the label if any vertex is behind the
 camera — partial-visibility clipping is a refinement); build a `PolylineArcWalker` over the projected polyline;
 choose anchor arc-distances (`line-center` → `TotalLength/2`; `line` → centered multiples of `symbol-spacing`,
 label needs `labelWidthPx ≤ TotalLength`); apply keep-upright (walk reversed when the net direction points
@@ -519,7 +535,7 @@ leftward); emit one `PlacedQuad` per glyph.
 
 **Double-rotation trap.** A curved glyph's rotation is the projected-line **tangent only**. The projection
 already baked the bearing in (path vertices go through the bearing-aware camera), and line placement defaults
-`rotation-alignment: auto → map` — exactly when the point-label path adds `LabelBearing.BillboardRotationRadians`.
+`rotation-alignment: auto → map` — exactly when the point-label path adds `SymbolBearing.BillboardRotationRadians`.
 So the curved path sets `PlacedQuad.RotationRadians = tangent` and must **NOT** also route through
 `BillboardRotationRadians` (tangent + bearing = double rotation). Point labels keep the bearing path; curved
 labels take the tangent branch.
@@ -532,7 +548,7 @@ the other, and their inner corners collide). The chord blends the two segment an
 tile edge-to-edge (MapLibre's approach). The `text-max-angle` **cull** gate stays on the raw **segment** tangent
 (`StageCurvedAnchor` decouples cull from render: cull answers "is the path too kinky to place a label here"; the
 chord blend is purely how each glyph is oriented), so culling is behaviour-preserving and the Burst/managed
-staged-count parity holds. Teeth: `LabelStagingMathCurvedVertexTests` (RED-verified — a glyph on a bend gets the
+staged-count parity holds. Teeth: `SymbolStagingMathCurvedVertexTests` (RED-verified — a glyph on a bend gets the
 blended chord angle, not a raw segment angle; a straight run is unchanged).
 
 > **Known limitation (tracked, not fixed) — corner spacing compression.** Glyphs are positioned at equal
@@ -549,11 +565,11 @@ blended chord angle, not a raw segment angle; a straight run is unchanged).
 buffer grown geometrically, a reused walker), never a fresh `float2[]`/`List` per label per frame.
 `CurvedTextLayout` stays build-time (its per-glyph result cached on the label), so only the walk is per-frame.
 
-**Collision (the one genuinely-new placement concern).** A point label submits one `LabelBox` (AABB). A long
+**Collision (the one genuinely-new placement concern).** A point label submits one `SymbolBox` (AABB). A long
 curved label's single AABB would bound a whole road → almost nothing places. So a curved label submits a
 **per-glyph box set** and places iff its boxes don't collide with already-placed boxes (MapLibre uses per-glyph
-collision circles; per-glyph AABBs are the tractable analogue). The unified model: `LabelCandidate` is a
-contiguous box range; `LabelCollision.SelectSurvivors(candidates, boxes, …)` treats a point label as a 1-box
+collision circles; per-glyph AABBs are the tractable analogue). The unified model: `SymbolCandidate` is a
+contiguous box range; `SymbolCollision.SelectSurvivors(candidates, boxes, …)` treats a point label as a 1-box
 candidate and a curved label as an N-glyph-box candidate, **all-or-nothing** (one colliding glyph drops the whole
 label; a placed label blocks across its whole run). Candidates sort; boxes stay put (grid stores absolute
 indices; adjacent glyph boxes never self-block).
@@ -577,57 +593,62 @@ line labels) follow the projected curve.
 
 ## What's already right, and what isn't
 
+**S1–S4 below have since landed** (see Stages); this subsection states the problem as it stood before them,
+so several of its present-tense claims describe code that no longer works this way — each fix's own numbered
+entry says what changed.
+
 The per-frame pipeline (§1) is almost entirely **screen-space**. At build time it projects geodetic anchors/paths
-to render space through `IProjection.Project` (`SymbolFeatureExtractor.cs:136,170`;
-`SymbolLabelBatchBuilder.ProjectCorner` `:87-91`); each frame it projects those to screen and does arc-walk /
-AABB / billboard in pixels. So **billboarding, per-glyph orientation, and collision are already
-projection-generic** — glyph quads are built in 2D screen space (`BillboardMath.BuildQuad`), and curved-text
-rotation is the screen-space tangent of the already-projected polyline (`LabelStagingMath.cs:181`). There is no
-world up-vector or great-circle tangent to get right. What remains is four fixes, one foundational.
+to render space through `IProjection.ProjectPoint` (`SymbolFeatureExtractor.cs`); the tile-coverage filter
+projects a tile's corners the same way (`SymbolTileCoverageFilter.ProjectCorner`); each frame it projects those
+to screen and does arc-walk / AABB / billboard in pixels. So **billboarding, per-glyph orientation, and
+collision are already projection-generic** — glyph quads are built in 2D screen space
+(`BillboardMath.BuildWorldQuad`), and curved-text rotation is the screen-space tangent of the already-projected
+polyline (`SymbolStagingMath`). There is no world up-vector or great-circle tangent to get right. What remains
+is four fixes, one foundational.
 
 ### 1. The projection seam drops the rebase rotation (foundational)
 
 The Unity camera places the look-at at the world origin in an idealized Y-up ENU orbit frame
-(`MapCamera.SyncToCamera`, `:114-141`), so `ViewProj` expects points in the **rebased look-at frame**. Mesh tiles
-honor this: `TileToSceneRebased = Rebase·(origin − sceneOrigin)` (`FloatingOrigin.cs:95`),
-`Rebase = transpose(TangentBasisAt(lookAt))` (`SceneFrame.cs:14`). The label seam does not —
-`LabelScreenProjection.TryProjectPoint` (`:87-88`), `SymbolProjectionJob.Execute` (`:49-52`), and
-`SymbolLabelBatchBuilder.ProjectCorner` only subtract `sceneOrigin`, never applying `Rebase`. On Mercator
-`Rebase = identity` (inert); under `SphericalProjection` every anchor away from the look-at projects to the wrong
-pixel. **Fix:** carry a `float3x3 rebase` into the seam and rotate after translating, before `viewProj`.
+(`MapCamera.SyncToCamera`), so `ViewProj` expects points in the **rebased look-at frame**. Mesh tiles
+honor this: `TileToSceneRebased = Rebase·(origin − sceneOrigin)` (`FloatingOrigin.cs`),
+`Rebase = transpose(TangentBasisAt(lookAt))` (`SceneFrame.cs`). The label seam did not —
+`SymbolScreenProjection.TryProjectPoint`, `SymbolProjectionJob.Execute`, and the tile-corner projector then
+inside the per-frame batch builder only subtracted `sceneOrigin`, never applying `Rebase`. On Mercator `Rebase = identity`
+(inert); under `SphericalProjection` every anchor away from the look-at projected to the wrong pixel.
+**Fix (landed, S2):** carry a `float3x3 rebase` into the seam and rotate after translating, before `viewProj`
+— `SymbolScreenProjection.TryProjectPoint` and `SymbolTileCoverageFilter.ProjectCorner` both take it today.
 
 ### 2. Cross-tile dedup drops render-Y
 
-`CrossTileLabelKey.For` (`:49-55`) quantizes render `.x`/`.z` only — the key has no Y axis (`:32-35`). Under
-`SphericalProjection.ProjectPoint` (`:51-55`) render X/Z ∝ cosφ (even in latitude) and Y ∝ sinφ (odd), so a
-same-longitude pair mirrored across the equator (e.g. 30°N and 30°S) collides exactly at any grid size — two
-distinct labels merge into one. Byte-identical on Mercator (surface labels have render.y ≡ 0). **Fix:** add a Y
-axis and quantize on all three. Bundle with renaming the quantization scale `WebMercator.GroundResolution` →
-`CameraPoseMath.MetersPerPixel` (`:31-32,46`) at the three sites (`SymbolLabelSubsystem.cs:467,484`,
-`LabelPlacementSystem.cs:477`) — the two are the same expression, so this just drops a Mercator-only name from a
-camera quantity; no behavior change.
+`CrossTileSymbolKey.For` quantized render `.x`/`.z` only — the key had no Y axis. Under
+`SphericalProjection.ProjectPoint` render X/Z ∝ cosφ (even in latitude) and Y ∝ sinφ (odd), so a
+same-longitude pair mirrored across the equator (e.g. 30°N and 30°S) collided exactly at any grid size — two
+distinct labels merged into one. Byte-identical on Mercator (surface labels have render.y ≡ 0). **Fix (landed,
+S1):** `CrossTileSymbolKey.For` now quantizes on all three axes; the quantization scale was renamed
+`WebMercator.GroundResolution` → `CameraPoseMath.MetersPerPixel` in the same stage, dropping a Mercator-only
+name from a camera quantity — no behavior change from the rename itself.
 
 ### 3. No horizon cull
 
-`SymbolProjectionJob.OutValid` culls only behind-camera points (`clip.w ≤ 0`); a far-side-of-globe label projects
-in front and draws through the earth (labels ship `ZTest Always`, so no depth hides it, and its collision box
-still contests near-side space). **Fix:** test each anchor against `IProjection.TryGetHorizonOccluder`
-(`SphericalProjection.cs:81-86`) as a rad-0 point — the algebra `FrustumTileSelector` already uses
-(`:100-108,178-188`) — and fold the result into `OutValid`, so occluded labels never reach collision. Correct
-only once the seam applies `Rebase` (the occluder is expressed in the rebased look-at frame). Mercator returns no
-occluder ⇒ no-op.
+`SymbolProjectionJob.OutValid` culled only behind-camera points (`clip.w ≤ 0`); a far-side-of-globe label
+projected in front and drew through the earth (labels ship `ZTest Always`, so no depth hides it, and its
+collision box still contests near-side space). **Fix (landed, S3):** test each anchor against
+`IProjection.TryGetHorizonOccluder` as a rad-0 point — the algebra `FrustumTileSelector` already uses — and
+fold the result into the cull. Landed as a **fade** (`GatherTrigger.Horizon`, §1.4), not a hard `OutValid`
+drop, so an occluded label eases out instead of popping. Correct only once the seam applies `Rebase` (the
+occluder is expressed in the rebased look-at frame). Mercator returns no occluder ⇒ no-op.
 
 ### 4. Long line segments chord instead of curving
 
-`SymbolFeatureExtractor.ProjectPath` (`:164-173`) projects only the original MVT vertices, so a long segment
-renders as a straight screen chord instead of the projected curve. **Fix:** subdivide per
+`SymbolFeatureExtractor.ProjectPath` projected only the original MVT vertices, so a long segment rendered as a
+straight screen chord instead of the projected curve. **Fix (landed, S4):** subdivide per
 `IProjection.MaxRefineAngleRad` (Mercator = ∞ ⇒ no split), as the mesh line path does
 (`SubdivideJob`, job-scheduling-design.md §8 stage 5 Group B — this note's own engine-free `Core` helper,
-`LineCurvatureSubdivision`, is exactly the ported form it already recommends). **Hazard:**
-`LineAnchor.Segment` (`:20`) indexes the path vertex array — computed against the tile-local path
-(`LineAnchorPlacement.Compute`, `SymbolFeatureExtractor.cs:106`) but resolved against the render path
-(`LabelStagingMath.cs:126`). Subdividing only `ProjectPath` silently desyncs those indices (in range, wrong
-vertex). Subdivide the tile-local path first and feed the same sequence to both anchor-compute and projection.
+`LineCurvatureSubdivision`, is exactly the ported form it already recommends). **Hazard, resolved:**
+`LineAnchor.Segment` indexes the path vertex array — computed against the tile-local path
+(`LineAnchorPlacement.Compute`) but resolved against the render path (`SymbolStagingMath`). Subdividing only
+`ProjectPath` would have silently desynced those indices (in range, wrong vertex); the landed fix subdivides
+the tile-local path first and feeds the same sequence to both anchor-compute and projection.
 
 Screen-space collision needs no change — it is already projection-blind; it only needs occluded labels removed
 first, which the horizon cull provides.
@@ -638,7 +659,7 @@ S1–S4 share the invariant **Mercator snapshots byte-identical**; each is headl
 
 | Stage | Change | Falsifiable teeth |
 |---|---|---|
-| **S1** ✅ | Dedup: add a Y axis to `CrossTileLabelKey` + rename the scale to `MetersPerPixel` | A 30°N/30°S same-longitude pair must NOT dedup to one cell; no symbol/label file references `WebMercator.GroundResolution`; Mercator dedup + snapshot parity |
+| **S1** ✅ | Dedup: add a Y axis to `CrossTileSymbolKey` + rename the scale to `MetersPerPixel` | A 30°N/30°S same-longitude pair must NOT dedup to one cell; no symbol/label file references `WebMercator.GroundResolution`; Mercator dedup + snapshot parity |
 | **S2** ✅ (keystone) | Apply `SceneFrame.Rebase` in the label projection seam | Under a non-origin globe rebase, the label seam matches the mesh-RTC oracle (`FloatingOrigin.TileToSceneRebased`) and differs from the no-rebase result — RED-verified off by ~48M px; Burst-vs-inline parity within ULP noise; Mercator snapshot parity |
 | **S3** ✅ | Horizon cull via `TryGetHorizonOccluder` — done as a FADE in `GatherSymbolPoints` (not a hard `OutValid` drop → labels would pop) | Far-hemisphere anchor culled, near-side kept; occluded label eases out (kept staged), absent from collision once faded |
 | **S4** ✅ (hardest) | Subdivide the tile-local path once (shared `LineCurvatureSubdivision` policy — the `SegmentSteps`/`MaxCurveSegments` leaf unified with the mesh path); feed the ONE finer sequence to both anchor-compute + projection | Forced-long 2-vertex globe segment splits (mid-vertex off the chord); anchor count/tile-position invariant, only `Segment` refined; each anchor resolves to its correct arc position; **RED-verified** vs the injected coarse-`Compute`/finer-`PathRender` desync; Mercator byte-identical |
@@ -679,29 +700,31 @@ label fixture and an exercised globe camera path (`SphericalProjection.ScreenToG
 confirm an interactive globe demo); S3–S5 cannot be validated without a globe on screen.
 
 Rejected alternative: a geodetic dedup key (store/quantize `GeoCoordinate`). The dedup is deliberately
-render-space to collapse parent/child tile-quantization noise into one cell (`CrossTileLabelKey.cs:16-23`);
+render-space to collapse parent/child tile-quantization noise into one cell (`CrossTileSymbolKey.For`);
 geodetic storage reintroduces an equivalent tolerance plus more plumbing, and 3-axis render quantization already
-fixes the defect. One tunable to surface in S3: the horizon-cull grazing margin (cf. `LabelViewportSpans`).
+fixes the defect. One tunable to surface in S3: the horizon-cull grazing margin.
 
 ---
 
 ## Grounding (touch points)
 
-`MapRenderer.Unity/Text/`: `SymbolLabelSubsystem` (queue/pump/store, scale at `:467,484`, + the pre-build
-tile-coverage cull in `CurrentBatch`, §1.5), `SymbolTileLabelStore` (active/cached/departing),
-`SymbolLabelBatch`/`SymbolLabelBatchBuilder` (SoA bridge), `Placement/LabelPlacementSystem` (`Tick`, scale at
-`:477`), `Placement/LabelScreenProjection` (`:87-88` — the projection seam), `Placement/LabelStagingMath`
-(`StageCurved` `:126`, tangent `:181`), `Placement/BillboardMath`, `SymbolFeatureExtractor` (`ProjectPath`
-`:164-173`, `LineAnchorPlacement.Compute` `:106`). `MapRenderer.Jobs/`: `SymbolProjectionJob` (`OutValid`),
-`LabelStageJob`, `LabelCollisionJob`, `SymbolBillboardJob`. `MapRenderer.Core/Text/`: `CodepointTextShaper`,
-`TextQuadLayout`, `CurvedTextLayout`, `PolylineArcWalker`, `Placement/CrossTileLabelKey`, `Placement/LineAnchor`
-(`:20`), `Placement/LabelTileCoverage`, `Placement/LabelTileCoverageFilter` (the pre-build cull, §1.5),
-`Placement/LabelViewDistance`. `MapRenderer.Core/Geo/`: `IProjection`
-(`Project`, `TryGetHorizonOccluder`, `MaxRefineAngleRad`), `SphericalProjection` (`ProjectPoint` `:51-55`,
-occluder `:81-86`), `WebMercator`, `CameraPoseMath`, `SceneFrame`, `FloatingOrigin`. Mesh-path prior art:
-`SubdivideJob` (job-scheduling-design.md §8 stage 5 Group B — this note's own engine-free
-`LineCurvatureSubdivision` is the ported form the mesh path's `SubdivideCenterline` retired in favour of),
-`ProjectPointsJob<TProj>`, `FrustumTileSelector`.
+`MapRenderer.Unity/Text/`: `SymbolSubsystem` (queue/pump/store, + the pre-build tile-coverage cull in
+`CurrentBatch`, §1.5), `SymbolTileStore` (active/cached/departing), `SymbolReconciler` (the off-main
+cross-tile dedup — `docs/labels-async-reconcile-design.md`), `Placement/SymbolPlacementSystem` (`Tick`),
+`Placement/SymbolGatherPlan` (the per-frame winner plan, §1.3), `Placement/SymbolScreenProjection` (the
+projection seam), `Placement/BillboardMath`, `SymbolFeatureExtractor` (`ProjectPath`,
+`LineAnchorPlacement.Compute`). `MapRenderer.Core/Text/`: `CodepointTextShaper`, `TextQuadLayout`,
+`CurvedTextLayout`, `Placement/SymbolStagingMath` (`StageCurved`, tangent), `Placement/PolylineArcWalker`,
+`Placement/CrossTileSymbolKey`, `Placement/LineAnchor`, `Placement/SymbolTileCoverage`,
+`Placement/SymbolTileCoverageFilter` (the pre-build cull, §1.5) — the B-3 per-symbol distance cull (§1.4) has
+no dedicated type; it is inline in `SymbolPlacementSystem`. `MapRenderer.Jobs/Symbols/`: `SymbolProjectionJob`
+(`OutValid`), `StageJob`, `CollisionJob` — the billboard build itself is not a job: `WorldSymbolRenderer`
+calls `BillboardMath.BuildWorldQuad` directly at emit time. `MapRenderer.Core/Coordinates/`: `IProjection`
+(`ProjectPoint`, `TryGetHorizonOccluder`, `MaxRefineAngleRad`), `SphericalProjection`, `WebMercator`.
+`MapRenderer.Core/View/`: `CameraPoseMath`, `FloatingOrigin`. `MapRenderer.Unity/Rendering/Backend/`:
+`SceneFrame`. Mesh-path prior art: `SubdivideJob` (job-scheduling-design.md §8 stage 5 Group B — this note's
+own engine-free `LineCurvatureSubdivision` is the ported form the mesh path's `SubdivideCenterline` retired in
+favour of), `ProjectPointsJob<TProj>`, `FrustumTileSelector`.
 
 ## Relationship to other work
 
@@ -851,7 +874,7 @@ surround them. That single decision is what keeps everything else still:
 
 So there are two representations with two consumers: the **padded** `SymbolQuad` (geometry + UVs) goes to
 render only; the **content** box goes to collision and placement only. The skirt is carried as one baked-px
-float (`IconQuadLayout.SkirtPx` → `SymbolLabel.IconSkirtPx` → `CurvedGlyph.CellSkirt`), never re-derived, so
+float (`IconQuadLayout.SkirtPx` → `SymbolFeature.IconSkirtPx` → `CurvedGlyph.CellSkirt`), never re-derived, so
 the grow and the un-grow cannot drift.
 
 **The packer.** `ShelfRectPacker` — next-fit-decreasing-height shelf packing, chosen over MaxRects/skyline
@@ -985,18 +1008,18 @@ the one setting an eyeball would check first — and 1× is precisely where the 
 |---|---|---|
 | Atlas index (Core, engine-free) | `GlyphAtlas`/`GlyphAtlasEntry` (dynamic) | **`SpriteIndex`** (parsed once; name→`SpriteEntry{x,y,w,h,pixelRatio,sdf}`) |
 | Style parse (Core) | `Symbol.LayoutProperties`/`PaintProperties` (`text-*`) | **`icon-*`** on the same `Symbol.StyleLayer` (add to Layout/Paint; new `PropertyNames`) |
-| Extract (Core) | `SymbolFeatureExtractor` → `SymbolLabel` (text) | same extractor emits **icon** `SymbolLabel`s (icon fields) |
+| Extract (Core) | `SymbolFeatureExtractor` → `SymbolFeature` (text) | same extractor emits **icon** `SymbolFeature`s (icon fields) |
 | Layout → quad (Core) | `TextQuadLayout`/`CurvedTextLayout` → `SymbolQuad[]` | **`IconQuadLayout`** → one `SymbolQuad` (sprite UVs) |
 | Atlas texture (Unity) | `GlyphAtlasTexture` + `GlyphManager` | **`SpriteSheet`** (PNG→`Texture2D`) + a sprite source (JSON+PNG fetch) |
-| Per-frame batch (Core) | `SymbolLabelBatch` (`Kind{Point,Curved}`) | icon records in the batch (see §5.4 — the crux) |
-| Draw (Unity) | `SymbolRenderLayer` + `SymbolText.shader` (SDF) | **`SymbolIcon.shader`** (RGBA) + a sprite-texture bind |
+| Per-frame batch (Core) | `SymbolBatch` (`Kind{Point,Curved}`) | icon records in the batch (see §5.4 — the crux) |
+| Draw (Unity) | `SymbolRenderLayer` + `SymbolText.shader` (SDF) | **`SymbolIconWorld.shader`** (RGBA) + a sprite-texture bind |
 
 The build-time half rides the same per-layer tile pipeline (`TileSymbolLayerProcessor`); the per-frame half is
 the same `SymbolPlacementSystem.Tick`. Collision is the same global grid — an icon is just another candidate box.
 
-## 5.4 The load-bearing decision (I5): how icons ride `SymbolLabelBatch`
+## 5.4 The load-bearing decision (I5): how icons ride `SymbolBatch`
 
-`SymbolLabelBatch`, `LabelStageJob`, and `SymbolBillboardJob` all switch on `Kind{Point,Curved}`, and the icon
+`SymbolBatch`, the Burst stage job, and the billboard build all switch on `Kind{Point,Curved}`, and the icon
 draw must bind a **different texture** (the sprite sheet) than the glyph atlas. This is the crux that decides how
 invasive the render plumbing (I5) is; the I5 plan must settle it explicitly. Two candidates:
 
@@ -1021,11 +1044,11 @@ globe eyeball). Each stage: plan → develop → review → headless gate (Edito
 |---|---|---|
 | **I1** ✅ | `SpriteIndex` (Core): parse sprite JSON → name→`SpriteEntry`; `TryGetSprite`. **Committed fixture** (`Assets/Fixtures/sprites/sample-sprite.{json,png}`, hand-authored, network-free) so I3+ have real test data. | Parse the fixture; a known name resolves to its exact rect + `pixelRatio`; an unknown name → false; malformed JSON → empty index, no throw. |
 | **I2** ✅ | `icon-*` style parse (Core): `PropertyNames` + `Symbol.LayoutProperties`/`PaintProperties` gain the §5.1-IN keys (data-driven `icon-image`, `icon-size`, `icon-offset`, `icon-anchor`, `icon-rotation-alignment`, `icon-allow-overlap`, `icon-ignore-placement`, `icon-padding`, `icon-opacity`). | Each key parses to its typed property/default; the no-`icon-*` layer is byte-identical to today; the `PropertyNames`-only-source test still passes. |
-| **I3** ✅ | Extract + layout (Core): `SymbolFeatureExtractor` emits an icon `SymbolLabel` per point feature whose `icon-image` resolves to a known sprite (unknown → skip); `IconQuadLayout` builds the single `SymbolQuad` from `SpriteEntry`+`icon-size`(×`pixelRatio`)+`icon-anchor`+`icon-offset`. Text-only tiles unchanged. Icons ride the extractor via a trailing optional `SpriteAtlasView = null` (the sole prod caller passes null ⇒ byte-identical until I5); `SymbolLabel` gains `Kind{Text,Icon}`+`IconQuad`. | An icon-image feature yields one icon label with the right anchor/size/UVs; unknown sprite → no label; anchor/offset shift the quad correctly; a text-only layer emits zero icon labels (parity). |
+| **I3** ✅ | Extract + layout (Core): `SymbolFeatureExtractor` emits an icon `SymbolFeature` per point feature whose `icon-image` resolves to a known sprite (unknown → skip); `IconQuadLayout` builds the single `SymbolQuad` from `SpriteEntry`+`icon-size`(×`pixelRatio`)+`icon-anchor`+`icon-offset`. Text-only tiles unchanged. Icons ride the extractor via a trailing optional `SpriteAtlasView = null` (the sole prod caller passes null ⇒ byte-identical until I5); `SymbolFeature` gains `Kind{Text,Icon}`+`IconQuad`. | An icon-image feature yields one icon label with the right anchor/size/UVs; unknown sprite → no label; anchor/offset shift the quad correctly; a text-only layer emits zero icon labels (parity). |
 | **I4** ✅ | Sprite atlas texture + source (Unity): `SpriteSheet` (PNG→`Texture2D` via `LoadImage`, immutable) + a JSON+PNG sprite source (fetch, prior art `UnityWebRequestGlyphSource`/`GlyphSourceFactory`; fixture-backed source for tests, prior art `FixtureGlyphSource`); produce the runtime `SpriteAtlasView`. `SpriteSheet` **row-flips** on decode so the sprite texture shares the glyph atlas's "top-left coord == GetPixel(coord)" contract (⇒ I5 binds either texture through the same shader, no UV re-flip). | Fixture PNG loads to a `Texture2D` of the right dims (64×64); a known sprite's UVs sample the correct texel colour (marker red/star green/dot blue — the orientation pin + anti-flip guard); missing sprite URL → graceful no-icons (warn once), style still loads. |
-| **I5a** ✅ | Data-path plumbing (Core+Unity, **§5.4-B**): `LabelInstance.Kind` + `AtlasKind` on `PointStageInput`/`CandidateEmit` (carried but NOT consumed ⇒ inert); `StyledSymbolTileBuilder` shapes an icon `LabelInstance` (skip glyph shaping, `IconQuad`→`Layout`, `TextSizePx=OneEm` ⇒ scale 1). Fully **headless-verified**. | Icon label stages as a 1-box point candidate at scale 1 (box = quad + padding, no double-scale); its `PlacedQuad` carries the sprite UVs; text path byte-identical; Burst-vs-managed parity green. |
-| **I5b** ✅ | Render (Unity): `SymbolIcon.shader` (RGBA, template + 3 deltas — straight sample, no SDF/halo, no UV re-flip) + `MapSymbolIcon.mat`; per-`(slot,AtlasKind)` draw partition binding the **sprite** texture for the icon bucket; `SymbolRenderLayer` icon material/presenter; `SymbolLabelSubsystem` loads the `SpriteSheet` at `SetStyle` + threads the real `SpriteAtlasView` (the null→real flip). Compile-green + snapshots; **on-screen render EYEBALL-OWED**. | Shader compiles; the icon bucket binds the SPRITE texture + icon material (`SymbolIconWiring` tooth); text snapshots byte-identical (icons off ⇒ no change). **Icon identity fenced to I6** (icons carry null `Text` ⇒ co-located distinct icons share fade/dedup). |
-| **I6 code** ✅ | Icon identity: `SymbolLabel`/`LabelInstance` carry `IconImage` (the sprite name); folded into `CrossTileLabelKey` (⇒ `PointFadeId`) so co-located distinct icons dedup/fade as two while the same icon across a zoom swap stays one. Guarded-skip fold ⇒ text keys/fades/snapshots byte-identical. | Two distinct co-located icons → distinct keys/FadeIds (RED pre-fix); same icon parent+child → one identity; text parity byte-identical. |
+| **I5a** ✅ | Data-path plumbing (Core+Unity, **§5.4-B**): `Kind` + `AtlasKind` on `PointStageInput`/`CandidateEmit` (carried but NOT consumed ⇒ inert); `StyledSymbolTileBuilder` shapes an icon `ShapedSymbol` (skip glyph shaping, `IconQuad`→`Layout`, `TextSizePx=OneEm` ⇒ scale 1). Fully **headless-verified**. | Icon label stages as a 1-box point candidate at scale 1 (box = quad + padding, no double-scale); its `PlacedQuad` carries the sprite UVs; text path byte-identical; Burst-vs-managed parity green. |
+| **I5b** ✅ | Render (Unity): `SymbolIconWorld.shader` (RGBA, template + 3 deltas — straight sample, no SDF/halo, no UV re-flip) + `MapSymbolIconWorld.mat`; per-`(slot,AtlasKind)` draw partition binding the **sprite** texture for the icon bucket; `SymbolRenderLayer` icon material/presenter; `SymbolSubsystem` loads the `SpriteSheet` at `SetStyle` + threads the real `SpriteAtlasView` (the null→real flip). Compile-green + snapshots; **on-screen render EYEBALL-OWED**. | Shader compiles; the icon bucket binds the SPRITE texture + icon material (`SymbolIconWiringTests`); text snapshots byte-identical (icons off ⇒ no change). **Icon identity fenced to I6** (icons carry null `Text` ⇒ co-located distinct icons share fade/dedup). |
+| **I6 code** ✅ | Icon identity: `SymbolFeature`/`ShapedSymbol` carry `IconImage` (the sprite name); folded into `CrossTileSymbolKey` (⇒ `PointFadeId`) so co-located distinct icons dedup/fade as two while the same icon across a zoom swap stays one. Guarded-skip fold ⇒ text keys/fades/snapshots byte-identical. | Two distinct co-located icons → distinct keys/FadeIds (RED pre-fix); same icon parent+child → one identity; text parity byte-identical. |
 | **Padded repack** (§5.2.1) | `SpriteSheet` repacks the decoded sheet so every sprite carries a one-texel transparent border (`SpriteSheetPadder` plans the rects, `SpriteSheetComposer` writes the pixels); `IconQuadLayout` draws that border and retires the half-texel UV inset; the skirt is removed again for collision (`ToLayoutResult(quad, skirtPx)`, `CurvedGlyph.CellSkirt`). **Icon ink returns to nominal — 4.5–12.5 % smaller than it shipped — and edges are ~1 texel softer: EYEBALL-OWED.** | Silhouette phase sweep over a FULL-BLEED sprite at magnification 1.0/1.37/2.5/4.0 (RED: centroid frozen at 127.500 for four phases, then +1.000); nominal-ink size via two bar centroids (RED: 45.714 px vs 40.000 nominal, i.e. exactly ×8/7); packer separation/determinism/alias/degenerate/**overflowing rect**/fallback; composer byte-identical content + alpha-0 + RGB-replicated border; the content box unchanged for all nine anchors; the texels-per-drawn-pixel identity; the skirt's carrier chain driven through real extraction → builder → collision box; a pattern driven through the real `SpriteSheet` samples neither the neighbour nor the border. |
 | **I6 eyeball** (maintainer) | The icon material is pre-wired into `Assets/Settings/Map/MapMaterialSet.asset`; liberty already carries the `sprite` URL — press Play and verify. | On-screen: icons draw at POI anchors, correct sprite/size/opacity, upright (not double-flipped), interleaved with text/fills; a real `sprite`-URL style lights up POI markers; icon-vs-text z-order. |
 **Invariant across I1–I5:** *text-only styles are byte-identical* — an icon change never perturbs the existing
@@ -1042,16 +1065,16 @@ URL — press Play).
 ## 5.6 Grounding (touch points)
 
 Core: `Style/Symbol/PropertyNames`, `Style/Symbol/{StyleLayer,LayoutProperties,PaintProperties}`,
-`Style/Symbol/SymbolFeatureExtractor` (the `isLine`/point branches — icons ride point), `Style/Symbol/SymbolLabel`
+`Style/Symbol/SymbolFeatureExtractor` (the `isLine`/point branches — icons ride point), `Style/Symbol/SymbolFeature`
 (icon fields), `Text/SymbolQuad` (the reused sprite/glyph-agnostic quad), `Text/TextQuadLayout` (prior art for
 the new `IconQuadLayout`), a new `Text/Sprites/SpriteIndex`+`SpriteEntry`. The padded repack (§5.2.1) adds
 `Text/Sprites/{SpriteBlit,SpritePadPlan,ShelfRectPacker,SpriteSheetPadder,SpriteSheetComposer}` — rect
 planning and RGBA32 pixel composition, both engine-free, so the load-bearing border rule is checked
 byte-for-byte on the fast `dotnet test` loop rather than behind a GPU readback. Unity: `Text/GlyphManager`/
 `GlyphAtlasTexture` (prior art for the sprite `Texture2D`), `Rendering/Source/GlyphSourceFactory`+
-`UnityWebRequestGlyphSource` (prior art for the sprite source), `Text/Placement/SymbolLabelBatchBuilder`,
-`Text/Placement/LabelPlacementSystem`, `Rendering/Style/SymbolRenderLayer`, `Shaders/Map/Symbol/Text/*`
-(template for `Shaders/Map/Symbol/Icon/*`). Jobs: `SymbolBillboardJob`, `LabelStageJob`, `LabelCollisionJob`
+`UnityWebRequestGlyphSource` (prior art for the sprite source), `Text/Placement/SymbolGatherPlan`,
+`Text/Placement/SymbolPlacementSystem`, `Rendering/Style/SymbolRenderLayer`, `Shaders/Map/Symbol/Text/*`
+(template for `Shaders/Map/Symbol/Icon/*`). Jobs: `SymbolProjectionJob`, `StageJob`, `CollisionJob`
 (unchanged — texture-blind). Style: top-level `"sprite"` in `StyleDocument`/`StyleParser`; `liberty.json:17`.
 
 ---
@@ -1074,7 +1097,7 @@ so `AlignmentResolution` resolved `auto → Map` under line placement and fell o
 **The load-bearing observation: an along-line icon IS a one-glyph curved label.** A `CurvedGlyph.Cell` is a
 `SymbolQuad` horizontally centred on 0, and an `IconQuadLayout` quad with the default `icon-anchor: center`
 is exactly that shape. So the icon reuses the curved machinery wholesale — per-anchor candidates, the
-projected-path arc walk, the per-glyph **rotated** collision box (`LabelBox.BuildRotatedGlyph`), the baked
+projected-path arc walk, the per-glyph **rotated** collision box (`SymbolBox.BuildRotatedGlyph`), the baked
 world tangent, and the world-anchored emit — for **zero** new record kinds, gather changes or oracle
 changes. Two curved gates go inert at one glyph: `labelSpanPx == 0` so the end-spill test never rejects, and
 the `text-max-angle` check is `g > 0`-guarded so it never fires.
@@ -1082,7 +1105,7 @@ the `text-max-angle` check is `g > 0`-guarded so it never fires.
 Three alternatives were rejected: a new "point icon + per-frame tangent" record kind (forks
 `LineAnchorPlacement`/the arc walk for a shape the curved path already produces); CPU-baked screen rotation
 with no shader change (reintroduces, for icons, the rotation/anchor drift under motion that Stage AC fixed
-for text); and a `LabelRecordKind.LineIcon` (touches block/gather/mirror/oracle/batch for no gain).
+for text); and a dedicated line-icon record kind (touches block/gather/mirror/oracle/batch for no gain).
 
 **The shader half was blocker-grade.** `SymbolIconWorld_ForwardPass.hlsl` declared `alignFlags` as
 "WRITTEN, UNREAD" and had no `tangentOS`, so without an HLSL change every arrow would draw unrotated —
@@ -1097,21 +1120,21 @@ path; an along-line icon is emitted from the line branch and can never carry a `
 `icon-rotate` is a zoom-capable degrees value, converted to radians **once** at extract (the `Angle`
 single-conversion rule) and composed as one addition on whatever the alignment already produced:
 
-* **Point icons** (and viewport-resolved line icons): one term at `LabelStagingMath.AppendPointHalf` —
+* **Point icons** (and viewport-resolved line icons): one term at `SymbolStagingMath.AppendPointHalf` —
   `BillboardRotationRadians(alignment, bearing) + IconRotationRadians(s.IconRotateRadians)`. Viewport ⇒
   `icon-rotate` alone; map ⇒ `bearing + icon-rotate`. 2D rotations commute, so one addition is the whole
   composition.
 * **Along-line icons**: the renderer forces an along-line candidate's per-quad rotation to 0 (the shader
   supplies the tangent instead), so the constant rides on `CandidateEmit.ExtraRotationRadians`, written by
-  `StageCurvedAnchor` and read at `WorldLabelRenderer`. Curved text leaves it 0, so the renderer passes
+  `StageCurvedAnchor` and read at `WorldSymbolRenderer`. Curved text leaves it 0, so the renderer passes
   exactly the `0f` it used to hardcode. *Rejected:* reusing `PlacedQuad.RotationRadians`, because curved
   text writes a live tangent angle there and a future reader would double-rotate.
 
 **Sign — measured, and the paper derivation that preceded it was wrong.** The staging frame's rotation is
 **counter-clockwise-positive on screen**, while `icon-rotate` is clockwise-positive, so the two senses are
-opposite and exactly one negation reconciles them: `LabelBearing.IconRotationRadians`, called by *both*
+opposite and exactly one negation reconciles them: `SymbolBearing.IconRotationRadians`, called by *both*
 `AppendPointHalf` and `StageCurvedAnchor`. `icon-rotate` keeps MapLibre's own sense on every carrier
-(`SymbolLabel` → `LabelInstance` → the stage inputs) and flips only there, at the boundary where it becomes
+(`SymbolFeature` → `ShapedSymbol` → the stage inputs) and flips only there, at the boundary where it becomes
 a staging rotation.
 
 The frame itself: `BillboardMath.BuildWorldQuad` rotates corners in the quad's **y-up local** frame and then
@@ -1125,10 +1148,10 @@ supplying the clockwise sense *and* left `OffsetPx` y-up, when the negation is p
 physical direction is known — the road swinging counter-clockwise on the map, which a map-aligned icon
 follows. It found `icon-rotate: 90` rendering at exactly +90° instead of −90°, a full inversion that every
 other tooth was blind to: **90° is the smallest angle at which +φ and −φ differ**, and 180° — liberty's only
-live value, its own inverse — can never show it. `LabelStagingMathTests` part (d) pins the same sense on the
+live value, its own inverse — can never show it. `SymbolStagingMathTests` part (d) pins the same sense on the
 point path at the `OffsetPx` level, stated in the true (y-down) frame.
 
-Related and still open: `LabelBearing.MapAlignedSign` is the *other* sign on this composition and remains
+Related and still open: `SymbolBearing.MapAlignedSign` is the *other* sign on this composition and remains
 **chosen, not derived**, deferred to an eyeball pass. It is the same class of risk this finding realised.
 
 **`icon-keep-upright` — ruled out on purpose, not overlooked.** Its spec default is `false` (unlike
@@ -1201,7 +1224,7 @@ hard-set `KeepUpright = false`. **Do not "fix" this by copying `TextKeepUpright`
   **Amended by the pitch-alignment epic W3, for the map-pitched along-line arm only.** The *viewport*
   along-line box is unchanged (still `BuildRotatedGlyph`, tangent only, no `icon-rotate`). A *map-pitched*
   along-line glyph's box is now the screen AABB of its four projected WORLD corners
-  (`LabelBox.TryBuildProjectedWorldGlyph`) and it **does** include `icon-rotate` — it must, because that is
+  (`SymbolBox.TryBuildProjectedWorldGlyph`) and it **does** include `icon-rotate` — it must, because that is
   what the renderer rotates the drawn corners by, and a box that omits it does not bound the ink.
   Numerically a no-op on every shipped style: the only production `icon-rotate` on a map-pitched layer is
   180°, which on a centre-anchored cell maps the cell onto itself and leaves the AABB identical. The point
@@ -1214,7 +1237,7 @@ hard-set `KeepUpright = false`. **Do not "fix" this by copying `TextKeepUpright`
   `icon-pitch-alignment` unset, `symbol-placement: line`). **CONSUMED as of the same epic's W1/W2/W3** — the
   "still unconsumed, no render caller yet" note that stood here was inherited staleness and has been false
   since W2. The resolved value reaches `CurvedStageInput.PitchAlignment`, where W1 makes it select the
-  WORLD-metre arc walk (`LabelStagingMath.StageCurved`'s `worldArc`), W2 makes it select the world-metre
+  WORLD-metre arc walk (`SymbolStagingMath.StageCurved`'s `worldArc`), W2 makes it select the world-metre
   corner unit (`CandidateEmit.CornerMetresPerLogicalPixel` → `SymbolWorldPitchAlign.hlsl`), and W3 makes it
   select the projected-world-corner collision box. (docs/maplibre-spec.md's `text-pitch-alignment` table
   carries the `icon-pitch-alignment` row too, since `symbol — icon` has no per-key table of its own; that
@@ -1225,14 +1248,14 @@ hard-set `KeepUpright = false`. **Do not "fix" this by copying `TextKeepUpright`
 Core: `Style/Symbol/PropertyNames` (`icon-rotate`), `Style/Symbol/LayoutProperties` (`IconRotate`),
 `Style/Symbol/SymbolFeatureExtractor` (`iconAlongLine`, `AlongLineIconContext`, `EmitAlongLineIcon`,
 `KeepAnchorsInsideTile`/`IsAnchorInsideTile` — the KL-A1 along-line anchor clip),
-`Style/Symbol/SymbolLabel` (`IconRotateRadians`), `Text/CurvedGlyph` (two producers, two vertical
-conventions), `Text/Placement/LabelStageInputs` (`CurvedStageInput.AtlasKind`, both `IconRotateRadians`),
-`Text/Placement/CandidateEmit` (`ExtraRotationRadians`), `Text/Placement/LabelStagingMath`
-(`AppendPointHalf`'s one addition; `StageCurvedAnchor`'s emit), `Text/Placement/LabelInstance`. Unity:
-`Text/StyledSymbolTileBuilder` (the point/curved icon split), `Text/Placement/SymbolTileLabelBlockBaker`
-(both inputs), `Text/Placement/WorldLabelRenderer` (the along-line rotation arm),
+`Style/Symbol/SymbolFeature` (`IconRotateRadians`), `Text/CurvedGlyph` (two producers, two vertical
+conventions), `Text/Placement/SymbolStageInputs` (`CurvedStageInput.AtlasKind`, both `IconRotateRadians`),
+`Text/Placement/CandidateEmit` (`ExtraRotationRadians`), `Text/Placement/SymbolStagingMath`
+(`AppendPointHalf`'s one addition; `StageCurvedAnchor`'s emit), `Text/Placement/ShapedSymbol`. Unity:
+`Text/StyledSymbolTileBuilder` (the point/curved icon split), `Text/Placement/SymbolTileBlockBaker`
+(both inputs), `Text/Placement/WorldSymbolRenderer` (the along-line rotation arm),
 `Shaders/Map/Symbol/Icon/SymbolIconWorld_ForwardPass.hlsl` (the ported tangent branch). Jobs: unchanged —
-`LabelStageJob` passes `CurvedStageInput` through wholesale.
+`StageJob` passes `CurvedStageInput` through wholesale.
 
 **Maintainer eyeball DISCHARGED (2026-07-30):** confirmed on `OpenStreetMapLiberty.unity` — road shields
 and road arrows both render. Headless teeth cover the emit shape, the atlas routing, the mesh geometry and
@@ -1262,8 +1285,8 @@ happen to coincide.
 **D-PA-1 — the predicate is `hasIcon && text != null`.** Symmetric and anchor/offset-independent; all five
 conjuncts retire (including one per-feature `text-radial-offset` expression evaluation).
 
-**D-PA-2 — the ICON stays the pair Owner.** `SymbolTileLabelBlockBaker` derives a pair's `FadeId` from the
-owner's icon identity, and `LabelPairing` / `LabelStageJob` / `AssertPairAdjacency` all encode
+**D-PA-2 — the ICON stays the pair Owner.** `SymbolTileBlockBaker` derives a pair's `FadeId` from the
+owner's icon identity, and `SymbolPairing` / `StageJob` / `AssertPairAdjacency` all encode
 owner-immediately-then-rider. Flipping the roles to the text half was explicitly out of scope.
 
 **D-PA-3 — `icon-optional`/`text-optional` still do NOT gate pair formation; D11 stays refuted, for a NEW
@@ -1273,7 +1296,7 @@ and would not self-block. The argument that does is the *instance* one: `text-op
 may render icon-only", which presupposes the instance. liberty's `airport` sets it and nothing else; under
 D11 it would not pair, its halves would be collision-tested independently, and the text could place with the
 icon culled — exactly what the flag forbids. Optionality remains a per-BOX verdict inside the
-test-all-then-insert loop (`LabelCandidate.OptionalBoxMask`).
+test-all-then-insert loop (`SymbolCandidate.OptionalBoxMask`).
 
 **D-PA-4 — the line branch re-gates on BOTH suppressions.** The old `centredPair && iconAtAnchors` re-gated
 the icon suppression but not the text one, so a line layer with `text-rotation-alignment: map` +
@@ -1281,8 +1304,9 @@ the icon suppression but not the text one, so a line layer with `text-rotation-a
 makes `EmitAtAnchor`'s "PairedInstance implies both halves" true by construction. Byte-identical on every
 shipped layer (the shields resolve both sides to viewport).
 
-**D-PA-5 — naming follows meaning:** `centredPair` → `pairedInstance`, `AnchorEmitContext.CentredPair` →
-`PairedInstance`. "Centred" survives only where it is still true (the shield-specific test names, §10).
+**D-PA-5 — naming follows meaning:** the local `centredPair` and the context's matching property both
+renamed to `pairedInstance`/`PairedInstance`. "Centred" survives only where it is still true (the
+shield-specific test names, §10).
 
 **Affected layers.** Nine liberty layers newly pair; the three shield layers were already centred and the
 new predicate is a strict superset, so their verdict is unchanged.
@@ -1319,7 +1343,7 @@ sort keys shifts (the pair is ordered by its icon's ordinal), and the pair's `Fa
 `Style/SymbolShieldExtractionTests.NonCentredPair_NowEmitsIconThenText_OwnerRider` (T1),
 `Style/SymbolTestFixtures` (the shared loaders + `StageInputFor`). Nothing else changed — the halves'
 anchors/offsets were already baked anchor-relative into their own quads and bounds by
-`TextQuadLayout.Layout` / `IconQuadLayout.Layout`, so `LabelStagingMath.StagePointPair` appending both at
+`TextQuadLayout.Layout` / `IconQuadLayout.Layout`, so `SymbolStagingMath.StagePointPair` appending both at
 the owner's `ScreenPx` was already correct for a displaced half. That premise is pinned by T3: staging the
 rider from the *owner's* bounds — the precise way the premise fails — reds T3 and **nothing else in 2017
 tests**. Do not read that as "T3 is the only tooth guarding the premise": perturb the layout/staging code it
@@ -1333,8 +1357,8 @@ Non-blocking. Recorded here rather than fixed in-stage, per `AGENTS.md` ("non-bl
 recorded, not necessarily fixed in-stage").
 
 **F-PA-1 — a MapLibre divergence that P-A makes LIVE. Read this before blaming the predicate.**
-`LabelStagingMath.StagePointPair` sets the candidate's `AllowOverlap = owner.AllowOverlap && rider.AllowOverlap`,
-and `LabelCollision.SelectSurvivors` consults only that **candidate** flag — `LabelBox.AllowOverlap` is
+`SymbolStagingMath.StagePointPair` sets the candidate's `AllowOverlap = owner.AllowOverlap && rider.AllowOverlap`,
+and `SymbolCollision.SelectSurvivors` consults only that **candidate** flag — `SymbolBox.AllowOverlap` is
 carried per box but never read there. MapLibre GL JS instead tests each half against the grid with *its own*
 allow-overlap and then ANDs the two **verdicts**. The two agree in the case this stage is about (text blocked
 ⇒ both drop) and **diverge in the mirror case**: dot's box blocked, text's box free — MapLibre places both,
@@ -1355,11 +1379,11 @@ fixed-once-and-commented. T2/T8 stay meaningful either way: they exercise the fe
 a rider displaced by up to 0.9 em (`poi_transit`) is culled or kept by the *icon's* position. Negligible at
 liberty's offsets; real if `icon-text-fit` or larger offsets ever land.
 
-**F-PA-4 — stale "centred pair" wording** survives in `LabelStagingMath.cs:82`, `LabelCandidate.cs:34`,
-`CandidateEmit.cs:14`, `LabelPlacementSystem.cs:358`/`:719`. All sit inside P-A's stop-listed files; fix on
-the next legitimate visit to each. Related: `LabelCollision.cs:180` justifies test-all-then-insert with
-"a centred pair's two boxes overlap by construction" — still true of centred pairs, so the code is right,
-but it now reads as the general rationale and no longer is (P-A's pairs are disjoint).
+**F-PA-4 — stale "centred pair" wording** survives in `SymbolStagingMath.cs`, `SymbolCandidate.cs:34`,
+`CandidateEmit.cs:14`. All sit inside P-A's stop-listed files; fix on the next legitimate visit to each.
+Related: `SymbolCollision.cs:180` justifies test-all-then-insert with "a centred pair's two boxes overlap by
+construction" — still true of centred pairs, so the code is right, but it now reads as the general rationale
+and no longer is (P-A's pairs are disjoint).
 
 **F-PA-5 — `poi_r1`/`_r7`/`_r20`/`_transit` remain headlessly unverifiable** (no `poi` source layer in any
 committed fixture), as do `label_town`/`label_village` at their real offsets. `poi_transit` is the only

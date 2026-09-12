@@ -123,7 +123,7 @@ namespace MapRenderer.Unity.Text.Placement
         private JobHandle? _collisionHandle;
         private int        _pendingCandidateCount;
 
-        /// <summary><c>AssertFadeIdsUnique</c>'s duplicate-check buffer, allocated lazily inside that
+        /// <summary><c>AssertFadeIdsUnique</c>'s duplicate-check scratch, allocated lazily inside that
         /// method — a release build strips its call sites, so this field stays zero-allocation.</summary>
         private NativeHashSet<long> _debugFadeIdSeen;
 
@@ -263,7 +263,7 @@ namespace MapRenderer.Unity.Text.Placement
         private NativeList<CandidateEmit>  _stageEmit;
         /// <summary>[candidateCount, boxCount, quadCount, emitCount].</summary>
         private NativeArray<int>           _stageCounts;
-        /// <summary>Arc-walk buffer (&gt;= max path length).</summary>
+        /// <summary>Arc-walk scratch (&gt;= max path length).</summary>
         private NativeList<float2>         _stagePath;
         private NativeList<float>          _stageCumulativeLength;
 
@@ -351,7 +351,7 @@ namespace MapRenderer.Unity.Text.Placement
         {
             _camera = camera ?? throw new ArgumentNullException(nameof(camera));
 
-            _symbolPoints = new NativeList<double3>(Allocator.Persistent); // projection buffer
+            _symbolPoints = new NativeList<double3>(Allocator.Persistent); // projection scratch
             _symbolUps = new NativeList<float3>(Allocator.Persistent);
             _symbolScreen = new NativeList<float2>(Allocator.Persistent);
             _symbolDepth  = new NativeList<float>(Allocator.Persistent);
@@ -1061,9 +1061,9 @@ namespace MapRenderer.Unity.Text.Placement
             _stageQuads.ResizeUninitialized(math.max(1, _mirrorMaxQuads));
             _stageCandidates.ResizeUninitialized(math.max(1, _mirrorMaxCandidates));
             _stageEmit.ResizeUninitialized(math.max(1, _mirrorMaxCandidates));
-            int buffer = math.max(1, _symbolPoints.Length);
-            _stagePath.ResizeUninitialized(buffer);
-            _stageCumulativeLength.ResizeUninitialized(buffer);
+            int pathCapacity = math.max(1, _symbolPoints.Length);
+            _stagePath.ResizeUninitialized(pathCapacity);
+            _stageCumulativeLength.ResizeUninitialized(pathCapacity);
             // No math.max(1, …) floor here: a zero-length _mirrorFadeCount is fine, since the fill loop and fade-id slice are both empty then.
             _stageAnchorWasPlaced.ResizeUninitialized(_mirrorFadeCount);
         }
@@ -1209,7 +1209,7 @@ namespace MapRenderer.Unity.Text.Placement
             _worldIconMaterial.DestroySafely();
             _worldIconMaterial = null;
 
-            _symbolPoints.Dispose(); // projection buffer
+            _symbolPoints.Dispose(); // projection scratch
             _symbolUps.Dispose();
             _symbolScreen.Dispose();
             _symbolDepth.Dispose();
@@ -1236,7 +1236,7 @@ namespace MapRenderer.Unity.Text.Placement
             _placedLastFrame.Dispose(); // native set, ctor-allocated alongside the other persistent containers
             _droppedHalvesLastFrame.Dispose(); // Same lifetime as _placedLastFrame
             _fadeOpacity.Dispose(); _seenFade.Dispose(); _forceFadeOut.Dispose(); _fadeSweepKeys.Dispose(); // fade collections, same lifetime
-            _gatherTrigger.Dispose(); // gather Cull→Compact per-symbol verdict buffer
+            _gatherTrigger.Dispose(); // gather Cull→Compact per-symbol verdict scratch
             _slotVisibleThisFrame.Dispose(); // per-slot zoom-visibility lookup, CullJob input
             _gatherCulledCounts.Dispose(); // per-trigger culled tally, CompactJob output bridge
             // AssertFadeIdsUnique's scratch set may be a default (never-created) value here; Dispose() no-ops on that.

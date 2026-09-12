@@ -305,11 +305,11 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.AreEqual(1, output.Symbols.Count, "the icon label must still be emitted");
             Assert.AreEqual(0, builder.SkippedSymbolCount, "an icon build must never be skipped");
-            ShapedSymbol label = output.Symbols[0];
-            Assert.AreEqual(SymbolKind.Icon, label.Kind);
-            Assert.AreEqual(1, label.QuadCount, "a sprite is exactly one quad");
-            Assert.AreEqual(TextQuadLayout.OneEm, label.TextSizePx, 1e-6, "icon scale must be 1 (OneEm/OneEm)");
-            Assert.IsNull(label.Text, "an icon label carries no text");
+            ShapedSymbol symbol = output.Symbols[0];
+            Assert.AreEqual(SymbolKind.Icon, symbol.Kind);
+            Assert.AreEqual(1, symbol.QuadCount, "a sprite is exactly one quad");
+            Assert.AreEqual(TextQuadLayout.OneEm, symbol.TextSizePx, 1e-6, "icon scale must be 1 (OneEm/OneEm)");
+            Assert.IsNull(symbol.Text, "an icon label carries no text");
         }
 
         [Test]

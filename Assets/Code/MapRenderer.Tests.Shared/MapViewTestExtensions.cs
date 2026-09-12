@@ -81,8 +81,12 @@ namespace MapRenderer.Tests
         /// admitted tile being decode-ready within the tick that completes its fetch — under the default,
         /// decodes land across an unpredictable number of ticks, so a per-tick budget sees a partial
         /// ready-set.</param>
+        /// <param name="symbolsIntentionallyUnwired">This helper never wires <c>SymbolSubsystem</c>, so a
+        /// symbol layer's source loads but never places. Pass <c>true</c> only when a test needs the source
+        /// wired and genuinely does not need placement; otherwise a symbol layer here throws.</param>
         internal static void LoadTestStyle(this MapViewComponent view, IDataSource source,
-            CameraProperties initialView, StyleDocument style = null, IWorkScheduler decodeScheduler = null)
+            CameraProperties initialView, StyleDocument style = null, IWorkScheduler decodeScheduler = null,
+            bool symbolsIntentionallyUnwired = false)
         {
             IWorkScheduler decodeSched = decodeScheduler ?? TestWorkScheduler;
             MapView mv = view.View;
@@ -96,6 +100,16 @@ namespace MapRenderer.Tests
             var specs = new List<TileManager.SourceSpec>();
             var seen  = new HashSet<string>();
             var layers = mv.Layers.Layers;
+
+            // This helper never wires SymbolSubsystem (see the class summary), so a symbol layer's source
+            // loads but placement never runs — a silent no-op a test can easily mistake for "zero symbols".
+            if (!symbolsIntentionallyUnwired)
+                for (int i = 0; i < layers.Count; i++)
+                    if (layers[i].StyleLayer?.LayerType == StyleLayerType.Symbol)
+                        throw new System.InvalidOperationException(
+                            "LoadTestStyle does not wire SymbolSubsystem, so symbol layers never place. Use the " +
+                            "async MapView.SetStyle path (see VisualScene / GeoJsonPointSymbolFixtureTests), or " +
+                            "pass symbolsIntentionallyUnwired: true if this test only needs the source wired.");
             // Epic A / A2: mirrors the production skip (MapView.BuildSourceSpecs, post-A2) — only a layer
             // with a non-empty StyleLayer.Source fetches; background is source-less by design (no Build-kind
             // check any more — ViewGeometry is REMOVED).

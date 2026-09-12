@@ -85,19 +85,19 @@ namespace MapRenderer.Tests
         /// <c>SymbolTileBlockBaker.BuildPointInput</c>'s field math (the Unity-only bake step itself
         /// can't run headlessly — no Unity.Collections in Tools/core-tests — so this is the engine-free
         /// subset: Color/FadeId are placeholders the callers set or ignore).</summary>
-        public static PointStageInput StageInputFor(SymbolStyle.SymbolFeature label, SymbolKind atlasKind,
+        public static PointStageInput StageInputFor(SymbolStyle.SymbolFeature symbol, SymbolKind atlasKind,
             float2 boundsMin, float2 boundsMax, float2 screenPx, float textSizePx)
             => new PointStageInput
             {
                 ScreenPx = screenPx, Depth = 0f, Projected = true,
                 BoundsMin = boundsMin, BoundsMax = boundsMax,
-                TextSizePx = textSizePx, PaddingPx = label.PaddingPx, SortKey = label.SortKey,
-                FeatureIndex = label.FeatureIndex, TileKey = label.TileKey, Slot = 0,
-                AllowOverlap = label.AllowOverlap, IgnorePlacement = label.IgnorePlacement,
-                TranslatePx = label.TranslatePx, TranslateAnchor = label.TranslateAnchor,
-                RotationAlignment = label.RotationAlignment, Color = new float4(1, 1, 1, 1),
+                TextSizePx = textSizePx, PaddingPx = symbol.PaddingPx, SortKey = symbol.SortKey,
+                FeatureIndex = symbol.FeatureIndex, TileKey = symbol.TileKey, Slot = 0,
+                AllowOverlap = symbol.AllowOverlap, IgnorePlacement = symbol.IgnorePlacement,
+                TranslatePx = symbol.TranslatePx, TranslateAnchor = symbol.TranslateAnchor,
+                RotationAlignment = symbol.RotationAlignment, Color = new float4(1, 1, 1, 1),
                 AtlasKind = atlasKind,
-                PairOptional = label.PairOptional, // stage C — mirrors BuildPointInput's own carry
+                PairOptional = symbol.PairOptional, // stage C — mirrors BuildPointInput's own carry
             };
     }
 }

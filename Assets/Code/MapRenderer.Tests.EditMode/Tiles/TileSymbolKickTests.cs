@@ -135,7 +135,7 @@ namespace MapRenderer.Tests.Tiles
             view.TileManager.SymbolWorkerFactory = spy;
             try
             {
-                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillAndSymbolStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: FillAndSymbolStyle(), symbolsIntentionallyUnwired: true);
 
                 // ONE LateUpdate creates the record + starts the fetch. The kick block can NEVER fire on this
                 // same call (it requires lt.Decode already set from a PRIOR PumpPending call) — TryBeginBuild
@@ -171,7 +171,7 @@ namespace MapRenderer.Tests.Tiles
             view.TileManager.SymbolWorkerFactory = spy;
             try
             {
-                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillAndSymbolStyle());
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillAndSymbolStyle(), symbolsIntentionallyUnwired: true);
 
                 view.LateUpdate();          // Tick 1: cover created (9 tiles), fetches requested
                 view.DrainMeshBuilds();     // land the fetch decodes deterministically (symbol-silent, per F-4)

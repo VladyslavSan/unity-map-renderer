@@ -14,7 +14,7 @@ Fill, line, and symbol are all just **style layers over the same vector tile.** 
 the *earliest possible* seam — the moment raw MVT `byte[]` is fetched:
 
 - Fill/line: `TileManager` decodes the tile and builds meshes (one worker task per tile, tile-atomic consume).
-- Symbol: `SymbolLabelSubsystem` received the **same** fetched bytes via a `SymbolTileBytesReady` push and ran a
+- Symbol: `SymbolSubsystem` received the **same** fetched bytes via a `SymbolTileBytesReady` push and ran a
   parallel pipeline — **decoding the tile a second time.**
 
 So the same protobuf parse ran twice per tile, and "symbol" was architecturally a different *kind of thing* from
@@ -168,7 +168,7 @@ the mesh consume/dispose Model-B contract, and the `IDataSource`/`MvtTile` gener
   per symbol style layer per (source, tile) build; worker step = `StyledSymbolTileBuilder.ExtractLayers`, main
   tail = `Shape`, gated behind a build-wide glyph-range collect/ensure step) + `RunSymbolWorkerPass` (the symbol
   cadence's own decode-once worker pass — faults
-  propagate rather than settle, since symbol holds only managed state). `SymbolLabelSubsystem.BuildTileAsync`
+  propagate rather than settle, since symbol holds only managed state). `SymbolSubsystem.BuildTileAsync`
   becomes the per-tile coordinator: one `SwitchToThreadPool`/`SwitchToMainThread(ct)` hop batches every layer's
   tail. Zero `TileManager` edits. Two self-decoding cadences persist by design until A4. Non-vacuity of the
   differential parity test (`SymbolProcessorParityTests`) verified by injecting each falsifier (reversed order,
@@ -185,7 +185,7 @@ the mesh consume/dispose Model-B contract, and the `IDataSource`/`MvtTile` gener
   fault is cached and rethrown to every caller. *Accepted tradeoff:* the decoded tile now lives as long as its
   last holder (a lingering kick task, a queued symbol build) — bounded, transient, deliberately unmeasured.
 - **A5 — retire the parallel push; one kick drives both.** A5a split `BuildTileAsync` into a worker phase +
-  a budgeted tail pump (`RunTailAsync`/`_readyTails`, the tail machinery entirely inside `SymbolLabelSubsystem`).
+  a budgeted tail pump (`RunTailAsync`/`_readyTails`, the tail machinery entirely inside `SymbolSubsystem`).
   A5b swapped the feed: `TileManager`'s per-tile kick now drives the symbol worker pass alongside the mesh pass,
   sharing the A4 decode, through one symbol-agnostic seam — `ISymbolTileWorkerFactory.TryBeginBuild(sourceId,
   tile)` (MAIN, kick time) returning `ISymbolTileWorkerPass.RunWorkerAndHandoff(SharedTileDecode)` (POOL, inside
@@ -248,7 +248,7 @@ open decisions, so it lives in its own SSOT: `docs/tile-geometry-ir-design.md`. 
 
 `TileLayerProcessContext.Zoom` currently carries two meanings by cadence: the mesh passes bake at the tile's
 INTEGER zoom, while the symbol pass evaluates style expressions (text-size etc.) at the **camera** zoom captured
-at build start (`SymbolLabelSubsystem.cs:279`, into the context at `:293`). **Direction (for now): change the
+at build start (`SymbolSubsystem.cs:472`, into the context at `:485`). **Direction (for now): change the
 symbol pass to use the tile's integer zoom** — aligning it with the mesh and making a tile's labels
 deterministic, cacheable, and camera-independent at build time. Scope: only the style-expression zoom — NOT the
 `WebMercator.GroundResolution(cameraZoom)` cross-tile quantization (that belongs to

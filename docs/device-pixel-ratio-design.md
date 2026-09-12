@@ -35,7 +35,7 @@ is logical. A quantity that only exists because the screen is made of discrete s
 ### 1.2 Why placement runs in LOGICAL px — the part that is not obvious
 
 Label collision, staging and the collision grid all work in logical px (`SymbolProjectionJob.ViewportLogicalPx`
-→ `LabelStagingMath`). Two questions this raises, because it looks like the "wrong" space given the screen is
+→ `SymbolStagingMath`). Two questions this raises, because it looks like the "wrong" space given the screen is
 physically made of device pixels:
 
 **Is it correct?** Yes, and identically so. At dpr *d*, the boxes stay in logical px **and the viewport also
@@ -150,7 +150,7 @@ is deliberately left alone.)
 | `line-translate` / `fill-translate` | `Line_VertexExtrude.hlsl:272-273` / `Fill_VertexModify.hlsl:113-114` — the same `MapPixelsToWorld` call | device | × dpr |
 | `text-halo-width` / `text-halo-blur` | `SymbolTextWorld_ForwardPass.hlsl:128`, added to a `screenDist` in device px | device | × dpr |
 | `text-size` | `SymbolTextWorld_ForwardPass.hlsl:99`, divided by `_ScreenParamsLogical` | **logical** | factor 1 |
-| `text-padding` / `icon-padding` | `LabelStagingMath.cs:171`/`:384`, collided against `SymbolProjectionJob.ViewportLogicalPx` anchors | **logical** | factor 1 |
+| `text-padding` / `icon-padding` | `SymbolStagingMath.cs`, collided against `SymbolProjectionJob.ViewportLogicalPx` anchors | **logical** | factor 1 |
 | `line-dasharray` | `Line_VertexExtrude.hlsl` `dashMetersPerUnit` — `_Width × _MapFrameMetersPerDevicePixel` (S110) | device (**both halves**) | × dpr, **cancelling** |
 
 **`line-dasharray` is the row that shows why a CPU round-trip cannot prove a basis.** Its period in world
@@ -167,13 +167,13 @@ measured off the camera as `2·d_lookAt·tan(fov/2) / ViewportPx.y`. The `/ dpr`
 framing — so the two halves can no longer name it separately and disagree. The pinned values are unchanged;
 see `docs/line-rendering-design.md` §1.1.*
 
-**The collision grid is not a third space.** `LabelStagingMath` mixes padding with `BoundsMin/Max`,
+**The collision grid is not a third space.** `SymbolStagingMath` mixes padding with `BoundsMin/Max`,
 `TextSizePx` and a `ViewportLogicalPx`-projected anchor in one expression — the same quantities the shader
 divides by `_ScreenParamsLogical`. One space, logical.
 
 **CPU-side px properties never reach the seam at all**, and all are already correct: `symbol-spacing`
 (`SymbolFeatureExtractor.cs:256`, via `WebMercator.TilePixelSize`), `text-translate` / `icon-translate`
-(`LabelStagingMath.cs:160`, `:381`), `icon-offset` / `text-offset` (ems → logical px in `IconQuadLayout`).
+(`SymbolStagingMath.cs`), `icon-offset` / `text-offset` (ems → logical px in `IconQuadLayout`).
 So D2's guarantee is scoped honestly: *the **material-bound** px family cannot compile without naming its
 space; the CPU-side px family resolves through `WebMercator.TilePixelSize` / `ViewportLogicalPx` and is
 logical by construction.*
@@ -253,7 +253,7 @@ fatter *and* softer. **No shader was edited in Stage 1.**
 
 *Rejected: "one basis everywhere."* Emitting device px for all nine and moving the label path off
 `_ScreenParamsLogical` is identity at dpr 1 and so survives every existing test — but it drags
-`SymbolProjectionJob.ViewportLogicalPx`, all of `LabelStagingMath`, `LabelInstance.PaddingPx`, the collision
+`SymbolProjectionJob.ViewportLogicalPx`, all of `SymbolStagingMath`, `ShapedSymbol.PaddingPx`, the collision
 grid's cell sizing and every px threshold in the fade machinery into device px, each site invisible to the
 gate at dpr 1. That reproduces this epic's exact failure mode at ~10× the surface, to buy uniformity in a
 half that is **already correct**.

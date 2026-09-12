@@ -823,7 +823,7 @@ namespace MapRenderer.Tests
                 system.Tick(in frame, plan.Build(buffer), atlasF);
                 system.Tick(in frame, plan.Build(buffer), atlasF);
                 Assert.That(plan.CollectedCount, Is.EqualTo(buffer.Symbols.Count),
-                    $"P-M precondition: the collect must yield all {buffer.Symbols.Count} buffer (got " +
+                    $"P-M precondition: the collect must yield all {buffer.Symbols.Count} symbols (got " +
                     $"{plan.CollectedCount}) — a dedup/coverage drop must show up here, not as missing ink.");
                 int expectedQuads = curvedIds.Length * config.GlyphCount + 2;
                 var perSymbol = new StringBuilder();
@@ -888,7 +888,7 @@ namespace MapRenderer.Tests
                 system.Tick(in frame, plan.Build(crossOnly), atlasF);
                 system.Tick(in frame, plan.Build(crossOnly), atlasF);
                 Assert.That(system.LastQuadCount, Is.EqualTo(2 * config.GlyphCount),
-                    $"P-M precondition: the ink pass must stage exactly the two cross-azimuth buffer " +
+                    $"P-M precondition: the ink pass must stage exactly the two cross-azimuth symbols " +
                     $"({2 * config.GlyphCount} quads), got {system.LastQuadCount}.");
 
                 // The ink pass must not have moved the geometry the headline reading came from.

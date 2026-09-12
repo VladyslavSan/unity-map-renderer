@@ -210,9 +210,10 @@ classifies — no special-casing, given the per-ring kind tag.
 > `TileLayerProcessorRunner.RunWorkerPass(decode, …)` and then `symbolPass?.RunWorkerAndHandoff(decode)` inside
 > one `UniTask.RunOnThreadPool` lambda, sequentially, against the same handle.
 >
-> What that misses — **D6 park mode.** `SymbolLabelSubsystem.RunWorkerAndHandoff` (`~:601–606`) does **not** run
-> the extract when `_parked`: it enqueues a `PendingSymbolBuild` **carrying `decode`** and returns. `PumpBuilds`
-> later dispatches it on its **own** `UniTask.RunOnThreadPool` (`~:698–705`), a different task at a later time,
+> What that misses — **D6 park mode.** `SymbolTileWorkerPass.RunWorkerAndHandoff` (`SymbolSubsystem.cs:549-561`)
+> does **not** run the extract when `_parked`: it enqueues a `PendingSymbolBuild` **carrying `decode`** and
+> returns. `PumpBuilds` (`:649`) later dispatches it on its **own** `UniTask.RunOnThreadPool` (as of this
+> 2026-08-08 audit; dispatch now goes through `WorkScheduler`), a different task at a later time,
 > outside the originating kick lambda entirely. A buffer scoped to the *kick* would therefore be
 > **use-after-dispose** whenever a sprite fetch has not settled. The existing code states the dependency it has
 > on the current design outright — *"the decode is retained (legal: `SharedTileDecode`'s own contract is plain
@@ -721,7 +722,7 @@ D1's release obligation is one line at each of four chokepoints rather than elev
 | a record leaves `_loaded` (cover change, eviction, restyle, teardown) | `TileManager.RenderTeardownRecord` | `lt.Decode?.Release(); lt.Decode = null;` |
 | a fetch completes with nobody to consume it | `TileManager.DiscardFetchOutcome` | `GetResult()?.Release()` |
 | the kick's own (transferred) reference | `KickMeshBuild`'s pool lambda | `finally { decode.Release(); }` + a prologue `catch` for the throw-before-the-lambda-exists case |
-| a parked symbol entry is dropped | `SymbolLabelSubsystem.DrainAndDiscardParkedBuilds`, plus `PumpBuilds`' ct-drop and drain `finally` | `DecodeRef.Dispose()` |
+| a parked symbol entry is dropped | `SymbolSubsystem.DrainAndDiscardParkedBuilds`, plus `PumpBuilds`' ct-drop and drain `finally` | `DecodeRef.Dispose()` |
 
 **Faults moved with the decode.** A decoder throw now faults the `GetTile` task, wrapped in
 `TileDecodeException`, and is observed at `TakeDecodeFromFetch` — which gives it its **own** throttled log and

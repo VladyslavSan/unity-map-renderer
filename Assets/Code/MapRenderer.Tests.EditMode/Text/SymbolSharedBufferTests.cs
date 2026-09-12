@@ -128,7 +128,7 @@ namespace MapRenderer.Tests.Text
             // The FeatureIndex sequence is pinned absolutely as well as differentially: a control that had
             // itself drifted would make the comparison above agree on a wrong answer.
             var indices = new List<int>();
-            foreach (SymbolStyle.SymbolFeature label in shared) indices.Add(label.FeatureIndex);
+            foreach (SymbolStyle.SymbolFeature symbol in shared) indices.Add(symbol.FeatureIndex);
             CollectionAssert.AreEqual(new[] { 0, 1, 2, 3, 4 }, indices,
                 "FeatureIndex counts emitted labels 0..n-1 in emission order, per tile — never the source " +
                 "layer's feature ordinal, and never restarted per feature");
@@ -161,10 +161,10 @@ namespace MapRenderer.Tests.Text
         private static List<SymbolStyle.SymbolFeature> Extract(IReadOnlyList<IFeature> features, string filterJson)
         {
             var tile = TestDecodedTiles.Of("probe", Tile, features, Extent);
-            var labels = new List<SymbolStyle.SymbolFeature>();
+            var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(
-                StyleLayer(filterJson), tile, Tile, Zoom, new WebMercatorProjection(), labels);
-            return labels;
+                StyleLayer(filterJson), tile, Tile, Zoom, new WebMercatorProjection(), symbols);
+            return symbols;
         }
 
         /// <summary>Runs the REAL selection seam, so the ordinals under test are production's.</summary>
@@ -200,10 +200,10 @@ namespace MapRenderer.Tests.Text
             return ordinals;
         }
 
-        private static int DistinctTexts(IReadOnlyList<SymbolStyle.SymbolFeature> labels)
+        private static int DistinctTexts(IReadOnlyList<SymbolStyle.SymbolFeature> symbols)
         {
             var seen = new HashSet<string>();
-            foreach (SymbolStyle.SymbolFeature label in labels) seen.Add(label.Text);
+            foreach (SymbolStyle.SymbolFeature symbol in symbols) seen.Add(symbol.Text);
             return seen.Count;
         }
     }

@@ -108,7 +108,7 @@ namespace MapRenderer.Tests.Text
         {
             var output = new List<ShapedSymbol>(); var blockIds = new List<int>();
             var localIndices = new List<int>(); var isDeparting = new List<byte>();
-            var dedup = new Dictionary<CrossTileSymbolKey, (ShapedSymbol label, int z, long tileKey, int blockId, int localIndex)>();
+            var dedup = new Dictionary<CrossTileSymbolKey, (ShapedSymbol symbol, int z, long tileKey, int blockId, int localIndex)>();
             int nextBlock = 0;
 
             foreach (List<ShapedSymbol> tile in activeTiles)
@@ -117,21 +117,21 @@ namespace MapRenderer.Tests.Text
                 int myBlock = nextBlock++;
                 for (int i = 0; i < tile.Count; i++)
                 {
-                    ShapedSymbol label = tile[i];
-                    if (label.Placement != SymbolPlacement.Point)
+                    ShapedSymbol symbol = tile[i];
+                    if (symbol.Placement != SymbolPlacement.Point)
                     {
-                        output.Add(label); blockIds.Add(myBlock); localIndices.Add(i); isDeparting.Add(0);
+                        output.Add(symbol); blockIds.Add(myBlock); localIndices.Add(i); isDeparting.Add(0);
                         continue;
                     }
-                    var key = CrossTileSymbolKey.For(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage, CrossTileSymbolKey.CanonicalGridMeters);
-                    int z = (int)(label.TileKey >> 44);
-                    if (!dedup.TryGetValue(key, out var cur) || z > cur.z || (z == cur.z && label.TileKey < cur.tileKey))
-                        dedup[key] = (label, z, label.TileKey, myBlock, i);
+                    var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, symbol.Text, symbol.IconImage, CrossTileSymbolKey.CanonicalGridMeters);
+                    int z = (int)(symbol.TileKey >> 44);
+                    if (!dedup.TryGetValue(key, out var cur) || z > cur.z || (z == cur.z && symbol.TileKey < cur.tileKey))
+                        dedup[key] = (symbol, z, symbol.TileKey, myBlock, i);
                 }
             }
             foreach (var kv in dedup)
             {
-                output.Add(kv.Value.label); blockIds.Add(kv.Value.blockId); localIndices.Add(kv.Value.localIndex); isDeparting.Add(0);
+                output.Add(kv.Value.symbol); blockIds.Add(kv.Value.blockId); localIndices.Add(kv.Value.localIndex); isDeparting.Add(0);
             }
             int activeCount = output.Count;
 
@@ -141,14 +141,14 @@ namespace MapRenderer.Tests.Text
                 int myBlock = nextBlock++;
                 for (int i = 0; i < tile.Count; i++)
                 {
-                    ShapedSymbol label = tile[i];
-                    if (label.Placement == SymbolPlacement.Point)
+                    ShapedSymbol symbol = tile[i];
+                    if (symbol.Placement == SymbolPlacement.Point)
                     {
-                        var key = CrossTileSymbolKey.For(label.AnchorRender, label.MaterialIndex, label.Text, label.IconImage, CrossTileSymbolKey.CanonicalGridMeters);
+                        var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, symbol.Text, symbol.IconImage, CrossTileSymbolKey.CanonicalGridMeters);
                         if (dedup.ContainsKey(key)) continue;
-                        dedup[key] = (label, 0, label.TileKey, myBlock, i);
+                        dedup[key] = (symbol, 0, symbol.TileKey, myBlock, i);
                     }
-                    output.Add(label); blockIds.Add(myBlock); localIndices.Add(i); isDeparting.Add(1);
+                    output.Add(symbol); blockIds.Add(myBlock); localIndices.Add(i); isDeparting.Add(1);
                 }
             }
             return new OracleOut { Output = output, ActiveCount = activeCount, BlockId = blockIds, LocalIndex = localIndices, IsDeparting = isDeparting };

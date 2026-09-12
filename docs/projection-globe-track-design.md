@@ -19,7 +19,7 @@ of Epic A; Track B does not own it.
 **A2 landed this (2026-07-13), confirming the above.** `TileBackgroundLayerProcessor` projects the
 background quad through the same `IProjection` fill/line use (curved on `SphericalProjection`, flat on
 `WebMercatorProjection`); `MapView.SetStyle`'s Mercator-only `BackgroundRenderLayer.SetVisible` gate is
-DELETED. See `docs/per-layer-tile-processing-a2-plan.md` / `docs/per-layer-tile-processing-design.md`.
+DELETED. See `docs/per-layer-tile-processing-design.md`.
 
 ### B3 — Full-sphere / polar-cap background surface (new, filed by A2)
 A2 makes the *covered* band (the Mercator tile pyramid, ±85.051°) curve correctly, but coverage is still the
@@ -39,8 +39,8 @@ occluded **by the globe itself**. Today's behind-camera cull (W<0) does not catc
 test** on the anchor before placement.
 
 - **Current state is better than "no globe support":** anchor world positions come from
-  `projection.Project(GeoCoordinate)` (`SymbolLabelBatchBuilder.cs:90`, `SyntheticLabelSource.cs:105,139`) —
-  projection-agnostic, with a `"stays globe-correct"` note (`SymbolLabelBatchBuilder.cs:77`). The per-frame
+  `projection.ProjectPoint(GeoCoordinate)` (`SymbolFeatureExtractor.cs:791`) — projection-agnostic by
+  construction, since `IProjection` resolves the anchor for whichever projection is active. The per-frame
   projection culls behind-camera anchors (`SymbolPlacementSystem.cs`), and there is a B-3
   horizon/distance cull for the tilted-view pile-up. So placement is projection-aware; **the specific gap is
   far-side occlusion.**
@@ -49,11 +49,11 @@ test** on the anchor before placement.
   `dot(anchorNormal, viewDir)` visibility test. Pre-collision placement (with the B-3 cull) is the cheap spot:
   far-side labels then never consume collision budget.
 
-### B2 — `WebMercator.GroundResolution` coupling
-`SymbolLabelSubsystem.cs:356,376` quantizes the cross-tile **collected set** (symbol dedup identity across a
-parent+child tile during a zoom) by `WebMercator.GroundResolution(zoom)` — a flat-Mercator quantum. On a globe
-that is the wrong quantum. Replace with a projection-supplied resolution / projection-agnostic quantization.
-Not fatal to positioning (it is only a dedup tolerance), but it is a flat-earth constant in the symbol path.
+### B2 — `WebMercator.GroundResolution` coupling — RESOLVED
+The cross-tile **collected set** (symbol dedup identity across a parent+child tile during a zoom) no longer
+quantizes by `WebMercator.GroundResolution(zoom)`. `CrossTileSymbolKey.CanonicalGridMeters` replaced it — a
+fixed 4.0 m grid over the render-space (pre-RTC) anchor, with no `WebMercator`-specific term, so no
+flat-Mercator quantum. See `labels-async-reconcile-design.md` §3.1.
 
 ## Relationship to Epic A / sequencing
 

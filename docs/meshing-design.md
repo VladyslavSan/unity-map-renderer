@@ -513,7 +513,7 @@ Every painted layer declares:
 |---|---|---|---|---|
 | **Fill** | `TileMesh` — once per `(tile,layer)`, Burst kernels, `Mesh.MeshData` | `Persistent` — backend redraws (BRG `OnPerformCulling` / EG entities / MeshRenderers) | global index | shipped |
 | **Line** | `TileMesh` (same) | `Persistent` | global index | shipped |
-| **Symbol/text** | `FramePlaced` — global collision → per-slot billboard mesh rebuilt every `Tick` | `Persistent` — a persistent per-slot `MeshRenderer` (`LabelSlotPresenter`) swaps its mesh each `Tick`, so the backend redraws it with no orchestrator | global index **per symbol layer** | shipped |
+| **Symbol/text** | `FramePlaced` — global collision → per-slot billboard mesh rebuilt every `Tick` | `Persistent` — a persistent per-slot `MeshRenderer` (`WorldSymbolRenderer`) swaps its mesh each `Tick`, so the backend redraws it with no orchestrator | global index **per symbol layer** | shipped |
 | **Background** | `TileMesh` — per-covered-tile, source-less (`BackgroundQuad` + `TileBuildGraph`) | `Persistent` — one quad per covered tile, same as fill/line | global index | shipped |
 | **Raster** *(future)* | `TileMesh` — per-tile textured quad | `Persistent` | global index | reserved seat |
 | **Fill-extrusion** | `TileMesh` (+ ZWrite on) — `FillExtrusionRenderLayer` / `StyledFillExtrusionTileBuilder` | `Persistent` | global index | shipped |
@@ -576,9 +576,9 @@ not the concrete types).
   The tile produce loop filters `layer is ITileMeshRenderLayer`; the payload carries its own `MaterialIndex`, so
   consume is indifferent to gaps, guarded by `(uint)materialIndex >= _layers.Count`.
 - **Global symbol collision, per-layer symbol draw** (MapLibre semantics). Collision stays ONE cross-layer pass
-  (`LabelCollisionJob` over all candidates — a road name and a city name keep competing in one greedy pass); each
+  (`CollisionJob` over all candidates — a road name and a city name keep competing in one greedy pass); each
   symbol layer draws its own survivors at its own queue via its per-slot mesh/material. `SymbolPlacementSystem`
-  partitions survivor quads by `LabelInstance.MaterialIndex` into per-slot meshes; slot `g` IS the g-th declared
+  partitions survivor quads by `ShapedSymbol.MaterialIndex` into per-slot meshes; slot `g` IS the g-th declared
   symbol layer. `SymbolRenderLayer`'s icon material gets `QueueFor(DrawIndex, Base)` and its text material
   `QueueFor(DrawIndex, Above)` (G7/D7 — the icon always draws under its own layer's text), so two symbol layers
   on one feature still draw in style order, band before band.
@@ -627,9 +627,9 @@ was a hardcoded camera-clear hack — both fixed.)
 
 ## Symbols: presence via persistent renderers
 
-Symbols draw as **persistent per-slot `MeshRenderer`s** (`LabelSlotPresenter`), not immediate-mode
+Symbols draw as **persistent per-slot `MeshRenderer`s** (`WorldSymbolRenderer`), not immediate-mode
 `Graphics.RenderMesh`. `Tick` does everything up to and including the per-slot mesh write (project → collide →
-fade/emit → `SymbolBillboardJob` → mesh upload) and swaps the presenter's mesh; Unity redraws it every camera
+fade/emit → mesh upload) and swaps the renderer's mesh; Unity redraws it every camera
 render automatically. This: (i) kills the Editor "blink" (a Game-View repaint without the player loop got no
 re-submission under immediate mode) with **no `beginCameraRendering` orchestrator**; (ii) inherits deterministic
 `renderQueue` ordering against BRG tiles (URP's `CommonTransparent` sort ranks `renderQueue` above the
