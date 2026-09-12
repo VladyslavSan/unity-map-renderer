@@ -1,9 +1,9 @@
-// stage-wall-job-plan.md §4 A2/A3 — the wall block's own parity teeth, direct against BuildLayerInput's
-// `walls` output (WallColumns), the same call site Assets/Fixtures/extrusion-wall-golden-*.json was captured
-// from (provenance sha 74a9f604, before this stage's Burst wall job existed — see each golden's own header).
+// The wall block's own parity teeth, direct against BuildLayerInput's `walls` output (WallColumns), the same
+// call site Assets/Fixtures/extrusion-wall-golden-*.json was captured from (provenance sha 74a9f604, before
+// this stage's Burst wall job existed — see each golden's own header).
 // Comparing here, rather than through the full assembled mesh, isolates exactly the code this stage replaced:
 // the roof/index-rebase machinery is independently pinned by StyledFillExtrusionMeshTests (7 teeth) and
-// StyledFillExtrusionGraphWriteTests (unmodified observers, per the plan's §3 fence).
+// StyledFillExtrusionGraphWriteTests (unmodified observers — this stage does not touch them).
 //
 // Two-part comparison, same shape as StyledFillExtrusionGraphWriteTests and grounded in the SAME measurement
 // (docs/job-scheduling-design.md §8 stage 5's opening invariant block + the wall-tail addendum):

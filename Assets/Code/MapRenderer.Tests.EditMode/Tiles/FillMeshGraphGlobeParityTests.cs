@@ -175,9 +175,9 @@ namespace MapRenderer.Tests.Tiles
                 int subdividedTriCount = graphOutput.TriangleIndices.Length / 3;
                 bool split = subdividedTriCount > sourceTriCount;
 
-                // DE-INDEXED, per vertex sharing (earcut-sdf-vertex-cost.md §6, T-C1): walk the INDEX
-                // buffer and dereference. Sharing changes storage between byte-identical vertices, so the
-                // raw column order and the raw index VALUES both legitimately move; the triangle stream a
+                // DE-INDEXED, per vertex sharing (T-C1): walk the INDEX buffer and dereference. Sharing
+                // changes storage between byte-identical vertices, so the raw column order and the raw
+                // index VALUES both legitimately move; the triangle stream a
                 // triangle-by-triangle reader actually sees does not. Hashing the columns in storage order
                 // (what this test did before the rebase) reports every sharing change as a regression.
                 //

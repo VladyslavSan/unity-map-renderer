@@ -6,7 +6,7 @@
 // The scheduler-ordering invariant this file owns: TileScheduler.Request reserves the _inFlight/_cts
 // slot synchronously, under its own lock, BEFORE a source's fetch can complete — so a synchronously-
 // completing source's cleanup can never observe a slot nothing has assigned yet. No thread-pool hop is
-// needed to establish that ordering, and none may be reintroduced (see fetch-scheduler-web-hang.md).
+// needed to establish that ordering, and none may be reintroduced.
 
 using System;
 using System.IO;
@@ -23,8 +23,8 @@ namespace MapRenderer.Tests.DataSources
     {
         // -----------------------------------------------------------------------------------------
         // Repo-root locator — same walk as DataSourceTests.LoadFixtureBytes, duplicated here rather
-        // than hoisted (see fetch-scheduler-web-hang-plan.md §6 follow-up 3). Do NOT use
-        // Application.dataPath — that would make this file engine-bound.
+        // than hoisted into MapRenderer.Tests.Shared — a deliberate, deferred follow-up, not an oversight.
+        // Do NOT use Application.dataPath — that would make this file engine-bound.
         // -----------------------------------------------------------------------------------------
 
         private static string FindRepoRoot()
@@ -82,8 +82,8 @@ namespace MapRenderer.Tests.DataSources
         /// When a source returns an already-completed UniTask (UniTask.FromResult), the sync-completion
         /// path must NOT leave a stale in-flight entry after Request() returns. Pinned by construction
         /// BEFORE the hop is removed — green today and green after is the point: it proves the ordering
-        /// invariant survives the change (see fetch-scheduler-web-hang-plan.md §4 T1: passing alone
-        /// proves nothing without the reverse-injection RED-verify).
+        /// invariant survives the change. Passing alone proves nothing without the reverse-injection
+        /// RED-verify.
         /// </summary>
         [Test]
         public async Task SyncCompletingSource_NoStaleInFlightEntry()
@@ -174,9 +174,8 @@ namespace MapRenderer.Tests.DataSources
         /// Named-API regression guard: <c>TileScheduler.cs</c> must contain ZERO occurrences of
         /// <c>SwitchToThreadPool</c> or <c>RunOnThreadPool</c>, in code OR comments — the ordering
         /// invariant is now a lock-and-conditional-registration fact, not a scheduling one, and no
-        /// replacement comment may reintroduce the false justification (see
-        /// fetch-scheduler-web-hang-plan.md §0 Addition 2). Does NOT prove no thread hop exists by any
-        /// mechanism — a different API, or a hop inside the injected <see cref="IDataSource"/>, would
+        /// replacement comment may reintroduce the false justification. Does NOT prove no thread hop exists
+        /// by any mechanism — a different API, or a hop inside the injected <see cref="IDataSource"/>, would
         /// pass this. It is a regression guard on this one file, by path; <c>FileDataSource.cs</c>
         /// legitimately keeps a guarded occurrence (see T4).
         /// </summary>
@@ -209,8 +208,7 @@ namespace MapRenderer.Tests.DataSources
         /// branch stays deliberate.
         /// <para><b>Known limitation:</b> <c>endGuardIndex</c> takes the FIRST <c>#endif</c> after the
         /// guard opens. A future nested <c>#if</c> inside the guarded block would satisfy the ordering
-        /// checks against that inner block's <c>#endif</c> for the wrong reason. Recorded, not fixed —
-        /// see <c>fetch-scheduler-web-hang.md</c>.</para>
+        /// checks against that inner block's <c>#endif</c> for the wrong reason. Recorded, not fixed.</para>
         /// </summary>
         [Test]
         public void FileDataSource_ThreadPoolHop_IsGuardedForWebGl()

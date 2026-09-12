@@ -148,9 +148,9 @@ namespace MapRenderer.Unity.Text
         /// caller-owned dedup scope, cleared once per BUILD (not per layer) so the set is build-wide.
         ///
         /// <para>This reproduces the set pass 1 used to REQUEST, not the set the shaper's presentation-form
-        /// mapping (Arabic joining) actually RESOLVES — the two differ (a pre-existing, deferred gap; see
-        /// <c>symbol-jobification-exploration.md</c> finding F1), and this method must not "fix" that: doing
-        /// so would fetch a different glyph set and change rendering output.</para>
+        /// mapping (Arabic joining) actually RESOLVES — the two differ (a pre-existing, deferred gap),
+        /// and this method must not "fix" that: doing so would fetch a different glyph set and change
+        /// rendering output.</para>
         /// </summary>
         /// <param name="extractedLayers">This build's <see cref="ExtractLayers"/> output; null is a no-op.</param>
         /// <param name="into">Appended to, in first-encounter order; not cleared by this method.</param>
@@ -177,8 +177,8 @@ namespace MapRenderer.Unity.Text
                     if (extracted[i].Kind == SymbolKind.Icon) continue;
                     string text = extracted[i].Text;
                     // UTF-16 CODE UNIT, not a decoded codepoint — deliberately reproduces the pre-existing
-                    // surrogate-pair gap (deferred; see symbol-jobification-exploration.md). Do not "fix" this
-                    // into a combined-codepoint walk; that changes the requested set.
+                    // surrogate-pair gap (deferred). Do not "fix" this into a combined-codepoint walk;
+                    // that changes the requested set.
                     for (int c = 0; c < text.Length; c++)
                     {
                         int rangeStart = FontStackResolver.ComputeRangeStart(text[c]);

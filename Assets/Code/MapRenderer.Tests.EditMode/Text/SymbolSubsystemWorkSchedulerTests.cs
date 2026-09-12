@@ -143,8 +143,8 @@ namespace MapRenderer.Tests.Text
 
         // ── :643 — the parked-build drain ─────────────────────────────────────────────────────────────
 
-        /// <summary>T1 (symbol-jobification-exploration.md §4/§7): the WebGL-only unrecoverable decode leak.
-        /// <c>PumpBuilds</c>' parked-queue drain dispatches through <see cref="SymbolSubsystem.WorkScheduler"/>
+        /// <summary>T1: the WebGL-only unrecoverable decode leak. <c>PumpBuilds</c>' parked-queue drain
+        /// dispatches through <see cref="SymbolSubsystem.WorkScheduler"/>
         /// — under <see cref="InlineWorkScheduler"/> the dispatched body (the ONLY release for the decode
         /// reference the park took) runs synchronously, on the calling thread, before <c>PumpBuilds</c>
         /// returns.
@@ -211,8 +211,8 @@ namespace MapRenderer.Tests.Text
 
         // ── :899 — the cross-tile reconcile ───────────────────────────────────────────────────────────
 
-        /// <summary>T2 (symbol-jobification-exploration.md §4/§7): the WebGL-only permanent placement wedge.
-        /// <c>ScheduleReconcileIfDirty</c> dispatches through <see cref="SymbolSubsystem.WorkScheduler"/> —
+        /// <summary>T2: the WebGL-only permanent placement wedge. <c>ScheduleReconcileIfDirty</c>
+        /// dispatches through <see cref="SymbolSubsystem.WorkScheduler"/> —
         /// under Inline the reconcile body runs synchronously, on the calling thread, inside the SAME
         /// <c>CurrentBatch</c> call that scheduled it.
         ///
@@ -281,7 +281,7 @@ namespace MapRenderer.Tests.Text
                 "actually applied, not merely that the flag cleared.");
         }
 
-        // ── Glyph-fetch hoist (symbol-glyph-fetch-hoist-plan.md T5c) ──────────────────────────────────
+        // ── Glyph-fetch hoist (T5c) ────────────────────────────────────────────────────────────────
 
         // A literal (non-templated) text-field: TextFieldResolver returns a template VERBATIM whenever it
         // contains no '{' — so every one of the fixture's ~248 "centroids" features resolves to this SAME

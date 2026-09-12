@@ -5,8 +5,8 @@
 // perf/gc-elimination: the single biggest managed allocator on the mesh-build worker pass was
 // `new List<SelectedTileFeature>()` in TileMeshLayerProcessor.ProcessOnWorker — one per (tile ×
 // resolving style-layer), grown from empty by doubling (~318 KB/tile-build on a liberty-shaped style,
-// see devloop's meshing-residual-breakdown.md §1 Row 1). This pins the fix: selection now appends into
-// the build's already-pooled TileBuildBuffers instead.
+// measured before this fix). This pins the fix: selection now appends into the build's already-pooled
+// TileBuildBuffers instead.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -41,8 +41,8 @@ namespace MapRenderer.Tests.Tiles
         /// Builds an <see cref="MvtLayer"/> of <paramref name="count"/> point features and NO adopted
         /// <see cref="MvtLayer.Geometry"/> (stays <c>default</c>/<c>IsCreated == false</c>) — deliberately, so
         /// <c>ProcessOnWorker</c>'s <c>geometry.IsCreated</c> gate skips <c>BuildGraphRequest</c> entirely and only the
-        /// selection step (this tooth's fence) runs, not the fill/line geometry pipeline (measured elsewhere,
-        /// and already zero-alloc — see <c>meshing-residual-breakdown.md</c> §1).
+        /// selection step (this tooth's fence) runs, not the fill/line geometry pipeline (measured
+        /// elsewhere, and already zero-alloc).
         /// </summary>
         private static MvtLayer MakeSourceLayer(string name, int count)
         {

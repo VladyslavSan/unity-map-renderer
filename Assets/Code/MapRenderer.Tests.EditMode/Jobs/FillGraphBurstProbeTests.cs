@@ -1,7 +1,7 @@
 // Unity EditMode only — NativeArray, Burst jobs, UnityEngine.Application. NOT registered in core-tests.csproj.
 //
-// The compile checkpoint (job-scheduling-design.md §8 stage 1, stage-fill-mesh-graph-plan.md §3): three
-// Burst behaviours the fill graph's shape depends on, none previously exercised in this repo:
+// The compile checkpoint (job-scheduling-design.md §8 stage 1): three Burst behaviours the fill graph's
+// shape depends on, none previously exercised in this repo:
 //   (i)   GetSubArray + a nested `new EarcutJob{...}.Execute()` call, inside another job's Execute — EarcutBatchJob.
 //   (ii)  NativeSortExtension.Sort<int, TComparer> over a generic comparer holding two NativeArray fields,
 //         inside a job — FillGatherJob<TComparer>.
@@ -9,8 +9,8 @@
 //         Execute(int index)) — TileToGeoJob / ProjectPointsJob<TProj>.
 // A green numeric assertion here is NOT the verdict: CompileSynchronously=true falls back to managed IL on a
 // Burst compile failure, so these tests can pass while Burst never compiled the job. The verdict is the log
-// grep the plan mandates (run-tests.sh's own log, greped for Burst errors) — this file only supplies the
-// numeric correctness half.
+// grep job-scheduling-design.md §7 Safety mandates (run-tests.sh's own log, greped for Burst errors) — this
+// file only supplies the numeric correctness half.
 
 using System.IO;
 using NUnit.Framework;

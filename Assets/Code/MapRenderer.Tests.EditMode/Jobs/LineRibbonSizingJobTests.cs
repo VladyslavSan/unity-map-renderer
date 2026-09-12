@@ -6,11 +6,10 @@
 // state directly rather than driving sizing into it. See Arm A's own doc for the one way that differs from
 // the real early-return state, and why the delta cannot change what the arm observes.
 //
-// Claim honestly (par-findings-checklist.md:113-115's brief said the missing arm here "is the gap that
-// would have caught" the original fill bug — it is not; fill's identical sizing-only arm did not catch
-// fill's identical bug, see FillSizingJobTests.cs's header): Arm B is the parity arm for the
-// monotonicity-assertion gap only. It would NOT have caught an out-of-bounds read past a borrowed count —
-// Arm A is the one that would.
+// Claim honestly (an earlier review said the missing arm here "is the gap that would have caught" the
+// original fill bug — it is not; fill's identical sizing-only arm did not catch fill's identical bug, see
+// FillSizingJobTests.cs's header): Arm B is the parity arm for the monotonicity-assertion gap only. It
+// would NOT have caught an out-of-bounds read past a borrowed count — Arm A is the one that would.
 
 using NUnit.Framework;
 using Unity.Collections;

@@ -3,10 +3,10 @@
 // it is a pure algebra check, fast within the batch run. NOT registered in core-tests.csproj (needs
 // UnityEngine.Camera for projectionMatrix/worldToCameraMatrix).
 //
-// A0 T1 (world-anchored-symbols-design.md §10 T1, §11 A0): pins the "two-term-RTC-vs-single-narrow" seam —
-// the world-anchored path composes a screen position via TWO float32-narrowed terms (mesh-baked
-// AnchorLocal = anchorRender-tileOriginRender, plus the per-frame tile transform
-// tileOriginRender-sceneOriginRender), while the OLD path (SymbolScreenProjection.TryProjectPoint) narrows
+// A0 T1: pins the "two-term-RTC-vs-single-narrow" seam — the world-anchored path composes a screen
+// position via TWO float32-narrowed terms (mesh-baked AnchorLocal = anchorRender-tileOriginRender, plus the
+// per-frame tile transform tileOriginRender-sceneOriginRender), while the OLD path
+// (SymbolScreenProjection.TryProjectPoint) narrows
 // renderPos-sceneOriginRender in ONE step. FloatingOrigin's tileOrigin term cancels analytically (its own
 // doc comment), so the two compositions should agree on the projected screen position within a tight px
 // bound — this test proves that empirically across zooms, all 4 glyph corners, and several tile origins

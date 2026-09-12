@@ -15,9 +15,11 @@ namespace MapRenderer.Tests.Text.Sprites
     /// reproducible regardless of dictionary insertion order, aliased names stay aliased, and a malformed
     /// sheet's degenerate entries survive untouched.
     ///
-    /// <para>The separation tooth (<see cref="EveryPlacedRect_IsSeparatedByAtLeastTwoTexels"/>) is the one
-    /// that makes the border REAL: a plan that placed cells correctly but let two content rects sit one texel
-    /// apart would give them a SHARED border texel, and the whole point is that each sprite's ramp is its
+    /// <para>The separation tooth
+    /// (<see cref="EveryPlacedRect_IsSeparatedByAtLeastTwoTexels_AndKeptOffTheSheetEdge"/>) is
+    /// the one that makes the border REAL: a plan that placed cells correctly but let two content rects sit
+    /// one texel apart would give them a SHARED border texel, and the whole point is that each sprite's
+    /// ramp is its
     /// own.</para>
     /// </summary>
     [TestFixture]

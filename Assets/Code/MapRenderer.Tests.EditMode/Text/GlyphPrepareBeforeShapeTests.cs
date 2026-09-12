@@ -23,7 +23,7 @@ using MapRenderer.Tests; // TestGlyphSource
 namespace MapRenderer.Tests.Text
 {
     /// <summary>
-    /// symbol-glyph-fetch-hoist-plan.md §3, T1–T4 (T5 lives in <see cref="SymbolTailPumpTests"/> — its two
+    /// Glyph-fetch hoist T1–T4 (T5 lives in <see cref="SymbolTailPumpTests"/> — its two
     /// structural halves need SOURCE FILES this fixture-driven suite has no reason to touch, and its
     /// behavioural half needs the subsystem harness in <c>SymbolSubsystemWorkSchedulerTests</c>).
     ///

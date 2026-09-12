@@ -934,9 +934,9 @@ namespace MapRenderer.Tests.Cameras
         /// clamp it; the camera never reaches the polar singularity where a single Mercator tile's span is
         /// unbounded.
         ///
-        /// <para><b>Antimeridian seam (out of S06 scope — see follow-ups.md).</b> The sweep stays in
-        /// lon ∈ [-160°, 160°] so it never straddles ±180°. At the seam, the selector wraps x
-        /// (geographically correct), but a wrapped tile's ABSOLUTE Mercator x jumps by a full world width
+        /// <para><b>Antimeridian seam (out of S06 scope).</b> The sweep stays in lon ∈ [-160°, 160°] so it
+        /// never straddles ±180°. At the seam, the selector wraps x (geographically correct), but a wrapped
+        /// tile's ABSOLUTE Mercator x jumps by a full world width
         /// (≈ 40,075 km) — it is geographically adjacent but ~40 M m away in Mercator. Origin-relative
         /// placement of such a wrapped tile would need a ±worldWidth offset; without it the render coord
         /// reaches world scale and float32 precision degrades to metres at the seam. That seam handling is

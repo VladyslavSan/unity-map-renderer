@@ -6,11 +6,10 @@
 // stock object/view/projection transform (TransformObjectToHClip) plus a logical-px screen offset — NOT
 // pre-projected screen px. Unlike the retired shader (whose object-to-world transform was INERT — its vertex
 // stage bypassed it entirely), the object-to-world transform is MEANINGFUL here: it carries the per-frame
-// floating-origin rebase (world-anchored-labels-design.md §3.4), the same mechanism tile meshes use. The
-// shared F2 (unlit, not a lit surface) rationale still applies; see SymbolTextWorld_ForwardPass.hlsl
-// for the vertex-math delta.
+// floating-origin rebase, the same mechanism tile meshes use. The shared F2 (unlit, not a lit surface)
+// rationale still applies; see SymbolTextWorld_ForwardPass.hlsl for the vertex-math delta.
 //
-// Submission: a dedicated per-(tile,DrawIndex,kind) label renderer (A1) sets this material's per-frame
+// Submission: a dedicated per-(tile,DrawIndex,kind) symbol renderer (A1) sets this material's per-frame
 // transform via FloatingOrigin.TileToSceneRebased — never Graphics.RenderMesh, never a static tile mesh.
 Shader "Map/Symbol/TextWorld"
 {

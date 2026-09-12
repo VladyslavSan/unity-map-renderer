@@ -13,7 +13,7 @@
 //   • Line/Fill DOTS blocks (must equal their respective CBUFFER sets)
 //   • Line.shader / Fill.shader Properties{} blocks (must be supersets of the registry)
 //
-// Exact counts (lessons.md: assert exact, never >): fail loud if a regex silently matches nothing.
+// Exact counts: assert exact, never >. Fail loud if a regex silently matches nothing.
 //
 // History: introduced S78 to lock the registry against both omissions and duplications.
 

@@ -227,12 +227,12 @@ namespace MapRenderer.Tests.Meshing
         }
 
         // -----------------------------------------------------------------------------------------------
-        // T-C4 (vertex sharing, earcut-sdf-vertex-cost.md §6): the z0 "countries" fixture
-        // is the plan's own vertex-sharing measurement corpus. The plan's headline 346,542 → 75,733 is the BANDED
-        // scenario — it assumes the per-vertex band/side column that lives only on the parked
-        // feat/fill-boundary-antialiasing branch (off `main`, no Band field). THIS branch realises the
-        // plan's NO-BAND row instead: 161,676 emitted → 44,915 unique. The banded 75,733 figure only becomes
-        // reachable if/when the band branch rebases onto this change and extends GlobeFillVertexKey.
+        // T-C4 (vertex sharing): the z0 "countries" fixture is the measurement corpus. The headline
+        // measurement 346,542 → 75,733 is the BANDED scenario — it assumes the per-vertex band/side column
+        // that lives only on the parked feat/fill-boundary-antialiasing branch (off `main`, no Band field).
+        // THIS branch realises the NO-BAND case instead: 161,676 emitted → 44,915 unique. The banded 75,733
+        // figure only becomes reachable if/when the band branch rebases onto this change and extends
+        // GlobeFillVertexKey.
         // Same ordered-parity + gap-corollary treatment as the water tile above, so the
         // SubdivisionCoverageValidator report (gap/coverage/quality) is proven unchanged on the SAME real-job
         // run T-C2 measures the sharing ratio from.
@@ -292,8 +292,8 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(mirrorReport.MaxGapMeters, hybridReport.MaxGapMeters, mirrorReport.MaxGapMeters * 1e-6 + 1e-6,
                 $"real job's own gap analysis must match the mirror's: mirror={mirrorReport.Summary} hybrid={hybridReport.Summary}");
 
-            // T-C2 ("it actually shares"): a fence with headroom bracketing the measured value (earcut-sdf-
-            // vertex-cost.md §4: mirror-measured 44,915 unique of 161,676 emitted, no band, on this fixture).
+            // T-C2 ("it actually shares"): a fence with headroom bracketing the measured value
+            // (mirror-measured 44,915 unique of 161,676 emitted, no band, on this fixture).
             // RED-verified: reverting Emit to sequential indices (git stash the production edit) makes
             // UniqueVertexCount == EmittedCount == 161,676, well outside this fence.
             Assert.Less(run.UniqueVertexCount, 55_000,

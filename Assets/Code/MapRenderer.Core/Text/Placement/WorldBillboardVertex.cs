@@ -1,7 +1,7 @@
 // Engine-free: no UnityEngine dependency.
 // BLITTABLE (mirrors BillboardVertex): ONE per billboard corner = stream 0 of the world-anchored symbol
-// mesh (Epic A, world-anchored-symbols-design.md §3.1/§11 A0) — fed straight to Mesh.SetVertexBufferData
-// by WorldBillboardMeshBuilder — field DECLARATION order is the vertex stream byte layout and MUST match
+// mesh (Epic A) — fed straight to Mesh.SetVertexBufferData by WorldBillboardMeshBuilder — field
+// DECLARATION order is the vertex stream byte layout and MUST match
 // WorldBillboardMeshBuilder.VertexDescriptors' order EXACTLY: Position (AnchorLocal), Color (ColorRGB),
 // TexCoord0 (Uv), TexCoord1 (Page), TexCoord2 (Offset), TexCoord3 (AlignFlags), TexCoord5 (Tangent),
 // TexCoord6 (Up) — Unity's canonical ascending VertexAttribute enum order (Position=0, Color=3,
@@ -11,13 +11,12 @@
 // stream than this struct actually writes (BillboardVertex's header documents the exact failure mode: the
 // symbol renders nothing). Keep to blittable fields only.
 //
-// FROZEN at A0 (world-anchored-symbols-design.md §11 A0): A1/A2/A3 are purely additive on top of this
-// layout — never a reshuffle of stream 0. Stage AC (curved-world) appended Tangent as the LAST field at
-// the time (TEXCOORD5) — AlignFlags was no longer last, Tangent was; P2 now appends Up (TEXCOORD6) as the
-// new LAST field (see its own doc below) — Tangent is no longer last, Up is. Both still honor "append,
-// never reshuffle existing attributes." Opacity is NOT here — it is stream 1 (a
-// separate per-frame dynamic array, TexCoord4 on the mesh) so a fade update (A2) never touches this
-// stream's topology.
+// FROZEN at A0: A1/A2/A3 are purely additive on top of this layout — never a reshuffle of stream 0. Stage
+// AC (curved-world) appended Tangent as the LAST field at the time (TEXCOORD5) — AlignFlags was no longer
+// last, Tangent was; P2 now appends Up (TEXCOORD6) as the new LAST field (see its own doc below) —
+// Tangent is no longer last, Up is. Both still honor "append, never reshuffle existing attributes."
+// Opacity is NOT here — it is stream 1 (a separate per-frame dynamic array, TexCoord4 on the mesh) so a
+// fade update (A2) never touches this stream's topology.
 
 using Unity.Mathematics;
 

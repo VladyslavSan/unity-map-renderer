@@ -359,7 +359,7 @@ namespace MapRenderer.Tests.Filters
         /// <summary>Test-assembly capability decorator around a real <see cref="MvtLayer"/> — forwards every
         /// <see cref="ITileLayer"/>/<see cref="IIndexedFeatureSource"/>/<see cref="INativeFilterSource"/>
         /// call to the inner layer, counting <see cref="TryBindNativeFilterCalls"/> and the returned
-        /// matcher's <see cref="MatchesCalls"/>. Never a production member — conventions forbid a test-only
+        /// matcher's <see cref="MatchAllCalls"/>. Never a production member — conventions forbid a test-only
         /// counter on <see cref="MvtLayer"/> itself, so this decorator lives here instead, exactly the
         /// allowed footprint for test-code (an adapter in the test assembly, not a member on the production
         /// type).

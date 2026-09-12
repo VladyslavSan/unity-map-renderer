@@ -256,10 +256,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── T6: a POPULATED symbol pass under Inline — T1/T2/T5 only ever drive symbolPass == null ────
 
-        /// <summary>The missing integration tooth (symbol-jobification-exploration.md §7 stage 1): T1, T2 and
-        /// T5 above all drive a style/view with no <c>TileManager.SymbolWorkerFactory</c> set, so
-        /// <c>symbolPass</c> inside <c>KickMeshBuild</c>'s body is always <c>null</c> and
-        /// <c>symbolPass?.RunWorkerAndHandoff(decode)</c> never actually executes anything — the POPULATED
+        /// <summary>The missing integration tooth: T1, T2 and T5 above all drive a style/view with no
+        /// <c>TileManager.SymbolWorkerFactory</c> set, so <c>symbolPass</c> inside <c>KickMeshBuild</c>'s
+        /// body is always <c>null</c> and <c>symbolPass?.RunWorkerAndHandoff(decode)</c> never actually
+        /// executes anything — the POPULATED
         /// path was untested end to end under Inline. This wires a spy factory so <c>TryBeginBuild</c>
         /// returns a real (non-null) pass and asserts its <c>RunWorkerAndHandoff</c> actually ran, on the
         /// CALLING thread, inside the SAME Inline-dispatched kick as the mesh pass.

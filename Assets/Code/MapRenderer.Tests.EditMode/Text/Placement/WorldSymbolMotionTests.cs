@@ -1,10 +1,10 @@
 // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, GPU render + CPU readback. Fixture/
 // harness modeled on WorldSymbolAbRenderSnapshotTests (T2) but does NOT touch that file. This is the A0
-// T3 regression tooth (world-anchored-symbols-design.md §10 T3, §11 A0): build the NEW world-anchored
-// mesh ONCE (frozen — AnchorLocal never rebaked), then PAN the camera (a new look-at longitude) and
-// re-render the SAME frozen mesh with only the per-frame object transform updated
-// (FloatingOrigin.TileToSceneRebased against the panned SceneFrame) — the glyph must track its WORLD
-// anchor, landing near the ANALYTIC expected screen position (SymbolScreenProjection.TryProjectPoint at
+// T3 regression tooth: build the NEW world-anchored mesh ONCE (frozen — AnchorLocal never rebaked), then
+// PAN the camera (a new look-at longitude) and re-render the SAME frozen mesh with only the per-frame
+// object transform updated (FloatingOrigin.TileToSceneRebased against the panned SceneFrame) — the glyph
+// must track its WORLD anchor, landing near the ANALYTIC expected screen position
+// (SymbolScreenProjection.TryProjectPoint at
 // the new pose), not stay pinned to its original screen pixel.
 //
 // RED-VERIFIED (developer note — not a committed failing test, see AGENTS.md's regression-test

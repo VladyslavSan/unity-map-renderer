@@ -1,11 +1,11 @@
 // Unity EditMode only — NativeArray/NativeList, Burst jobs, UnityEngine.Application. NOT registered in
 // core-tests.csproj.
 //
-// SHARED between the wall-job stage (stage-wall-job-plan.md A0.2/A0.3, R7) and the line-graph stage
-// (stage-line-graph-plan.md A0.2) — whichever lands first creates this file; the second adds to it. Both
-// probes pin one thing each: that the managed (boxed IProjection / plain-loop) path and its Burst-compiled
-// twin (TileToGeoJob / ProjectPointsJob<TProj>) agree — WITHIN THE BOUND job-scheduling-design.md §8 stage 5
-// measured, per field, not a flat tolerance — in the double domain. Neither probe bounds the float streams a
+// SHARED between the wall-job stage and the line-graph stage — whichever lands first creates this file; the
+// second adds to it. Both probes pin one thing each: that the managed (boxed IProjection / plain-loop) path
+// and its Burst-compiled twin (TileToGeoJob / ProjectPointsJob<TProj>) agree — WITHIN THE BOUND
+// job-scheduling-design.md §8 stage 5 measured, per field, not a flat tolerance — in the double domain.
+// Neither probe bounds the float streams a
 // caller derives afterwards (cast, normalize, cross) — see the wall stage's own A2 for that composite
 // reading.
 //

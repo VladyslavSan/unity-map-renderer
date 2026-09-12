@@ -15,11 +15,12 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B; <c>step4.4-plan.md</c> §4.4c — banks 3b): a
-    /// <see cref="SymbolTileBuffer"/> reused across builds (<c>SymbolSubsystem</c>'s pool: rent →
-    /// <see cref="SymbolTileBuffer.Clear"/> → repopulate) must not measurably grow the managed heap once
-    /// its pooled lists' backing capacity has stabilized — the entire point of replacing a fresh per-symbol
-    /// managed carrier list (plus a per-symbol layout-result object graph) per tile with one reused buffer.
+    /// Symbol-label perf Phase 1 / Stage 1 (docs/symbol-label-perf-design.md §4, §5 B): a
+    /// <see cref="SymbolTileBuffer"/> reused across builds (<c>SymbolSubsystem</c>'s pool: rent
+    /// → <see cref="SymbolTileBuffer.Clear"/> → repopulate) must not measurably grow the managed
+    /// heap once its pooled lists' backing capacity has stabilized — the entire point of replacing a fresh
+    /// per-symbol managed carrier list (plus a per-symbol layout-result object graph) per tile with one
+    /// reused buffer.
     ///
     /// <para><b>Scope note</b> (the zero-alloc claim is NOT "all of <c>Shape</c>"): <c>ShapedRun</c>
     /// (<c>StyledSymbolTileBuilder.Shape</c>, `:268`) is a genuine, deliberate per-symbol allocation with

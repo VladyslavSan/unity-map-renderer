@@ -5,9 +5,9 @@
 // WorldBillboardVertex's AnchorLocal IS a real object-space position (tile-local render space — the
 // floating-origin Level-1 bake, see FloatingOrigin.cs) — this vertex stage runs it through the STOCK URP
 // MVP (TransformObjectToHClip; the floating-origin Level-2 rebase lives in unity_ObjectToWorld, set once
-// per frame by the label renderer, mirrors tile placement — world-anchored-labels-design.md §3.4), then
-// adds a constant-LOGICAL-px glyph-corner offset in clip space so the glyph stays a fixed screen size at
-// any depth. No `ndc.y = -ndc.y`: that was the retired OLD path's own on-screen calibration for its
+// per frame by the symbol renderer, mirrors tile placement), then adds a constant-LOGICAL-px glyph-corner
+// offset in clip space so the glyph stays a fixed screen size at any depth. No `ndc.y = -ndc.y`: that was
+// the retired OLD path's own on-screen calibration for its
 // px→clip bypass — stock MVP already handles Y correctly here (A0's Y-flip
 // reconciliation lives in the emit/test convention, never a shader flip — see WorldSymbolAbRenderSnapshotTests).
 //

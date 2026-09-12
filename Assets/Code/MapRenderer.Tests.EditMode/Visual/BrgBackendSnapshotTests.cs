@@ -16,8 +16,8 @@
 //   Tooth 6 — headless green: all GPU-independent assertions pass under ./Tools/run-tests.sh.
 //
 // GPU-dependent teeth (2-pixel, 3-per-layer-paint) fall back to Assert.Inconclusive when no GPU
-// context is provably absent (all-black render + all-black blank control), per lessons.md:
-// no unbounded skip — the Inconclusive path only fires when GPU context is proved missing; if the
+// context is provably absent (all-black render + all-black blank control). No unbounded skip: the
+// Inconclusive path only fires when GPU context is proved missing; if the
 // blank-control renders non-black (GPU present) but the map render is all-black or culling never
 // fires, the test produces Assert.Fail (a real failure, not a vacuous skip).
 

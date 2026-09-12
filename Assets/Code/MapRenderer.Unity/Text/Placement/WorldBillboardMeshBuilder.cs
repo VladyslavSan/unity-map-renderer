@@ -11,9 +11,9 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// Epic A / A0 (world-anchored-symbols-design.md §3.1, §11 A0): the type-explicit builder (naming
-    /// convention) that assembles a two-stream world-anchored symbol <see cref="Mesh"/> from CPU corner
-    /// data. Reused by A1's real per-(tile,DrawIndex,kind) emit and A0's test scaffold.
+    /// Epic A / A0: the type-explicit builder (naming convention) that assembles a two-stream
+    /// world-anchored symbol <see cref="Mesh"/> from CPU corner data. Reused by A1's real
+    /// per-(tile,DrawIndex,kind) emit and A0's test scaffold.
     ///
     /// <para><b>Two streams</b> (so a per-frame fade update never touches topology, §3.1): stream 0 is
     /// <see cref="WorldBillboardVertex"/> — Position(AnchorLocal)/Color(ColorRGB)/TexCoord0(Uv)/

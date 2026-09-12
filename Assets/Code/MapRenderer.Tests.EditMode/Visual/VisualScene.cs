@@ -49,8 +49,8 @@ namespace MapRenderer.Tests
         /// <summary>Extra <c>LateUpdate</c> ticks pumped AFTER the tiles settle, before the snapshot: Entities
         /// Graphics needs at least one more Rebuild/EG-system tick before its BRG batch is cullable, so
         /// rendering on the settle frame itself yields a blank frame (probe-confirmed: +0 frames blank, +1
-        /// renders — see <c>geojson-visual-kit-entities-finding.md</c>). 10 is a robust margin over the
-        /// observed 1; harmless on the GameObject backend, which is already renderable.</summary>
+        /// renders). 10 is a robust margin over the observed 1; harmless on the GameObject backend, which
+        /// is already renderable.</summary>
         private const int WarmupFrames = 10;
 
         /// <summary>Bounded ceiling for <see cref="SpinUntilSymbolsReady"/> (plan Risk R1/R5): the symbol
@@ -245,8 +245,8 @@ namespace MapRenderer.Tests
             // The tile render backend — default Entities (the PRODUCT DEFAULT), so the suite validates the
             // shipping path; overridable via Backend(). Rendering correctly on Entities requires the warm-up
             // pump after settle (WarmupFrames, below): the earlier blank-on-Entities symptom was NOT a product
-            // bug but EG/BRG warm-up latency (geojson-visual-kit-entities-finding.md). Config.Backend is an
-            // already-public field, so this is a test-assembly configuration choice, not a production change.
+            // bug but EG/BRG warm-up latency. Config.Backend is an already-public field, so this is a
+            // test-assembly configuration choice, not a production change.
             _mapView.Config.Backend = _backend;
 
             // ── This scene's OWN camera + off-screen RT + MapCamera (plan §2 — the one camera). Seeded with

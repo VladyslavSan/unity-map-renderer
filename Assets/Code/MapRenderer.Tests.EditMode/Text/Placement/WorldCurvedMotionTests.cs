@@ -1,12 +1,12 @@
 // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, GPU render + CPU readback. Fixture/harness
 // modeled on WorldSymbolMotionTests (T3) but does NOT touch that file — this is Stage AC's T-MOT regression
-// tooth (curved-world-plan.md §4 T-MOT): build the NEW world-anchored CURVED mesh ONCE (frozen — AnchorLocal/
-// Tangent never rebaked, exactly like WorldSymbolMotionTests' point case), then PAN AND ROTATE (heading) the
-// camera and re-render the SAME frozen mesh with only the per-frame object transform updated — the glyph
+// tooth: build the NEW world-anchored CURVED mesh ONCE (frozen — AnchorLocal/Tangent never rebaked, exactly
+// like WorldSymbolMotionTests' point case), then PAN AND ROTATE (heading) the camera and re-render the SAME
+// frozen mesh with only the per-frame object transform updated — the glyph
 // must (a) track its WORLD anchor (position) and (b) RE-ORIENT to the live screen tangent (the whole point
 // of Stage AC's shader-side projection — a shallow impl that baked a screen rotation would pass (a) and fail
 // (b)). Uses a NONZERO per-glyph AnchorLocal (a tile-corner bake, mirrors WorldPointEmitRenderTests' NEW-F1
-// pattern) and a NON-axis-aligned (diagonal) world Tangent, per the plan's explicit T-MOT requirements.
+// pattern) and a NON-axis-aligned (diagonal) world Tangent, per T-MOT's explicit requirements.
 //
 // RED-VERIFIED (2026-07-20) — the two failure modes were actually INJECTED and observed to fail, not argued
 // by analogy:

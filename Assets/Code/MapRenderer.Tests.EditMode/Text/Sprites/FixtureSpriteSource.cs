@@ -9,10 +9,9 @@ namespace MapRenderer.Tests
     /// <summary>
     /// I4 test/demo-only <see cref="ISpriteSource"/>: serves the committed fixture sprite sheet at
     /// <c>Assets/Fixtures/sprites/sample-sprite.{json,png}</c> (the same fixture <c>SpriteIndexTests</c>/
-    /// <c>SpriteSheetTests</c> load), mirroring <see cref="FixtureGlyphSource"/> so a future icon eyeball
-    /// demo can render REAL sprite icons with no network dependency. NOT a production data source —
-    /// production wires the real <c>UnityWebRequestSpriteSource</c> against a style's <c>sprite</c> URL,
-    /// via <c>SpriteSourceFactory</c>.
+    /// <c>SpriteSheetTests</c> load), so a future icon eyeball demo can render REAL sprite icons with no
+    /// network dependency. NOT a production data source — production wires the real
+    /// <c>UnityWebRequestSpriteSource</c> against a style's <c>sprite</c> URL, via <c>SpriteSourceFactory</c>.
     /// </summary>
     public sealed class FixtureSpriteSource : ISpriteSource
     {

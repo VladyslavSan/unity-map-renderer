@@ -108,7 +108,7 @@ namespace MapRenderer.Tests.Text
                 "(F-3(b)) unwinds before the commit, silently (no partial commit on that path either).");
         }
 
-        // ── Glyph-fetch hoist (symbol-glyph-fetch-hoist-plan.md T4/T5a/T5b) ───────────────────────────
+        // ── Glyph-fetch hoist (T4/T5a/T5b) ────────────────────────────────────────────────────────────
 
         /// <summary>T4 structural half: <c>RunTailAsync</c> now awaits exactly ONCE — the build-wide glyph-
         /// range ensure step — and that ONE await comes BEFORE the per-layer shape loop starts. Complements

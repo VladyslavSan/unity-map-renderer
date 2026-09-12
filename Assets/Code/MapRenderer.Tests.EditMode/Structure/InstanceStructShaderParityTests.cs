@@ -13,7 +13,7 @@
 // Reverse (union): every struct material-prop field appears in Fill∪Line DOTS names.
 //   Adding a struct field no shader declares → fails reverse.
 //
-// Exact counts (lessons.md: assert the exact known total, never `>`):
+// Exact counts: assert the exact known total, never `>`.
 //   struct material-prop fields == 31, Line DOTS props == 24, Fill DOTS props == 21.
 //   A regex/reflection pass that silently matches nothing fails the exact count, not the
 //   forward/reverse check.
@@ -81,7 +81,7 @@ namespace MapRenderer.Tests.Structure
         private static Dictionary<string, int> ParseDotsProps(string filePath)
             => ShaderPropertyParser.ParseDotsProps(filePath);
 
-        // ── Exact count guards (lessons.md: assert exact, never >) ───────────────────────────
+        // ── Exact count guards (assert exact, never >) ───────────────────────────────────────
 
         /// <summary>
         /// Struct must have exactly 31 material-prop fields (excludes unity_* transforms).

@@ -7,10 +7,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// Epic A / A1 (world-anchored-symbols-design.md §11 A1): builds one quad's 4
-    /// <see cref="WorldBillboardVertex"/>s for the world-anchored point/icon/curved-text draw path.
-    /// zoom-independent (the anchor moves with zoom; the quad's screen-pixel SIZE does not, because
-    /// <c>emScale</c> is built from the resolved `text-size`, not from zoom/distance). F7 (S20 stage doc §6):
+    /// Epic A / A1: builds one quad's 4 <see cref="WorldBillboardVertex"/>s for the world-anchored
+    /// point/icon/curved-text draw path. zoom-independent (the anchor moves with zoom; the quad's
+    /// screen-pixel SIZE does not, because <c>emScale</c> is built from the resolved `text-size`, not
+    /// from zoom/distance). F7 (S20 stage doc §6):
     /// only the <c>emScale / TextQuadLayout.OneEm</c> scale is applied — S19 already baked
     /// `text-offset`/`text-radial-offset` into the quad's baked-px corners, so there is no second screen-space
     /// offset here (double-apply would be a bug).

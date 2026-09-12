@@ -4,9 +4,8 @@
 //
 // This stage (value table -> blittable native): MvtLayer.Values shrank from a GC-heap List<MvtValue> (24 B/
 // entry, one managed string field) to a blittable NativeArray<MvtValueNative> (16 B/entry, no managed field)
-// plus a per-layer managed string[] side table (MvtValueNative.StringId indexes it). See
-// native-mvt-storage-stage2-valuetable-plan.md (devloop) for the design; Value.cs/Color.cs are untouched
-// (fence).
+// plus a per-layer managed string[] side table (MvtValueNative.StringId indexes it). Value.cs/Color.cs are
+// untouched (fence).
 
 using System;
 using System.Linq;

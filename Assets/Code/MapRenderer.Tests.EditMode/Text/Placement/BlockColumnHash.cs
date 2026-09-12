@@ -82,8 +82,8 @@ namespace MapRenderer.Tests.Text.Placement
                 $"MaxBoxes={MaxBoxes} MaxQuads={MaxQuads} MaxCandidates={MaxCandidates} TileKey={TileKey}";
         }
 
-        /// <summary>Digests every column of <paramref name="block"/> (the developer checklist in
-        /// <c>step4.4-plan.md</c> §4.4a) EXCEPT <c>TextIds</c>/<c>IconImageIds</c> — see the type doc.</summary>
+        /// <summary>Digests every column of <paramref name="block"/> EXCEPT <c>TextIds</c>/<c>IconImageIds</c>
+        /// (bake-order intern ids, not stable across captures) — see the type doc.</summary>
         internal static ColumnHashes Hash(SymbolTileBlock block) => new ColumnHashes(
             kinds: HashArray(block.Kinds, e => (int)e),
             detail: HashArray(block.Detail, e => e),

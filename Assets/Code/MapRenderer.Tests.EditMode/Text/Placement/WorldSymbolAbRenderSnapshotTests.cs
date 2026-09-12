@@ -1,9 +1,9 @@
 // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
 // NOT registered in core-tests.csproj. Modeled on SymbolAtlasOrientationSnapshotTests (same fixture glyph,
-// same headless-readback caveats) but does NOT touch that file — this is the A0 GPU A/B equivalence tooth
-// (world-anchored-symbols-design.md §10 T2, §11 A0), rendering the SAME real glyph through BOTH the OLD
-// screen-space path (a real SymbolPlacementSystem.Tick, exactly like the orientation test) and the NEW
-// world-anchored path (a one-off WorldBillboardMeshBuilder mesh presented through Map/Symbol/TextWorld).
+// same headless-readback caveats) but does NOT touch that file — this is the A0 GPU A/B equivalence tooth,
+// short-named T2 by the tests that model against it, rendering the SAME real glyph through BOTH the OLD
+// SymbolPlacementSystem.Tick, exactly like the orientation test) and the NEW world-anchored path (a one-off
+// WorldBillboardMeshBuilder mesh presented through Map/Symbol/TextWorld).
 //
 // Y RECONCILIATION (advisor #1 / A0's make-or-break — resolved EMPIRICALLY, see WorldSymbolInkAnalysis):
 // the headless camera→RenderTexture readback is vertically mirrored vs on-screen for EVERY path (Unity's

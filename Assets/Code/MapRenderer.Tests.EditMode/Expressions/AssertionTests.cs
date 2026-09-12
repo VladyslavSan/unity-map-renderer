@@ -18,8 +18,8 @@ namespace MapRenderer.Tests.Expressions
     /// Also verifies that <c>["number",["zoom"]]</c> parses and classifies as Zoom-kind — the key
     /// "legal wrapped zoom" form used by the per-frame interpolate path.
     ///
-    /// Allocation test (no-GC sweep) is in <see cref="PaintPropertyEvaluatorTests"/> which covers the
-    /// full zoom-evaluation path including these assertion wrappers.
+    /// Allocation test (no-GC sweep) is in <see cref="MapRenderer.Tests.Style.StylePropertyTests"/>
+    /// which covers the full zoom-evaluation path including these assertion wrappers.
     /// </summary>
     [TestFixture]
     public class AssertionTests

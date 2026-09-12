@@ -115,9 +115,9 @@ namespace MapRenderer.Tests.Structure
         /// built and disposed by the exact same technique. <c>tagWords</c> is different from the other five:
         /// it is not scratch, it is TRANSFERRED to <c>MvtLayer.FeatureTagWords</c> via
         /// <c>AdoptFeatureTagWords</c> and the local nulled immediately after (the "transfer nulls the
-        /// source" double-free guard — <c>MEMORY.md</c>, Model B), so its <c>finally</c>-block
-        /// <c>tagWords.Dispose()</c> is a no-op on the success path and only actually frees the buffer if a
-        /// LATER throw (there is none scheduled) landed between the adopt and return. This is exactly the
+        /// source" double-free guard, Model B), so its <c>finally</c>-block <c>tagWords.Dispose()</c> is a
+        /// no-op on the success path and only actually frees the buffer if a LATER throw (there is none
+        /// scheduled) landed between the adopt and return. This is exactly the
         /// "no IsCreated guard, Dispose() early-returns on default" idiom the geometry buffers already
         /// use.</para>
         ///

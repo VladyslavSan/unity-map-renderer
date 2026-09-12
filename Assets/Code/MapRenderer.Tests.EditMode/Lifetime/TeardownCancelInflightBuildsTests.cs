@@ -1,5 +1,5 @@
-// Teardown-cancel: zero-leak teardown on Stop while mesh builds are in-flight (design SSOT:
-// teardown-cancel-inflight-builds-design.md). Drives load, kicks mesh builds, and tears down WITHOUT
+// Teardown-cancel: zero-leak teardown on Stop while mesh builds are in-flight (see the disposal &
+// cancellation contract, docs/async-architecture.md). Drives load, kicks mesh builds, and tears down WITHOUT
 // settling first — the exact race the maintainer reproduced (Stop while tiles are still loading).
 //
 // This is EditMode, and deliberately so: the un-fixed stall must be measured by the TEST thread, which

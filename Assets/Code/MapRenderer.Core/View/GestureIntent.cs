@@ -33,7 +33,7 @@ namespace MapRenderer.Core.View
     ///
     /// <para><b>Encoding:</b> a discriminated-union-style <c>readonly struct</c> — one
     /// <see cref="Kind"/> discriminant plus the union of all payloads. Use the factory methods
-    /// (<see cref="ZoomAt"/>, <see cref="Pan"/>, <see cref="HeadingByDeg"/>, <see cref="TiltByDeg"/>)
+    /// (<see cref="ZoomAt"/>, <see cref="Pan"/>, <see cref="HeadingBy"/>, <see cref="TiltBy"/>)
     /// so the correct fields are always set.</para>
     ///
     /// <para><b>Per-gesture config</b> (zoom clamps, <c>maxPitch</c>) rides on the payload so the

@@ -20,9 +20,9 @@ using Is = UnityEngine.TestTools.Constraints.Is; // Is.Not.AllocatingGCMemory() 
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// R1 (design §10.2, plan `symbol-gather-memo-plan.md`): <see cref="SymbolPlacementSystem.GatherIntoMirror"/>
-    /// memoizes its heavy compaction on <see cref="SymbolGatherPlan.WinnerSetVersion"/> — a same-source,
-    /// same-version frame runs only the three per-frame masks (Departing/CoverageFading/Dropped), not the full
+    /// R1 (design §10.2): <see cref="SymbolPlacementSystem.GatherIntoMirror"/> memoizes its heavy compaction on
+    /// <see cref="SymbolGatherPlan.WinnerSetVersion"/> — a same-source, same-version frame runs only
+    /// the three per-frame masks (Departing/CoverageFading/Dropped), not the full
     /// pool rebuild. These are the CONTENT teeth: byte-identity across held frames (T1), invalidation on a real
     /// version change with the winner SET (T2a) or CONTENT (T3/T4/T4b) changing, and the memo-hit path's own
     /// zero-GC guarantee (T6). <see cref="SymbolPlacementSystem.MirrorRebuildCount"/> is the discriminating signal

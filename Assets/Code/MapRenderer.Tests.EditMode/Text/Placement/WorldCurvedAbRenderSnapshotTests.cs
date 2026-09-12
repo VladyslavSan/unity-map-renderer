@@ -1,6 +1,6 @@
 // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
 // NOT registered in core-tests.csproj. Modeled on WorldSymbolAbRenderSnapshotTests (T2's point A/B) but for
-// CURVED (along-line) text — Stage AC's T-AB tooth (curved-world-plan.md §4 T-AB).
+// CURVED (along-line) text — Stage AC's T-AB tooth.
 //
 // CONVERTED (old-screen-path deletion, §6a): this tooth used to render the SAME asymmetric glyph through
 // BOTH the OLD screen curved path (a hand-built BillboardMath.BuildQuad mesh through Map/Symbol/Text) and the

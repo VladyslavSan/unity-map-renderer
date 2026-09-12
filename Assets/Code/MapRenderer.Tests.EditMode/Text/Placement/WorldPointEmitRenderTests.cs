@@ -1,8 +1,8 @@
 // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
 // NOT registered in core-tests.csproj.
 //
-// Epic A / A1 (world-anchored-symbols-design.md §11 A1) — the two A0-review findings that must run through
-// the REAL production path (not A0's hand-built test scaffold), plus the no-leak tooth:
+// Epic A / A1 — the two A0-review findings that must run through the REAL production path (not A0's
+// hand-built test scaffold), plus the no-leak tooth:
 //
 //   A0-F2 (real-emit upright): A0's Y-negation fix lived only in test scaffold (BuildOneGlyphWorldMesh).
 //     This renders a point symbol through the REAL SymbolPlacementSystem.Tick (which now produces the world

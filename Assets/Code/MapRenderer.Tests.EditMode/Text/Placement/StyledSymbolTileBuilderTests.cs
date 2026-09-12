@@ -404,9 +404,9 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(42L, built.TileKey);
         }
 
-        // ── 4.4c pairing-adjacency tooth (step4.4-plan.md §4.4c A's TRAP): every layer processor of ONE
-        //    build must write into the SAME SymbolTileBuffer, or SymbolPairing's owner-at-i+1 resolution
-        //    breaks. TileSymbolLayerProcessor.CompleteOnMain calls Shape ONCE PER LAYER — this
+        // ── 4.4c pairing-adjacency tooth: every layer processor of ONE build must write into the SAME
+        //    SymbolTileBuffer, or SymbolPairing's owner-at-i+1 resolution breaks.
+        //    TileSymbolLayerProcessor.CompleteOnMain calls Shape ONCE PER LAYER — this
         //    reproduces that shape directly: two Shape calls sharing one buffer, an owner tailing the
         //    FIRST call and its rider heading the SECOND. RED-verify: give the second call its OWN fresh
         //    buffer instead (the violation) — Bake would then see the owner alone (PairRoles[0] dissolves

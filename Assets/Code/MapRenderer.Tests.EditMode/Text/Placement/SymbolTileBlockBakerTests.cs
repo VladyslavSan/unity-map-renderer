@@ -243,7 +243,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── (G) Exception-safety: a bake that throws mid-fill (after every array was already allocated at its
         //    final size) must leak no NativeArray — Bake's catch disposes the partial block before rethrowing.
         //
-        //    4.4c VERIFY-ITEM (step4.4-plan.md §4.4f): the pre-buffer injection was a fake IReadOnlyList<SymbolQuad>
+        //    4.4c VERIFY-ITEM: the pre-buffer injection was a fake IReadOnlyList<SymbolQuad>
         //    that lied about its own Count (a two-pass CountSizes/Fill disagreement). Under ShapedSymbol's
         //    (start,count) spans, CountSizes and Fill read the SAME span, so that two-pass disagreement is no
         //    longer inducible through the (now-deleted) per-symbol-carrier→buffer conversion adapter (its
