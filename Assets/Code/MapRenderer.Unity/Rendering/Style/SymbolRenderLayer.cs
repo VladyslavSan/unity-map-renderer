@@ -155,11 +155,16 @@ namespace MapRenderer.Unity.Rendering.Style
             try
             {
                 var haloColor = paint.HaloColor.Evaluate(zoom); // MapRenderer.Core.Expressions.Color (sRGB)
-                // sRGB→linear (project is Linear color space; the shader consumes _HaloColor directly, and
-                // SetColor uploads raw floats with no gamma conversion) — mirrors the vertex text-color bake
-                // in SymbolPlacementSystem and StyledFill/LineTileBuilder's Color.linear convention.
+                // NO .linear here (UMR-135): _HaloColor is a Color-TYPED material property
+                // (SymbolTextWorld.shader), and in Linear colour space Unity converts a Color-typed property
+                // sRGB→linear itself on upload — the same convention ZoomStyleApplier.ToUnityColor relies on
+                // for _BaseColor/_FillOutlineColor, pixel-verified by
+                // PaintColorRenderTests.ConstantLineColor_RenderedPixel_MatchesAuthored. Pre-converting here
+                // too double-applies the conversion (measured ~17.6% of authored for a 0.5-grey halo). The
+                // vertex-COLOR-STREAM `.linear` bakes in SymbolPlacementSystem/StyledFill/LineTileBuilder are
+                // a DIFFERENT convention (Unity does not convert a vertex stream) and are not precedent here.
                 material.SetColor(HaloColorId,
-                    new Color((float)haloColor.R, (float)haloColor.G, (float)haloColor.B, (float)haloColor.A).linear);
+                    new Color((float)haloColor.R, (float)haloColor.G, (float)haloColor.B, (float)haloColor.A));
                 // S107: both halo terms are added to a signed distance the SDF shader carries in DEVICE px
                 // (screenDist, from an fwidth-derived screen scale), so both take the px→device conversion.
                 // The pair scales TOGETHER — splitting it would render the halo inconsistently at dpr ≠ 1.
