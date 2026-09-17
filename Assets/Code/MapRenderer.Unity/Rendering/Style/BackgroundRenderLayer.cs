@@ -28,15 +28,16 @@ namespace MapRenderer.Unity.Rendering.Style
     /// (<see cref="Materials.BaseTweaker.ApplyBaseContract"/>), so painter order via <c>renderQueue</c> alone
     /// decides the composite.</para>
     /// </summary>
-    internal sealed class BackgroundRenderLayer : IRenderLayer
+    internal sealed class BackgroundRenderLayer : IRenderLayer, IFadeableRenderLayer
     {
-        public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; }
+        public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; private set; }
         public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
         public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; } // owned fill-base clone; null iff FillMaterial unassigned (slot kept, never shows)
+        public int                               TransitioningCount => _applier?.TransitioningCount ?? 0;
 
         private readonly ZoomStyleApplier _applier; // null iff Material null
 
@@ -64,17 +65,50 @@ namespace MapRenderer.Unity.Rendering.Style
 
             Background.PaintProperties paint = layer.Paint;
             var applier = new ZoomStyleApplier(mat);
+            // BEFORE the paint bind: a Constant opacity is pushed once at bind time and then skipped
+            // forever, so an unscaled bind-time push would make a seeded fade of 0 invisible.
+            applier.SeedFade(layer.IsVisibleAtZoom(initialZoom) ? 1f : 0f);
             Materials.MaterialFactory.BindBackgroundPaintToApplier(paint, applier, mat);
             // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
             // (RenderLayerSet.ApplyZoom's contract). Background has no px-valued paint, so the ratio is
             // inert here; it is threaded for interface uniformity.
-            applier.ApplyZoom(initialZoom, 1.0);
+            applier.ApplyZoom(new StyleFrameInputs(initialZoom, 1.0, 0.0));
 
             return new BackgroundRenderLayer(layer, mat, applier, drawIndex);
         }
 
         // zoom-expression background-color/opacity; no px-valued paint, so the ratio is inert.
-        public void ApplyZoom(double zoom, double devicePixelRatio) => _applier?.ApplyZoom(zoom, devicePixelRatio);
+        /// <inheritdoc cref="IFadeableRenderLayer.FadesGradually"/>
+        public bool FadesGradually => true;
+
+        /// <inheritdoc cref="IFadeableRenderLayer.SetFade"/>
+        public void SetFade(float amount) => _applier?.SetFade(amount);
+
+        /// <inheritdoc cref="IFadeableRenderLayer.PaintsSomething"/>
+        public bool PaintsSomething => !_applier?.EffectiveOpacityIsZero ?? true;
+
+        public void ApplyZoom(in StyleFrameInputs inputs) => _applier?.ApplyZoom(inputs);
+
+        /// <summary>
+        /// Re-targets this layer's uniform bindings at <paramref name="layer"/> — the survivor gate has
+        /// already proven its mesh-affecting content unchanged. A no-op when this slot has no material
+        /// (unconfigured background, see <see cref="Create"/>).
+        /// </summary>
+        public void Restyle(MapRenderer.Core.Style.StyleLayer layer, in StyleTransition transition, double nowSeconds)
+        {
+            StyleLayer = layer;
+            if (_applier == null) return;
+            var typed = (Background.StyleLayer)layer;
+            _applier.SetTransition(transition, nowSeconds);
+            Materials.MaterialFactory.BindBackgroundPaintToApplier(typed.Paint, _applier, Material);
+        }
+
+        /// <inheritdoc cref="IRenderLayer.SetDrawOrder"/>
+        public void SetDrawOrder(int declaredOrder)
+        {
+            if (Material != null)
+                Material.renderQueue = LayerDrawOrder.QueueFor(declaredOrder, MaterialSubSlot);
+        }
 
         /// <summary>A2: no GameObject/Mesh to destroy — background owns only its material.</summary>
         public void Dispose()

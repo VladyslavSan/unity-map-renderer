@@ -58,6 +58,8 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             public Entity      Entity;
             public TileId      TileId;   // which tile root this layer hangs under
             public BatchMeshID MeshId;   // stall #3: the EG-registered mesh id, for UnregisterMesh on removal
+            public int         MaterialIndex; // the layer slot this entity was created at — UMR-151: lets
+                                               // SetLayerMaterials find every item a retired slot must retire
         }
 
         // One per live tile: the named parent entity its layer entities are grouped under, so the
@@ -78,6 +80,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // Per-layer shadow-cast declaration, parallel to _layerMaterials — IRenderLayer.CastShadows, carried
         // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off, identically in all three backends.
         private readonly List<ShadowCastingMode>    _layerShadowModes = new List<ShadowCastingMode>();
+        // Per-layer draw gate (ITileRenderBackend.SetLayerVisible), parallel to _layerMaterials. True ⇒ this
+        // slot's entities carry DisableRendering. Absent or short ⇒ visible, identically in all three backends.
+        private readonly List<bool>                _layerGatedOut    = new List<bool>();
         // internal (not private) for the same reason as ItemRec/RootRec — test-assembly observability.
         internal readonly Dictionary<int, ItemRec>    _items          = new Dictionary<int, ItemRec>();
         internal readonly Dictionary<TileId, RootRec> _tileRoots      = new Dictionary<TileId, RootRec>();
@@ -167,7 +172,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private SceneFrame _lastFrame;
         private bool       _hasSceneOrigin;
 
-        /// <param name="layerMaterials">The full-width per-layer material list, indexed by draw slot.</param>
+        /// <param name="layerMaterials">The full-width per-layer material list, indexed by slot.</param>
         /// <param name="layerNames">
         /// Optional per-layer style ids parallel to <paramref name="layerMaterials"/>, used only to name the
         /// layer entities in the Editor's Entities Hierarchy. When null/short, the material name is used.
@@ -206,6 +211,51 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             for (int i = 0; i < _layerMaterials.Count; i++)
                 _materialIds[i] = _layerMaterials[i] != null ? _eg.RegisterMaterial(_layerMaterials[i]) : default;
             BuildLayerPrototype();
+        }
+
+        /// <summary>UMR-151 restyle-time material update — retires a slot's entities (one batched
+        /// <see cref="RemoveItems"/>, including an immediate EG mesh unregister — UNLIKE BRG) when its
+        /// material goes null; see `docs/tile-pipeline-design.md` §1.10.</summary>
+        public void SetLayerMaterials(
+            IReadOnlyList<Material> layerMaterials, IReadOnlyList<ShadowCastingMode> layerShadowModes)
+        {
+            ThrowIfDisposed();
+
+            int oldCount = _layerMaterials.Count;
+            var newMaterialIds = new BatchMaterialID[layerMaterials.Count];
+            for (int i = 0; i < layerMaterials.Count; i++)
+            {
+                Material mat    = layerMaterials[i];
+                Material oldMat = i < oldCount ? _layerMaterials[i] : null;
+                if (ReferenceEquals(mat, oldMat))
+                {
+                    newMaterialIds[i] = i < _materialIds.Length ? _materialIds[i] : default;
+                    continue;
+                }
+                // Reference-null, NOT `!=` (Unity's fake-null hides a DESTROYED material — see
+                // docs/tile-pipeline-design.md §1.10's SetLayerMaterials note).
+                if (i < oldCount && !ReferenceEquals(oldMat, null) && i < _materialIds.Length)
+                    _eg.UnregisterMaterial(_materialIds[i]);
+                newMaterialIds[i] = mat != null ? _eg.RegisterMaterial(mat) : default;
+            }
+            _materialIds = newMaterialIds;
+
+            _layerMaterials.Clear();
+            for (int i = 0; i < layerMaterials.Count; i++) _layerMaterials.Add(layerMaterials[i]);
+
+            _layerShadowModes.Clear();
+            if (layerShadowModes != null)
+                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
+
+            var retired = new List<int>();
+            foreach (var kv in _items)
+            {
+                int mi = kv.Value.MaterialIndex;
+                if ((uint)mi >= (uint)_layerMaterials.Count || _layerMaterials[mi] == null)
+                    retired.Add(kv.Key);
+            }
+            if (retired.Count > 0)
+                RemoveItems(retired.ToArray());
         }
 
         /// <summary>
@@ -265,11 +315,43 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// <paramref name="materialIndex"/>, or <see cref="ShadowCastingMode.Off"/> when no list was supplied
         /// or it is short. The fallback must read identically in all three backends
         /// (<see cref="ITileRenderBackend"/>).</summary>
-        /// <param name="materialIndex">The layer's global draw slot.</param>
+        /// <param name="materialIndex">The layer's global SLOT.</param>
         private ShadowCastingMode ShadowModeFor(int materialIndex)
             => (uint)materialIndex < (uint)_layerShadowModes.Count
                 ? _layerShadowModes[materialIndex]
                 : ShadowCastingMode.Off;
+
+        /// <summary>True when <paramref name="materialIndex"/>'s slot is gated out.</summary>
+        /// <param name="materialIndex">The layer's global SLOT.</param>
+        private bool GatedOut(int materialIndex)
+            => (uint)materialIndex < (uint)_layerGatedOut.Count && _layerGatedOut[materialIndex];
+
+        /// <inheritdoc cref="ITileRenderBackend.SetLayerVisible"/>
+        public void SetLayerVisible(int slot, bool visible)
+        {
+            if (IsDisposed || slot < 0) return;
+            while (_layerGatedOut.Count <= slot) _layerGatedOut.Add(false);
+            if (_layerGatedOut[slot] == !visible) return; // unchanged ⇒ no structural change
+            _layerGatedOut[slot] = !visible;
+
+            int n = 0;
+            foreach (var kv in _items) if (kv.Value.MaterialIndex == slot) n++;
+            if (n == 0) return;
+
+            var affected = new NativeArray<Entity>(n, Allocator.Temp);
+            try
+            {
+                int w = 0;
+                foreach (var kv in _items)
+                    if (kv.Value.MaterialIndex == slot) affected[w++] = kv.Value.Entity;
+
+                // ONE structural change for the whole slot, not one per entity — the same batching reason
+                // RemoveItems destroys its entities in a single DestroyEntity(NativeArray) call.
+                if (visible) _em.RemoveComponent<DisableRendering>(affected);
+                else         _em.AddComponent<DisableRendering>(affected);
+            }
+            finally { affected.Dispose(); }
+        }
 
         // ── Instrumentation counters ────────────────────────────────────────────────────────────
         // Read only by tests, but WRITTEN by the code below, so they stay on the class: they are state this
@@ -367,7 +449,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// <summary>
         /// Registers a tile-layer mesh as an Entities-Graphics entity, parented under its tile's root
         /// entity (created on demand). Returns a handle for later removal. <paramref name="materialIndex"/>
-        /// is the layer's global draw slot, indexing the full-width material list, matching
+        /// is the layer's global SLOT, indexing the full-width material list, matching
         /// <see cref="Backend.BRG.TileRenderer.AddTileLayer"/>; non-tile-mesh slots are null and never
         /// receive this call.
         /// </summary>
@@ -452,12 +534,16 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 #endif
             }
 
+            // An item added into an already-gated slot must not draw until the gate lifts (the prototypes
+            // carry no DisableRendering, so this is the only place that state reaches a fresh instance).
+            if (GatedOut(materialIndex)) _em.AddComponent<DisableRendering>(e);
+
             var rec = _tileRoots[tileId];
             rec.ChildCount++;
             _tileRoots[tileId] = rec;
 
             int handle = _nextHandle++;
-            _items[handle] = new ItemRec { Entity = e, TileId = tileId, MeshId = meshId };
+            _items[handle] = new ItemRec { Entity = e, TileId = tileId, MeshId = meshId, MaterialIndex = materialIndex };
             return handle;
         }
 

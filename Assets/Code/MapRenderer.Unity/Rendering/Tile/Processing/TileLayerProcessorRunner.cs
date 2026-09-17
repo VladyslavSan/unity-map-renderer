@@ -42,7 +42,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// path.</para></summary>
         /// <param name="decode">The caller-owned shared decode lease this pass reads (never released here).</param>
         /// <param name="context">Per-tile projection/origin/zoom context, unchanged by cancellation.</param>
-        /// <param name="processors">One this-source processor per dense layer id, in declared order.</param>
+        /// <param name="processors">One this-source processor per dense layer id, in SLOT order.</param>
         /// <param name="token">The teardown/lifetime token; defaults to <see cref="CancellationToken.None"/>
         /// for callers outside <c>KickMeshBuild</c> (existing tests) that have no lifetime to observe.</param>
         internal static TilePrologueOutput RunWorkerPass(

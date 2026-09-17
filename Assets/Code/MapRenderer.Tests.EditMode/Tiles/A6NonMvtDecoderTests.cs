@@ -67,7 +67,10 @@ namespace MapRenderer.Tests.Tiles
                 _paint = paint;
             }
 
-            public void ApplyZoom(double zoom, double devicePixelRatio) { }
+            public void ApplyZoom(in StyleFrameInputs inputs) { }
+            public int TransitioningCount => 0;
+            public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
+            public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }
 
             public ILayerMeshBuild BuildGraphRequest(

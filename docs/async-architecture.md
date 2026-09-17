@@ -128,6 +128,12 @@ lifetime question comes up (it's forced by the platform, not a style choice: job
   created-vs-destroyed counts (`CountMeshObjects`) for the *resource*. Caching the *data* would tangle the two
   and invert the "arrays return to baseline after consume" invariant — which is exactly why S82 caches the
   `Mesh`, not the `NativeArray`.
+- **UMR-151 (style-transitions Stage 3) extends the single-owner rule to the render-layer SLOT.** A
+  `RenderLayerSet` slot is stable for a surviving layer across a partial-survival restyle — never
+  reassigned, never shared — and a RETIRED slot's `Material` is destroyed exactly ONCE, by the tombstone
+  swap in `RenderLayerSet.TryRestyleInPlace` (`_layers[slot].Dispose()` immediately before
+  `_layers[slot] = new TombstoneRenderLayer(slot)`), never by a backend's `SetLayerMaterials` — a backend
+  only UNREGISTERS its own reference to a material that already went null, it never calls `Destroy` on one.
 
 **Cancellation ≠ cleanup.** A `CancellationToken` stops the *work*; allocated resources still need explicit
 disposal at all four exits: (1) **consumed** → dispose after main-thread upload; (2) **released-while-in-flight**

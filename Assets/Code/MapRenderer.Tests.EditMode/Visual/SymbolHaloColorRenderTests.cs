@@ -6,8 +6,8 @@
 // UMR-135: text-halo-color reaches a Color-typed material property (_HaloColor, SymbolTextWorld.shader),
 // which Unity gamma-converts sRGB->linear on upload in Linear colour space — the same convention
 // PaintColorRenderTests.ConstantLineColor_RenderedPixel_MatchesAuthored pins for _BaseColor. If production
-// ALSO pre-converts on the CPU (SymbolRenderLayer.BindHalo's `.linear`), the value is converted twice and
-// renders far too dark.
+// ALSO pre-converts on the CPU (SymbolRenderLayer.BindTextPaint applying a manual gamma conversion before
+// handing the colour to ZoomStyleApplier), the value is converted twice and renders far too dark.
 //
 // This isolates the halo term from the fill term (SymbolTextWorld_ForwardPass.hlsl's
 // `lerp(_HaloColor.rgb, input.color.rgb, fillAlpha)`) by forcing fillAlpha to 0 via two SDF-shape overrides
@@ -93,10 +93,11 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Renders one halo through the production bind (<see cref="SymbolRenderLayer.Create"/>). Returns
-        /// the centre sample in linear RGB, or null with no GPU context.
+        /// Renders one halo through the production bind (<see cref="SymbolRenderLayer.Create"/>), optionally
+        /// followed by a <see cref="SymbolRenderLayer.Restyle"/> to <paramref name="restyleToHex"/> — T7
+        /// (UMR-147). Returns the centre sample in linear RGB, or null with no GPU context.
         /// </summary>
-        private static double3? RenderHalo(string haloHex)
+        private static double3? RenderHalo(string haloHex, string restyleToHex = null, double duration = 0.0)
         {
             Symbol.StyleLayer layer    = BuildSymbolLayer(haloHex);
             MapMaterialSet    settings = MapMaterialSetTestUtil.Load();
@@ -112,6 +113,16 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat(Shader.PropertyToID("_SdfPixelRange"), 0f);
             mat.SetFloat(Shader.PropertyToID("_SdfEdge"), 3f);
             mat.SetVector(Shader.PropertyToID("_ScreenParamsLogical"), new Vector4(SnapSize, SnapSize, 0f, 0f));
+
+            // T7: the restyle seam. AFTER the SDF overrides (Restyle/ApplyZoom touch only
+            // _TextColor/_HaloColor/_HaloWidthPx/_HaloBlurPx, so the overrides above survive unaffected) and
+            // BEFORE the render, so the sample reflects the eased/settled colour, not the initial bind.
+            if (restyleToHex != null)
+            {
+                Symbol.StyleLayer newLayer = BuildSymbolLayer(restyleToHex);
+                renderLayer.Restyle(newLayer, StyleTransition.Default, nowSeconds: 0.0);
+                renderLayer.ApplyZoom(new StyleFrameInputs(8.0, 1.0, duration));
+            }
 
             // _MainTex is a Texture2DArray sampler — every other production/test caller of this shader binds
             // a real atlas before rendering; an unbound array sampler renders nothing on this backend. Its
@@ -204,8 +215,41 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(measured.Value[c], Is.EqualTo(expect3[c]).Within(0.02),
                     $"channel {c}: text-halo-color must reach the fragment converted sRGB->linear ONCE. " +
                     $"measured={measured.Value} authored(linear)={expect3}. Landing far below authored means " +
-                    $"SymbolRenderLayer.BindHalo's CPU `.linear` conversion is double-applying Unity's own " +
+                    $"SymbolRenderLayer.BindTextPaint's CPU gamma conversion is double-applying Unity's own " +
                     $"upload conversion of the Color-typed _HaloColor property (UMR-135).");
+        }
+
+        // #808080 -> #4099C0: no shared channel, none at 0/1 (plan §4 colour choice for the halo pair).
+        private const string RestyledHaloHex = "#4099C0";
+
+        /// <summary>
+        /// <b>T7 (UMR-147).</b> A RESTYLED <c>text-halo-color</c> must reach the fragment as the NEW
+        /// authored colour, converted sRGB->linear exactly once — <see cref="HaloColor_RenderedPixel_MatchesAuthored"/>
+        /// only guards the initial <c>Create</c> write; this is the missing assertion over a restyle
+        /// re-bind. RED-verify: <c>Restyle</c> omits the halo re-bind — the pixel stays <c>#808080</c> and
+        /// the R assertion fires first (linear 0.2159 vs expected 0.0513).
+        /// </summary>
+        [Test]
+        public void RestyledHaloColor_RenderedPixel_MatchesTheNewAuthored()
+        {
+            double3? measured = RenderHalo(AuthoredHaloHex, RestyledHaloHex, StyleTransition.Default.DurationSeconds);
+            if (measured == null)
+            {
+                Assert.Inconclusive("No GPU context (the halo arm rendered blank).");
+                return;
+            }
+
+            Assert.IsTrue(ColorUtility.TryParseHtmlString(RestyledHaloHex, out Color authored));
+            Color   expected = authored.linear;
+            double3 expect3  = new double3(expected.r, expected.g, expected.b);
+
+            Debug.Log($"[SymbolHaloColorRender] restyled measured={measured.Value} authored(linear)={expect3}");
+
+            for (int c = 0; c < 3; c++)
+                Assert.That(measured.Value[c], Is.EqualTo(expect3[c]).Within(0.02),
+                    $"channel {c}: a RESTYLED text-halo-color must reach the fragment converted sRGB->linear " +
+                    $"ONCE, at the NEW authored value. measured={measured.Value} authored(linear)={expect3}. " +
+                    "Landing at the OLD authored value means Restyle never re-bound the halo.");
         }
     }
 }

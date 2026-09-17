@@ -247,9 +247,14 @@ namespace MapRenderer.Tests.Visual
                 ""version"": 8,
                 ""layers"": [
                     { ""id"": ""label"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
-                      ""layout"": { ""text-field"": ""{NAME}"" } }
+                      ""layout"": { ""text-field"": ""{NAME}"" },
+                      ""paint"": { ""text-color"": ""#ffffff"" } }
                 ]
             }";
+            // text-color: white — a CONSTANT text-color now binds _TextColor (style-transitions epic), so
+            // leaving it at the spec default (black) would multiply the hand-injected vertex ink below to
+            // black. White is the uniform's identity, so this test's direct SymbolPaint injection (bypassing
+            // SymbolFeatureExtractor.EvaluatePaint) reaches the pixel untouched, as it always has.
             StyleDocument style = StyleParser.Parse(StyleJson);
             var symbolLayer = (Symbol.StyleLayer)style.Layers[0];
             var settings = MapMaterialSetTestUtil.Load();
@@ -335,10 +340,13 @@ namespace MapRenderer.Tests.Visual
             const string StyleJson = @"{
                 ""version"": 8,
                 ""layers"": [
-                    { ""id"": ""a"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""la"", ""layout"": { ""text-field"": ""{NAME}"" } },
-                    { ""id"": ""b"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""lb"", ""layout"": { ""text-field"": ""{NAME}"" } }
+                    { ""id"": ""a"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""la"", ""layout"": { ""text-field"": ""{NAME}"" },
+                      ""paint"": { ""text-color"": ""#ffffff"" } },
+                    { ""id"": ""b"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""lb"", ""layout"": { ""text-field"": ""{NAME}"" },
+                      ""paint"": { ""text-color"": ""#ffffff"" } }
                 ]
             }";
+            // text-color: white on both layers — see the identical note on this file's first test.
             StyleDocument style = StyleParser.Parse(StyleJson);
             var settings = MapMaterialSetTestUtil.Load();
             var layerA = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, 8.0, drawIndex: 1);
@@ -435,9 +443,11 @@ namespace MapRenderer.Tests.Visual
                 ""version"": 8,
                 ""layers"": [
                     { ""id"": ""label"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
-                      ""layout"": { ""text-field"": ""{NAME}"" } }
+                      ""layout"": { ""text-field"": ""{NAME}"" },
+                      ""paint"": { ""text-color"": ""#ffffff"" } }
                 ]
             }";
+            // text-color: white — see the identical note on this file's first test.
             StyleDocument style = StyleParser.Parse(StyleJson);
             var settings = MapMaterialSetTestUtil.Load();
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)style.Layers[0], settings, 8.0, drawIndex: 0);

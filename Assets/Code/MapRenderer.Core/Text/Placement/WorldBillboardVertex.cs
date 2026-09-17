@@ -36,9 +36,10 @@ namespace MapRenderer.Core.Text.Placement
         /// Never rebaked on camera motion; the object-to-world transform supplies Level 2 every frame.</summary>
         public float3 AnchorLocal;
 
-        /// <summary>Per-vertex color (COLOR): carries the OLD path's <see cref="SymbolPaint.TextColor"/>.rgb
-        /// VERBATIM — no sRGB→linear conversion (A0 equivalence requires the identical color value; see
-        /// this file's header and the A0 plan's color-space note). Opacity is stream 1, not this field.</summary>
+        /// <summary>Per-vertex color (COLOR): <see cref="SymbolPaint.TextColor"/>.rgb, LINEAR (converted by
+        /// <c>SymbolPlacementSystem.LinearColor</c> — not verbatim). WHITE whenever <c>text-color</c> rides
+        /// the <c>_TextColor</c> uniform instead (a CONSTANT expression). Opacity is stream 1, not this
+        /// field.</summary>
         public float3 ColorRGB;
 
         /// <summary>Normalized atlas UV (TEXCOORD0) — straight from <see cref="SymbolQuad.UvTopLeft"/>/

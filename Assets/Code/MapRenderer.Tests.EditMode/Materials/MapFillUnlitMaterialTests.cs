@@ -45,12 +45,14 @@ namespace MapRenderer.Tests.Materials
             try
             {
                 // The exact set MaterialFactory.BindFillPaintToApplier binds (re-derived by reading that
-                // method, MaterialFactory.cs:59-98 — not copied from the stage brief). Each carries its
+                // method, MaterialFactory.cs:59-104 — not copied from the stage brief). Each carries its
                 // PropertyId (for HasProperty), its C# identifier (for messages), and its shader-name
-                // string constant (for the CBUFFER-membership check). Opacity is the shared registry; the
-                // rest are Fill-only. None of the seven is a texture, so all belong in UnityPerMaterial.
+                // string constant (for the CBUFFER-membership check). Opacity and BaseColor are the shared
+                // registry; the rest are Fill-only. None of the eight is a texture, so all belong in
+                // UnityPerMaterial.
                 var boundProps = new (int id, string name, string shaderName)[]
                 {
+                    (ShaderProperties.PropertyId.BaseColor,                nameof(ShaderProperties.PropertyId.BaseColor),                ShaderProperties.PropertyNames.BaseColor),
                     (ShaderProperties.PropertyId.Opacity,                  nameof(ShaderProperties.PropertyId.Opacity),                  ShaderProperties.PropertyNames.Opacity),
                     (ShaderProperties.Fill.PropertyId.FillOutlineColor,    nameof(ShaderProperties.Fill.PropertyId.FillOutlineColor),    ShaderProperties.Fill.PropertyNames.FillOutlineColor),
                     (ShaderProperties.Fill.PropertyId.FillAntialias,       nameof(ShaderProperties.Fill.PropertyId.FillAntialias),       ShaderProperties.Fill.PropertyNames.FillAntialias),

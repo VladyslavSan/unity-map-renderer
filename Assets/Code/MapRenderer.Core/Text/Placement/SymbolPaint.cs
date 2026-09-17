@@ -9,39 +9,31 @@ namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
     /// The resolved `text-*` PAINT properties for one symbol (as opposed to layout, which
-    /// <c>TextQuadLayout.Layout</c> already baked into <see cref="SymbolQuad"/>s). Every color is
-    /// straight RGBA (0..1, already linear-space).
+    /// <c>TextQuadLayout.Layout</c> already baked into <see cref="SymbolQuad"/>s). Every color is straight
+    /// RGBA (0..1); the linear conversion happens later, at bake (<c>SymbolPlacementSystem.LinearColor</c>).
     ///
-    /// <para><see cref="TextColor"/>/<see cref="Opacity"/> feed the billboard vertex color stream; halo
-    /// (<see cref="HaloColor"/>/<see cref="HaloWidthPx"/>/<see cref="HaloBlurPx"/>) is declared here and
-    /// honoured by the shader; <see cref="Default"/> supplies a constant halo until per-symbol
-    /// <c>text-halo-*</c> values are wired.</para>
+    /// <para><see cref="TextColor"/> feeds the billboard vertex color stream for every kind EXCEPT a
+    /// CONSTANT <c>text-color</c>, which instead rides a per-layer uniform and leaves this white;
+    /// <see cref="Opacity"/> always feeds the vertex stream. Halo is bound directly to a per-layer
+    /// uniform (<c>SymbolRenderLayer.BindTextPaint</c>), not carried here.</para>
     /// </summary>
     public readonly struct SymbolPaint
     {
-        /// <summary>Fill color (`text-color`), straight RGBA.</summary>
+        /// <summary>Fill color (`text-color`), straight RGBA. White when a CONSTANT `text-color` rides the
+        /// per-layer uniform instead of this stream.</summary>
         public float4 TextColor { get; init; }
 
         /// <summary>Overall opacity (`text-opacity`), multiplies <see cref="TextColor"/>.a at bake time.</summary>
         public float Opacity { get; init; }
 
-        /// <summary>Halo color (`text-halo-color`), straight RGBA.</summary>
-        public float4 HaloColor { get; init; }
-
-        /// <summary>Halo width in pixels (`text-halo-width`).</summary>
-        public float HaloWidthPx { get; init; }
-
-        /// <summary>Halo blur in pixels (`text-halo-blur`).</summary>
-        public float HaloBlurPx { get; init; }
-
-        /// <summary>Style-spec defaults: opaque black text, no halo (`text-halo-width` default 0).</summary>
+        /// <summary>Style-spec defaults: opaque black text (`text-color`'s spec default). Under the
+        /// two-carrier contract above this is the STREAM value — correct for a non-Constant `text-color`;
+        /// a Constant one rides the per-layer uniform instead and would leave <see cref="TextColor"/>
+        /// white, not this black.</summary>
         public static readonly SymbolPaint Default = new SymbolPaint
         {
             TextColor = new float4(0f, 0f, 0f, 1f),
             Opacity = 1f,
-            HaloColor = new float4(1f, 1f, 1f, 1f),
-            HaloWidthPx = 0f,
-            HaloBlurPx = 0f,
         };
     }
 }

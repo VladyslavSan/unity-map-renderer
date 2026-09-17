@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// LAYER's share of a symbol tile build — one instance per symbol style layer per (source, tile) build
     /// (matching the mesh side's per-layer granularity). This is parity-safe because
     /// <see cref="StyledSymbolTileBuilder.ExtractLayers"/> and <see cref="StyledSymbolTileBuilder.Shape"/>
-    /// are ALREADY per-layer loops, so N single-layer processors invoked in declared order reproduce the
+    /// are ALREADY per-layer loops, so N single-layer processors invoked in SLOT order reproduce the
     /// identical call sequence and symbol order as one N-layer call.
     ///
     /// <para>Worker step = <see cref="StyledSymbolTileBuilder.ExtractLayers"/> for this one layer. Main tail =

@@ -91,11 +91,15 @@ namespace MapRenderer.Tests.Visual
             ]
         }";
 
+        // text-color: white — a CONSTANT text-color binds _TextColor (style-transitions epic); leaving it
+        // at the spec default (black) would multiply MeasureTextHeightPx's hand-injected TextInk vertex
+        // colour (bypassing SymbolFeatureExtractor.EvaluatePaint) down to black.
         private const string SymbolStyleJson = @"{
             ""version"": 8,
             ""layers"": [
                 { ""id"": ""label"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
-                  ""layout"": { ""text-field"": ""{NAME}"" } }
+                  ""layout"": { ""text-field"": ""{NAME}"" },
+                  ""paint"": { ""text-color"": ""#ffffff"" } }
             ]
         }";
 
@@ -304,7 +308,7 @@ namespace MapRenderer.Tests.Visual
 
             var applier = new ZoomStyleApplier(mat);
             MaterialFactory.BindLinePaintToApplier(lineLayer.Paint, applier, mat);
-            applier.ApplyZoom(SweptZoom, scene.MapCam.DevicePixelRatio);
+            applier.ApplyZoom(new StyleFrameInputs(SweptZoom, scene.MapCam.DevicePixelRatio, 0.0));
 
             Mesh mesh = BuildCentredRibbon(scene);
             GameObject go = AttachMesh(mesh, mat, "Dpr_StyledLine");

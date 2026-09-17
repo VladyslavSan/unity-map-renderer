@@ -37,7 +37,8 @@
 struct SymbolWorldAttributes
 {
     float3 anchorOS   : POSITION;  // tile-local render-space anchor (WorldBillboardVertex.AnchorLocal)
-    float3 colorRGB   : COLOR;     // text color, verbatim (no sRGB conversion — see WorldBillboardVertex)
+    float3 colorRGB   : COLOR;     // LINEAR text color (see WorldBillboardVertex) — white for a CONSTANT
+                                    // text-color, which then rides the _TextColor uniform instead
     float2 uv         : TEXCOORD0;
     float  page       : TEXCOORD1; // atlas Texture2DArray layer
     float2 offsetPx   : TEXCOORD2; // unrotated glyph-corner offset — logical px, OR METRES when bit2 is set (W2)
@@ -152,7 +153,10 @@ half4 SymbolWorldPassFragment(SymbolWorldVaryings input) : SV_Target
     half haloAlpha = saturate((screenDist + _HaloWidthPx) / max(_SdfSoftness + _HaloBlurPx, 1e-3h) + 0.5h);
 
     half4 result;
-    result.rgb = lerp(_HaloColor.rgb, input.color.rgb, fillAlpha);
+    // Two-carrier text-color: a CONSTANT rides _TextColor, every other kind bakes into the vertex stream,
+    // and the unused carrier sits at white. _TextColor.a is deliberately unread — text-opacity already
+    // rides input.color.a and a second alpha term would apply it twice.
+    result.rgb = lerp(_HaloColor.rgb, input.color.rgb * _TextColor.rgb, fillAlpha);
     half coverage = max(fillAlpha, haloAlpha * _HaloColor.a);
     result.a = coverage * input.color.a;
     return result;

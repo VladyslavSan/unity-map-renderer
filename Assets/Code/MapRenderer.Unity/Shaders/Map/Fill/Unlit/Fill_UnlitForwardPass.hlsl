@@ -12,10 +12,11 @@
 //     the FRAGMENT drops lighting. This is the load-bearing invariant the epic plan documents (§1): the
 //     vertex hooks consume NORMAL/TANGENT as GEOMETRY, not lighting, so there is no vertex-layout fork.
 //   • Fragment is flat: albedo = _BaseColor × _BaseMap × vColor; alpha = _BaseColor.a × _BaseMap.a ×
-//     vColor.a × _Opacity (the two texture/color alpha factors default to 1 for every layer — fill-color
-//     never sets a custom _BaseMap or non-opaque _BaseColor — so this is the Lit twin's alpha with the
-//     lighting-only surface-data plumbing removed, not the epic plan's shorthand which drops those two
-//     factors outright; see the unlit S1 dev report for why). No InitializeStandardLitSurfaceData, no
+//     vColor.a × _Opacity (_BaseMap.a stays 1 for every layer — fill-color never sets a custom
+//     _BaseMap — but _BaseColor.a now carries a Constant/Zoom fill-color's authored alpha, read the
+//     same way the Lit twin reads it, so this is the Lit twin's alpha with the lighting-only
+//     surface-data plumbing removed, not the epic plan's shorthand which drops _BaseMap.a/_BaseColor.a
+//     outright; see the unlit S1 dev report for why). No InitializeStandardLitSurfaceData, no
 //     InputData, no UniversalFragmentPBR/SAMPLE_GI — UniversalFragmentUnlit (URP's own no-lighting exit
 //     point) composes the final color instead.
 //   • Keeps the fill-pattern branch (SampleFillPattern + clip) verbatim from Fill_LitForwardPass.hlsl.
@@ -109,9 +110,10 @@ void UnlitPassFragment(
 
     // [MAP DELTA] Flat albedo/alpha — no lighting, no InitializeStandardLitSurfaceData. Composite order
     // mirrors Fill_LitForwardPass's InitializeStandardLitSurfaceData + its [MAP DELTA S12] modulation:
-    //   texColor / _BaseColor = the URP surface factors (both identity {1,1,1,1} for every real fill —
-    //     the layer color rides vColor, never _BaseColor/_BaseMap; see StyledFillTileBuilder's contract).
-    //   vColor    = per-feature baked color (data-driven dimension, S12).
+    //   texColor  = the URP surface factor (identity {1,1,1,1} for every real fill — no custom _BaseMap).
+    //   _BaseColor = a Constant/Zoom fill-color, converted and uploaded once per material.
+    //   vColor    = the data-driven bake (Source/Expression fill-color, S12) — white when _BaseColor
+    //     carries the color instead, so exactly one of the two is non-white per layer.
     //   _Opacity  = the paint property.
     half3 albedo = texColor.rgb * _BaseColor.rgb * input.vColor.rgb;
     half  alpha  = texColor.a   * _BaseColor.a   * input.vColor.a * _Opacity;

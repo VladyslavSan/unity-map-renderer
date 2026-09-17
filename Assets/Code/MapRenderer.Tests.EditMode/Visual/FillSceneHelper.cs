@@ -95,8 +95,9 @@ namespace MapRenderer.Tests
             var fillShader = MapMaterialSetTestUtil.Load().FillMaterial.shader;
             var mat = new Material(fillShader) { name = "FillSceneHelper_Fill" };
             FillMaterialTweaker.ApplyPainterContract(mat);
-            mat.SetColor("_BaseColor", Color.white);
-            mat.SetFloat("_Opacity",  1f);
+            var applier = new MapRenderer.Unity.Rendering.Style.ZoomStyleApplier(mat);
+            MaterialFactory.BindFillPaintToApplier(paint, applier, mat);
+            applier.ApplyZoom(new MapRenderer.Unity.Rendering.Style.StyleFrameInputs(styleZoom, 1.0, 0.0));
             mr.sharedMaterial = mat;
 
             // FitToView: scale+center so the mesh fits in viewSize world units (same as MapFillBootstrap).

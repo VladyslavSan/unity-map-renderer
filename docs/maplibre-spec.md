@@ -102,7 +102,7 @@ Parse: `Style/Fill/{PaintProperties,LayoutProperties,FillPattern}.cs`. Consume: 
 
 | Property | Status | Notes |
 |---|:---:|---|
-| fill-color | ✅ | baked per-feature into COLOR stream; **data-driven** ✔ |
+| fill-color | ✅ | constant/zoom rides the `_BaseColor` uniform; **data-driven** bakes per-feature into the COLOR stream |
 | fill-opacity | 🟡 | constant/zoom → `_Opacity` uniform (re-pushed per frame); **data-driven** → baked into COLOR alpha with `_Opacity` pinned to 1 so it cannot double-apply. Caveat: a **Composite** (zoom+feature) expression takes the bake branch, so it is frozen at the tile's build zoom — `ApplyZoom` pushes uniforms, it does not re-mesh |
 | fill-outline-color | 🟠 | parsed + bound to `_FillOutlineColor`, but no outline pass/geometry reads it |
 | fill-antialias | ✅ | fill silhouettes carry a one-device-pixel antialiasing band grown OUTWARD from the polygon boundary (`docs/fill-boundary-antialiasing-design.md`); `false` suppresses that band for the layer, in geometry, which is what keeps the property per-layer implementable where MSAA would not be. Consumed in C# at `StyledFillTileBuilder.BuildLayerInput` — the `_FillAntialias` uniform stays bound and read by no pass, deliberately. Resolved at the tile's **build zoom**, so a zoom-dependent value does not re-mesh as the user zooms |
@@ -149,7 +149,7 @@ Parse: `Style/Symbol/{Layout,Paint}Properties.cs`. Consume: `SymbolFeatureExtrac
 | text-field | ✅ | `{token}` + expression resolve |
 | text-font | ✅ | font stack + fallback |
 | text-size | ✅ | zoom-eval → screen scale |
-| text-color / text-opacity | ✅ | baked into vertex color (data-driven ✔) |
+| text-color / text-opacity | ✅ | text-color: constant rides the `_TextColor` uniform; every other kind (zoom/data-driven) bakes into the COLOR stream. text-opacity: always baked into the vertex opacity stream |
 | text-halo-color / -width / -blur | 🟡 | per-layer material uniforms; **constant/zoom only** (data-driven halo keeps base) |
 | symbol-sort-key | ✅ | greedy placement order |
 | text-padding | ✅ | collision-box growth |

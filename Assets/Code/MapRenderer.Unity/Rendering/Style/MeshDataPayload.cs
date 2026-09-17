@@ -38,10 +38,10 @@ namespace MapRenderer.Unity.Rendering.Style
     /// allocation is not a no-GC concern.)</para>
     ///
     /// <para><b>The consume-loop contract</b> (vestige sweep: moved here from the same interface): every
-    /// source-tile layer settles into a dense <c>MeshDataPayload[]</c>, one slot per layer, in draw order —
+    /// source-tile layer settles into a dense <c>MeshDataPayload[]</c>, one entry per layer, in SLOT order —
     /// the consume loop reads <see cref="VertexCount"/> (charged against the S87 per-frame vertex budget),
     /// calls <see cref="Upload"/> or <see cref="Dispose"/> (exactly one, never both), and reads
-    /// <see cref="MaterialIndex"/> for the layer's global draw-order slot.</para>
+    /// <see cref="MaterialIndex"/> for the layer's global slot.</para>
     /// </summary>
     internal sealed class MeshDataPayload
     {
@@ -87,7 +87,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>Vertex count written by the worker (0 = empty layer — allocated but never populated).</summary>
         public int VertexCount { get; private set; }
 
-        /// <summary>Global draw-order / material index of the render layer this payload belongs to (S89 C).</summary>
+        /// <summary>Global SLOT / material index of the render layer this payload belongs to (S89 C).</summary>
         public int MaterialIndex { get; private set; }
 
         // Pool-only: real construction happens via Reset, called from MeshDataPayloadPool.Rent()'s fallback

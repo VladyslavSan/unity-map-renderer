@@ -251,12 +251,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>
         /// Destroys every held <see cref="Mesh"/> and empties the cache — reusable afterwards (unlike a true
-        /// <see cref="IDisposable"/> teardown). Called by <c>TileManager.SetSources</c> on EVERY call
-        /// (first style AND every restyle): a restyle rebuilds <c>RenderLayerSet</c>'s layer indexing, so a
-        /// stale entry's <c>layerId</c> may no longer denote the same semantic layer — and pre-S83,
-        /// <see cref="StyleToken"/> is a constant default shared by every style, so without this clear a
-        /// restyle could get a false HIT serving a PRIOR style's baked geometry under a coincidentally-
-        /// matching <c>(tileId, layerId)</c>. Also called by <see cref="Dispose"/> (teardown).
+        /// <see cref="IDisposable"/> teardown). Called by <see cref="Dispose"/> (teardown) and by
+        /// <c>TileManager</c>'s tile-buffer-clip purge (a bake-parameter change, unrelated to restyle).
         /// </summary>
         internal void Clear()
         {

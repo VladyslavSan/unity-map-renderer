@@ -10,9 +10,11 @@
 //   (A) STYLE-BOUND — genuine `text-halo-*` spec terms; production S105 binds these by name.
 //   (B) INTERNAL    — engine plumbing (SDF threshold, AA, per-frame screen size). Names avoid every
 //                     `text-*`/`symbol-*` style-spec term so a future style binding can never collide.
-// `text-color`/`text-opacity` are NOT material properties at all — Slice 1 (and S105) bake them into the
-// per-vertex COLOR stream instead (mirrors how `line-color` already rides vertex color in
-// StyledLineTileBuilder), so there is nothing here to collide with those two terms either.
+// `text-color`/`text-opacity`: a two-carrier split (style-transitions epic). A CONSTANT `text-color` rides
+// `_TextColor` below — a multiplier, identity white — so it can ease across a restyle; every other kind
+// (Zoom/Feature/Composite) still bakes into the per-vertex COLOR stream (mirrors how `line-color` rides
+// vertex color in StyledLineTileBuilder), which then carries white for exactly the constant arm.
+// `text-opacity` is unchanged — it still rides the vertex opacity stream, never a uniform.
 
 #ifndef MAP_SYMBOL_INPUT_INCLUDED
 #define MAP_SYMBOL_INPUT_INCLUDED
@@ -45,6 +47,10 @@ float _SdfPixelRange;
 float4 _HaloColor;
 float  _HaloWidthPx;
 float  _HaloBlurPx;
+// _TextColor — text-color, CONSTANT kind only (see this file's header). A multiplier over the vertex COLOR
+// stream; identity white. Default MUST stay white (SymbolTextWorld.shader) — every other expression kind
+// leaves this at white and carries its colour in the vertex instead.
+float4 _TextColor;
 CBUFFER_END
 
 // Stage M: a Texture2DArray — one layer per GlyphAtlas page. Single-page maps (the invariant: any map

@@ -211,5 +211,52 @@ namespace MapRenderer.Tests.Json
                 "…and the canonical text does NOT collide. Keying SourceKey on ToString is the defect this " +
                 "type replaces: two different inline datasets would be one source.");
         }
+
+        // ── Digest (UMR-95): the prepared-cache token wraps Write's canonical text in a short hash ──────
+
+        /// <summary>Digest inherits Write's key-order insensitivity — two DOMs with the same values in
+        /// different key order must fold to the same token, or an equivalent style re-parsed in a different
+        /// member order would look like a new cache key and rebuild every tile for nothing.</summary>
+        [Test]
+        public void Digest_IsKeyOrderInvariant()
+        {
+            Assert.AreEqual(
+                JsonCanonical.Digest("style", Obj(("a", Num(1)), ("b", Num(2))), "extra"),
+                JsonCanonical.Digest("style", Obj(("b", Num(2)), ("a", Num(1))), "extra"),
+                "the same document authored in two member orders must digest to ONE token");
+        }
+
+        /// <summary>A changed value must digest differently, or two distinct styles would collide onto one
+        /// cache token and the second would serve the first's stale bake.</summary>
+        [Test]
+        public void Digest_IsSensitiveToContent()
+        {
+            Assert.AreNotEqual(
+                JsonCanonical.Digest("style", Obj(("a", Num(1))), "extra"),
+                JsonCanonical.Digest("style", Obj(("a", Num(2))), "extra"),
+                "a changed value must produce a different digest");
+        }
+
+        /// <summary><paramref name="extra"/>'s own role: with the JSON content held fixed, a different
+        /// <c>extra</c> (the layer-numbering/FillAntialiasing fold in production) must still change the
+        /// token, or a numbering shift under unchanged style content would serve a stale bake.</summary>
+        [Test]
+        public void Digest_ExtraComponent_SeparatesEqualContent()
+        {
+            JsonValue value = Obj(("a", Num(1)));
+            Assert.AreNotEqual(
+                JsonCanonical.Digest("style", value, "numbering=1"),
+                JsonCanonical.Digest("style", value, "numbering=2"),
+                "the same content under a different `extra` must digest differently");
+        }
+
+        /// <summary>A null <paramref name="value"/> would collide with any other null-Root document sharing
+        /// the same prefix — see <see cref="JsonCanonical.Digest"/>'s own doc — so it must fail loud rather
+        /// than silently mint a shared token.</summary>
+        [Test]
+        public void Digest_NullValue_Throws()
+        {
+            Assert.Throws<System.ArgumentNullException>(() => JsonCanonical.Digest("style", null, "extra"));
+        }
     }
 }

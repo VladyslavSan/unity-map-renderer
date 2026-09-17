@@ -302,9 +302,10 @@ void LitPassFragment(
 
     // [MAP DELTA] fill-pattern: the sprite REPLACES the layer colour — per the Style Spec, fill-color is not
     // used AT ALL on a pattern layer, so both the vColor bake and _BaseColor are overwritten rather than
-    // tinted (a pattern layer's vColor carries fill-color's spec default, opaque black — the very thing that
-    // used to paint these layers black). fill-opacity still applies: it is the one paint property that
-    // survives, so _Opacity is re-applied here on top of the sprite's own alpha.
+    // tinted (a pattern layer's fill-color is Constant/Zoom, so its spec default, opaque black, now rides
+    // _BaseColor and leaves vColor white — _BaseColor is the one that used to paint these layers black).
+    // fill-opacity still applies: it is the one paint property that survives, so _Opacity is re-applied
+    // here on top of the sprite's own alpha.
     bool  patternClipped;
     half4 patternTexel = SampleFillPattern(input.uv, patternClipped);
     clip(patternClipped ? -1.0 : 1.0);

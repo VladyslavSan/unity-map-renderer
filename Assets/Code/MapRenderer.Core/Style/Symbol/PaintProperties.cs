@@ -13,9 +13,10 @@ namespace MapRenderer.Core.Style.Symbol
     /// <c>Fill</c> do. Engine-free; clean-room (public Style Spec §symbol paint).
     /// <c>icon-color</c> and the <c>icon-halo-*</c> trio are deferred to the SDF epic.
     ///
-    /// <para>How each is consumed (S20/S105 F1): <see cref="Color"/>/<see cref="Opacity"/> bake into the
-    /// per-vertex billboard COLOUR stream (works for constant AND data-driven); the halo trio binds by name
-    /// onto the per-layer material's <c>_HaloColor</c>/<c>_HaloWidthPx</c>/<c>_HaloBlurPx</c> uniforms
+    /// <para>How each is consumed (S20/S105 F1, split per the style-transitions epic): a CONSTANT
+    /// <see cref="Color"/> binds to the per-layer <c>_TextColor</c> uniform; every other kind bakes into the
+    /// per-vertex billboard COLOUR stream instead. <see cref="Opacity"/> always bakes into the vertex
+    /// stream. The halo trio binds by name onto <c>_HaloColor</c>/<c>_HaloWidthPx</c>/<c>_HaloBlurPx</c>
     /// (constant/zoom only in the first cut). <see cref="IconOpacity"/> is parsed here; consumption
     /// (icon quad alpha) is a later stage.</para>
     /// </summary>

@@ -1,5 +1,7 @@
 using System.Collections.Generic;
+using Unity.Mathematics;
 using UnityEngine;
+using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Rendering;
@@ -14,8 +16,8 @@ namespace MapRenderer.Unity.Rendering.Style
     ///
     /// <para>ARCHITECTURE §"Layer ordering": the style is an ordered list of layers composited in declared
     /// order. This holds exactly that — ONE <see cref="List{IRenderLayer}"/> containing ALL painted layers
-    /// (fill, line, symbol, background — D7 global numbering, the render-layer model), in declared order,
-    /// where <c>index == DrawIndex == draw order == material index</c>. The old
+    /// (fill, line, symbol, background — D7 global numbering, the render-layer model), where
+    /// <c>index == DrawIndex == SLOT == material index</c>; draw order rides <c>renderQueue</c>. The old
     /// fill/line split (<c>_fills</c>/<c>_lines</c>, the fills-then-lines <c>materialIndex = FillCount + li</c>
     /// flatten, and the "fills first" comments) is gone: every kind is just an <see cref="IRenderLayer"/>
     /// implementation in one list, and a new layer type drops in via <see cref="RenderLayerFactory"/> with no
@@ -53,17 +55,19 @@ namespace MapRenderer.Unity.Rendering.Style
         private SpriteAtlasView _spriteAtlas;
         private Texture2D       _spriteTexture;
 
-        /// <summary>Number of render layers (declared, renderable). <c>index == draw order == material index</c>.</summary>
+        /// <summary>Number of render-layer SLOTS — every consumer indexes by slot, including a vacated one
+        /// (a <see cref="TombstoneRenderLayer"/>). <c>index == slot == material index</c>, no longer
+        /// <c>== draw order</c> after a partial-survival reorder (see <see cref="TryRestyleInPlace"/>).</summary>
         public int Count => _layers.Count;
 
         /// <summary>The shared Hierarchy parent for the layers' scene GameObjects (null before the first
         /// <see cref="Build"/> / after <see cref="Dispose"/>). Tests read the live grouping through it.</summary>
         internal Transform Root => _root != null ? _root.transform : null;
 
-        /// <summary>The render layer at declared-order <paramref name="index"/>.</summary>
+        /// <summary>The render layer at SLOT <paramref name="index"/>.</summary>
         public IRenderLayer this[int index] => _layers[index];
 
-        /// <summary>The render layers in declared order (read-only view).</summary>
+        /// <summary>The render layers in SLOT order (read-only view).</summary>
         public IReadOnlyList<IRenderLayer> Layers => _layers;
 
         /// <summary>Snapshot copy for an async mesh-build task (so the list can't mutate mid-flight).</summary>
@@ -73,6 +77,25 @@ namespace MapRenderer.Unity.Rendering.Style
         /// skipped, with its reason. Rebuilt from scratch on every <see cref="Build"/>, including a
         /// restyle — an old style's skips stop applying the moment a new style replaces it.</summary>
         public IReadOnlyList<SkippedLayer> SkippedLayers => _skippedLayers;
+
+        /// <summary>
+        /// One slot's fade ease. Lives HERE, not on the layer: the target comes from the style layer's zoom
+        /// range, the duration from the frame's <see cref="StyleFrameInputs.Transition"/> and the instant
+        /// from the frame — none of the three is any one layer's, so no transition and no clock cross
+        /// <see cref="IFadeableRenderLayer"/>.
+        /// </summary>
+        private struct LayerFade
+        {
+            public float  Current;
+            public float  Origin;
+            public float  Target;
+            public double StartSeconds;      // armed-at + delay
+            public double DurationSeconds;
+        }
+
+        // Index-aligned with _layers. Build appends one per slot and ClearLayers empties it; a restyle
+        // replaces a slot IN PLACE (including with a tombstone), so the two lists can never drift.
+        private readonly List<LayerFade> _fades = new List<LayerFade>();
 
         /// <summary>
         /// Builds the render layers from <paramref name="style"/>. Draw order IS the style's declared layer
@@ -85,7 +108,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// symbol layer's text, so it draws over that same layer's icon (G7/D7 — written separately by
         /// <see cref="SymbolRenderLayer.Create"/>, since the icon has no Build-time free ride).
         /// The list contains ALL painted layers — fill, line, symbol, background — with
-        /// <c>index == DrawIndex == draw order == material index</c>; every slot is material-bearing when
+        /// <c>index == DrawIndex == SLOT == material index</c>; every slot is material-bearing when
         /// its base material is configured (symbol as of E2/D11, background as of E3). A layer that takes no
         /// slot — an unsupported kind, an unconfigured material, or a by-design skip (a source-less symbol
         /// layer) — is recorded in <see cref="SkippedLayers"/> with which, instead of silently dropped
@@ -115,9 +138,12 @@ namespace MapRenderer.Unity.Rendering.Style
                     continue;
                 }
 
-                if (layer.Material != null) // null only when that slot's own base material is unconfigured — skip the queue write
-                    layer.Material.renderQueue = LayerDrawOrder.QueueFor(drawIndex, layer.MaterialSubSlot);
+                layer.SetDrawOrder(drawIndex); // no-op when that slot's own base material is unconfigured
                 _layers.Add(layer);
+                // Seeded from the SAME predicate each TryCreate hands ZoomStyleApplier.SeedFade, so this
+                // ease and the material's multiplier agree on the first frame by construction.
+                float seed = sl.IsVisibleAtZoom(initialZoom) ? 1f : 0f;
+                _fades.Add(new LayerFade { Current = seed, Origin = seed, Target = seed });
                 drawIndex++;
             }
         }
@@ -143,10 +169,163 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <see cref="RenderLayerFactory"/>'s four Create/TryCreate overloads would churn 8 call sites for
         /// the same guarantee.</para>
         /// </summary>
-        public void ApplyZoom(double zoom, double devicePixelRatio)
+        public void ApplyZoom(in StyleFrameInputs inputs)
         {
             for (int i = 0; i < _layers.Count; i++)
-                _layers[i].ApplyZoom(zoom, devicePixelRatio);
+            {
+                // The minzoom/maxzoom/visibility draw gate. The `is` test excludes a tombstone without a null
+                // check, and no real kind carries a null StyleLayer; Restyle moves StyleLayer forward.
+                if (_layers[i] is IFadeableRenderLayer fadeable)
+                    fadeable.SetFade(AdvanceFade(i, fadeable, inputs.Zoom, inputs.NowSeconds, inputs.Transition));
+                _layers[i].ApplyZoom(inputs);
+            }
+        }
+
+        /// <summary>
+        /// Moves slot <paramref name="index"/>'s fade toward the amount its zoom range implies, and returns
+        /// the resolved value. Re-arms only when the target actually changes, so a settled frame costs one
+        /// float compare. A layer that declares <see cref="IFadeableRenderLayer.FadesGradually"/> false eases
+        /// over no duration at all, so it lands on its target the frame the target moves.
+        /// </summary>
+        /// <param name="index">The slot, which is also this fade's index.</param>
+        /// <param name="layer">The slot's own layer, read for its <see cref="IRenderLayer.StyleLayer"/>
+        /// zoom range and its <see cref="IFadeableRenderLayer.FadesGradually"/> declaration.</param>
+        /// <param name="zoom">The live camera zoom the target is evaluated at.</param>
+        /// <param name="nowSeconds">The live wall clock, for arming and advancing the ease.</param>
+        /// <param name="transition">This frame's ease duration/delay, from <see cref="StyleFrameInputs.Transition"/>.</param>
+        /// <returns>The fade amount to apply this frame, 0 to 1.</returns>
+        private float AdvanceFade(
+            int index, IFadeableRenderLayer layer, double zoom, double nowSeconds, StyleTransition transition)
+        {
+            LayerFade f = _fades[index];
+            float target = layer.StyleLayer.IsVisibleAtZoom(zoom) ? 1f : 0f;
+
+            if (target != f.Target)
+            {
+                StyleTransition arm = layer.FadesGradually ? transition : StyleTransition.Instant;
+                f.Origin          = f.Current;
+                f.Target          = target;
+                f.StartSeconds    = nowSeconds + arm.DelaySeconds;
+                f.DurationSeconds = arm.DurationSeconds;
+            }
+
+            if (f.Current != f.Target)
+            {
+                double elapsed = nowSeconds - f.StartSeconds;
+                if (elapsed >= 0.0)   // delay holds on the wall clock, as the paint bindings' ease does
+                {
+                    double t = f.DurationSeconds <= 0.0 ? 1.0 : math.saturate(elapsed / f.DurationSeconds);
+                    f.Current = t >= 1.0
+                        ? f.Target    // settle EXACTLY on the target, never a lerp endpoint
+                        : math.lerp(f.Origin, f.Target, (float)math.smoothstep(0.0, 1.0, t));
+                }
+            }
+
+            _fades[index] = f;
+            return f.Current;
+        }
+
+        /// <summary>Entries currently easing, summed across every layer. No production consumer — see
+        /// <see cref="IRenderLayer.TransitioningCount"/> for why it stays anyway.</summary>
+        internal int TransitioningCount
+        {
+            get
+            {
+                int n = 0;
+                for (int i = 0; i < _layers.Count; i++)
+                    n += _layers[i].TransitioningCount;
+                return n;
+            }
+        }
+
+        /// <summary>
+        /// Style-transitions epic, Stage 3 (UMR-151): an ID-KEYED diff — the exits are named and explained
+        /// in `docs/tile-pipeline-design.md` §1.10. Returns <c>false</c> (unmodified) on ANY refusal — the
+        /// two-pass shape below (classify fully, THEN mutate) is what makes that contract hold.
+        /// </summary>
+        /// <param name="oldStyle">The document these render layers were last built (or restyled) from.</param>
+        /// <param name="newStyle">The candidate replacement document.</param>
+        /// <param name="transition">The duration/delay newly-differing uniforms ease over.</param>
+        /// <param name="nowSeconds">The restyle's wall-clock instant (armed-at, before any delay).</param>
+        internal bool TryRestyleInPlace(StyleDocument oldStyle, StyleDocument newStyle,
+            in StyleTransition transition, double nowSeconds)
+        {
+            if (!SurvivingLayerGate.RootMatches(oldStyle, newStyle)) return false;
+
+            // Old side: id -> slot, over RENDERED layers only — _layers is shorter than oldStyle.Layers
+            // whenever Build skipped one (§1.10). A null id cannot be matched, so refuse closed.
+            var oldSlotById = new Dictionary<string, int>(_layers.Count);
+            for (int i = 0; i < _layers.Count; i++)
+            {
+                StyleLayer sl = _layers[i].StyleLayer;
+                if (sl == null) continue; // an already-vacated slot (a prior restyle's tombstone)
+                if (sl.Id == null) return false;
+                oldSlotById[sl.Id] = i;
+            }
+
+            // Old side, DECLARED but never rendered (e.g. `raster`) — keyed the same way so an unchanged
+            // skipped layer is told apart from a genuine ADD below (§1.10, exit 1). No slot to track.
+            var oldDeclaredById = new Dictionary<string, StyleLayer>(oldStyle.Layers.Count);
+            for (int i = 0; i < oldStyle.Layers.Count; i++)
+            {
+                StyleLayer sl = oldStyle.Layers[i];
+                if (sl.Id != null) oldDeclaredById[sl.Id] = sl;
+            }
+
+            // New side, in declared order, classified against the old set. READ-ONLY: only the pass below
+            // writes _layers, which is what makes a mid-walk refusal leave it unmodified.
+            var survivors = new List<(int slot, int declaredOrder, StyleLayer newLayer)>(newStyle.Layers.Count);
+            var claimedSlots = new HashSet<int>();
+            for (int declaredOrder = 0; declaredOrder < newStyle.Layers.Count; declaredOrder++)
+            {
+                StyleLayer newLayer = newStyle.Layers[declaredOrder];
+                if (newLayer.Id != null && oldSlotById.TryGetValue(newLayer.Id, out int slot))
+                {
+                    if (!SurvivingLayerGate.LayerSurvives(_layers[slot].StyleLayer, newLayer))
+                        return false; // a MESH-AFFECTING change — falls through to the full rebuild
+                    survivors.Add((slot, declaredOrder, newLayer));
+                    claimedSlots.Add(slot);
+                    continue;
+                }
+
+                // Not a rendered survivor: ignore an unrendered layer carried over unchanged, refuse a
+                // genuine ADD or a changed unrendered one — this diff cannot tell if it would now render.
+                if (newLayer.Id == null
+                 || !oldDeclaredById.TryGetValue(newLayer.Id, out StyleLayer oldDeclared)
+                 || JsonCanonical.Write(oldDeclared.Raw) != JsonCanonical.Write(newLayer.Raw))
+                    return false;
+            }
+
+            // Removal fence, by predicate (still read-only): refuse when a removed slot's layer is referenced
+            // by a list this arm never refreshes — MapView._symbolRenderLayers is the only one (§1.10, UMR-152).
+            for (int i = 0; i < _layers.Count; i++)
+                if (_layers[i] is SymbolRenderLayer && !claimedSlots.Contains(i)) return false;
+
+            // Only now mutate. Any old slot not claimed above is a removal.
+            foreach (var (slot, declaredOrder, newLayer) in survivors)
+            {
+                _layers[slot].Restyle(newLayer, transition, nowSeconds);
+                _layers[slot].SetDrawOrder(declaredOrder);
+            }
+            for (int i = 0; i < _layers.Count; i++)
+            {
+                if (_layers[i].StyleLayer == null) continue; // already a tombstone
+                if (claimedSlots.Contains(i)) continue;
+                _layers[i].Dispose();
+                _layers[i] = new TombstoneRenderLayer(i);
+            }
+
+            // Re-push the sprite sheet in the SAME call, not by clearing the memo alone: re-binding just ran
+            // MaterialFactory's direct writes again, which zeroes _PatternRect — the memo below would then
+            // suppress the re-resolve and a pattern layer would render clipped until the sheet reference
+            // next changes, which may be never.
+            SpriteAtlasView atlas = _spriteAtlas;
+            Texture2D       tex   = _spriteTexture;
+            _spriteAtlas   = null;
+            _spriteTexture = null;
+            SetSprites(atlas, tex);
+
+            return true;
         }
 
         /// <summary>
@@ -182,6 +361,7 @@ namespace MapRenderer.Unity.Rendering.Style
             for (int i = 0; i < _layers.Count; i++)
                 _layers[i].Dispose();
             _layers.Clear();
+            _fades.Clear();
             _skippedLayers.Clear(); // the compatibility summary belongs to the CURRENT style only
             // Drop the memo with the layers it described: the replacements start unresolved, so a sheet that
             // arrived before this restyle must be pushed again rather than compared away as "unchanged".

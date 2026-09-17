@@ -95,10 +95,11 @@ namespace MapRenderer.Tests.Tiles
         public void TwoStyles_Coexist_NoCrossContamination()
         {
             // Genuinely DIFFERENT-colored styles per styleId (stronger than two tokens over identical
-            // synthetic geometry): interp-fill-style.json (zoom-interpolated, red<->blue) vs
-            // coexist-fill-style.json (constant green), both over the same fixture tile/layer.
+            // synthetic geometry): interp-fill-composite-style.json (zoom-interpolated CONTINENT match,
+            // still Composite-kind so the bake still runs post-Stage-1) vs coexist-fill-style.json
+            // (constant green — Stage 1 bakes this white), both over the same fixture tile/layer.
             byte[] bytes  = SampleTileFixture.Bytes();
-            var styleDocA = LoadStyle("interp-fill-style.json");
+            var styleDocA = LoadStyle("interp-fill-composite-style.json");
             var styleDocB = LoadStyle("coexist-fill-style.json");
             Mesh meshA = BuildFillMesh(bytes, styleDocA, Tile0, zoom: 3.0);
             Mesh meshB = BuildFillMesh(bytes, styleDocB, Tile0, zoom: 3.0);

@@ -30,18 +30,19 @@ namespace MapRenderer.Unity.Rendering.Style
     /// Axes (design §"Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> /
     /// <see cref="DrawPersistence.Persistent"/>.
     /// </summary>
-    internal sealed class FillExtrusionRenderLayer : ITileMeshRenderLayer
+    internal sealed class FillExtrusionRenderLayer : ITileMeshRenderLayer, IFadeableRenderLayer
     {
         private readonly ZoomStyleApplier _applier;
-        private readonly FillExtrusion.PaintProperties _paint;
+        private FillExtrusion.PaintProperties _paint;
 
-        public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; }
+        public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; private set; }
         public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
         public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.On;
         public Material                          Material    { get; }
+        public int                               TransitioningCount => _applier.TransitioningCount;
 
         private FillExtrusionRenderLayer(
             FillExtrusion.StyleLayer layer, Material material, ZoomStyleApplier applier, int drawIndex)
@@ -62,7 +63,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <param name="layer">The parsed fill-extrusion style layer.</param>
         /// <param name="settings">The material set to clone the FILL-EXTRUSION base material from.</param>
         /// <param name="initialZoom">The zoom to seed the first uniform push at.</param>
-        /// <param name="drawIndex">This layer's global draw slot (D7), threaded straight into the instance.</param>
+        /// <param name="drawIndex">This layer's global SLOT (D7), threaded straight into the instance.</param>
         /// <returns>The new render layer, or <c>null</c> when the material set is unconfigured.</returns>
         public static FillExtrusionRenderLayer TryCreate(
             FillExtrusion.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)
@@ -71,14 +72,50 @@ namespace MapRenderer.Unity.Rendering.Style
             if (mat == null) return null;
 
             var applier = new ZoomStyleApplier(mat);
+            // BEFORE the paint bind: a Constant opacity is pushed once at bind time and then skipped
+            // forever, so an unscaled bind-time push would make a seeded fade of 0 invisible.
+            applier.SeedFade(layer.IsVisibleAtZoom(initialZoom) ? 1f : 0f);
             Materials.MaterialFactory.BindFillExtrusionPaintToApplier(layer.Paint, applier, mat);
             // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
             // (RenderLayerSet.ApplyZoom's contract).
-            applier.ApplyZoom(initialZoom, 1.0);
+            applier.ApplyZoom(new StyleFrameInputs(initialZoom, 1.0, 0.0));
             return new FillExtrusionRenderLayer(layer, mat, applier, drawIndex);
         }
 
-        public void ApplyZoom(double zoom, double devicePixelRatio) => _applier.ApplyZoom(zoom, devicePixelRatio);
+        /// <summary>
+        /// False: <see cref="Materials.FillExtrusionTweaker.ApplyElevatedContract"/> blends
+        /// <c>One/Zero</c> with depth write, so alpha is discarded and a part-faded building would render
+        /// SOLID. This kind is fully drawn or fully absent, never part-way.
+        /// </summary>
+        public bool FadesGradually => false;
+
+        /// <inheritdoc cref="IFadeableRenderLayer.SetFade"/>
+        public void SetFade(float amount) => _applier.SetFade(amount);
+
+        /// <inheritdoc cref="IFadeableRenderLayer.PaintsSomething"/>
+        public bool PaintsSomething => !_applier.EffectiveOpacityIsZero;
+
+        public void ApplyZoom(in StyleFrameInputs inputs) => _applier.ApplyZoom(inputs);
+
+        /// <summary>
+        /// Re-targets this layer's uniform bindings at <paramref name="layer"/> — the survivor gate has
+        /// already proven its mesh-affecting content unchanged.
+        /// </summary>
+        public void Restyle(MapRenderer.Core.Style.StyleLayer layer, in StyleTransition transition, double nowSeconds)
+        {
+            var typed = (FillExtrusion.StyleLayer)layer;
+            StyleLayer = typed;
+            _paint     = typed.Paint;
+            _applier.SetTransition(transition, nowSeconds);
+            Materials.MaterialFactory.BindFillExtrusionPaintToApplier(_paint, _applier, Material);
+        }
+
+        /// <inheritdoc cref="IRenderLayer.SetDrawOrder"/>
+        public void SetDrawOrder(int declaredOrder)
+        {
+            if (Material != null)
+                Material.renderQueue = LayerDrawOrder.QueueFor(declaredOrder, MaterialSubSlot);
+        }
 
         // job-scheduling-design.md §8 stage 4: mirrors FillRenderLayer.BuildGraphRequest's shape — the
         // graph's write step does the mesh write.

@@ -1,3 +1,8 @@
+// RUN THIS FIXTURE ONLY IN A FULL `./Tools/run-tests.sh`. Under -testFilter it reds 16 of 19 for reasons
+// unrelated to the code under test: every case reads ZERO darkening, including the stock-URP rung that
+// uses none of our shaders. A GPU context IS present (PaintColorRenderTests renders green in the same
+// session), so NoGpuContext does not fire and the failures look real. docs/lessons-learned.md carries
+// the discriminator.
 // Unity EditMode only — off-screen GPU render (SnapshotRenderer). NOT registered in core-tests.csproj.
 //
 // A LADDER, not a single assertion. Building shadows render into the shadow map (confirmed in the Frame

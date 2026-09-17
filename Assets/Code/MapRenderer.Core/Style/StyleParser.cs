@@ -169,6 +169,10 @@ namespace MapRenderer.Core.Style
             layer.MinZoom = json.GetNullableDouble("minzoom");
             layer.MaxZoom = json.GetNullableDouble("maxzoom");
 
+            // visibility is kind-agnostic, so it belongs on the base beside minzoom, not in a per-kind
+            // LayoutProperties. Absent or any value but "none" means visible, which the == gives for free.
+            layer.Hidden = layoutJson?.GetString("visibility") == "none";
+
             // Raw sub-tree retained verbatim (null if the key is absent).
             layer.Filter = json.Get("filter");
 

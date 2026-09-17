@@ -79,11 +79,52 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Routes a tile release to the slot's owning pipeline — a no-op on the source-less slot.</summary>
         public void ReleaseTile(int slot, TileId id) => _pipelines[slot].FeatureSource?.Release(id);
 
+        /// <summary>
+        /// The "nothing would change" predicate of <see cref="Rebuild"/> — true iff calling it with the
+        /// same arguments would keep every pipeline and add none: same count, same order, and for each
+        /// real slot <c>SourceId</c>/resolved <c>DefKey</c>/<c>MinZoom</c>/<c>MaxZoom</c> all equal.
+        /// Kept in step with <see cref="Rebuild"/> deliberately — placed directly above it so the two
+        /// read together.
+        ///
+        /// <para>Compares the RESOLVED specs, not the raw style JSON <c>sources</c> object: a <c>url</c>
+        /// source resolves through a TileJSON fetch, so two documents with byte-identical raw
+        /// <c>sources</c> can still resolve to different specs, and two with different raw JSON can
+        /// resolve to the same ones. Both this check and the raw-JSON one in
+        /// <see cref="MapRenderer.Unity.Rendering.Style.SurvivingLayerGate"/> are cheap and both fail closed.</para>
+        /// </summary>
+        internal bool Matches(IReadOnlyList<TileManager.SourceSpec> specs, bool hasBackground)
+        {
+            int expectedCount = specs.Count + (hasBackground ? 1 : 0);
+            if (_pipelines.Count != expectedCount) return false;
+
+            for (int i = 0; i < specs.Count; i++)
+            {
+                SourcePipeline p = _pipelines[i];
+                TileManager.SourceSpec spec = specs[i];
+                if (p.SourceId != spec.SourceId) return false;
+                if (!p.DefKey.Equals(spec.Key)) return false;
+                if (p.MinZoom != spec.MinZoom || p.MaxZoom != spec.MaxZoom) return false;
+            }
+
+            return !hasBackground || _pipelines[_pipelines.Count - 1].IsSourceless;
+        }
+
         /// <summary>Diffs the registry against <paramref name="specs"/> by (SourceId, resolved Key),
         /// keeping unchanged pipelines and disposing removed ones, then commits stable slots
-        /// <c>0..N-1</c> and appends the source-less slot last if <paramref name="hasBackground"/>.</summary>
-        public void Rebuild(IReadOnlyList<TileManager.SourceSpec> specs, bool hasBackground)
+        /// <c>0..N-1</c> and appends the source-less slot last if <paramref name="hasBackground"/>.
+        /// Returns the OLD-slot → NEW-slot map (<c>-1</c> for a departed pipeline) — UMR-151, see
+        /// `docs/tile-pipeline-design.md` §1.10.</summary>
+        public int[] Rebuild(IReadOnlyList<TileManager.SourceSpec> specs, bool hasBackground)
         {
+            int oldCount = _pipelines.Count;
+            var oldSlotOf = new Dictionary<SourcePipeline, int>(oldCount);
+            for (int i = 0; i < oldCount; i++) oldSlotOf[_pipelines[i]] = i;
+
+            // The synthetic background pipeline holds no resource, but its IDENTITY must survive an
+            // unchanged-background restyle or its slot reads as departed below (§1.10).
+            SourcePipeline oldBackground = oldCount > 0 && _pipelines[oldCount - 1].IsSourceless
+                ? _pipelines[oldCount - 1] : null;
+
             var kept    = new List<SourcePipeline>(specs.Count);
             var keptOld = new HashSet<SourcePipeline>();
             for (int i = 0; i < specs.Count; i++)
@@ -107,28 +148,38 @@ namespace MapRenderer.Unity.Rendering.Tile
                 }
             }
 
+            SourcePipeline background = null;
+            if (hasBackground)
+            {
+                background = oldBackground ?? new SourcePipeline
+                {
+                    // Source left null ⇒ IsSourceless is true (computed). The synthetic background pipeline.
+                    SourceId = string.Empty,
+                    MinZoom  = int.MinValue, MaxZoom = int.MaxValue,
+                };
+                if (oldBackground != null) keptOld.Add(oldBackground);
+            }
+
             // Pipeline-teardown removed sources: dispose the feature source — fetch, scheduler and cache all live inside it now.
             for (int i = 0; i < _pipelines.Count; i++)
             {
                 var p = _pipelines[i];
                 if (keptOld.Contains(p)) continue;
-                p.FeatureSource?.Dispose();
+                p.FeatureSource?.Dispose(); // no-op for the departing background pipeline (null FeatureSource)
             }
 
             // Commit the new registry with stable slots 0..N-1 — the slot IS the index, nothing stores it twice.
             _pipelines.Clear();
             for (int i = 0; i < kept.Count; i++)
                 _pipelines.Add(kept[i]);
+            if (background != null) _pipelines.Add(background);
 
-            if (hasBackground)
-            {
-                _pipelines.Add(new SourcePipeline
-                {
-                    // Source left null ⇒ IsSourceless is true (computed). The synthetic background pipeline.
-                    SourceId = string.Empty,
-                    MinZoom  = int.MinValue, MaxZoom = int.MaxValue,
-                });
-            }
+            var slotMap = new int[oldCount];
+            for (int i = 0; i < oldCount; i++) slotMap[i] = -1;
+            for (int newSlot = 0; newSlot < _pipelines.Count; newSlot++)
+                if (oldSlotOf.TryGetValue(_pipelines[newSlot], out int oldSlot))
+                    slotMap[oldSlot] = newSlot;
+            return slotMap;
         }
 
         /// <summary>The existing pipeline with this source-id AND matching resolved key, or null.</summary>

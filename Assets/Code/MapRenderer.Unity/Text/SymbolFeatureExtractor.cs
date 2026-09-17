@@ -21,6 +21,7 @@ using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Unity.Text
 {
@@ -335,9 +336,6 @@ namespace MapRenderer.Unity.Text
                     {
                         TextColor   = new float4(1f, 1f, 1f, 1f),
                         Opacity     = iconOpacity,
-                        HaloColor   = new float4(1f, 1f, 1f, 1f),
-                        HaloWidthPx = 0f,
-                        HaloBlurPx  = 0f,
                     };
                 }
 
@@ -885,14 +883,15 @@ namespace MapRenderer.Unity.Text
         private static SymbolPaint EvaluatePaint(PaintProperties paint, double zoom, IFeature feature)
         {
             Color textColor = paint.Color.Evaluate(zoom, feature);
-            Color haloColor = paint.HaloColor.Evaluate(zoom, feature);
+            float4 textRgba = ToFloat4(textColor);
+            // Complement of SymbolRenderLayer.BindTextPaint: a CONSTANT rides _TextColor, so the vertex
+            // stays white rgb and the fragment's uniform x vertex product is the colour ONCE. Alpha is untouched.
+            if (SymbolTextColorCarrier.RidesUniform(paint.Color))
+                textRgba = new float4(1f, 1f, 1f, textRgba.w);
             return new SymbolPaint
             {
-                TextColor   = ToFloat4(textColor),
+                TextColor   = textRgba,
                 Opacity     = paint.Opacity.Evaluate(zoom, feature),
-                HaloColor   = ToFloat4(haloColor),
-                HaloWidthPx = paint.HaloWidth.Evaluate(zoom, feature),
-                HaloBlurPx  = paint.HaloBlur.Evaluate(zoom, feature),
             };
         }
 

@@ -229,8 +229,10 @@ namespace MapRenderer.App
         /// (<c>file://</c>, <c>http://</c>, <c>https://</c>) is used verbatim; a bare relative path is
         /// resolved under <c>Application.streamingAssetsPath</c> as a <c>file://</c> URI (so the shipped
         /// liberty.json loads fully offline in a standalone build).
+        /// <c>internal</c>: UMR-143's <see cref="Menu.StylesPage"/> shares this resolution so a runtime
+        /// style switch and startup load agree on the same URI for the same bare path.
         /// </summary>
-        private static string ResolveStyleUri(string styleUri)
+        internal static string ResolveStyleUri(string styleUri)
         {
             if (string.IsNullOrEmpty(styleUri)) styleUri = "Fixtures/liberty.json";
             if (styleUri.StartsWith("file://") || styleUri.StartsWith("http://") || styleUri.StartsWith("https://"))

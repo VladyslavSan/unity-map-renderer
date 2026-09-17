@@ -616,7 +616,6 @@ namespace MapRenderer.Tests.Text.Placement
         private static SymbolPaint SymbolPaintWhite() => new SymbolPaint
         {
             TextColor = new float4(1f, 1f, 1f, 1f), Opacity = 1f,
-            HaloColor = default, HaloWidthPx = 0f, HaloBlurPx = 0f,
         };
 
         /// <summary>

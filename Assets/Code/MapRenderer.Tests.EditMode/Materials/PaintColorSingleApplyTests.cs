@@ -11,9 +11,9 @@
 // these teeth pin is one carrier per case — constant/zoom → the uniform, data-driven → the stream, the other
 // side left at white — in ALPHA as well as rgb.
 //
-// `fill` runs the OPPOSITE, also-coherent contract (colour only ever in the stream; BindFillPaintToApplier
-// never touches _BaseColor), which is why it has its own row here: a gate generalised across all three
-// builders would break it.
+// `fill` now runs the SAME contract as `line` and `fill-extrusion` — constant/zoom rides `_BaseColor`,
+// data-driven bakes into the stream. `ConstantFillColor_EffectiveColor_MatchesAuthored` below is fill's
+// row of the shared tooth.
 //
 // The fixture colour is deliberately MID-TONE. Squaring is invisible at white and near-maximal at mid-grey,
 // which is how this survived — every colour fixture that could have caught it was near-white.
@@ -154,7 +154,7 @@ namespace MapRenderer.Tests.Materials
             Assert.IsNotNull(mat, "Map/Line base material must be configured.");
             var applier = new ZoomStyleApplier(mat);
             MaterialFactory.BindLinePaintToApplier(paint, applier, mat);
-            applier.ApplyZoom(Zoom, 1.0);
+            applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
             return mat;
         }
 
@@ -164,7 +164,7 @@ namespace MapRenderer.Tests.Materials
             Assert.IsNotNull(mat, "Map/FillExtrusion base material must be configured.");
             var applier = new ZoomStyleApplier(mat);
             MaterialFactory.BindFillExtrusionPaintToApplier(paint, applier, mat);
-            applier.ApplyZoom(Zoom, 1.0);
+            applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
             return mat;
         }
 
@@ -358,33 +358,103 @@ namespace MapRenderer.Tests.Materials
             finally { Object.DestroyImmediate(mat); if (mesh != null) Object.DestroyImmediate(mesh); }
         }
 
-        // ── Tooth 5 — `fill` runs the opposite contract and must be untouched ────────────────────
+        // ── Tooth 5 — `fill` runs the same contract as line/fill-extrusion ───────────────────────
 
-        /// <summary>
-        /// fill keeps its colour in the COLOR stream for the constant case too, because
-        /// <c>BindFillPaintToApplier</c> never writes <c>_BaseColor</c> — one carrier, the other way round.
-        /// A gate generalised across all three builders would leave fill with NO colour at all.
-        /// </summary>
+        /// <summary>Tooth 1, fill kind. Same composition as the line/fill-extrusion rows above — fill's
+        /// constant/zoom colour now rides <c>_BaseColor</c> too (Stage 1), so the same double-apply hazard
+        /// applies here and the same headline check pins it.</summary>
         [Test]
-        public void ConstantFillColor_IsUnchanged()
+        public void ConstantFillColor_EffectiveColor_MatchesAuthored()
         {
             var paint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":\"{AuthoredHex}\"}}"));
+            Assert.IsFalse(paint.Color.DependsOnFeature,
+                "precondition: the fixture's fill-color must parse as constant, or this row tests the " +
+                "data-driven branch that DataDrivenFillColor_StillVariesPerFeature already covers.");
+
             Material mat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
             Assert.IsNotNull(mat, "Map/Fill base material must be configured.");
             var applier = new ZoomStyleApplier(mat);
             MaterialFactory.BindFillPaintToApplier(paint, applier, mat);
-            applier.ApplyZoom(Zoom, 1.0);
+            applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
 
             Mesh mesh = TestTileMeshBuilder.BuildFill(new[] { SquareFeature(1000) }, paint, Zoom, Extent, Tile);
             try
             {
-                AssertRgbEquals(AuthoredSrgb.linear, StreamColor(mesh, "constant fill-color"),
-                    "fill bakes its constant colour into the COLOR stream — that is fill's contract, not the " +
-                    "defect. Losing it means the gate was generalised past line and fill-extrusion");
+                Color uniform = ShaderBaseColor(mat);
+                Color stream  = StreamColor(mesh, "constant fill-color");
+                Color effective = new Color(uniform.r * stream.r, uniform.g * stream.g, uniform.b * stream.b, 1f);
 
-                AssertRgbEquals(Color.white, mat.GetColor(ShaderProperties.PropertyId.BaseColor),
-                    "fill's _BaseColor is the white identity in EVERY case — BindFillPaintToApplier never " +
-                    "binds it, so a non-white value here means a bind was added and fill now doubles too");
+                AssertRgbEquals(AuthoredSrgb.linear, effective,
+                    $"a CONSTANT fill-color must reach the fragment exactly once. uniform={Fmt(uniform)} " +
+                    $"stream={Fmt(stream)}. Both carrying it renders the colour SQUARED");
+            }
+            finally { Object.DestroyImmediate(mat); if (mesh != null) Object.DestroyImmediate(mesh); }
+        }
+
+        /// <summary>Tooth 4, fill kind. Same shape as the line/fill-extrusion rows above.</summary>
+        [Test]
+        public void DataDrivenFillColor_StillVariesPerFeature()
+        {
+            const string ddColor = "[\"match\",[\"get\",\"cat\"],\"a\",\"#6699CC\",\"b\",\"#CC9966\",\"#000000\"]";
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":{ddColor}}}"));
+            Assert.IsTrue(paint.Color.DependsOnFeature, "precondition: the fixture's fill-color must be data-driven.");
+
+            Material mat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
+            Assert.IsNotNull(mat, "Map/Fill base material must be configured.");
+            var applier = new ZoomStyleApplier(mat);
+            MaterialFactory.BindFillPaintToApplier(paint, applier, mat);
+            applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
+
+            Mesh mesh = TestTileMeshBuilder.BuildFill(
+                new[] { SquareFeature(1000, Cat("a")), SquareFeature(2000, Cat("b")) }, paint, Zoom, Extent, Tile);
+            try
+            {
+                Assert.GreaterOrEqual(DistinctStreamColors(mesh, "data-driven fill-color").Count, 2,
+                    "a data-driven fill-color must still bake ≥2 distinct COLOR-stream values — gating the " +
+                    "bake on the WRONG side of DependsOnFeature trades one branch for the other.");
+
+                Color uniform = mat.GetColor(ShaderProperties.PropertyId.BaseColor);
+                AssertRgbEquals(Color.white, uniform,
+                    "a data-driven fill-color must leave _BaseColor at the white identity — binding it here " +
+                    "would tint every feature and re-create the double-apply on the other branch");
+            }
+            finally { Object.DestroyImmediate(mat); if (mesh != null) Object.DestroyImmediate(mesh); }
+        }
+
+        /// <summary>
+        /// fill's own P4 wrinkle: a CONSTANT fill-color's alpha rides <c>_BaseColor.a</c>, and a data-driven
+        /// fill-opacity is baked into the SAME stream a constant colour would have used. This is where the
+        /// product <c>FillSortKeyAndOpacityTests.DataDrivenOpacity_IsTheStreamsOnlyAlphaCarrier</c> used to
+        /// assert on one carrier now lives — see that test for the mirror.
+        /// </summary>
+        [Test]
+        public void ConstantFillColorAlpha_IsNotAppliedTwice()
+        {
+            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(
+                $"{{\"fill-color\":{AuthoredRgbaHalfAlpha},\"fill-opacity\":[\"get\",\"op\"]}}"));
+            Assert.That((float)paint.Color.Evaluate(Zoom).A, Is.EqualTo(HalfAlpha).Within(Tol),
+                "precondition: the fixture colour must carry the authored alpha 0.5.");
+            Assert.IsTrue(paint.Opacity.DependsOnFeature, "precondition: fill-opacity must be data-driven.");
+
+            Material mat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
+            Assert.IsNotNull(mat, "Map/Fill base material must be configured.");
+            var applier = new ZoomStyleApplier(mat);
+            MaterialFactory.BindFillPaintToApplier(paint, applier, mat);
+            applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
+
+            var props = new Dictionary<string, Value> { { "op", Value.Number(0.4) } };
+            Mesh mesh = TestTileMeshBuilder.BuildFill(new[] { SquareFeature(1000, props) }, paint, Zoom, Extent, Tile);
+            try
+            {
+                float uniformA = mat.GetColor(ShaderProperties.PropertyId.BaseColor).a;
+                float streamA  = StreamColor(mesh, "constant fill-color alpha, data-driven opacity").a;
+                float opacity  = mat.GetFloat(ShaderProperties.PropertyId.Opacity);
+                float composed = uniformA * streamA * opacity;
+
+                Assert.That(composed, Is.EqualTo(0.2f).Within(Tol),
+                    $"a CONSTANT fill-color's authored ALPHA (0.5) × a data-driven fill-opacity (0.4) must " +
+                    $"reach the fragment exactly once each. _BaseColor.a={uniformA:F4} vColor.a={streamA:F4} " +
+                    $"_Opacity={opacity:F4} → {composed:F4}.");
             }
             finally { Object.DestroyImmediate(mat); if (mesh != null) Object.DestroyImmediate(mesh); }
         }

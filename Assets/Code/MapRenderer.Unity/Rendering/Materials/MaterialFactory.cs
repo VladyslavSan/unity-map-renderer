@@ -58,6 +58,12 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// </summary>
         public static void BindFillPaintToApplier(Fill.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
         {
+            // fill-color: Constant/Zoom rides the _BaseColor uniform; data-driven is baked per-feature into
+            // the COLOR stream by StyledFillTileBuilder, which leaves the vertex white for exactly this branch.
+            // The fragment multiplies uniform × vertex in rgb AND alpha, so writing both renders the colour squared.
+            if (!paint.Color.DependsOnFeature)
+                applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
+
             // fill-opacity. Constant/Zoom rides the _Opacity uniform; data-driven is baked per-feature into
             // the COLOR stream's alpha by StyledFillTileBuilder (P4). In the baked case _Opacity MUST be
             // pinned to 1: the fragment computes `alpha *= vColor.a * _Opacity`, so leaving the material's
@@ -65,10 +71,12 @@ namespace MapRenderer.Unity.Rendering.Materials
             // below (a constant base, evaluated value baked per-vertex) — except that opacity is unitless, so
             // its base is a literal 1, while line-width's base is a px value and therefore carries the
             // device-pixel ratio (S107).
+            // The pin is now a BINDING of the constant 1, not a direct SetFloat, so the layer-fade gate
+            // has exactly one writer of _Opacity and nothing competes with it.
             if (paint.Opacity.DependsOnFeature)
-                mat.SetFloat(ShaderProperties.PropertyId.Opacity, 1f);
+                applier.BindOpacity(new StyleProperty<float>(1f), ShaderProperties.PropertyId.Opacity);
             else
-                applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
+                applier.BindOpacity(paint.Opacity, ShaderProperties.PropertyId.Opacity);
 
             // fill-outline-color: bind only when explicitly set (not a fallback) and non-data-driven.
             if (!paint.OutlineColorIsFallback && !paint.OutlineColor.DependsOnFeature)
@@ -87,7 +95,7 @@ namespace MapRenderer.Unity.Rendering.Materials
 
             // fill-translate-anchor.
             if (!paint.TranslateAnchor.DependsOnFeature)
-                applier.BindFloat(paint.TranslateAnchor, ShaderProperties.Fill.PropertyId.FillTranslateAnchor);
+                applier.BindDiscreteFloat(paint.TranslateAnchor, ShaderProperties.Fill.PropertyId.FillTranslateAnchor);
 
             // fill-pattern: flag the layer, and start it UNRESOLVED (zero-area rect ⇒ the shader clips).
             // The sprite sheet is fetched asynchronously and cannot exist yet at material-build time, so
@@ -151,8 +159,12 @@ namespace MapRenderer.Unity.Rendering.Materials
             if (!paint.Color.DependsOnFeature)
                 applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
 
+            // The else arm is unreachable by any valid style — fill-extrusion-opacity is not data-driven-able
+            // — but binding it keeps _Opacity single-writer so a malformed style cannot escape the gate.
             if (!paint.Opacity.DependsOnFeature)
-                applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
+                applier.BindOpacity(paint.Opacity, ShaderProperties.PropertyId.Opacity);
+            else
+                applier.BindOpacity(new StyleProperty<float>(1f), ShaderProperties.PropertyId.Opacity);
 
             // fill-extrusion-height / fill-extrusion-base: Constant/Zoom rides the uniform; data-driven is
             // baked per-vertex by the builder instead, and the uniform is pinned to 0 so the VS's additive
@@ -171,7 +183,7 @@ namespace MapRenderer.Unity.Rendering.Materials
             // MapPixelsToWorld — same device-px space fill-translate/line-translate live in (S107).
             applier.BindDevicePixelVector(paint.Translate, ShaderProperties.FillExtrusion.PropertyId.FillExtrusionTranslate);
             if (!paint.TranslateAnchor.DependsOnFeature)
-                applier.BindFloat(paint.TranslateAnchor, ShaderProperties.FillExtrusion.PropertyId.FillExtrusionTranslateAnchor);
+                applier.BindDiscreteFloat(paint.TranslateAnchor, ShaderProperties.FillExtrusion.PropertyId.FillExtrusionTranslateAnchor);
 
             // No Fill-pattern defensive reset here (unlike BindBackgroundPaintToApplier): Map/FillExtrusion
             // (I2b) is its OWN dedicated shader with its OWN CBUFFER — it declares no _FillPattern/
@@ -209,8 +221,12 @@ namespace MapRenderer.Unity.Rendering.Materials
         {
             if (!paint.Color.DependsOnFeature)
                 applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
+            // As fill-extrusion: the else arm is unreachable by any valid style (background has no features),
+            // and exists so _Opacity keeps exactly one writer for the layer-fade gate.
             if (!paint.Opacity.DependsOnFeature)
-                applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
+                applier.BindOpacity(paint.Opacity, ShaderProperties.PropertyId.Opacity);
+            else
+                applier.BindOpacity(new StyleProperty<float>(1f), ShaderProperties.PropertyId.Opacity);
 
             // Defensive identity — the clone inherits the base .mat's _FillTranslate; assert the spec's
             // "no translate" (background has no fill-translate equivalent).
@@ -264,9 +280,12 @@ namespace MapRenderer.Unity.Rendering.Materials
             if (!paint.Color.DependsOnFeature)
                 applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
 
-            // line-opacity.
+            // line-opacity. The else arm binds a constant 1 where the material previously inherited it, so
+            // _Opacity keeps exactly one writer for the layer-fade gate.
             if (!paint.Opacity.DependsOnFeature)
-                applier.BindFloat(paint.Opacity, ShaderProperties.PropertyId.Opacity);
+                applier.BindOpacity(paint.Opacity, ShaderProperties.PropertyId.Opacity);
+            else
+                applier.BindOpacity(new StyleProperty<float>(1f), ShaderProperties.PropertyId.Opacity);
 
             // ── The device-px family (S107) ───────────────────────────────────────────────────────
             // Every line paint property below is a LOGICAL px value whose shader consumer measures against
@@ -320,7 +339,7 @@ namespace MapRenderer.Unity.Rendering.Materials
 
             // line-translate-anchor.
             if (!paint.TranslateAnchor.DependsOnFeature)
-                applier.BindFloat(paint.TranslateAnchor, ShaderProperties.Line.PropertyId.LineTranslateAnchor);
+                applier.BindDiscreteFloat(paint.TranslateAnchor, ShaderProperties.Line.PropertyId.LineTranslateAnchor);
 
             // line-pattern hook: set flag; solid fallback until S17.
             mat.SetFloat(ShaderProperties.Line.PropertyId.LinePattern, paint.PatternName != null ? 1f : 0f);

@@ -701,3 +701,35 @@ other, and the rule for guards applies: assert it was satisfiable.
   always pumped once. Every other bare `!AllTilesSettled()` site in the suite was checked and is safe
   (each is preceded by an unconditional pump or an assertion forcing a non-empty cover); the bare shape
   is a latent trap for *new* drives, not an existing bug. (2026-09-04.)
+
+### `ShadowReceiveBisectTests` only measures correctly in a FULL run — a filtered run reds 16 of 19
+
+Measured 2026-09-17 at `025b4309`, twice, identically.
+
+```
+./Tools/run-tests.sh EditMode 'ShadowReceiveBisectTests'   → total=19 passed=3  failed=16
+./Tools/run-tests.sh                                       → all 19 PASS
+```
+
+Every failure reports **zero** darkening between the shadows-OFF and shadows-ON frames — including
+`StockUrpLit_GroundDarkensUnderACastShadow`, which uses a stock URP Lit material and none of this repo's
+shaders. That is the tell: a fault in our shaders cannot red the stock-URP rung, so the cause is the
+render environment, not the code under test. The three cases that survive a filtered run are exactly the
+ones that *search* for a working configuration (`MapScale_ShadowKnobSweep_FindsAKnobThatRestoresTheShadow`,
+`MapScale_AtTheAppsRealAlbedo_…`, `MapScale_UnderTheAppsSkyboxAmbient_…`) rather than asserting a fixed one.
+
+**Why it matters, and it is not academic:** the natural way to iterate on a shadow tooth is to filter to
+the fixture, because a full run costs minutes and a filtered one costs seconds. Do that and you are handed
+16 failures that have nothing to do with your change. The trap is that the run looks like a clean,
+well-scoped measurement — `result="Failed(Child)"` with a plausible per-case message each time — so it
+reads as "I broke something" rather than "I measured wrong".
+
+**The rule: RED-verify anything in this fixture with a FULL `./Tools/run-tests.sh`, never `-testFilter`.**
+Budget the wall-clock accordingly; there is no fast loop for this fixture.
+
+`Assert.Inconclusive`/`NoGpuContext` does NOT fire here — a GPU context is present and
+`PaintColorRenderTests` renders 4/4 green in the same headless batch session. So the usual "no GPU in
+batch mode" explanation is ruled out, and reaching for it will send you the wrong way.
+
+The precise missing precondition has not been isolated; what is established is the discriminator above
+(full run green, filtered run red, stock-URP rung among the casualties).

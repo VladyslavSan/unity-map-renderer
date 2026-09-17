@@ -30,6 +30,9 @@ Shader "Map/Symbol/TextWorld"
         _HaloColor    ("Halo Color (text-halo-color)", Color) = (1, 1, 1, 1)
         _HaloWidthPx  ("Halo Width (text-halo-width, px)", Float) = 1.0
         _HaloBlurPx   ("Halo Blur (text-halo-blur, px)", Float) = 0.5
+        // text-color multiplier, CONSTANT kind only — identity white. MUST default white: several tests
+        // construct this material raw and never bind the uniform (see SymbolText_Input.hlsl).
+        _TextColor    ("Text Color (text-color multiplier, identity white)", Color) = (1, 1, 1, 1)
 
         // (C) Render state — material-UI knobs (S58 pattern, mirrors Fill/Line's [_Cull]/[_ZWrite]/[_ZTest]
         // and Blend). Defaults match Map/Symbol/Text's: straight alpha, ZWrite Off, ZTest Always (unlit

@@ -382,15 +382,28 @@ and for these two the honest answer is **none can**, which is exactly why prose 
 
 **1. A throwing `Release()` during teardown aborts the loop, leaving later records untorn.**
 `RenderTeardownRecord` now nulls the record's handle before releasing it, so the funnel itself cannot retry a
-handle it has already released. The residue is in the three callers (`SetSources`, `ReleaseTile`,
-`DoDispose`): each iterates records, and a throw from one record's release abandons the rest of the loop.
+handle it has already released. The residue is in the callers: a throw from one record's release abandons
+every record the surrounding loop had not yet reached.
 
-*Why no tooth exists.* All three callers pass a **struct copy**, so `lt.Decode = null` is discarded even on
+*Why no tooth exists.* Every caller passes a **struct copy**, so `lt.Decode = null` is discarded even on
 the happy path — there is no production-observable difference between the two orderings. Reflecting into the
 method cannot see it either: `MethodInfo.Invoke` does not copy a by-ref argument back when the callee throws
 (measured, not assumed). The ordering is therefore pinned **structurally** by
 `TileProcessingStructureTests.RenderTeardownRecord_NullsTheRecordsHandleBeforeItReleases`, RED-verifiable by
-swapping the two statements, and nothing observes the caller-side residue.
+swapping the two statements.
+
+*Half of this closed in UMR-151.* The record that threw used to stay in `_loaded` as a half-torn HUSK, which
+a later frame and `DoDispose` both read. `TileManager.RemoveAndTeardownRecord` now removes before tearing
+down, so restyle, in-place restyle and eviction leave no husk. `DoDispose` still tears down in place, and a throw in
+its loop skips the `_loaded.Clear()` that follows, so the husk is still reachable there — the `Clear()` is
+not what closes it. It was left alone because `DoDispose` is **terminal**: nothing reads `_loaded` after the
+manager is disposed, so no later call or frame can observe the husk, where on the restyle and eviction paths
+the map keeps being used. (`VerifiedDisposable.Dispose` also sets `IsDisposed` *before* calling `DoDispose`,
+so not even a second `Dispose()` re-enters the loop.) The remove-first shape would additionally need a
+key snapshot, which would red
+`TileProcessingStructureTests.TileManagerDoDispose_TearsDownEveryRecordThroughTheSingleFunnel`'s
+`foreach (var … in _loaded)` pattern, an anti-bypass pin RED-verified against three real bypasses. The
+abandoned-rest-of-loop half above is untouched by any of this.
 
 *Why it was left.* After D1's transfer fix there is no known route to a throwing `Release()` — it needs a
 decoder whose `IDecodedTile.Dispose()` throws, or a future over-release. This is hardening, not a live bug.

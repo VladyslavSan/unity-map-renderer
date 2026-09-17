@@ -66,11 +66,17 @@ namespace MapRenderer.Tests
         }
 
         public static string LoadLibertyJson() => LoadUpText("Assets", "StreamingAssets", "Fixtures", "liberty.json");
+        public static string LoadLibertyNightJson() => LoadUpText("Assets", "StreamingAssets", "Fixtures", "liberty-night.json");
 
         private static StyleDocument _libertyDoc;
+        private static StyleDocument _libertyNightDoc;
 
         /// <summary>The real shipped Liberty style, parsed once per test run.</summary>
         public static StyleDocument LibertyDoc() => _libertyDoc ??= StyleParser.Parse(LoadLibertyJson());
+
+        /// <summary>The real shipped Liberty-night style (the day/night pair UMR-147 turns on), parsed once
+        /// per test run.</summary>
+        public static StyleDocument LibertyNightDoc() => _libertyNightDoc ??= StyleParser.Parse(LoadLibertyNightJson());
 
         /// <summary>Liberty's symbol layer with this id, or null (a non-symbol layer also yields null).</summary>
         public static SymbolStyle.StyleLayer FindSymbolLayer(string id)

@@ -372,10 +372,16 @@ namespace MapRenderer.Tests.Text.Placement
         /// failure message. Paste that dump here (replacing the sentinel) to make this a real, committed,
         /// fixed-oracle golden. Once pasted, DO NOT re-bake a snapshot to go green on a later divergence —
         /// a moved digest means behaviour changed; find and fix the cause instead
-        /// (`snapshot-moved-suspect-the-fixture` / `never re-bake a snapshot to go green`).</summary>
+        /// (`snapshot-moved-suspect-the-fixture` / `never re-bake a snapshot to go green`).
+        ///
+        /// <para><b>2026-09-13 (UMR-145):</b> the <c>Points</c> component moved — this fixture's paint-less
+        /// <c>text-color</c> now rides <c>_TextColor</c> (Constant), so the bake is WHITE where it was
+        /// BLACK; the render is unchanged. Recorded here because no other tooth observes it: this golden
+        /// no longer discriminates a constant <c>text-color</c> — that coverage now lives in
+        /// <c>SymbolTextColorCarrierTests</c>/<c>SymbolTextColorRenderTests</c>.</para></summary>
         private const string CapturedGoldenHash =
             "Kinds=-13491713 Detail=1233695479 WorldStart=1233695479 WorldCount=-1252581121 RepAnchor=515797947 " +
-            "MaterialIndexes=-2021596801 PairRoles=-13491713 Points=1107115275 " +
+            "MaterialIndexes=-2021596801 PairRoles=-13491713 Points=-1040368373 " +
             "PointQuadStart=-1852567463 PointQuadCount=648814877 Curveds=527 CurvedGlyphStart=527 " +
             "CurvedGlyphCount=527 CurvedAnchorStart=527 CurvedAnchorCount=527 CurvedAnchorFadeStart=527 " +
             "Quads=-1354314655 Glyphs=527 Anchors=527 WorldPoints=515797947 WorldUps=2133991935 " +

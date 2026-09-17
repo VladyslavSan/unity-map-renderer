@@ -35,6 +35,12 @@ namespace MapRenderer.Tests
         internal static Transform Container(this GameObjectTileRenderer renderer, TileId tileId)
             => renderer._tree.Container(tileId);
 
+        /// <summary>Whether the draw item's layer child is submitted for drawing — the GameObject arm of
+        /// the per-slot draw gate (<c>ITileRenderBackend.SetLayerVisible</c>). Throws for an unknown
+        /// handle.</summary>
+        internal static bool IsItemDrawn(this GameObjectTileRenderer renderer, int handle)
+            => renderer._items[handle].Node.Renderer.enabled;
+
         /// <summary>
         /// World-space translation (X, Z) of the draw item's owning container, or (NaN, NaN) for an
         /// unknown/dead handle. The backend root sits at the world origin, so a container's position is its

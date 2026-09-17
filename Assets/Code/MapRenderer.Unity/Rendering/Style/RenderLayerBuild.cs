@@ -3,7 +3,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// <summary>
     /// The lifetime class of an <see cref="IRenderLayer"/>'s geometry — which loop feeds it (the
     /// render-layer model). Orthogonal to <see cref="DrawPersistence"/> (who
-    /// re-draws it) and <see cref="IRenderLayer.DrawIndex"/> (its slot in the global draw order).
+    /// re-draws it) and <see cref="IRenderLayer.DrawIndex"/> (its stable slot in the layer set).
     ///
     /// Epic A / A2: the former view-synthesized-geometry member (background's pre-A2 self-owned world-cap
     /// quad) is REMOVED — background is now a per-covered-tile <see cref="TileMesh"/> layer (source-less,

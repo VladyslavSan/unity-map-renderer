@@ -43,6 +43,36 @@ namespace MapRenderer.Core.Json
             return sb.ToString();
         }
 
+        /// <summary>A short, stable 64-bit hex digest (FNV-1a) of <paramref name="prefix"/>, the canonical
+        /// text of <paramref name="value"/>, and <paramref name="extra"/> — a cache key must not re-hash the
+        /// whole canonical text on every lookup; computing this digest is the one-time control-plane cost.</summary>
+        /// <param name="value">Must not be null — a null <c>Root</c> would otherwise collide with any other
+        /// null-Root document sharing <paramref name="prefix"/>. A library-contract guard: production callers
+        /// fail loud earlier, so this should never actually be what fires.</param>
+        /// <param name="extra">A caller-built component folded in after <paramref name="value"/> — e.g. a
+        /// layer-numbering signature the JSON content alone cannot see.</param>
+        public static string Digest(string prefix, JsonValue value, string extra)
+        {
+            if (value == null) throw new System.ArgumentNullException(nameof(value),
+                "a null Root would collide with any other null-Root document sharing this prefix");
+            ulong hash = 14695981039346656037UL; // FNV-1a 64-bit offset basis
+            Fold(prefix ?? string.Empty, ref hash);
+            Fold("\0", ref hash);
+            Fold(Write(value), ref hash);
+            Fold("\0", ref hash);
+            Fold(extra ?? string.Empty, ref hash);
+            return hash.ToString("x16");
+        }
+
+        private static void Fold(string s, ref ulong hash)
+        {
+            for (int i = 0; i < s.Length; i++)
+            {
+                hash ^= s[i];
+                hash *= 1099511628211UL; // FNV-1a 64-bit prime
+            }
+        }
+
         private static void Write(JsonValue value, StringBuilder sb)
         {
             if (value == null) { sb.Append("null"); return; }
