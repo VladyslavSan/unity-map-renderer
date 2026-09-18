@@ -16,7 +16,8 @@
 // — instead of the point/icon north-up passthrough. Point/icon never take this branch (bit1 clear), so
 // their render stays byte-identical.
 //
-// FRAGMENT: shades ONE thing. It takes a colour (vertex COLOR) and a pair of device-px widenings
+// FRAGMENT: shades ONE thing. It takes a colour (vertex COLOR, tinted in the vertex stage by whichever of
+// _TextColor/_HaloColor this run uses — see there) and a pair of device-px widenings
 // (TEXCOORD7, WorldBillboardVertex.SdfWidenPx) that push the SDF fill edge out and widen the AA transition,
 // and it emits that colour at the resulting coverage. At a zero widening that is the plain glyph.
 //
@@ -44,7 +45,8 @@
 struct SymbolWorldAttributes
 {
     float3 anchorOS   : POSITION;  // tile-local render-space anchor (WorldBillboardVertex.AnchorLocal)
-    float3 colorRGB   : COLOR;     // text color, verbatim (no sRGB conversion — see WorldBillboardVertex)
+    float3 colorRGB   : COLOR;     // LINEAR run colour (see WorldBillboardVertex) — white for a CONSTANT
+                                   // text-color/text-halo-color, which rides a uniform instead
     float2 uv         : TEXCOORD0;
     float  page       : TEXCOORD1; // atlas Texture2DArray layer
     float2 offsetPx   : TEXCOORD2; // unrotated glyph-corner offset — logical px, OR METRES when bit2 is set (W2)
@@ -135,7 +137,14 @@ SymbolWorldVaryings SymbolWorldPassVertex(SymbolWorldAttributes input)
     output.positionCS = clip;
     output.uv    = input.uv;
     output.page  = input.page;
-    output.color = float4(input.colorRGB, input.opacity);     // fragment's input.color.a still works unchanged
+    // Two-carrier text/halo colour: a CONSTANT `text-color`/`text-halo-color` rides _TextColor/_HaloColor
+    // and leaves the vertex stream white; every other kind bakes into the stream and leaves the uniform
+    // white, so the product is the colour ONCE either way. WHICH uniform applies is the run: Emit gives a
+    // halo run a non-zero sdfWidenPx.x — it emits one only when text-halo-width > 0 — and a text run
+    // exactly zero, so the test below is exact rather than a threshold. Both uniforms' .a is unread:
+    // text-opacity and the colour's own alpha already ride input.opacity.
+    float3 tint  = input.sdfWidenPx.x > 0.0 ? _HaloColor.rgb : _TextColor.rgb;
+    output.color = float4(input.colorRGB * tint, input.opacity); // fragment's input.color.a still works unchanged
     output.sdfWidenPx = input.sdfWidenPx;
     return output;
 }

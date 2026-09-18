@@ -23,7 +23,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// dasharray re-evaluated in <see cref="ApplyZoom"/>.
     /// Axes (design §"Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
     /// </summary>
-    internal sealed class LineRenderLayer : ITileMeshRenderLayer
+    internal sealed class LineRenderLayer : ITileMeshRenderLayer, IFadeableRenderLayer
     {
         /// <summary>Profiler marker name constants (SSOT) for this layer's telemetry — referenced by the
         /// <see cref="ProfilerMarker"/> fields below and by <c>ProfilerMarkerTests</c> (internal, via
@@ -42,17 +42,18 @@ namespace MapRenderer.Unity.Rendering.Style
         private static readonly ProfilerMarker PmZoomLineDash =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.ApplyZoomLineDash);
 
-        private readonly Line.PaintProperties  _paint;
-        private readonly Line.LayoutProperties _layout;
+        private Line.PaintProperties  _paint;
+        private Line.LayoutProperties _layout;
         private readonly ZoomStyleApplier      _applier;
 
-        public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; }
+        public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; private set; }
         public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
         public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; }
+        public int                               TransitioningCount => _applier.TransitioningCount;
 
         private LineRenderLayer(
             Line.StyleLayer layer, Material material, Line.PaintProperties paint,
@@ -81,26 +82,61 @@ namespace MapRenderer.Unity.Rendering.Style
             Line.PaintProperties  paint  = layer.Paint;
             Line.LayoutProperties layout = layer.Layout;
             var applier = new ZoomStyleApplier(mat);
+            // BEFORE the paint bind: a Constant opacity is pushed once at bind time and then skipped
+            // forever, so an unscaled bind-time push would make a seeded fade of 0 invisible.
+            applier.SeedFade(layer.IsVisibleAtZoom(initialZoom) ? 1f : 0f);
             Materials.MaterialFactory.BindLinePaintToApplier(paint, applier, mat);
             // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
             // (RenderLayerSet.ApplyZoom's contract).
-            applier.ApplyZoom(initialZoom, 1.0);
+            applier.ApplyZoom(new StyleFrameInputs(initialZoom, 1.0, 0.0));
             return new LineRenderLayer(layer, mat, paint, layout, applier, drawIndex);
         }
 
-        public void ApplyZoom(double zoom, double devicePixelRatio)
+        /// <inheritdoc cref="IFadeableRenderLayer.FadesGradually"/>
+        public bool FadesGradually => true;
+
+        /// <inheritdoc cref="IFadeableRenderLayer.SetFade"/>
+        public void SetFade(float amount) => _applier.SetFade(amount);
+
+        /// <inheritdoc cref="IFadeableRenderLayer.PaintsSomething"/>
+        public bool PaintsSomething => !_applier.EffectiveOpacityIsZero;
+
+        public void ApplyZoom(in StyleFrameInputs inputs)
         {
             using (PmZoomLines.Auto())
             {
-                _applier.ApplyZoom(zoom, devicePixelRatio);
+                _applier.ApplyZoom(inputs);
 
                 // Re-evaluate the dasharray per frame ONLY when its expression depends on zoom (the engine's
                 // classification). A constant dash (the common case) is set once at bind time and skipped
                 // here — no per-frame eval, no allocation.
                 if (ExpressionKinds.DependsOnZoom(_paint.DashArrayKind))
                     using (PmZoomLineDash.Auto())
-                        Materials.MaterialFactory.ApplyLineDashArray(_paint, Material, zoom);
+                        Materials.MaterialFactory.ApplyLineDashArray(_paint, Material, inputs.Zoom);
             }
+        }
+
+        /// <summary>
+        /// Re-targets this layer's uniform bindings at <paramref name="layer"/> — the survivor gate has
+        /// already proven its mesh-affecting content unchanged. The dash array is re-applied even though
+        /// the gate proves <c>line-dasharray</c> unchanged: it feeds the per-frame branch above off
+        /// <c>_paint</c>, which this swaps.
+        /// </summary>
+        public void Restyle(MapRenderer.Core.Style.StyleLayer layer, in StyleTransition transition, double nowSeconds)
+        {
+            var typed = (Line.StyleLayer)layer;
+            StyleLayer = typed;
+            _paint     = typed.Paint;
+            _layout    = typed.Layout;
+            _applier.SetTransition(transition, nowSeconds);
+            Materials.MaterialFactory.BindLinePaintToApplier(_paint, _applier, Material);
+        }
+
+        /// <inheritdoc cref="IRenderLayer.SetDrawOrder"/>
+        public void SetDrawOrder(int declaredOrder)
+        {
+            if (Material != null)
+                Material.renderQueue = LayerDrawOrder.QueueFor(declaredOrder, MaterialSubSlot);
         }
 
         // job-scheduling-design.md §8 stage 5: builds the prologue's graph build — the graph's write step

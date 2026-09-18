@@ -342,9 +342,12 @@ namespace MapRenderer.Tests.Meshing
         }
 
         [Test]
-        public void DataDrivenOpacity_MultipliesWithFillColorAlpha()
+        public void DataDrivenOpacity_IsTheStreamsOnlyAlphaCarrier()
         {
-            // Both dimensions are real: fill-color may carry its own alpha, and fill-opacity scales it.
+            // fill-color here is CONSTANT (a literal, not data-driven), so Stage 1's guard leaves the
+            // COLOR stream white and its authored alpha (0.4) rides _BaseColor.a instead — see
+            // PaintColorSingleApplyTests.ConstantFillColorAlpha_IsNotAppliedTwice for that composed product.
+            // This test's own carrier is the data-driven fill-opacity alone.
             var features = new List<IFeature> { Feature(0, 0, "a", sortKey: 0.0, opacity: 0.5) };
             var paint = Fill.PaintProperties.Parse(JsonParser.Parse(
                 @"{""fill-color"": ""rgba(255,255,255,0.4)"", ""fill-opacity"": [""get"", ""op""]}"));
@@ -354,8 +357,9 @@ namespace MapRenderer.Tests.Meshing
             try
             {
                 foreach (Color c in mesh.colors)
-                    Assert.AreEqual(0.2f, c.a, 1e-3,
-                        "fill-color alpha (0.4) × data-driven fill-opacity (0.5) = 0.2");
+                    Assert.AreEqual(0.5f, c.a, 1e-3,
+                        "fill-color is constant, so the stream carries only the data-driven fill-opacity " +
+                        "(0.5) — its own alpha (0.4) now rides _BaseColor.a, not the stream.");
             }
             finally { if (mesh != null) Object.DestroyImmediate(mesh); }
         }

@@ -1403,9 +1403,12 @@ runs, glyph n's ink is already in the framebuffer and indistinguishable from bac
 
 **The shader now renders one thing.** It takes a colour (vertex `COLOR`) and a pair of device-px widenings
 (`WorldBillboardVertex.SdfWidenPx`, TEXCOORD7) that push the SDF fill edge out and widen the AA transition,
-and emits that colour at the resulting coverage. `_HaloColor`, `_HaloWidthPx` and `_HaloBlurPx` are gone from
-the CBUFFER, the Properties block and `SymbolRenderLayer`'s binds. There is no halo branch, because there is
-no halo concept.
+and emits that colour at the resulting coverage. `_HaloWidthPx` and `_HaloBlurPx` are gone from the CBUFFER,
+the Properties block and `SymbolRenderLayer`'s binds. There is no halo branch, because there is no halo
+concept — the fragment cannot tell the two runs apart and does not need to.
+
+`_HaloColor` survives, but as something else entirely: not the old combine term, but the CONSTANT arm of
+`text-halo-color`'s two-carrier split, the exact mirror of `_TextColor` (see §8.1).
 
 **A halo is a second copy of the label's glyphs.** `WorldSymbolRenderer.Emit` writes each label's whole glyph
 run twice into the same mesh: the halo run first, carrying `text-halo-color` in the colour stream and
@@ -1431,12 +1434,13 @@ Decisions worth keeping:
   codebase already computed and discarded. Consequence: a **data-driven** `text-halo-*` now works, and the
   zoom-expression halo deferred as §7 risk 9 stops being deferred — both fall out of using the per-feature
   evaluation rather than a style-load-zoom snapshot.
-- **`text-halo-color` is now `.linear` on the CPU**, in `SymbolPlacementSystem.LinearHaloColor` — the exact
-  sibling of `LinearColor`. This is the inversion of UMR-135, and the reason is mechanical: UMR-135 found
-  that `_HaloColor` was a Color-TYPED material property, which Unity converts on upload, so pre-converting
-  double-applied it. Unity does not convert a vertex stream, so the conversion has to move upstream. Same
-  rendered colour. `SymbolHaloColorRenderTests` carries the inversion in its header; without that note a
-  future reader finds UMR-135's rationale and "fixes" it back.
+- **`text-halo-color` is `.linear` on the CPU for the stream carrier**, in
+  `SymbolPlacementSystem.LinearHaloColor` — the exact sibling of `LinearColor`. UMR-135 found that
+  `_HaloColor` was a Color-TYPED material property, which Unity converts on upload, so pre-converting
+  double-applied it; Unity does not convert a vertex stream, so on that carrier the conversion has to move
+  upstream instead. Both statements are now true at once, one per carrier (§8.1). Same rendered colour
+  either way. `SymbolHaloColorRenderTests` has an arm per carrier and carries the reasoning in its header;
+  without it a future reader finds one rationale and "fixes" the other side back.
 - **Width and blur stay LOGICAL px all the way to the emit**, where they take the logical→device conversion
   together (S107) against the LIVE ratio. So a dpr change re-scales the halo on the next Tick with no
   re-bake, no change detection, and no frozen-zoom bookkeeping — `SymbolRenderLayer.ApplyZoom` became a
@@ -1446,6 +1450,32 @@ Decisions worth keeping:
   chase.
 - **A haloless label pays nothing.** A zero `text-halo-width` or a transparent `text-halo-color` gates the
   second run off, and a zero width is the spec default. Icons never take it — no `icon-halo-*` path.
+
+## 8.1 …except one colour uniform, for the restyle ease
+
+Merging the style-transitions work (UMR-95) put one uniform back. That branch made a **CONSTANT** `text-color`
+ride `_TextColor` rather than the vertex stream, because a value baked into a mesh cannot be eased: the
+in-place restyle path re-binds uniforms and never re-bakes a tile. `text-color` and `text-halo-color` are the
+two paint keys the shipped liberty → liberty-night pair differs on across its symbol layers, so without both
+of them free, the restyle gate refuses the whole document and the ease never runs at all.
+
+So `text-halo-color` takes the same split: **Constant → the `_HaloColor` uniform, every other kind → the
+vertex stream**, with the unused carrier left at identity white and the fragment multiplying the two. Exactly
+one of them is ever non-white, so the colour is converted once and applied once on either path.
+
+- **Which uniform a run uses is read off `SdfWidenPx`, in the vertex stage.** One material draws both runs,
+  so a single tint uniform would paint the halo with the text's colour. The discriminator is exact rather
+  than a threshold: `Emit` emits a halo run only when `text-halo-width > 0`, so a halo vertex always has
+  `SdfWidenPx.x > 0` and a text vertex always has exactly `0`. It costs no vertex attribute and no flag bit —
+  and a flag bit was not free, because `AlignFlags` is tested with float comparisons (`>= 1.5`) that a new
+  high bit would break.
+- **Only the colours, and only at Constant.** `text-halo-width`/`-blur` stay per-feature on the vertex stream;
+  the restyle gate refuses a change to either, and refuses a non-Constant colour change on the same grounds.
+  A colour's ALPHA also stays on the stream — for the halo it additionally decides whether the second run is
+  emitted at all — so an alpha-only change refuses too.
+- **What this costs.** A zoom-expression `text-halo-color` no longer eases across a restyle, where it did
+  while the whole trio was uniform-bound. It is the same rule `text-color` already lives under, and the
+  shipped pair uses constants throughout.
 
 Two behaviour changes that are correct, not bugs:
 

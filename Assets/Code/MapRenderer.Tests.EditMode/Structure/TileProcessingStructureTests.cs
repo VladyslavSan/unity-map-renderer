@@ -1195,13 +1195,17 @@ namespace MapRenderer.Tests.Structure
         ///
         /// <para><b>Structural, and this one really is.</b> <c>Release()</c> throws on an unbalanced release
         /// and <c>IDecodedTile.Dispose()</c> can throw, so the order decides whether the local is left
-        /// holding a handle whose reference is already gone. No runtime tooth can see it: all three callers
-        /// (<c>SetSources</c>, <c>ReleaseTile</c>, <c>DoDispose</c>) pass a struct COPY and none writes it
-        /// back on the throwing path, so the record inside <c>_loaded</c> is left armed under BOTH orderings
-        /// — and <c>MethodInfo.Invoke</c> does not copy a by-ref argument back when the callee throws, so
-        /// reflecting into the method directly cannot read the difference either (measured, not assumed).
-        /// What is pinned here is the funnel's own discipline; the caller-side residue is recorded as an
-        /// open finding rather than hidden behind a green count.</para>
+        /// holding a handle whose reference is already gone. No runtime tooth can see it: every caller
+        /// passes a struct COPY and none writes it back, so <c>lt.Decode = null</c> is discarded even on the
+        /// happy path — and <c>MethodInfo.Invoke</c> does not copy a by-ref argument back when the callee
+        /// throws, so reflecting into the method directly cannot read the difference either (measured, not
+        /// assumed). What is pinned here is the funnel's own discipline.</para>
+        ///
+        /// <para><b>Caller-side residue (UMR-151).</b> The two direct callers are
+        /// <c>TileManager.RemoveAndTeardownRecord</c>, which drops the record from <c>_loaded</c> before
+        /// calling this, and <c>DoDispose</c>, which does not. A throw mid-loop still abandons the records
+        /// the loop never reached — that half stays open, in
+        /// `docs/per-layer-tile-processing-design.md` § "D1 recorded limitations".</para>
         ///
         /// <para><b>RED injection:</b> swap the two statements back to
         /// <c>lt.Decode?.Release(); lt.Decode = null;</c>.</para>

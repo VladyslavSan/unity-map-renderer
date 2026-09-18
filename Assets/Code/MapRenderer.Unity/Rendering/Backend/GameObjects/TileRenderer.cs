@@ -32,7 +32,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
     /// Styling is per-layer (the shared material, written each frame by <c>ZoomStyleApplier</c> directly on
     /// the Material) plus per-feature (vertex colours baked into the mesh), so <see cref="Rebuild"/> does no
     /// material work — same as the instanced backends. <paramref name="layerMaterials"/> is the FULL-WIDTH,
-    /// global-draw-slot-aligned material list (fill/line/symbol/background in one declared order, §3.3), so
+    /// global-SLOT-aligned material list (fill/line/symbol/background in one slot order, §3.3), so
     /// <c>materialIndex</c> matches <see cref="BRG.TileRenderer.AddTileLayer"/> /
     /// <see cref="Entities.TileRenderer.AddTileLayer"/>. E1 audit: this ctor only STORES the list (no
     /// registration, no index-0 seed), so a null entry at a symbol/background slot needs no guard here —
@@ -54,6 +54,8 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         {
             public MeshNode Node;
             public TileId   TileId;   // which tile container this layer hangs under
+            public int      MaterialIndex; // the layer slot this child was bound at — UMR-151: lets
+                                            // SetLayerMaterials find every item a retired slot must retire
         }
 
         private readonly List<Material> _layerMaterials = new List<Material>();
@@ -64,6 +66,9 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off (never default(...), never throw);
         // the same fallback the other two backends use, so a divergence is a test failure, not a silent drift.
         private readonly List<ShadowCastingMode> _layerShadowModes = new List<ShadowCastingMode>();
+        // Per-layer draw gate (ITileRenderBackend.SetLayerVisible), parallel to _layerMaterials. True ⇒ this
+        // slot's children are drawn. Absent or short ⇒ visible, identically in all three backends.
+        private readonly List<bool> _layerVisible = new List<bool>();
         // internal (not private): the test assembly's GameObjectTileRendererTestExtensions reads these
         // for observability that used to sit on this class as public members.
         internal readonly Dictionary<int, ItemRec> _items = new Dictionary<int, ItemRec>();
@@ -105,11 +110,29 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// <paramref name="materialIndex"/>, or <see cref="ShadowCastingMode.Off"/> when no list was supplied
         /// or it is short. The fallback must read identically in all three backends
         /// (<see cref="ITileRenderBackend"/>).</summary>
-        /// <param name="materialIndex">The layer's global draw slot.</param>
+        /// <param name="materialIndex">The layer's global SLOT.</param>
         private ShadowCastingMode ShadowModeFor(int materialIndex)
             => (uint)materialIndex < (uint)_layerShadowModes.Count
                 ? _layerShadowModes[materialIndex]
                 : ShadowCastingMode.Off;
+
+        /// <summary>True when <paramref name="materialIndex"/>'s slot is visible.</summary>
+        /// <param name="materialIndex">The layer's global SLOT.</param>
+        private bool Visible(int materialIndex)
+            => (uint)materialIndex >= (uint)_layerVisible.Count || _layerVisible[materialIndex];
+
+        /// <inheritdoc cref="ITileRenderBackend.SetLayerVisible"/>
+        public void SetLayerVisible(int slot, bool visible)
+        {
+            if (IsDisposed || slot < 0) return;
+            while (_layerVisible.Count <= slot) _layerVisible.Add(true);
+            if (_layerVisible[slot] == visible) return; // unchanged ⇒ no walk over the items
+            _layerVisible[slot] = visible;
+
+            foreach (var kv in _items)
+                if (kv.Value.MaterialIndex == slot)
+                    kv.Value.Node.Renderer.enabled = visible;
+        }
 
         // Placeholder name for a freshly built node; AttachAt renames it per style layer on every rent.
         private const string PooledLayerName = "tile-layer";
@@ -168,7 +191,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// <summary>
         /// Registers a tile-layer mesh as a child GameObject under its tile's container (created on demand
         /// via the shared <see cref="SceneTileTree"/>). Returns a handle for later removal.
-        /// <paramref name="materialIndex"/> is the layer's global draw slot, indexing the full-width
+        /// <paramref name="materialIndex"/> is the layer's global SLOT, indexing the full-width
         /// material list, matching the instanced backends; non-tile-mesh slots are null and never receive
         /// this call.
         /// </summary>
@@ -196,13 +219,46 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             // Per rent, not per node: the pool recycles a node across layers with different declarations.
             node.Renderer.shadowCastingMode = ShadowModeFor(materialIndex);
             node.Renderer.receiveShadows    = true;
-            node.Renderer.enabled        = true;  // MeshNode builds and releases disabled
+            // Not unconditionally true: MeshNode builds and releases DISABLED, and an item added into a
+            // slot that is already hidden must stay that way until the gate lifts.
+            node.Renderer.enabled        = Visible(materialIndex);
 
             _tree.AddChild(tileId);
 
             int handle = _nextHandle++;
-            _items[handle] = new ItemRec { Node = node, TileId = tileId };
+            _items[handle] = new ItemRec { Node = node, TileId = tileId, MaterialIndex = materialIndex };
             return handle;
+        }
+
+        /// <summary>UMR-151 restyle-time material update — re-points a changed slot's live
+        /// <c>sharedMaterial</c>s, and retires (pool-releases) a slot going null; see
+        /// `docs/tile-pipeline-design.md` §1.10.</summary>
+        public void SetLayerMaterials(
+            IReadOnlyList<Material> layerMaterials, IReadOnlyList<ShadowCastingMode> layerShadowModes)
+        {
+            ThrowIfDisposed();
+
+            int oldCount = _layerMaterials.Count;
+            var retired  = new List<int>();
+            foreach (var kv in _items)
+            {
+                int mi = kv.Value.MaterialIndex;
+                Material newMat = (uint)mi < (uint)layerMaterials.Count ? layerMaterials[mi] : null;
+                if (newMat == null) { retired.Add(kv.Key); continue; }
+                Material oldMat = mi < oldCount ? _layerMaterials[mi] : null;
+                if (!ReferenceEquals(newMat, oldMat))
+                    kv.Value.Node.Renderer.sharedMaterial = newMat;
+            }
+
+            _layerMaterials.Clear();
+            for (int i = 0; i < layerMaterials.Count; i++) _layerMaterials.Add(layerMaterials[i]);
+
+            _layerShadowModes.Clear();
+            if (layerShadowModes != null)
+                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
+
+            if (retired.Count > 0)
+                RemoveItems(retired.ToArray());
         }
 
         /// <summary>

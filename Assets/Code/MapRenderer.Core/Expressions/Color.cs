@@ -155,5 +155,33 @@ namespace MapRenderer.Core.Expressions
         }
 
         private static double Clamp01(double v) => v < 0.0 ? 0.0 : (v > 1.0 ? 1.0 : v);
+
+        // ---- premultiplied-alpha mix (Porter-Duff, first-principles) -------------------------------
+
+        /// <summary>
+        /// Mix two colors in premultiplied-alpha sRGB space: the same arithmetic
+        /// <see cref="Ops.Ramps"/> uses for its default <c>interpolate</c> color space, hoisted here so
+        /// a style-transition ease and a zoom ramp share one implementation. At <c>t=0</c>/<c>t=1</c>
+        /// this returns <paramref name="a"/>/<paramref name="b"/> exactly; between, RGB is
+        /// premultiplied by alpha, mixed, then unpremultiplied by the mixed alpha.
+        /// </summary>
+        public static Color MixPremultiplied(in Color a, in Color b, double t)
+        {
+            // Early-exact, not just fast: a multiply immediately followed by a divide (a.R*aA/aA) is not
+            // the float identity, so without this the doc's "returns a/b exactly" claim would be false.
+            if (t <= 0.0) return a;
+            if (t >= 1.0) return b;
+
+            double aA = a.A, bA = b.A;
+            double aOut = Lin(aA, bA, t);
+            if (aOut <= 0.0)
+                return new Color(0.0, 0.0, 0.0, 0.0);
+            double rOut = Lin(a.R * aA, b.R * bA, t) / aOut;
+            double gOut = Lin(a.G * aA, b.G * bA, t) / aOut;
+            double bOut = Lin(a.B * aA, b.B * bA, t) / aOut;
+            return new Color(rOut, gOut, bOut, aOut);
+        }
+
+        private static double Lin(double a, double b, double t) => a + (b - a) * t;
     }
 }

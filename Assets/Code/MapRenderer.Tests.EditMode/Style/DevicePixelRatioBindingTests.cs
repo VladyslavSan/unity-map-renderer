@@ -102,13 +102,13 @@ namespace MapRenderer.Tests.Style
                     ("line-blur",      ShaderProperties.Line.PropertyId.Blur,       2f),
                 };
 
-                applier.ApplyZoom(Zoom, 1.0);
+                applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
                 foreach (var (name, id, styled) in rows)
                     Assert.That(mat.GetFloat(id), Is.EqualTo(styled).Within(1e-4f),
                         $"{name} at dpr 1 must be the styled logical value {styled} — dpr 1 is the IDENTITY, " +
                         "and every pre-existing golden in the suite depends on it.");
 
-                applier.ApplyZoom(Zoom, 2.0);
+                applier.ApplyZoom(new StyleFrameInputs(Zoom, 2.0, 0.0));
                 foreach (var (name, id, styled) in rows)
                     Assert.That(mat.GetFloat(id), Is.EqualTo(2f * styled).Within(1e-4f),
                         $"{name} must read {2f * styled} at dpr 2 (styled {styled} logical px × 2). Its shader " +
@@ -117,7 +117,7 @@ namespace MapRenderer.Tests.Style
 
                 // Back to 1: the ratio is a live per-frame input, not a one-way latch. A binding that took the
                 // bind-time constant shortcut would be frozen at whichever ratio it first saw.
-                applier.ApplyZoom(Zoom, 1.0);
+                applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
                 foreach (var (name, id, styled) in rows)
                     Assert.That(mat.GetFloat(id), Is.EqualTo(styled).Within(1e-4f),
                         $"{name} must return to {styled} when the ratio returns to 1 (a window dragged back " +
@@ -151,12 +151,12 @@ namespace MapRenderer.Tests.Style
                 MaterialFactory.BindLinePaintToApplier(paint, applier, mat);
                 int widthId = ShaderProperties.Line.PropertyId.Width;
 
-                applier.ApplyZoom(Zoom, 1.0);
+                applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
                 Assert.That(mat.GetFloat(widthId), Is.EqualTo(1f).Within(1e-4f),
                     "data-driven width: the base must be 1 at dpr 1 so the baked per-vertex width passes " +
                     "through unchanged (the pre-existing convention, byte-identical).");
 
-                applier.ApplyZoom(Zoom, 2.0);
+                applier.ApplyZoom(new StyleFrameInputs(Zoom, 2.0, 0.0));
                 Assert.That(mat.GetFloat(widthId), Is.EqualTo(2f).Within(1e-4f),
                     "data-driven width: the base must be 2 at dpr 2, so widthWorld = 2 × bakedPx × pxToWorld. " +
                     "Reading 1 here means the data-driven branch was left out of the conversion and every " +
@@ -200,13 +200,13 @@ namespace MapRenderer.Tests.Style
                         "would pass a magnitude-blind check but skew every translated layer.");
                 }
 
-                lineApplier.ApplyZoom(Zoom, 1.0);
-                fillApplier.ApplyZoom(Zoom, 1.0);
+                lineApplier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
+                fillApplier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
                 AssertTranslate(lineMat, lineId, "line-translate", 5f, -7f, 1.0);
                 AssertTranslate(fillMat, fillId, "fill-translate", 9f, -11f, 1.0);
 
-                lineApplier.ApplyZoom(Zoom, 2.0);
-                fillApplier.ApplyZoom(Zoom, 2.0);
+                lineApplier.ApplyZoom(new StyleFrameInputs(Zoom, 2.0, 0.0));
+                fillApplier.ApplyZoom(new StyleFrameInputs(Zoom, 2.0, 0.0));
                 // Both are consumed by the same MapPixelsToWorld call the widths are, so they are device px.
                 AssertTranslate(lineMat, lineId, "line-translate", 10f, -14f, 2.0);
                 AssertTranslate(fillMat, fillId, "fill-translate", 18f, -22f, 2.0);
@@ -230,6 +230,11 @@ namespace MapRenderer.Tests.Style
         // as a RENDERED softness ratio. The halo's rendered transition is (_SdfAaDevicePx + blur) — an AA
         // constant in device px summed with the style's blur — so that ratio is not 2 even on a correct build.
 
+        // A zoom-expression text-halo-width no longer tracks the live zoom through a uniform either: like
+        // every other text-* paint term it is evaluated PER FEATURE at tile build (SymbolFeatureExtractor),
+        // so it moves when the tile is rebuilt, not every frame. The T5 tooth that read _HaloWidthPx back off
+        // the material went with the uniform.
+
         // ── The BRG arm (design-doc C2) ──────────────────────────────────────────────────────────
 
         /// <summary>
@@ -246,7 +251,7 @@ namespace MapRenderer.Tests.Style
             set.Build(style, Zoom, MapMaterialSetTestUtil.Load());
             Assert.That(set.Count, Is.EqualTo(1), "line-only style must build exactly one render layer.");
 
-            set.ApplyZoom(Zoom, 2.0);
+            set.ApplyZoom(new StyleFrameInputs(Zoom, 2.0, 0.0));
 
             Material mat    = set[0].Material;
             int      widthId = ShaderProperties.Line.PropertyId.Width;

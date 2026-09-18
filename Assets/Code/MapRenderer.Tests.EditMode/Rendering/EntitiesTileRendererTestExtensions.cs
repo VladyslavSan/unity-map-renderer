@@ -48,6 +48,33 @@ namespace MapRenderer.Tests
             return (f.ShadowCastingMode, f.ReceiveShadows);
         }
 
+        /// <summary>Whether the draw item's entity is submitted for drawing — the Entities arm of the
+        /// per-slot draw gate (<c>ITileRenderBackend.SetLayerVisible</c>), which rides EG's
+        /// <see cref="DisableRendering"/> tag. Throws for an unknown handle.</summary>
+        internal static bool IsItemDrawn(this EntitiesTileRenderer renderer, int handle)
+            => !renderer._em.HasComponent<DisableRendering>(renderer._items[handle].Entity);
+
+        /// <summary>True when NO live draw item at <paramref name="materialIndex"/> is gated out. Reads
+        /// every item rather than one handle, so a gate that reached only some of a slot's entities fails
+        /// it.</summary>
+        internal static bool AllItemsDrawnAtSlot(this EntitiesTileRenderer renderer, int materialIndex)
+        {
+            foreach (var kv in renderer._items)
+                if (kv.Value.MaterialIndex == materialIndex
+                    && renderer._em.HasComponent<DisableRendering>(kv.Value.Entity))
+                    return false;
+            return true;
+        }
+
+        /// <summary>Live draw items registered at <paramref name="materialIndex"/> — the anti-vacuity count
+        /// for <see cref="AllItemsDrawnAtSlot"/>, which is trivially true of a slot with no items.</summary>
+        internal static int ItemCountAtSlot(this EntitiesTileRenderer renderer, int materialIndex)
+        {
+            int n = 0;
+            foreach (var kv in renderer._items) if (kv.Value.MaterialIndex == materialIndex) n++;
+            return n;
+        }
+
         /// <summary>Number of live tile root entities (one per tile that has ≥1 layer).</summary>
         internal static int TileRootCount(this EntitiesTileRenderer renderer) => renderer._tileRoots.Count;
 

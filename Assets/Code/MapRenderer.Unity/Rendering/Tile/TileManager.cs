@@ -412,17 +412,23 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         // ── Lifecycle / injection ────────────────────────────────────────────────────────────
 
-        /// <summary>The <see cref="Map.View.SetStyle"/> entry point — applies <paramref name="specs"/> as the
-        /// pipeline registry and (re)builds the backend, handling both first call and restyle (see <c>docs/tile-pipeline-design.md</c> §1).</summary>
-        internal void SetSources(IReadOnlyList<SourceSpec> specs, Map.RenderBackend backend)
+        /// <summary>The <see cref="Map.View.SetStyle"/> FULL-REBUILD entry point: applies
+        /// <paramref name="specs"/> and (re)builds the backend, unconditionally. Why unconditional, and how
+        /// this differs from <see cref="RestyleSourcesInPlace"/> — `docs/tile-pipeline-design.md` §1.10.</summary>
+        /// <param name="teardownRecordProbe">UMR-151 test seam — see §1.10. Null in production.</param>
+        internal void SetSources(
+            IReadOnlyList<SourceSpec> specs, Map.RenderBackend backend, System.Action teardownRecordProbe = null)
         {
             // 1. Render-teardown every existing record (no scheduler release, keep warm caches) — in-flight tasks land in the holding pens.
-            foreach (var kv in _loaded)
+            var teardownKeys = new List<LoadedKey>(_loaded.Keys);
+            for (int i = 0; i < teardownKeys.Count; i++)
             {
-                var lt = kv.Value; // foreach value is read-only; teardown needs a ref to null its Meshes
-                RenderTeardownRecord(ref lt);
+                RemoveAndTeardownRecord(teardownKeys[i]);
+                teardownRecordProbe?.Invoke();
             }
 
+            // Redundant on every path that reaches it: the loop above removed every key it snapshotted.
+            // A throw inside the loop skips this line too — the records it never reached stay, intact.
             _loaded.Clear();
             // Records were torn down above — drop the deferred-release bookkeeping too (a queued key can't survive a restyle).
             _releaseQueue.Clear();
@@ -431,23 +437,77 @@ namespace MapRenderer.Unity.Rendering.Tile
             _desired.Clear();
             _desiredSet.Clear();
 
-            // Purge PreparedTileCache every call — a restyle rebuilds layer indexing, so a held layerId may no longer match.
-            _prepared.Clear();
+            // No purge here: CurrentStyle is a content-derived token (see its own doc), so a changed style
+            // already partitions to a different token and an unchanged one is safe to keep and reuse.
 
             // 2. Diff the pipeline registry against the new specs and commit stable slots.
-            bool hasBackground = false;
-            for (int li = 0; li < _layers.Count; li++)
-                if (_layers[li] is Style.BackgroundRenderLayer)
-                {
-                    hasBackground = true;
-                    break;
-                }
-
-            _sources.Rebuild(specs, hasBackground);
+            _sources.Rebuild(specs, HasBackgroundLayer());
 
             // 3. Rebuild the backend from the (caller-rebuilt) styled layer set; re-arm cover selection.
             _coverGate.Invalidate();
             BuildBackend(backend);
+        }
+
+        /// <summary>UMR-151: the <see cref="Map.View.SetStyle"/> PARTIAL-SURVIVAL entry point — called only
+        /// after <see cref="Style.RenderLayerSet.TryRestyleInPlace"/> has patched <c>_layers</c> in place.
+        /// Keeps (re-keys) a record whose source pipeline survived instead of tearing it down; see
+        /// `docs/tile-pipeline-design.md` §1.10 for why that is sound and what happens to a removed slot.</summary>
+        internal void RestyleSourcesInPlace(IReadOnlyList<SourceSpec> specs, Map.RenderBackend backend)
+        {
+            int[] slotMap = ApplySourceDiff(specs);
+            TeardownRecordsOnDepartedPipelines(slotMap);
+            _coverGate.Invalidate();
+            EnsureBackend(backend);
+        }
+
+        /// <summary>Diffs the pipeline registry against <paramref name="specs"/> and commits the new stable
+        /// slots. Returns the OLD-slot → NEW-slot map (<see cref="SourceRegistry.Rebuild"/>'s own contract)
+        /// for <see cref="TeardownRecordsOnDepartedPipelines"/> to apply against <see cref="_loaded"/>.</summary>
+        private int[] ApplySourceDiff(IReadOnlyList<SourceSpec> specs) => _sources.Rebuild(specs, HasBackgroundLayer());
+
+        /// <summary>
+        /// Tears down a loaded record iff its pipeline departed (<paramref name="slotMap"/>'s <c>-1</c>);
+        /// re-keys every other record to its new slot. <see cref="RestyleSourcesInPlace"/>'s narrower
+        /// counterpart to <see cref="SetSources"/>'s unconditional teardown loop.
+        /// </summary>
+        /// <param name="slotMap">OLD slot → NEW slot, or <c>-1</c> for a departed pipeline
+        /// (<see cref="SourceRegistry.Rebuild"/>).</param>
+        private void TeardownRecordsOnDepartedPipelines(int[] slotMap)
+        {
+            var departed = new List<LoadedKey>();
+            var reKeyed  = new List<(LoadedKey oldKey, LoadedTile lt, int newSlot)>();
+            foreach (var kv in _loaded)
+            {
+                int newSlot = slotMap[kv.Key.Slot];
+                if (newSlot == -1) departed.Add(kv.Key);
+                else if (newSlot != kv.Key.Slot) reKeyed.Add((kv.Key, kv.Value, newSlot));
+            }
+
+            foreach (LoadedKey key in departed)
+                RemoveAndTeardownRecord(key);
+
+            foreach (var (oldKey, lt, newSlot) in reKeyed)
+            {
+                _loaded.Remove(oldKey);
+                _loaded[new LoadedKey(oldKey.Tile, newSlot)] = lt;
+            }
+
+            // Deferred-release/desired bookkeeping is per-tick derived state, invalid against the just-
+            // rebuilt slot indexing regardless of what survived — cleared unconditionally, as before.
+            _releaseQueue.Clear();
+            _releaseQueued.Clear();
+            _desired.Clear();
+            _desiredSet.Clear();
+        }
+
+        /// <summary>UMR-151: <see cref="RestyleSourcesInPlace"/>'s backend step. This method is never reached
+        /// with a null <see cref="_instanced"/> — the partial-survival arm only runs after a first, full
+        /// <see cref="SetStyle"/> has already called <see cref="SetSources"/> → <see cref="BuildBackend"/> at
+        /// least once — but falls back to building one rather than assuming that.</summary>
+        private void EnsureBackend(Map.RenderBackend backend)
+        {
+            if (_instanced == null) { BuildBackend(backend); return; }
+            _instanced.SetLayerMaterials(LayerMaterials(_layers), LayerShadowModes(_layers));
         }
 
         /// <summary>Constructs the tile render backend from the styled layer set (default arm Entities so a
@@ -463,9 +523,29 @@ namespace MapRenderer.Unity.Rendering.Tile
                     new GOBackend.TileRenderer(LayerMaterials(_layers), LayerNames(_layers), LayerShadowModes(_layers)),
                 _ => new EntBackend.TileRenderer(LayerMaterials(_layers), LayerNames(_layers), LayerShadowModes(_layers)),
             };
+            PushLayerDrawGates(); // a fresh backend starts all-visible; seed it before the first item lands
         }
 
-        /// <summary>Per-layer materials in declared order — the one full-width list every backend indexes by
+        /// <summary>True iff the current render layers include a <see cref="Style.BackgroundRenderLayer"/> —
+        /// the synthetic source-less pipeline slot's admission test.</summary>
+        private bool HasBackgroundLayer()
+        {
+            for (int li = 0; li < _layers.Count; li++)
+                if (_layers[li] is Style.BackgroundRenderLayer)
+                    return true;
+            return false;
+        }
+
+        /// <summary>
+        /// True iff calling <see cref="SetSources"/> with <paramref name="specs"/> would rebuild the
+        /// pipeline registry identically (same pipelines, same slots) — the restyle-in-place gate's third
+        /// conjunct (<c>Map.MapView.SetStyle</c>): an in-place restyle must not tear down loaded tiles for
+        /// a source set it would only re-derive unchanged.
+        /// </summary>
+        internal bool SourcesUnchanged(IReadOnlyList<SourceSpec> specs)
+            => _sources.Matches(specs, HasBackgroundLayer());
+
+        /// <summary>Per-layer materials in SLOT order — the one full-width list every backend indexes by
         /// <c>materialIndex</c>. A null entry is possible (unassigned base material); backends must tolerate it.</summary>
         private static List<Material> LayerMaterials(Style.RenderLayerSet layers)
         {
@@ -645,6 +725,20 @@ namespace MapRenderer.Unity.Rendering.Tile
             _instanced?.Rebuild(frame);
         }
 
+        /// <summary>
+        /// Pushes each layer's visibility to the backend as a per-slot draw gate, so a layer that paints
+        /// nothing the framebuffer can show submits no draw item at all. Called beside every
+        /// <see cref="Style.RenderLayerSet.ApplyZoom"/> — that is what refreshes the values read here, and
+        /// a frame must never render between the two. Kinds with no opacity of their own always draw.
+        /// </summary>
+        public void PushLayerDrawGates()
+        {
+            if (_instanced == null) return;
+            for (int li = 0; li < _layers.Count; li++)
+                _instanced.SetLayerVisible(
+                    li, !(_layers[li] is Style.IFadeableRenderLayer fadeable) || fadeable.PaintsSomething);
+        }
+
         /// <summary>Test-only: true ⟺ the tile has ≥1 source-record, ALL its records are <c>Built</c>, and
         /// the union produced geometry. N=1 ⇒ identical to a single-record (built + has-geometry) check.</summary>
         internal bool TryGetBuiltTile(TileId id)
@@ -734,7 +828,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             // Defensive backstop, not the normal path — cfg.Projection is always non-null here in production.
             _projection = cfg.Projection ?? new WebMercatorProjection(); // cached for the mesh build bake
 
-            // A changed clip window bumps the bake revision — Clear() here is reclamation, not the invalidation mechanism itself.
+            // A changed clip window invalidates every cached mesh — this Clear() IS the invalidation, not a reclamation.
             if (cfg.BufferClip.IsEnabled             != _bufferClip.IsEnabled ||
                 cfg.BufferClip.KeepAtReferenceExtent != _bufferClip.KeepAtReferenceExtent)
             {
@@ -1208,7 +1302,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Starts a background mesh build over the shared decode (off-PlayerLoop completion — see
         /// <c>docs/async-architecture.md</c> §"Disposal &amp; cancellation contract"). Bakes at the tile's
-        /// integer zoom, so the prepared artifact is a pure function of (styleId, tileId, layerId).</summary>
+        /// integer zoom — see <c>docs/tile-pipeline-design.md</c> §1.9 for the full bake-parameter SSOT.</summary>
         private WorkHandle<Processing.TilePrologueOutput> KickMeshBuild(
             LoadedTile                       lt, TileId id, SharedDisposable<IDecodedTile> decode, string sourceId,
             Processing.ISymbolTileWorkerPass symbolPass = null)
@@ -1218,7 +1312,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             double  zoom           = id.Z;
             double3 tileOrigin     = lt.TileOriginRender;
 
-            // Dense per-(tile, source) produce, declared order — each dense slot becomes one processor, never captured across threads.
+            // Dense per-(tile, source) produce, slot order — each dense slot becomes one processor, never captured across threads.
             ComputeDenseLayerIds(sourceId, _denseLayerIds);
             int dense = _denseLayerIds.Count;
 
@@ -1346,7 +1440,8 @@ namespace MapRenderer.Unity.Rendering.Tile
             int cursor = lt.ConsumeCursor;
             while (cursor < denseCount && meshesConsumed < meshBudget && vertsConsumed < vertBudget)
             {
-                // A payload whose material index no longer exists (a mid-flight restyle) is freed without registering, or the backend throws.
+                // A payload whose slot is gone — out of range, or RETIRED to a tombstone by a mid-flight
+                // restyle — is freed, never registered: width never shrinks, so a count check cannot see it.
                 int slot = cursor;
                 Style.MeshDataPayload payload = payloads[slot];
                 cursor++;
@@ -1354,7 +1449,9 @@ namespace MapRenderer.Unity.Rendering.Tile
                 int materialIndex = payload?.MaterialIndex ?? -1;
                 int layerVerts    = payload?.VertexCount   ?? 0;
 
-                if (payload == null || (uint)materialIndex >= (uint)currentLayerCount)
+                if (payload == null
+                 || (uint)materialIndex >= (uint)currentLayerCount
+                 || _layers[materialIndex] is Style.TombstoneRenderLayer)
                 {
                     payload?.Dispose();
                     // Null the slot the instant Dispose() has run — load-bearing, not cosmetic (see below).
@@ -1469,22 +1566,28 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// in-flight work — a still-running handle goes into <see cref="_pending"/> so it never leaks.</summary>
         private void ReleaseTile(LoadedKey key)
         {
-            if (_loaded.TryGetValue(key, out var lt))
-            {
-                // Background records skip the cache transfer — a full-tile quad is trivial to rebuild on re-entry.
-                bool transferredToCache =
-                    _cacheEnabled && lt.Built && lt.Meshes != null && !_sources.IsSourceless(key.Slot);
-                // Transfers meshes into PreparedTileCache instead of letting teardown destroy them — scoped to eviction, not restyle (docs/tile-pipeline-design.md §5.1).
-                if (transferredToCache)
-                    TransferBuiltMeshesToCache(key.Tile, _sources.SourceIdOf(key.Slot), ref lt);
-
-                RenderTeardownRecord(ref lt);
-                _loaded.Remove(key);
-            }
+            RemoveAndTeardownRecord(key, transferToCache: true);
 
             // Route release to the owning pipeline — a record on source B never touches A; the source-less pipeline is a no-op.
             _sources.ReleaseTile(key.Slot, key.Tile);
             // No symbol-release callback — the subsystem's next CollectLoadedTileKeys pull no longer reports it, and reconcile fades the symbols.
+        }
+
+        /// <summary>Drops <paramref name="key"/> from <see cref="_loaded"/> BEFORE tearing its record down —
+        /// the one ordering every abandonment path shares. The dictionary value is a copy, so a teardown that
+        /// ran first would leave a HUSK behind if it threw. A key already gone is a no-op.</summary>
+        /// <param name="transferToCache">Eviction only: hand a Built record's meshes to
+        /// <see cref="_prepared"/> first, so teardown finds nothing left to destroy.</param>
+        private void RemoveAndTeardownRecord(LoadedKey key, bool transferToCache = false)
+        {
+            if (!_loaded.Remove(key, out LoadedTile lt)) return;
+
+            // Transfer instead of destroy — scoped to eviction, not restyle (docs/tile-pipeline-design.md §5.1).
+            // A source-less background record is excluded: a full-tile quad is trivial to rebuild on re-entry.
+            if (transferToCache && _cacheEnabled && lt.Built && lt.Meshes != null && !_sources.IsSourceless(key.Slot))
+                TransferBuiltMeshesToCache(key.Tile, _sources.SourceIdOf(key.Slot), ref lt);
+
+            RenderTeardownRecord(ref lt);
         }
 
         /// <summary>Transfers a Built record's meshes into <see cref="_prepared"/>, keyed per layer under
@@ -1563,6 +1666,10 @@ namespace MapRenderer.Unity.Rendering.Tile
                         break;
                     }
                 }
+                // A hit must be complete on BOTH sides. A hit marks the record Built+FetchCompleted, so it is
+                // never pumped and never kicks a symbol build — serving one whose warm symbol block is gone
+                // (a full-rebuild restyle Clears the store) loses its labels permanently.
+                if (allCached) allCached = SymbolsCachedFor(_sources.SourceIdOf(slot), id);
             }
 
             if (allCached)
@@ -1586,6 +1693,20 @@ namespace MapRenderer.Unity.Rendering.Tile
                     Built            = false,
                     TileOriginRender = origin,
                 };
+            }
+        }
+
+        /// <summary>Isolated <see cref="Processing.ISymbolTileWorkerFactory.SymbolsCachedFor"/> — a throwing
+        /// factory must never fault admission, and a factory that cannot answer is treated as NOT cached, so
+        /// the tile re-fetches rather than re-showing label-less.</summary>
+        private bool SymbolsCachedFor(string sourceId, TileId id)
+        {
+            if (SymbolWorkerFactory == null) return true;
+            try { return SymbolWorkerFactory.SymbolsCachedFor(sourceId, id); }
+            catch (System.Exception ex)
+            {
+                Debug.LogWarning($"[TileManager] symbol factory (cache probe) threw for {id}: {ex.Message}");
+                return false;
             }
         }
 
@@ -1651,8 +1772,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Tears down a record's RENDER state — destroys its Mesh assets, unregisters its backend
         /// draw items, and stashes any in-flight fetch/mesh build in the holding pens. Does <b>NOT</b> touch
         /// the scheduler/cache: <see cref="ReleaseTile"/> follows with <c>Scheduler.Release</c>; restyle
-        /// calls this ALONE for a kept source so its cached bytes survive. The caller removes the key from
-        /// <see cref="_loaded"/>.
+        /// calls this ALONE for a kept source so its cached bytes survive.
+        /// <see cref="RemoveAndTeardownRecord"/> has already dropped the key from <see cref="_loaded"/>.
+        /// <see cref="DoDispose"/> has not — see the remark on its own <c>_loaded.Clear()</c>.
         /// <para><b>THE single record-teardown funnel.</b> All abandonment paths — eviction
         /// (<see cref="ReleaseTile"/>), restyle (<see cref="SetSources"/>), teardown
         /// (<see cref="DoDispose"/>) — reach a record through here. A new per-record teardown obligation
@@ -1767,6 +1889,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 RenderTeardownRecord(ref lt);
             }
 
+            // Skipped if the loop above threw, which leaves a torn-down record in _loaded as a husk.
+            // Tolerated ONLY because this is terminal: nothing reads _loaded after the manager is disposed.
             _loaded.Clear();
 
             // The teardown loop above just re-filled the pens — flush AFTER it, or this drains pens that refill and never empty.

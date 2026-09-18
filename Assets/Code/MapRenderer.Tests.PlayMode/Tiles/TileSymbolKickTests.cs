@@ -51,6 +51,10 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 IssuedPasses.Add(pass);
                 return pass;
             }
+
+            /// <summary>Not under test here: the spy commits no symbol blocks, so it answers "nothing
+            /// to lose" and leaves TileManager's prepared-cache probe exactly as it was.</summary>
+            public bool SymbolsCachedFor(string sourceId, TileId tile) => true;
         }
 
         private sealed class SpySymbolTileWorkerPass : ISymbolTileWorkerPass

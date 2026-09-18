@@ -87,7 +87,6 @@ namespace MapRenderer.Tests.Text.Placement
             var whitePaint = new SymbolPaint
             {
                 TextColor = new float4(1f, 1f, 1f, 1f), Opacity = 1f,
-                HaloColor = default, HaloWidthPx = 0f, HaloBlurPx = 0f,
             };
 
             // Spread the four sprites across the frame (ground offsets from the look-at; fraction kept modest so
@@ -874,7 +873,6 @@ namespace MapRenderer.Tests.Text.Placement
                 paint: new SymbolPaint
                 {
                     TextColor = new float4(1f, 1f, 1f, 1f), Opacity = 1f,
-                    HaloColor = default, HaloWidthPx = 0f, HaloBlurPx = 0f,
                 },
                 textSizePx: TextQuadLayout.OneEm, // scale 1 — the cell's baked px ARE screen px
                 maxAngleDeg: 180f,
@@ -994,7 +992,6 @@ namespace MapRenderer.Tests.Text.Placement
                 paint: new SymbolPaint
                 {
                     TextColor = new float4(1f, 1f, 1f, 1f), Opacity = 1f,
-                    HaloColor = default, HaloWidthPx = 0f, HaloBlurPx = 0f,
                 },
                 textSizePx: TextQuadLayout.OneEm, // scale 1 — the cell's baked px ARE screen px
                 allowOverlap: true, // render diagnostic — never collision-cull

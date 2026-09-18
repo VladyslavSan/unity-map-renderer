@@ -4,8 +4,10 @@
 // (CacheDisabled, CachedMeshes) stay in the EditMode half — Object.Destroy is deferred to end-of-frame in
 // PlayMode, so "destroyed immediately" and process-wide FindObjectsOfTypeAll<Mesh> counts don't hold here.
 //
-// Vacuity trap avoided: every test uses interp-fill-style.json (a zoom-`interpolate` fill-color), NOT a
-// constant-color style — a constant fixture would make the id.Z-vs-cam.Zoom bake pass vacuously.
+// Every test uses interp-fill-style.json (a zoom-`interpolate` fill-color) as its style fixture.
+// Post-Stage-1, a zoom-`interpolate` fill-color bakes vColor white and rides `_BaseColor` — same as a
+// constant style — so this fixture is no longer a defence against a vertex-color vacuity trap; none of
+// these teeth read vertex color, so nothing here is lost.
 
 using System.Collections;
 using System.Collections.Generic;
@@ -38,6 +40,17 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         private static StyleDocument InterpFillStyle()
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", "interp-fill-style.json");
+            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
+            return StyleParser.Parse(File.ReadAllText(path));
+        }
+
+        /// <summary>Composite (zoom + feature) fill-color — unlike <see cref="InterpFillStyle"/>'s pure
+        /// Zoom-kind expression, this still bakes a per-feature COLOR stream after Stage 1's fill-color
+        /// carrier split, so <see cref="ZoomBake_AtIdZ_NotStaleCamZoom"/>'s "bake happens at id.Z, not the
+        /// fractional camera zoom" claim stays observable on the mesh.</summary>
+        private static StyleDocument InterpFillCompositeStyle()
+        {
+            string path = Path.Combine(Application.dataPath, "Fixtures", "interp-fill-composite-style.json");
             Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
             return StyleParser.Parse(File.ReadAllText(path));
         }
@@ -213,7 +226,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         public IEnumerator ZoomBake_AtIdZ_NotStaleCamZoom()
         {
             byte[] bytes = SampleTileFixture.Bytes();
-            var style    = InterpFillStyle();
+            var style    = InterpFillCompositeStyle();
             var src      = TestDataSource.FromBytes(bytes);
             var go       = new GameObject("MapView_S82_ZoomBake");
             var view     = go.AddComponent<MapView>();

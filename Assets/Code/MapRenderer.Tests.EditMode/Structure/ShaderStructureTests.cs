@@ -9,8 +9,9 @@
 //   • _NORMALMAP / _METALLICSPECGLOSSMAP pragmas are present (required for teeth #1 and #3)
 //   • THIRD-PARTY-NOTICES.txt has a UCL entry
 //   • UCL license text file exists
-//   • Shaders/Map/PixelsToWorld.hlsl (S23 I2a) is the one sanctioned cross-folder include — every carrier
-//     references it via ../PixelsToWorld.hlsl and none locally re-defines MapPixelsToWorld
+//   • Shaders/Map/ holds EXACTLY ONE sanctioned cross-folder include — PixelsToWorld.hlsl (S23 I2a),
+//     referenced via ../PixelsToWorld.hlsl by every carrier, which none locally re-defines
+//   • No map pass discards a fragment on _Opacity — fade is a per-slot DRAW gate
 //
 // Runs in the Unity EditMode test assembly (moved from Tools/core-tests, which used
 // test-binary-relative path arithmetic that broke on the Assets/Code/ folder move). Paths are now
@@ -21,7 +22,7 @@
 // collapsed into _BaseColor), S56 (reorg into Common/ + Map/<Layer>/), S66 (each layer is
 // self-contained; Common/ holds only LitInput.Template.hlsl; files renamed to <Layer>_<Pass>), and
 // S23 I2a (the shared px→world measurement was hoisted out of per-layer sentinel-pinned copies into
-// Shaders/Map/PixelsToWorld.hlsl — the one sanctioned exception to self-containment).
+// Shaders/Map/PixelsToWorld.hlsl — then one of the two sanctioned exceptions to self-containment).
 
 using System;
 using System.Collections.Generic;
@@ -491,18 +492,21 @@ namespace MapRenderer.Tests.Structure
         public void MapLayerFiles_ShareOnlyViaSanctionedInclude()
         {
             // S66: each layer folder is self-contained (no reach into Common/). There are exactly two
-            // sanctioned cross-folder `../` reaches, both validated STRUCTURALLY (resolve on disk), not by a
-            // string allow-list:
-            //   (1) S23 I2a — ../PixelsToWorld.hlsl, the shared px→world at the Map root, reached from each
-            //       kind's vertex file; and
+            // KINDS of sanctioned cross-folder `../` reach, both validated STRUCTURALLY (resolve on disk),
+            // not by a string allow-list:
+            //   (1) the ONE sanctioned Map-root shared include — PixelsToWorld.hlsl (S23 I2a, the shared
+            //       px→world, reached from each kind's vertex file); and
             //   (2) the unlit epic's Lit/Unlit split — a .shader / mode-specific .hlsl in Map/<Kind>/{Lit,
             //       Unlit}/ reaches ONE level up to its OWN kind root for the three shared includes
             //       (<Kind>_VertexModify/VertexExtrude, _DepthOnlyPass, _DepthNormalsPass).
-            // Every `../` include must resolve to a real file that is EITHER the Map-root PixelsToWorld.hlsl
-            // OR still inside the SAME kind's tree. That blocks a reach into Common/, into a SIBLING layer,
-            // or outside Map/ — the reaches this test exists to catch — and now also catches a dangling
-            // include that resolves to nothing.
-            string pixelsToWorld = Path.GetFullPath(Path.Combine(MapDir, "PixelsToWorld.hlsl"));
+            // Every `../` include must resolve to a real file that is EITHER the Map-root shared include OR
+            // still inside the SAME kind's tree. That blocks a reach into Common/, into a SIBLING layer, or
+            // outside Map/ — the reaches this test exists to catch — and also catches a dangling include
+            // that resolves to nothing.
+            var mapRootShared = new[]
+            {
+                Path.GetFullPath(Path.Combine(MapDir, "PixelsToWorld.hlsl")),
+            };
 
             // AllDirectories: entry points + mode-specific .hlsl now live in each kind's Lit/ and Unlit/.
             foreach (string kindDir in new[] { MapFillDir, MapLineDir, MapExtrusionDir })
@@ -523,11 +527,90 @@ namespace MapRenderer.Tests.Structure
                     Assert.That(File.Exists(target), Is.True,
                         $"{Path.GetFileName(file)} includes '{m.Groups[1].Value}', which resolves to a " +
                         $"nonexistent file: {target}");
-                    Assert.That(target == pixelsToWorld || IsUnder(target, kindDir), Is.True,
+                    Assert.That(mapRootShared.Contains(target) || IsUnder(target, kindDir), Is.True,
                         $"{Path.GetFileName(file)} has an unsanctioned cross-folder include " +
-                        $"'{m.Groups[1].Value}' (→ {target}). A `../` reach may only target ../PixelsToWorld.hlsl " +
-                        "(S23 I2a) or a shared include in the SAME kind root (the Lit/Unlit split).");
+                        $"'{m.Groups[1].Value}' (→ {target}). A `../` reach may only target the sanctioned " +
+                        "Map-root shared include (PixelsToWorld.hlsl) or a shared include in the SAME kind " +
+                        "root (the Lit/Unlit split).");
                 }
+            }
+        }
+
+        // ── The layer-fade draw gate ──────────────────────────────────────
+
+        /// <summary>
+        /// Every kind directory whose Input files declare <c>_Opacity</c> — the PREDICATE that decides which
+        /// kinds the fade gate applies to. Today it enumerates to Fill, Line and FillExtrusion; Symbol is
+        /// excluded because its Input files declare no <c>_Opacity</c>. Hard-coding the three would leave a
+        /// fourth <c>_Opacity</c>-bearing kind silently unfenced, which is what this fence exists to prevent.
+        /// </summary>
+        private static string[] OpacityBearingKindDirs()
+            => Directory.EnumerateDirectories(MapDir)
+                .Where(d => Directory.EnumerateFiles(d, "*Input.hlsl", SearchOption.AllDirectories)
+                    .Any(f => File.ReadAllText(f, Encoding.UTF8).Contains("_Opacity")))
+                .OrderBy(d => d, StringComparer.Ordinal)
+                .ToArray();
+
+        /// <summary>
+        /// NO map fragment pass discards on the fade uniform. Fade is a per-slot DRAW gate
+        /// (<c>ITileRenderBackend.SetLayerVisible</c>) — a gated layer submits no draw item, so the fragment
+        /// never runs and a clip there is dead work.
+        ///
+        /// <para>Exempt from the length limit for a limitation no rendered tooth can observe: 11 of the 18
+        /// pass sites cannot rasterise in the shipped configuration (Forward+, queue >= 3000,
+        /// CastShadows.Off on every kind but fill-extrusion), so a clip re-added to one of them stays
+        /// invisible until a configuration flip makes the pass live. This fence is their sole observer. It
+        /// matches the ARGUMENT (<c>_Opacity</c>), so the line-coverage and pattern-cutout
+        /// <c>clip()</c>s are untouched, and it strips comments first, so a commented-out clip does not
+        /// fail it.</para>
+        /// </summary>
+        [Test]
+        public void NoMapPassBody_DiscardsOnTheLayerFadeUniform()
+        {
+            string[] kindDirs = OpacityBearingKindDirs();
+            Assert.That(kindDirs, Is.Not.Empty,
+                "no kind directory under Shaders/Map/ declares _Opacity — the predicate that selects which " +
+                "kinds carry the fade gate matched nothing, so this fence would be vacuous.");
+
+            foreach (string kindDir in kindDirs)
+            foreach (string pass in Directory.EnumerateFiles(kindDir, "*Pass.hlsl", SearchOption.AllDirectories))
+            {
+                string body = ShaderPropertyParser.StripHlslComments(File.ReadAllText(pass, Encoding.UTF8));
+
+                Assert.That(Regex.IsMatch(body, @"\bclip\s*\([^;]*\b_Opacity\b"), Is.False,
+                    $"{Path.GetFileName(pass)} discards a fragment on _Opacity. The fade gate is a " +
+                    "per-slot DRAW gate now (ITileRenderBackend.SetLayerVisible): a gated layer submits no " +
+                    "draw item, so this clip runs only for layers that are supposed to be drawn.");
+
+                Assert.That(body, Does.Not.Contain("MAP_CLIP_IF_ABSENT"),
+                    $"{Path.GetFileName(pass)} calls MAP_CLIP_IF_ABSENT. No such macro is defined, so the " +
+                    "pass would not compile; fade is decided at submission, not in the fragment.");
+            }
+        }
+
+        /// <summary>
+        /// Nothing under Shaders/ defines a fade-discard macro or its threshold. The companion fence
+        /// above only reads pass BODIES, so a definition that nothing includes yet would sit unobserved
+        /// until someone wired it up.
+        /// </summary>
+        [Test]
+        public void NoShaderFile_DefinesAFadeDiscardMacro()
+        {
+            Assert.That(File.Exists(Path.Combine(MapDir, "LayerFade.hlsl")), Is.False,
+                "Shaders/Map/LayerFade.hlsl defines a fragment-side fade threshold. Fade is a " +
+                "per-slot draw gate (ITileRenderBackend.SetLayerVisible) — see docs/tile-pipeline-design.md §7.5.");
+
+            foreach (string file in Directory.EnumerateFiles(
+                         ShaderPropertyParser.ShadersDir, "*", SearchOption.AllDirectories)
+                     .Where(f => f.EndsWith(".hlsl", StringComparison.Ordinal)
+                              || f.EndsWith(".shader", StringComparison.Ordinal)))
+            {
+                string text = File.ReadAllText(file, Encoding.UTF8);
+                Assert.That(text, Does.Not.Contain("MAP_CLIP_IF_ABSENT"),
+                    $"{Path.GetFileName(file)} defines a fragment-side fade discard.");
+                Assert.That(text, Does.Not.Contain("MAP_LAYER_FADE_EPSILON"),
+                    $"{Path.GetFileName(file)} defines a second copy of the visibility threshold — " +
+                    "ZoomStyleApplier.VisibleOpacityEpsilon is the only one.");
             }
         }
 

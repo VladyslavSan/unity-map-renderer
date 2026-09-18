@@ -22,7 +22,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// over the existing mesh-building code, so it is behaviour-preserving.
     /// Axes (design §"Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
     /// </summary>
-    internal sealed class FillRenderLayer : ITileMeshRenderLayer, ISpriteConsumerRenderLayer
+    internal sealed class FillRenderLayer : ITileMeshRenderLayer, ISpriteConsumerRenderLayer, IFadeableRenderLayer
     {
         /// <summary>Profiler marker name constants (SSOT) for this layer's telemetry — referenced by the
         /// <see cref="ProfilerMarker"/> field below and by <c>ProfilerMarkerTests</c> (internal, via
@@ -39,9 +39,9 @@ namespace MapRenderer.Unity.Rendering.Style
         private static readonly ProfilerMarker PmZoomFills =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.ApplyZoomFills);
 
-        private readonly Fill.PaintProperties  _paint;
+        private Fill.PaintProperties  _paint;
 
-        private readonly Fill.LayoutProperties _layout;
+        private Fill.LayoutProperties _layout;
         private readonly ZoomStyleApplier      _applier;
 
         // The sprite's resolved rect + base repeat count. What reaches the shader is this run through
@@ -50,13 +50,14 @@ namespace MapRenderer.Unity.Rendering.Style
         private bool                        _patternResolved;
         private double                      _lastZoom;
 
-        public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; }
+        public MapRenderer.Core.Style.StyleLayer StyleLayer  { get; private set; }
         public RenderLayerBuild                  Build       => RenderLayerBuild.TileMesh;
         public DrawPersistence                   Persistence => DrawPersistence.Persistent;
         public int                               DrawIndex   { get; }
         public LayerSubSlot                      MaterialSubSlot => LayerSubSlot.Base;
         public ShadowCastingMode                 CastShadows => ShadowCastingMode.Off;
         public Material                          Material    { get; }
+        public int                               TransitioningCount => _applier.TransitioningCount;
 
         private FillRenderLayer(
             Fill.StyleLayer layer, Material material, Fill.PaintProperties paint,
@@ -87,23 +88,59 @@ namespace MapRenderer.Unity.Rendering.Style
             Material mat = Materials.MaterialFactory.CreateFillMaterial(settings);
             if (mat == null) return null;
 
+            // Read ONCE, handed to both carriers (BindFillPaintToApplier here, _paint for the mesh bake) —
+            // one DependsOnFeature reading makes the two guards exact complements: never both, never neither.
             Fill.PaintProperties paint = layer.Paint;
             var applier = new ZoomStyleApplier(mat);
+            // BEFORE the paint bind: a Constant opacity is pushed once at bind time and then skipped
+            // forever, so an unscaled bind-time push would make a seeded fade of 0 invisible.
+            applier.SeedFade(layer.IsVisibleAtZoom(initialZoom) ? 1f : 0f);
             Materials.MaterialFactory.BindFillPaintToApplier(paint, applier, mat);
             // Seeded at dpr 1 — the live ratio arrives with the first ApplyZoom, before any frame draws
             // (RenderLayerSet.ApplyZoom's contract).
-            applier.ApplyZoom(initialZoom, 1.0);
+            applier.ApplyZoom(new StyleFrameInputs(initialZoom, 1.0, 0.0));
             return new FillRenderLayer(layer, mat, paint, layer.Layout, applier, drawIndex, initialZoom);
         }
 
-        public void ApplyZoom(double zoom, double devicePixelRatio)
+        /// <inheritdoc cref="IFadeableRenderLayer.FadesGradually"/>
+        public bool FadesGradually => true;
+
+        /// <inheritdoc cref="IFadeableRenderLayer.SetFade"/>
+        public void SetFade(float amount) => _applier.SetFade(amount);
+
+        /// <inheritdoc cref="IFadeableRenderLayer.PaintsSomething"/>
+        public bool PaintsSomething => !_applier.EffectiveOpacityIsZero;
+
+        public void ApplyZoom(in StyleFrameInputs inputs)
         {
             using (PmZoomFills.Auto())
             {
-                _applier.ApplyZoom(zoom, devicePixelRatio);
-                _lastZoom = zoom;
+                _applier.ApplyZoom(inputs);
+                _lastZoom = inputs.Zoom;
                 PushPatternScale();
             }
+        }
+
+        /// <summary>
+        /// Re-targets this layer's uniform bindings at <paramref name="layer"/> — the survivor gate has
+        /// already proven its mesh-affecting content unchanged, so only the paint/layout carriers and the
+        /// applier's bindings need to move.
+        /// </summary>
+        public void Restyle(MapRenderer.Core.Style.StyleLayer layer, in StyleTransition transition, double nowSeconds)
+        {
+            var typed = (Fill.StyleLayer)layer;
+            StyleLayer = typed;
+            _paint     = typed.Paint;
+            _layout    = typed.Layout;
+            _applier.SetTransition(transition, nowSeconds);
+            Materials.MaterialFactory.BindFillPaintToApplier(_paint, _applier, Material);
+        }
+
+        /// <inheritdoc cref="IRenderLayer.SetDrawOrder"/>
+        public void SetDrawOrder(int declaredOrder)
+        {
+            if (Material != null)
+                Material.renderQueue = LayerDrawOrder.QueueFor(declaredOrder, MaterialSubSlot);
         }
 
         /// <summary>

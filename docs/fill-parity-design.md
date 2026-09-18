@@ -60,7 +60,7 @@ was scoped against, kept as written so the stages below can be read against it. 
 
 | Property | State | Evidence |
 |---|---|---|
-| `fill-color` | ✅ per-feature bake, data-driven works | `StyledFillTileBuilder.cs:151` |
+| `fill-color` | ✅ two-carrier split: constant/zoom → `_BaseColor` uniform, data-driven → per-feature bake | `MaterialFactory.cs:65`, `StyledFillTileBuilder.cs:319` |
 | `fill-opacity` | 🟡 `_Opacity` uniform, constant/zoom only | `MaterialFactory.cs:60` |
 | `fill-translate` | 🟡 read, but raw px with no px→world scale | `Fill_VertexModify.hlsl:43` |
 | `fill-translate-anchor` | 🟠 bound; shader implements only the `map` path | `Fill_VertexModify.hlsl:21` |

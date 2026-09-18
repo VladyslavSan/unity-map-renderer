@@ -13,7 +13,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// </summary>
     internal struct TilePrologueOutput
     {
-        /// <summary>Dense over the kick's <c>ITileMeshRenderLayer</c>s, in declared order: a rented
+        /// <summary>Dense over the kick's <c>ITileMeshRenderLayer</c>s, in SLOT order: a rented
         /// <see cref="ILayerMeshBuild"/> for a layer with graph work, and <c>null</c> for a layer that
         /// produced nothing (an unsupported phase, or a processor never reached after an earlier one
         /// faulted).</summary>

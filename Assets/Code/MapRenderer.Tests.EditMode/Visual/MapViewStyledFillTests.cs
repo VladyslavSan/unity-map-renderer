@@ -27,6 +27,7 @@ using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
+using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Visual
 {
@@ -349,12 +350,19 @@ namespace MapRenderer.Tests.Visual
 
         // ─── #4: Gamma-correct baked vertex colors (DECISIVE) ────────────────────────────────────
 
+        // The constant-color arm of gamma linearization is observed in
+        // PaintColorRenderTests.ConstantFillColor_RenderedPixel_MatchesAuthored; this fixture is now
+        // data-driven (a `match` expression), so it exercises only the data-driven bake.
         [Test]
-        public void MapView_ConstantFillColor_VertexColorsAreLinearized()
+        public void MapView_DataDrivenFillColor_VertexColorsAreLinearized()
         {
             // Use a known sRGB value where linear ≠ sRGB: rgba(127, 0, 0) → sRGB≈0.498, linear≈0.212.
             // The decisive check: stored R is closer to linear (≈0.212) than to sRGB (≈0.498).
             // This proves MeshBuilder.Build() called Color.linear before Mesh.SetColors.
+            // Both `match` arms below hold the SAME rgba(127,0,0,1) on purpose: this forces
+            // DependsOnFeature == true (so the value bakes to vColor, not _BaseColor) while pinning the
+            // authored 127 so the linearization check stays byte-level — simplifying to a constant
+            // fill-color would move the value to _BaseColor and red this test for the wrong reason.
             const string styleJson = @"{
                 ""version"": 8,
                 ""name"": ""GammaTest"",
@@ -371,7 +379,9 @@ namespace MapRenderer.Tests.Visual
                         ""source"": ""maplibre"",
                         ""source-layer"": ""countries"",
                         ""paint"": {
-                            ""fill-color"": [""rgba"", 127, 0, 0, 1]
+                            ""fill-color"": [""match"", [""get"", ""CONTINENT""],
+                                ""Asia"", [""rgba"", 127, 0, 0, 1],
+                                [""rgba"", 127, 0, 0, 1]]
                         }
                     }
                 ]
@@ -479,11 +489,11 @@ namespace MapRenderer.Tests.Visual
                 applier.BindFloat(paint.Opacity, Shader.PropertyToID("_MyZoomOpacity"));
 
                 // Apply at zoom=0.
-                applier.ApplyZoom(0.0, 1.0);
+                applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.0));
                 float valAtZoom0 = mat.GetFloat("_MyZoomOpacity");
 
                 // Apply at zoom=6.
-                applier.ApplyZoom(6.0, 1.0);
+                applier.ApplyZoom(new StyleFrameInputs(6.0, 1.0, 0.0));
                 float valAtZoom6 = mat.GetFloat("_MyZoomOpacity");
 
                 Debug.Log($"[StyledFillTests] ZoomStyleApplier: zoom=0 → {valAtZoom0:F4}, zoom=6 → {valAtZoom6:F4}");
@@ -557,6 +567,71 @@ namespace MapRenderer.Tests.Visual
             finally
             {
                 view.Teardown(); // dispose the backend world/BRG (OnDestroy does not fire on DestroyImmediate)
+                UnityEngine.Object.DestroyImmediate(go);
+            }
+        }
+
+        // ─── #6: fill-color Stage 1 — zoom retint does not rebuild the mesh (DECISIVE) ──────────
+
+        private static void AssertColorClose(Color expected, Color actual, string what)
+        {
+            Assert.That(actual.r, NUnit.Framework.Is.EqualTo(expected.r).Within(1e-3f), $"{what}: R (actual={actual}, expected={expected})");
+            Assert.That(actual.g, NUnit.Framework.Is.EqualTo(expected.g).Within(1e-3f), $"{what}: G (actual={actual}, expected={expected})");
+            Assert.That(actual.b, NUnit.Framework.Is.EqualTo(expected.b).Within(1e-3f), $"{what}: B (actual={actual}, expected={expected})");
+        }
+
+        /// <summary>
+        /// A Zoom-kind fill-color must retint the MATERIAL, not rebake the MESH — that is Stage 1's whole
+        /// deliverable. Pins the tile set fixed across the zoom move so a rebuild (if one happened) could
+        /// only be the colour change, never a different cover.
+        /// </summary>
+        [Test]
+        public void FillColor_ZoomExpression_RetintsWithoutRebuildingTheMesh()
+        {
+            string path = Path.Combine(Application.dataPath, "Fixtures", "interp-fill-style.json");
+            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
+            var style = StyleParser.Parse(File.ReadAllText(path));
+
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go   = new GameObject("MapView");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+
+            var tile0 = new TileId { Z = 0, X = 0, Y = 0 };
+
+            try
+            {
+                view.LoadTestStyle(src,
+                    new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 1.0, 0, 0),
+                    style: style);
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(tile0), "z0/0/0 tile must be built at zoom 1.");
+
+                Mesh  m1 = view.GetTileMeshes(tile0)[0];
+                Color c1 = view.Layers[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor);
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Zoom = 5.0 });
+                view.LateUpdate();
+
+                Assert.IsTrue(view.TryGetBuiltTile(tile0), "z0/0/0 tile must still be built at zoom 5 — the " +
+                    "cover is pinned, so only the colour should have moved.");
+                Mesh  m2 = view.GetTileMeshes(tile0)[0];
+                Color c2 = view.Layers[0].Material.GetColor(ShaderProperties.PropertyId.BaseColor);
+
+                // ── DECISIVE, in order: no rebuild, then each stop's colour, then the two differ ──────
+                Assert.AreSame(m1, m2,
+                    "a zoom-only retint of a Zoom-kind fill-color must not rebuild the mesh — the colour " +
+                    "lives on the material now, not baked into the mesh.");
+                AssertColorClose(new Color(1f, 0f, 0f, 1f), c1, "c1 (zoom=1 stop, authored sRGB)");
+                AssertColorClose(new Color(0f, 0f, 1f, 1f), c2, "c2 (zoom=5 stop, authored sRGB)");
+                Assert.AreNotEqual(c1, c2, "the two zoom stops must retint to visibly different colours.");
+            }
+            finally
+            {
+                view.Teardown();
                 UnityEngine.Object.DestroyImmediate(go);
             }
         }

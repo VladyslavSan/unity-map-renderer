@@ -39,21 +39,30 @@ namespace MapRenderer.Core.Style
         /// <summary>Layer <c>maxzoom</c>. Nullable: the spec lists no default (absent = unbounded above).</summary>
         public double? MaxZoom;
 
-        /// <summary>MapLibre layer visibility at a given DISPLAY (camera) zoom: <c>minzoom &lt;= zoom &lt; maxzoom</c>,
-        /// with a null bound meaning unbounded. <b>minzoom is inclusive, maxzoom is EXCLUSIVE</b> (Style Spec). Must
-        /// be evaluated against the LIVE camera zoom every frame — NOT the tile build zoom — so overzoomed tiles
-        /// (camera past the source's max data zoom) still turn layers on/off as MapLibre does.</summary>
+        /// <summary><c>layout: {"visibility": ...}</c> ONLY — <see langword="false"/> means
+        /// <c>"none"</c> was declared. Does NOT consider zoom; see <see cref="IsVisibleAtZoom"/> for the
+        /// combined answer of whether the layer actually draws. Defaults <see langword="true"/> so a
+        /// layer built without going through <see cref="StyleParser"/> (a test fixture, a decoder probe)
+        /// is visible by the same spec default an absent <c>layout</c> parses to.</summary>
+        public bool Visible = true;
+
+        /// <summary>MapLibre layer visibility at a given DISPLAY (camera) zoom: <see cref="Visible"/>, and
+        /// <c>minzoom &lt;= zoom &lt; maxzoom</c>, with a null bound meaning unbounded. <b>minzoom is inclusive,
+        /// maxzoom is EXCLUSIVE</b> (Style Spec). Must be evaluated against the LIVE camera zoom every frame — NOT
+        /// the tile build zoom — so overzoomed tiles (camera past the source's max data zoom) still turn layers
+        /// on/off as MapLibre does.</summary>
         public bool IsVisibleAtZoom(double zoom)
-            => (!MinZoom.HasValue || zoom >= MinZoom.Value) && (!MaxZoom.HasValue || zoom < MaxZoom.Value);
+            => Visible && (!MinZoom.HasValue || zoom >= MinZoom.Value) && (!MaxZoom.HasValue || zoom < MaxZoom.Value);
 
         /// <summary>Raw <c>filter</c> sub-tree (legacy or expression), or null. Parsed in S10.</summary>
         public JsonValue Filter;
 
         /// <summary>The full original layer JSON object, retained so unknown/forward-compat keys survive
         /// (including its <c>paint</c>/<c>layout</c> sub-trees, which are otherwise parsed and discarded).
-        /// Internal: callers read the typed <c>Paint</c>/<c>Layout</c> views on the concrete subclass instead.
-        /// Access from <c>MapRenderer.Tests.EditMode</c> is granted via <c>InternalsVisibleTo</c> for
-        /// forward-compat assertions only.</summary>
-        internal JsonValue Raw;
+        /// Callers read the typed <c>Paint</c>/<c>Layout</c> views on the concrete subclass instead, except
+        /// the restyle survivor gate (<c>SurvivingLayerGate</c>, in <c>MapRenderer.Unity</c>), which must
+        /// compare the whole raw object — an unknown or forward-compat key must be inside that comparison,
+        /// and the typed views drop it.</summary>
+        public JsonValue Raw;
     }
 }

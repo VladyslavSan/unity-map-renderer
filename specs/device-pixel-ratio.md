@@ -98,8 +98,7 @@ other px property is logical, and reaches its consumer *without* a conversion �
 the shader divides by the logical viewport, or baked CPU-side into geometry/placement.
 
 **Device-space — crosses the seam (`× dpr`).** Exactly eight, all bound through the DPR seam (the
-`BindDevicePixelFloat`/`BindDevicePixelVector` call sites in `MaterialFactory`, and `SymbolRenderLayer.BindHalo`
-for the halo pair):
+`BindDevicePixelFloat`/`BindDevicePixelVector` call sites in `MaterialFactory` and `SymbolRenderLayer.BindTextPaint`):
 
 | property | consumer measures | at the seam |
 |---|---|---|

@@ -8,25 +8,27 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// The resolved `text-*` PAINT properties for one symbol (as opposed to layout, which
-    /// <c>TextQuadLayout.Layout</c> already baked into <see cref="SymbolQuad"/>s). Every color is
-    /// straight RGBA (0..1, already linear-space).
+    /// The resolved text fill PAINT properties for one symbol (as opposed to layout, which
+    /// <c>TextQuadLayout.Layout</c> already baked into <see cref="SymbolQuad"/>s). Every color is straight
+    /// RGBA (0..1); the linear conversion happens later, at bake (<c>SymbolPlacementSystem.LinearColor</c>).
     ///
-    /// <para><see cref="TextColor"/>/<see cref="Opacity"/> feed the billboard vertex color stream, and the
-    /// halo trio (<see cref="HaloColor"/>/<see cref="HaloWidthPx"/>/<see cref="HaloBlurPx"/>) feeds the SAME
-    /// stream on a second copy of the label's glyphs — the text shader has no halo term of its own. All five
-    /// are evaluated PER FEATURE by <c>SymbolFeatureExtractor</c>, so a data-driven <c>text-halo-*</c>
-    /// behaves like a data-driven <c>text-color</c>.</para>
+    /// <para>All five are evaluated PER FEATURE by <c>SymbolFeatureExtractor</c> and feed the billboard
+    /// vertex streams — the halo trio on a second copy of the label's glyphs, so the shader has no halo term
+    /// of its own. <see cref="TextColor"/> and <see cref="HaloColor"/> carry white RGB when their expression
+    /// is CONSTANT: that kind rides a per-layer uniform instead (<c>SymbolRenderLayer.BindTextPaint</c>) so a
+    /// restyle can ease it. Their ALPHA and <see cref="Opacity"/> always ride the stream.</para>
     /// </summary>
     public readonly struct SymbolPaint
     {
-        /// <summary>Fill color (`text-color`), straight RGBA.</summary>
+        /// <summary>Fill color (`text-color`), straight RGBA. White RGB when a CONSTANT value rides the
+        /// per-layer uniform instead of this stream.</summary>
         public float4 TextColor { get; init; }
 
         /// <summary>Overall opacity (`text-opacity`), multiplies <see cref="TextColor"/>.a at bake time.</summary>
         public float Opacity { get; init; }
 
-        /// <summary>Halo color (`text-halo-color`), straight RGBA.</summary>
+        /// <summary>Halo color (`text-halo-color`), straight RGBA. White RGB when a CONSTANT value rides the
+        /// per-layer uniform, on the same terms as <see cref="TextColor"/>.</summary>
         public float4 HaloColor { get; init; }
 
         /// <summary>Halo width in pixels (`text-halo-width`).</summary>
@@ -35,7 +37,9 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>Halo blur in pixels (`text-halo-blur`).</summary>
         public float HaloBlurPx { get; init; }
 
-        /// <summary>Style-spec defaults: opaque black text, no halo (`text-halo-width` default 0).</summary>
+        /// <summary>Style-spec defaults: opaque black text, no halo (`text-halo-width` default 0). Under the
+        /// two-carrier contract above these are the STREAM values — correct for a non-Constant expression; a
+        /// Constant one rides the per-layer uniform and leaves white RGB here instead.</summary>
         public static readonly SymbolPaint Default = new SymbolPaint
         {
             TextColor = new float4(0f, 0f, 0f, 1f),

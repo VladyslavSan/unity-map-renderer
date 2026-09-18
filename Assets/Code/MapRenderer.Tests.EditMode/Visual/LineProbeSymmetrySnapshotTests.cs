@@ -118,7 +118,7 @@ namespace MapRenderer.Tests.Visual
             Assert.That(set.Count, Is.EqualTo(1), "the probe-road style must yield exactly one render layer.");
             Assert.IsNotNull(set[0].Material, "Map/Line base material must be configured for this fixture.");
 
-            set.ApplyZoom(Zoom, Dpr);
+            set.ApplyZoom(new StyleFrameInputs(Zoom, Dpr, 0.0));
 
             Material mat = set[0].Material;
             Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.DashCount), Is.EqualTo(0f),

@@ -154,7 +154,7 @@ namespace MapRenderer.Tests.Visual
 
             // The production per-frame push. This is what sets _MapFrameMetersPerDevicePixel, so it is part
             // of the measurement, not setup.
-            set.ApplyZoom(Zoom, devicePixelRatio);
+            set.ApplyZoom(new StyleFrameInputs(Zoom, devicePixelRatio, 0.0));
 
             Material mat = set[0].Material;
             Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.DashCount), Is.EqualTo(2f),

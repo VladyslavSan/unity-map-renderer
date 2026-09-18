@@ -175,7 +175,10 @@ namespace MapRenderer.Tests.Tiles
             public LayerSubSlot     MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material         Material        => null;
-            public void ApplyZoom(double zoom, double devicePixelRatio) { }
+            public void ApplyZoom(in StyleFrameInputs inputs) { }
+            public int TransitioningCount => 0;
+            public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
+            public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }
 
             public ILayerMeshBuild BuildGraphRequest(
@@ -438,7 +441,10 @@ namespace MapRenderer.Tests.Tiles
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material Material => null;
-            public void ApplyZoom(double zoom, double devicePixelRatio) { }
+            public void ApplyZoom(in StyleFrameInputs inputs) { }
+            public int TransitioningCount => 0;
+            public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
+            public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }
 
             public CountedGraphInputRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;
@@ -469,7 +475,10 @@ namespace MapRenderer.Tests.Tiles
             public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
             public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
             public Material Material => null;
-            public void ApplyZoom(double zoom, double devicePixelRatio) { }
+            public void ApplyZoom(in StyleFrameInputs inputs) { }
+            public int TransitioningCount => 0;
+            public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
+            public void SetDrawOrder(int declaredOrder) { }
             public void Dispose() { }
 
             public ThrowingGraphInputRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;

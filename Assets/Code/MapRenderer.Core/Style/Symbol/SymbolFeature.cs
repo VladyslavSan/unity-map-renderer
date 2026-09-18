@@ -84,7 +84,9 @@ namespace MapRenderer.Core.Style.Symbol
         /// <summary>Packed owning-tile id (z/x/y → opaque <c>long</c>) — the second S20 tiebreak component.</summary>
         public long TileKey { get; init; }
 
-        /// <summary>Resolved <c>text-color</c>/<c>text-opacity</c>/<c>text-halo-*</c> paint.</summary>
+        /// <summary>Resolved <c>text-color</c>/<c>text-opacity</c>/<c>text-halo-*</c> paint. A CONSTANT
+        /// colour rides a per-layer uniform instead and leaves white RGB here — see
+        /// <see cref="Text.Placement.SymbolPaint"/>.</summary>
         public SymbolPaint Paint { get; init; }
 
         /// <summary>Size-independent layout options (anchor/offset/justify/max-width/line-height/letter-spacing/

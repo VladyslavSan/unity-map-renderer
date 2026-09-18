@@ -455,6 +455,16 @@ namespace MapRenderer.Unity.Text
         }
 
         /// <summary><see cref="Processing.ISymbolTileWorkerFactory"/> entry — MAIN THREAD, from TileManager's
+        /// prepared-cache probe. Mirrors <see cref="TryBeginBuild"/>'s two participation guards, so the pair
+        /// can never disagree about whether this source produces labels at all.</summary>
+        public bool SymbolsCachedFor(string sourceId, TileId tile)
+        {
+            if (_builder == null) return true;                              // no glyph pipeline — no labels to lose
+            if (!_layersBySource.TryGetValue(sourceId, out _)) return true;  // mesh-only source
+            return _store.HasCommittedBlock(new SymbolTileStore.Key(sourceId, tile));
+        }
+
+        /// <summary><see cref="Processing.ISymbolTileWorkerFactory"/> entry — MAIN THREAD, from TileManager's
         /// per-tile kick: begin a symbol build for this <paramref name="sourceId"/>/<paramref name="tile"/> if it
         /// has symbol layers and the glyph pipeline is live; null otherwise. Captures the camera zoom/projection
         /// at the kick.</summary>

@@ -3,15 +3,17 @@
 // context is unavailable in batch mode, per the other snapshot fixtures.
 // NOT included in Tools/core-tests/core-tests.csproj.
 //
-// UMR-135, INVERTED — read this before "fixing" the assertion back. The question is unchanged (does
-// text-halo-color reach the screen converted sRGB->linear exactly ONCE?) but the answer moved to the other
-// side. UMR-135's finding was that `_HaloColor` is a Color-TYPED material property, which Unity converts on
-// upload, so SymbolRenderLayer had to NOT pre-convert. That uniform no longer exists: the text shader has no
-// halo term at all, and a halo is a second copy of the label's glyphs carrying text-halo-color in the vertex
-// COLOR stream (SymbolTextWorld_ForwardPass.hlsl's header). Unity does not convert a vertex stream, so
-// SymbolPlacementSystem.LinearHaloColor now MUST pre-convert — the exact sibling of LinearColor, which has
-// always done it for text-color. Same rendered colour, conversion moved one step upstream; this fixture
-// still fails if it happens twice or not at all.
+// UMR-135, now answered on BOTH sides — read this before "fixing" either arm. The question is unchanged
+// (does text-halo-color reach the screen converted sRGB->linear exactly ONCE?) but there are two carriers to
+// ask it of, and the conversion lives in a different place on each:
+//   * CONSTANT text-halo-color rides the Color-TYPED `_HaloColor` uniform, which Unity converts on upload —
+//     so SymbolRenderLayer.BindColorTint must NOT pre-convert (that was UMR-135's original finding), and the
+//     vertex stream carries WHITE.
+//   * every other kind bakes into the vertex COLOR stream on a second copy of the label's glyphs, which
+//     Unity does NOT convert — so SymbolPlacementSystem.LinearHaloColor MUST pre-convert, the exact sibling
+//     of LinearColor, and the uniform stays WHITE.
+// The fragment multiplies the two, so exactly one of them is ever non-white. One arm below per carrier; a
+// conversion done twice or not at all fails whichever arm owns it.
 //
 // The quad below carries exactly what WorldSymbolRenderer.Emit's halo run writes, taken through the
 // production linearization — never from the authored hex, which is what makes the conversion observable. Two
@@ -49,14 +51,25 @@ namespace MapRenderer.Tests.Visual
         private static float4 HaloSrgbFloat4(MapRenderer.Core.Expressions.Color c)
             => new float4((float)c.R, (float)c.G, (float)c.B, (float)c.A);
 
-        private static Symbol.StyleLayer BuildSymbolLayer(string haloHex)
+        /// <summary>What <c>SymbolFeatureExtractor.StreamRgba</c> bakes for a CONSTANT text-halo-color: the
+        /// colour rides <c>_HaloColor</c>, so the vertex stream is white at this fixture's opaque alpha.</summary>
+        private static readonly float4 StreamWhite = new float4(1f, 1f, 1f, 1f);
+
+        // A ZOOM-kind text-halo-color that evaluates to AuthoredHaloHex at every zoom — the value is held
+        // constant so the arms differ in CARRIER alone, never in the colour being measured.
+        private const string ZoomHaloColorJson =
+            @"[""interpolate"",[""linear""],[""zoom""],0,""" + AuthoredHaloHex + @""",22,""" + AuthoredHaloHex + @"""]";
+
+        /// <param name="haloColorJson">The raw <c>text-halo-color</c> JSON value — a quoted hex for the
+        /// CONSTANT arm, an expression for the vertex-stream arm.</param>
+        private static Symbol.StyleLayer BuildSymbolLayer(string haloColorJson)
         {
             string styleJson = @"{
                 ""version"": 8,
                 ""layers"": [
                     { ""id"": ""label"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
                       ""layout"": { ""text-field"": ""{NAME}"" },
-                      ""paint"": { ""text-halo-color"": """ + haloHex + @""", ""text-halo-width"": 20, ""text-halo-blur"": 0 } }
+                      ""paint"": { ""text-halo-color"": " + haloColorJson + @", ""text-halo-width"": 20, ""text-halo-blur"": 0 } }
                 ]
             }";
             StyleDocument style = StyleParser.Parse(styleJson);
@@ -102,13 +115,17 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// Renders one halo run: the production material (<see cref="SymbolRenderLayer.Create"/>) over a quad
-        /// whose colour came through <c>SymbolPlacementSystem.LinearHaloColor</c>. Returns the centre sample
-        /// in linear RGB, or null with no GPU context.
+        /// Renders one halo run: the production material (<see cref="SymbolRenderLayer.Create"/>, which
+        /// binds <c>_HaloColor</c>) over a quad whose vertex COLOR is <paramref name="streamSrgb"/> taken
+        /// through <c>SymbolPlacementSystem.LinearHaloColor</c> — the caller spells out that payload so the
+        /// carrier under test is explicit, never derived from the production predicate. Optionally followed
+        /// by a <see cref="SymbolRenderLayer.Restyle"/> to <paramref name="restyleToHex"/> — T7 (UMR-147).
+        /// Returns the centre sample in linear RGB, or null with no GPU context.
         /// </summary>
-        private static double3? RenderHalo(string haloHex)
+        private static double3? RenderHalo(string haloColorJson, in float4 streamSrgb,
+            string restyleToHex = null, double duration = 0.0)
         {
-            Symbol.StyleLayer layer    = BuildSymbolLayer(haloHex);
+            Symbol.StyleLayer layer    = BuildSymbolLayer(haloColorJson);
             MapMaterialSet    settings = MapMaterialSetTestUtil.Load();
             SymbolRenderLayer renderLayer = SymbolRenderLayer.Create(layer, settings, initialZoom: Zoom, drawIndex: 0);
             Assert.IsNotNull(renderLayer.WorldTextMaterial, "MapMaterialSet.SymbolTextWorld must be assigned.");
@@ -122,6 +139,16 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat(Shader.PropertyToID("_SdfEdge"), 3f);
             mat.SetVector(Shader.PropertyToID("_ScreenParamsLogical"), new Vector4(SnapSize, SnapSize, 0f, 0f));
 
+            // T7: the restyle seam. AFTER the SDF overrides (Restyle/ApplyZoom touch only _TextColor and
+            // _HaloColor, so the overrides above survive unaffected) and BEFORE the render, so the sample
+            // reflects the eased/settled colour, not the initial bind.
+            if (restyleToHex != null)
+            {
+                Symbol.StyleLayer newLayer = BuildSymbolLayer("\"" + restyleToHex + "\"");
+                renderLayer.Restyle(newLayer, StyleTransition.Default, nowSeconds: 0.0);
+                renderLayer.ApplyZoom(new StyleFrameInputs(8.0, 1.0, duration));
+            }
+
             // _MainTex is a Texture2DArray sampler — every other production/test caller of this shader binds
             // a real atlas before rendering; an unbound array sampler renders nothing on this backend. Its
             // content is irrelevant here (the overrides above fix coverage regardless of what is sampled), so
@@ -131,12 +158,13 @@ namespace MapRenderer.Tests.Visual
             blankAtlas.Apply();
             mat.SetTexture(Shader.PropertyToID("_MainTex"), blankAtlas);
 
-            // The production chain a halo vertex's colour actually comes from: the parsed style paint,
-            // through SymbolPlacementSystem.LinearHaloColor (which is where the one sRGB→linear convert now
-            // lives). dpr is 1 here, so text-halo-width's logical px are already device px.
+            // The production chain a halo vertex's colour actually comes from: what
+            // SymbolFeatureExtractor.StreamRgba bakes for this carrier, through
+            // SymbolPlacementSystem.LinearHaloColor (where the stream's one sRGB→linear convert lives).
+            // dpr is 1 here, so text-halo-width's logical px are already device px.
             var paint = new SymbolPaint
             {
-                HaloColor = HaloSrgbFloat4(layer.Paint.HaloColor.Evaluate(Zoom)),
+                HaloColor = streamSrgb,
                 Opacity   = 1f,
             };
             Mesh mesh = BuildHaloQuad(halfSizePx: 40f,
@@ -163,7 +191,7 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 snap.Render(camera);
-                snap.WritePng($"symbol-halo-{haloHex.TrimStart('#')}.png");
+                snap.WritePng($"symbol-halo-{(restyleToHex ?? haloColorJson).Trim('"', '#')}.png");
                 if (snap.IsAllBlack()) return null; // no GPU context
                 return SampleCenterLinear(snap);
             }
@@ -206,7 +234,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void HaloColor_RenderedPixel_MatchesAuthored()
         {
-            double3? measured = RenderHalo(AuthoredHaloHex);
+            double3? measured = RenderHalo($"\"{AuthoredHaloHex}\"", StreamWhite);
             if (measured == null)
             {
                 Assert.Inconclusive("No GPU context (the halo arm rendered blank).");
@@ -223,8 +251,79 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(measured.Value[c], Is.EqualTo(expect3[c]).Within(0.02),
                     $"channel {c}: text-halo-color must reach the fragment converted sRGB->linear ONCE. " +
                     $"measured={measured.Value} authored(linear)={expect3}. Far BELOW authored means " +
-                    $"LinearHaloColor's `.linear` is landing on top of a second conversion; far ABOVE " +
-                    $"means it was dropped, leaving sRGB bytes in a stream Unity never converts.");
+                    $"BindColorTint pre-converted on top of Unity's own upload conversion of the " +
+                    $"Color-typed _HaloColor (UMR-135); far ABOVE means the uniform never reached the " +
+                    $"fragment and the white vertex stream is all that is left.");
+        }
+
+        /// <summary>
+        /// The SECOND carrier. A non-Constant <c>text-halo-color</c> bakes into the vertex COLOR stream, and
+        /// the uniform stays white — so the one sRGB->linear conversion is
+        /// <c>SymbolPlacementSystem.LinearHaloColor</c>'s. Without this arm the fixture above would leave
+        /// that conversion unobserved: its stream payload is white, on which any conversion is a no-op.
+        /// </summary>
+        [Test]
+        public void StreamCarriedHaloColor_RenderedPixel_MatchesAuthored()
+        {
+            Symbol.StyleLayer layer = BuildSymbolLayer(ZoomHaloColorJson);
+            Assert.That(SymbolTextColorCarrier.RidesUniform(layer.Paint.HaloColor), Is.False,
+                "precondition: this arm's text-halo-color must ride the vertex stream, not the uniform — " +
+                "otherwise it silently duplicates the constant arm.");
+
+            double3? measured = RenderHalo(ZoomHaloColorJson,
+                HaloSrgbFloat4(layer.Paint.HaloColor.Evaluate(Zoom)));
+            if (measured == null)
+            {
+                Assert.Inconclusive("No GPU context (the halo arm rendered blank).");
+                return;
+            }
+
+            Assert.IsTrue(ColorUtility.TryParseHtmlString(AuthoredHaloHex, out Color authored));
+            Color   expected = authored.linear;
+            double3 expect3  = new double3(expected.r, expected.g, expected.b);
+
+            Debug.Log($"[SymbolHaloColorRender] stream measured={measured.Value} authored(linear)={expect3}");
+
+            for (int c = 0; c < 3; c++)
+                Assert.That(measured.Value[c], Is.EqualTo(expect3[c]).Within(0.02),
+                    $"channel {c}: a stream-carried text-halo-color must reach the fragment converted " +
+                    $"sRGB->linear ONCE. measured={measured.Value} authored(linear)={expect3}. Far ABOVE " +
+                    $"authored means LinearHaloColor's `.linear` was dropped, leaving sRGB bytes in a " +
+                    $"stream Unity never converts; far BELOW means it was applied twice.");
+        }
+
+        // #808080 -> #4099C0: no shared channel, none at 0/1 (plan §4 colour choice for the halo pair).
+        private const string RestyledHaloHex = "#4099C0";
+
+        /// <summary>
+        /// <b>T7 (UMR-147).</b> A RESTYLED <c>text-halo-color</c> must reach the fragment as the NEW
+        /// authored colour, converted sRGB->linear exactly once — <see cref="HaloColor_RenderedPixel_MatchesAuthored"/>
+        /// only guards the initial <c>Create</c> write; this is the missing assertion over a restyle
+        /// re-bind. RED-verify: <c>Restyle</c> omits the halo re-bind — the pixel stays <c>#808080</c> and
+        /// the R assertion fires first (linear 0.2159 vs expected 0.0513).
+        /// </summary>
+        [Test]
+        public void RestyledHaloColor_RenderedPixel_MatchesTheNewAuthored()
+        {
+            double3? measured = RenderHalo($"\"{AuthoredHaloHex}\"", StreamWhite,
+                RestyledHaloHex, StyleTransition.Default.DurationSeconds);
+            if (measured == null)
+            {
+                Assert.Inconclusive("No GPU context (the halo arm rendered blank).");
+                return;
+            }
+
+            Assert.IsTrue(ColorUtility.TryParseHtmlString(RestyledHaloHex, out Color authored));
+            Color   expected = authored.linear;
+            double3 expect3  = new double3(expected.r, expected.g, expected.b);
+
+            Debug.Log($"[SymbolHaloColorRender] restyled measured={measured.Value} authored(linear)={expect3}");
+
+            for (int c = 0; c < 3; c++)
+                Assert.That(measured.Value[c], Is.EqualTo(expect3[c]).Within(0.02),
+                    $"channel {c}: a RESTYLED text-halo-color must reach the fragment converted sRGB->linear " +
+                    $"ONCE, at the NEW authored value. measured={measured.Value} authored(linear)={expect3}. " +
+                    "Landing at the OLD authored value means Restyle never re-bound the halo.");
         }
     }
 }

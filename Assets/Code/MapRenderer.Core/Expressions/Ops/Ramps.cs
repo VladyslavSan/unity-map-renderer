@@ -181,23 +181,10 @@ namespace MapRenderer.Core.Expressions.Ops
                 default:
                     // Default interpolate: premultiplied-alpha sRGB (matching MapLibre semantics).
                     // MapLibre premultiplies alpha before blending, then unpremultiplies the result.
-                    // This differs from straight sRGB only when alpha != 1 (e.g. transparent → opaque).
-                    // At alpha=1 premult is identity, so this reduces exactly to straight sRGB lerp.
                     // Lab/Hcl branches are left as straight-alpha interpolation (scoped to default only).
-                    //
-                    // Math (Porter-Duff, first-principles):
-                    //   premult(c) = (R*A, G*A, B*A, A)
-                    //   lerp in premult space, then unpremult: if A_out > 0, divide RGB by A_out.
-                {
-                    double aA = a.A, bA = b.A;
-                    double aOut = Lin(aA, bA, t);
-                    if (aOut <= 0.0)
-                        return Value.OfColor(new Color(0.0, 0.0, 0.0, 0.0));
-                    double rOut = Lin(a.R * aA, b.R * bA, t) / aOut;
-                    double gOut = Lin(a.G * aA, b.G * bA, t) / aOut;
-                    double bOut = Lin(a.B * aA, b.B * bA, t) / aOut;
-                    return Value.OfColor(new Color(rOut, gOut, bOut, aOut));
-                }
+                    // Hoisted to Color.MixPremultiplied: a style-transition ease is the same arithmetic
+                    // over the same two colors, and now shares this one implementation.
+                    return Value.OfColor(Color.MixPremultiplied(a, b, t));
             }
         }
 

@@ -1,11 +1,13 @@
 using System;
 using System.Collections.Generic;
+using System.Text;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using Unity.Mathematics;
 using Unity.Profiling;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
@@ -13,6 +15,7 @@ using MapRenderer.Core.View;
 using MapRenderer.Core.View.Camera;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Concurrency;
+using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
@@ -128,6 +131,48 @@ namespace MapRenderer.Unity.Rendering.Map
 
         private StyleDocument _style;
 
+        /// <summary>UMR-151: the document the live layers were last SUCCESSFULLY built or restyled from —
+        /// the in-place gate's <c>previous</c>. Distinct from <see cref="_style"/>, which commits early and
+        /// stays advanced after an aborted rebuild; this field is null from the gate until either arm's end,
+        /// so an abort in between forces the next call down the full-rebuild arm.</summary>
+        private StyleDocument _committedStyle;
+
+        // Style-transitions epic, Stage 2: the FillAntialiasing this view's TileManager.CurrentStyle token
+        // was folded from. _config.FillAntialiasing is live-mutable; a toggle between two SetStyle calls
+        // must not be absorbed by an in-place restyle that leaves the token stale (the token bakes it in,
+        // §S82/UMR-95, since it changes vertices, not a uniform).
+        private bool _committedFillAntialiasing;
+
+        // Style-transitions epic, Stage 2, 4th gate conjunct: the base material REFERENCES the last real
+        // Layers.Build ran against. MapMaterialSet is a mutable ScriptableObject — PreparedCacheTests'
+        // FillExtrusionMaterialAssignedInPlace_.../FillExtrusionMaterialNulledInPlace_... mutate a field IN
+        // PLACE (same MapMaterialSet reference) between two SetStyle calls with byte-identical style
+        // content, specifically so a layer gains or drops a material and its dense id shifts. The in-place
+        // restyle path re-binds EXISTING appliers against EXISTING materials; it cannot discover a layer
+        // that would now build (or now be skipped) without re-running RenderLayerFactory, so it must refuse
+        // whenever any base material reference has changed since the last Build — Material equality
+        // (Unity's fake-null-aware Equals), not just a null/non-null check, because Restyle also never
+        // re-clones a swapped-but-still-non-null base.
+        private (Material fill, Material line, Material fillExtrusion, Material symbolText, Material symbolIcon)
+            _committedMaterials;
+
+        private static (Material, Material, Material, Material, Material) MaterialSnapshot(Materials.MapMaterialSet set)
+            => (set.FillMaterial, set.LineMaterial, set.FillExtrusionMaterial, set.SymbolTextWorld, set.SymbolIconWorld);
+
+        /// <summary>Test seam for the style-transition clock. Production → <c>Time.unscaledTimeAsDouble</c>
+        /// (UNSCALED: a theme change is a UI-class animation that must ease under <c>timeScale == 0</c>).
+        /// <see cref="Text.SymbolPlacementSystem.EaseFade"/> runs on SCALED time, so the two clocks disagree
+        /// under <c>timeScale != 1</c> — pre-existing, and not this epic's to fix.</summary>
+        internal Func<double> NowSecondsOverride { get; set; }
+        // Not `(NowSecondsOverride ?? DefaultNowSeconds)()`: that reads as a method-group-to-delegate
+        // conversion on every call, which this project's C# version does not cache — an allocation inside
+        // the scope MapView_SteadyStateTick_DoesNotAllocateGCMemory measures. The ternary never converts.
+        private double NowSeconds => NowSecondsOverride != null ? NowSecondsOverride() : Time.unscaledTimeAsDouble;
+
+        /// <summary>How long a restyled uniform binding eases from its old value to its new one. The ONLY
+        /// source of the duration/delay: no style key is read (epic decision 0a).</summary>
+        public Style.StyleTransition StyleTransition { get; set; } = Style.StyleTransition.Default;
+
         // Per-style-layer render bundles (fills + lines), built at SetStyle. Owns the materials.
         /// <summary>The per-style-layer render bundles owned by this view. <c>internal</c>: tests read counts
         /// via <c>MapViewTestExtensions</c> (InternalsVisibleTo).</summary>
@@ -203,6 +248,34 @@ namespace MapRenderer.Unity.Rendering.Map
         internal System.Func<string, CancellationToken, UniTask<string>> DocumentLoaderOverride;
         internal System.Func<string, IDataSource>                        TileSourceFactoryOverride;
 
+        /// <summary>UMR-151: the six mutation sites of <see cref="SetStyle(StyleDocument,string,CancellationToken)"/>'s
+        /// full-rebuild arm after which an exception would leave persistent state a later call or frame
+        /// reads (the predicate `docs/tile-pipeline-design.md` §1.10 enumerates). Named for the site,
+        /// in commit order.</summary>
+        internal enum CommitPhase
+        {
+            /// <summary>After <see cref="_style"/>/<see cref="StyleId"/> commit — old style must stay fully live.</summary>
+            IdentityCommitted,
+            /// <summary>After the <see cref="_committedFillAntialiasing"/>/<see cref="_committedMaterials"/> memo
+            /// write — the in-place gate's own memo must not outrun the build.</summary>
+            MaterialMemoWritten,
+            /// <summary>After <see cref="Style.RenderLayerSet.Build"/> — leak baseline from here on.</summary>
+            LayersBuilt,
+            /// <summary>After the <see cref="Tile.TileManager.CurrentStyle"/> token write.</summary>
+            StyleTokenWritten,
+            /// <summary>After <see cref="Text.SymbolSubsystem.SetStyle"/>.</summary>
+            SymbolStyleApplied,
+            /// <summary>Inside <see cref="Tile.TileManager.SetSources"/>'s teardown loop, once per record —
+            /// the one phase whose OWN interior can throw mid-teardown.</summary>
+            SourcesTeardownRecord,
+        }
+
+        /// <summary>UMR-151 test seam: null in production (a per-call delegate check, not a per-frame one —
+        /// this method is not a hot path). Set by a test to throw at a chosen <see cref="CommitPhase"/> and
+        /// observe what the full-rebuild arm leaves behind. Reached via the existing
+        /// <c>InternalsVisibleTo("MapRenderer.Tests.EditMode")</c> (<c>MapRenderer.Unity/AssemblyInfo.cs</c>).</summary>
+        internal Action<CommitPhase> CommitProbe;
+
         /// <summary>
         /// S83b: load a style from <paramref name="styleUri"/> (file:// or http(s)://), resolve each of its
         /// sources (inline <c>tiles[]</c>, else S83a TileJSON), wire one data pipeline per source-id, and
@@ -251,25 +324,70 @@ namespace MapRenderer.Unity.Rendering.Map
             // capture ONCE here and validate that SAME captured reference — a concurrent mutation between
             // this check and its use (Layers.Build below) cannot slip a null base past validation (no await
             // between validate and use). Fail-loud: an unconfigured base is a developer configuration error.
+            // Live-mutable here is a WITHIN-one-call guard only — a field mutation (or an outright swap to a
+            // different MapMaterialSet) that shifts the layer numbering ACROSS style loads is caught by the
+            // cache token's layer-numbering fold (below), not by this guard.
             var materialSet = _config.MaterialSet;
             materialSet.Validate();
+
+            // UMR-95: fail loud HERE (before any commit) — a null Root at Digest's site (after Build) would
+            // leave the new style/id/layers installed under the OLD token. Digest's own check must never fire.
+            if (style.Root == null)
+                throw new InvalidOperationException("StyleDocument.Root is null — the prepared cache's " +
+                    "cache-key digest needs it (a hand-built StyleDocument must set Root).");
+
+            // Style-transitions epic, Stage 2 + Stage 3 (UMR-151) — docs/tile-pipeline-design.md §1.10.
+            // UMR-151: the last SUCCESSFULLY committed document, nulled for this call's duration — an abort
+            // below leaves it null, so the next call takes the full rebuild arm (correct, merely not fast).
+            StyleDocument   previous   = _committedStyle; // null on the first load — inPlace is false, as it must be
+            _committedStyle            = null;
+            Style.StyleTransition transition = StyleTransition;
+            double          now        = NowSeconds;
+            bool inPlace = previous != null
+                        && _config.FillAntialiasing == _committedFillAntialiasing
+                        && MaterialSnapshot(materialSet).Equals(_committedMaterials)
+                        && TileManager.SourcesUnchanged(specs)
+                        && Layers.TryRestyleInPlace(previous, style, transition, now);
 
             // Identity commits HERE (not before the await, HIGH b) — a delayed restyle must not run the OLD
             // layers/pipelines under the NEW cache token, and a cancel above must not report the new identity.
             _style  = style;
             StyleId = styleId;
-            // S82: the PreparedTileCache's opaque cache-key token — constant default until S83 supplies a
-            // real per-style id (Risk 2); set before SetSources so a hit/miss probe this Tick already sees it.
-            TileManager.CurrentStyle = new Tile.StyleToken(StyleId);
+            CommitProbe?.Invoke(CommitPhase.IdentityCommitted);
+
+            if (inPlace)
+            {
+                // UMR-151, unconditional here (including a pure reorder) — docs/tile-pipeline-design.md §1.10.
+                TileManager.RestyleSourcesInPlace(specs, _config.Backend);
+
+                // Layers.Build / TileManager.CurrentStyle / SymbolSubsystem.SetStyle / LogSkippedLayers /
+                // _symbolStyleLayers/_symbolRenderLayers deliberately skipped — docs/tile-pipeline-design.md §1.10.
+                Layers.ApplyZoom(new Style.StyleFrameInputs(
+                    Camera.CurrentProperties.Zoom, _config.DevicePixelRatio, now, transition));
+                TileManager.PushLayerDrawGates(); // the restyle may have moved a layer's zoom range
+                _committedStyle = style; // UMR-151: the in-place patch completed — the gate may trust it again
+                return;
+            }
+
+            _committedFillAntialiasing = _config.FillAntialiasing;
+            _committedMaterials        = MaterialSnapshot(materialSet);
+            CommitProbe?.Invoke(CommitPhase.MaterialMemoWritten);
 
             Layers.Build(_style, Camera.CurrentProperties.Zoom, materialSet);
+            CommitProbe?.Invoke(CommitPhase.LayersBuilt);
+            // S82/UMR-95: token = styleId + Root + built numbering + FillAntialiasing (bakes into vertices,
+            // not a uniform — a toggle changes neither Root's bytes nor the numbering) — set AFTER Build.
+            TileManager.CurrentStyle = new Tile.StyleToken(JsonCanonical.CacheKey(
+                StyleId, _style.Root, LayerNumbering(Layers) + "|aa=" + _config.FillAntialiasing));
+            CommitProbe?.Invoke(CommitPhase.StyleTokenWritten);
             LogSkippedLayers(Layers.SkippedLayers); // UMR-116: once per style load, never per tile/frame
             // S107: Build seeds every layer's px uniforms at dpr 1. SetStyle is async — its continuation can
             // resume AFTER this frame's LateUpdate has already run — and on a RESTYLE the previous tiles are
             // still loaded, so the newly-built layers would draw them once at the seeded ratio (roads and
             // halos ~36 % too thin at a ratio of 1.56). One line closes that window for every layer kind,
             // including the symbol halo, which has no seed of its own at all.
-            Layers.ApplyZoom(Camera.CurrentProperties.Zoom, _config.DevicePixelRatio);
+            Layers.ApplyZoom(new Style.StyleFrameInputs(Camera.CurrentProperties.Zoom, _config.DevicePixelRatio, now, transition));
+            TileManager.PushLayerDrawGates(); // fade advanced above; the gate must not lag it by a frame
             // D10: derive the symbol layers from the just-built set (RenderLayerFactory is the sole
             // registry) instead of re-walking style.Layers with an is-check (kills §1.6). One walk, two
             // lists (D11/E2): the typed StyleLayer for the subsystem, the owning SymbolRenderLayer (its
@@ -287,14 +405,25 @@ namespace MapRenderer.Unity.Rendering.Map
 
             SymbolSubsystem.SetStyle(_style,
                 _symbolStyleLayers); // S105: group symbol layers + (re)build the shared glyph pipeline
+            CommitProbe?.Invoke(CommitPhase.SymbolStyleApplied);
 
-            TileManager.SetSources(specs, _config.Backend);
+            TileManager.SetSources(specs, _config.Backend, RecordProbeOrNull());
+            _committedStyle = style; // UMR-151: the rebuild completed — the gate may trust it again
         }
 
+        /// <summary>UMR-151: the <see cref="CommitPhase.SourcesTeardownRecord"/> half of <see cref="CommitProbe"/>
+        /// — its ONE phase whose site lives inside <see cref="Tile.TileManager.SetSources"/>, not here, so it
+        /// has to cross the call as a delegate rather than an inline invoke. Null when no probe is installed
+        /// (production; also a per-call, not per-frame, allocation when one is).</summary>
+        private Action RecordProbeOrNull()
+            => CommitProbe != null ? () => CommitProbe(CommitPhase.SourcesTeardownRecord) : null;
+
         /// <summary>UMR-116: warns once, naming every layer <see cref="Style.RenderLayerSet.Build"/> skipped
-        /// for an actual compatibility reason (unsupported kind / unconfigured material). A layer skipped as
-        /// <see cref="Style.LayerSkipReason.GenuinelyUnpainted"/> (e.g. a source-less symbol layer) is
-        /// by-design, not a gap, and stays silent — see that enum member's own doc. Internal (not private):
+        /// for an actual compatibility reason (unsupported kind / unconfigured material). A by-design skip
+        /// stays silent — <see cref="Style.LayerSkipReason.GenuinelyUnpainted"/> (a source-less symbol
+        /// layer), <see cref="Style.LayerSkipReason.Hidden"/> (<c>visibility: none</c>) and
+        /// <see cref="Style.LayerSkipReason.FullyTransparent"/>, each documented on its own enum member.
+        /// Internal (not private):
         /// a test-assembly caller exercises the GenuinelyUnpainted suppression directly, via
         /// InternalsVisibleTo (no production caller besides <c>SetStyle</c>).</summary>
         internal static void LogSkippedLayers(IReadOnlyList<Style.SkippedLayer> skipped)
@@ -303,12 +432,27 @@ namespace MapRenderer.Unity.Rendering.Map
             for (int i = 0; i < skipped.Count; i++)
             {
                 Style.SkippedLayer s = skipped[i];
-                if (s.Reason == Style.LayerSkipReason.GenuinelyUnpainted) continue;
+                if (s.Reason is Style.LayerSkipReason.GenuinelyUnpainted
+                             or Style.LayerSkipReason.Hidden
+                             or Style.LayerSkipReason.FullyTransparent) continue;
                 problems.Add($"'{s.Id}' ({s.RawType}): {s.Reason}");
             }
             if (problems.Count > 0)
                 Debug.LogWarning(
                     $"[MapView.SetStyle] {problems.Count} style layer(s) not rendered: {string.Join(", ", problems)}");
+        }
+
+        /// <summary>UMR-95: a plain-text encoding of the dense (index, id) pairs the layer set just built —
+        /// folded into the cache token so a numbering shift (a skipped/added layer, from EITHER the style or a
+        /// slot-dropping <c>MapMaterialSet</c> field) changes the token even under unchanged style content.
+        /// <c>RenderLayerCompatibilitySummaryTests</c> pins that it folds the (index, id) PAIRS, not just
+        /// <see cref="Style.RenderLayerSet.Count"/> — why per-index not count is in <c>docs/tile-pipeline-design.md</c> §1.9.</summary>
+        internal static string LayerNumbering(Style.RenderLayerSet layers)
+        {
+            var sb = new StringBuilder();
+            for (int li = 0; li < layers.Count; li++)
+                sb.Append(li).Append(':').Append(layers[li].StyleLayer?.Id).Append('|');
+            return sb.ToString();
         }
 
         /// <summary>
@@ -483,7 +627,14 @@ namespace MapRenderer.Unity.Rendering.Map
             //    value (copied one step above) but going through the camera would imply the camera owns the
             //    paint basis, which is the confusion MapCamera's own doc-comment records.
             using (PmApplyZoom.Auto())
-                Layers.ApplyZoom(cameraProperties.Zoom, _config.DevicePixelRatio);
+            {
+                // Re-read StyleTransition every frame so a live change to the property takes effect
+                // without a restyle — passed straight into the inputs struct, not staged through a
+                // settable property first.
+                Layers.ApplyZoom(new Style.StyleFrameInputs(
+                    cameraProperties.Zoom, _config.DevicePixelRatio, NowSeconds, StyleTransition));
+                TileManager.PushLayerDrawGates();
+            }
 
             // Camera-relative rendering: snap the render origin to the look-at every frame, then place all
             // loaded tiles relative to it — best float precision, no threshold/rebase machinery.

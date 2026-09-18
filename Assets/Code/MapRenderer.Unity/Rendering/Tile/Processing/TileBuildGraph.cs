@@ -25,7 +25,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// </summary>
     internal sealed class TileBuildGraph
     {
-        /// <summary>Dense over the kick's <c>ITileMeshRenderLayer</c>s, in declared order — ALIASES the
+        /// <summary>Dense over the kick's <c>ITileMeshRenderLayer</c>s, in SLOT order — ALIASES the
         /// caller's own array (<see cref="TilePrologueOutput.Layers"/> or <c>TileManager.KickSourcelessBackground</c>'s
         /// own build array), never a copy: this graph owns each non-null element from the moment it is
         /// handed over. A <c>null</c> slot means a layer with nothing to build.</summary>
@@ -92,7 +92,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// build AND every not-yet-reached one — ownership transfers the moment the caller hands over
         /// <paramref name="layers"/>, not incrementally per element.</para>
         /// </summary>
-        /// <param name="layers">One build per background layer, in draw order — this graph ALIASES the
+        /// <param name="layers">One build per background layer, in SLOT order — this graph ALIASES the
         /// array (§2.4), it does not copy it. A <c>null</c> element is a layer with nothing to build. Every
         /// non-null build's own input is expected to borrow <paramref name="ownedGeometry"/> itself (or
         /// another buffer this graph does not own) — a build's own <c>Dispose</c> never disposes it.</param>
@@ -225,7 +225,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         }
 
         /// <summary>Completes the write jobs and takes every layer's <see cref="MeshDataPayload"/>, in dense
-        /// draw order (one exact-sized array — the count is already known from
+        /// SLOT order (one exact-sized array — the count is already known from
         /// <see cref="MeshWriteOutput.IsCreated"/>).
         ///
         /// <para><b>Idempotent</b> — a repeat call returns the SAME array instance rather than throwing. This

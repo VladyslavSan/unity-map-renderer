@@ -1,13 +1,16 @@
 // Unity EditMode only — runs a real SymbolPlacementSystem Tick and reads back a built Mesh.
 // NOT registered in Tools/core-tests/core-tests.csproj.
 //
-// The halo's teeth after it left the shader. There is no _HaloColor/_HaloWidthPx/_HaloBlurPx uniform to
-// assert against any more: the text shader takes one colour and one pair of device-px widenings, and a halo
-// is a SECOND copy of the label's glyph run carrying text-halo-* in exactly those channels
-// (WorldSymbolRenderer.Emit). So every halo claim is now observable in ONE place — the emitted mesh — and
-// this fixture reads it there: that the run exists, that it is submitted BEFORE the text run, that its
-// width/blur reach the vertex in DEVICE px, that its colour is linearized exactly once, and that a haloless
-// layer emits nothing extra.
+// The halo's teeth after it left the shader. There is no _HaloWidthPx/_HaloBlurPx uniform to assert against
+// any more: the text shader takes one colour and one pair of device-px widenings, and a halo is a SECOND
+// copy of the label's glyph run carrying text-halo-* in exactly those channels (WorldSymbolRenderer.Emit).
+// So every halo claim is now observable in ONE place — the emitted mesh — and this fixture reads it there:
+// that the run exists, that it is submitted BEFORE the text run, that its width/blur reach the vertex in
+// DEVICE px, that its colour is linearized exactly once, and that a haloless layer emits nothing extra.
+//
+// The one term that also has a uniform is text-halo-color, whose CONSTANT kind rides _HaloColor so a restyle
+// can ease it (SymbolTextColorCarrier). That split is upstream of this fixture — it builds its SymbolPaint
+// directly, so what is asserted here is the stream carrier alone.
 
 using System.Collections.Generic;
 using NUnit.Framework;

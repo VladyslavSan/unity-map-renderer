@@ -13,6 +13,7 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Style;
+using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Map;
 
@@ -158,10 +159,202 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreEqual(1, countAfterBuild, "sanity: circle-b was skipped by Build.");
 
             for (int frame = 0; frame < 50; frame++)
-                set.ApplyZoom(frame * 0.1, 1.0);
+                set.ApplyZoom(new StyleFrameInputs(frame * 0.1, 1.0, 0.0));
 
             Assert.AreEqual(countAfterBuild, set.SkippedLayers.Count,
                 "50 simulated frames must not change the compatibility summary — it is bounded to style load.");
+        }
+
+        // ── UMR-95 stage 1: the numbering fold's granularity (MapView.LayerNumbering) ──────────────────
+
+        // Extrusion present; the OTHER layer (circle-b, an unsupported kind) is skipped — the lone survivor
+        // is the extrusion layer, at dense index 0.
+        private const string ExtrusionPresentOtherSkippedStyleJson = @"{
+    ""version"": 8,
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""ext-layer"", ""type"": ""fill-extrusion"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-extrusion-height"": 20 } },
+        { ""id"": ""circle-b"", ""type"": ""circle"", ""source"": ""s"", ""source-layer"": ""b"" }
+    ]
+}";
+
+        // Extrusion skipped (via the material below); the OTHER layer (a real line) is present — the lone
+        // survivor is the line layer, also at dense index 0. Equal SURVIVOR COUNT to the style above (1),
+        // but a different (index, id) pair.
+        private const string ExtrusionSkippedOtherPresentStyleJson = @"{
+    ""version"": 8,
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""ext-layer2"", ""type"": ""fill-extrusion"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-extrusion-height"": 20 } },
+        { ""id"": ""line-other"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""b"", ""paint"": { ""line-color"": [""rgba"",0,255,0,1], ""line-width"": 2 } }
+    ]
+}";
+
+        /// <summary>A committed <see cref="MapMaterialSet"/> clone with <c>FillExtrusionMaterial</c> unset —
+        /// the one lever this codebase has to skip an extrusion layer without touching style content
+        /// (<c>FillMaterial</c>/<c>LineMaterial</c>/<c>SymbolTextWorld</c> are all <c>Validate()</c>-required,
+        /// never absent).</summary>
+        private static MapMaterialSet WithoutExtrusionMaterial()
+        {
+            var lit = MapMaterialSetTestUtil.Load();
+            var set = ScriptableObject.CreateInstance<MapMaterialSet>();
+            set.FillMaterial    = lit.FillMaterial;
+            set.LineMaterial    = lit.LineMaterial;
+            set.SymbolTextWorld = lit.SymbolTextWorld;
+            return set;
+        }
+
+        /// <summary>Pins that <see cref="MapView.LayerNumbering"/> folds the actual (dense index, id) PAIRS,
+        /// not merely the survivor COUNT. The two styles here produce the SAME count (1) by different skip
+        /// patterns — extrusion present with the other layer skipped, versus extrusion skipped with the
+        /// other layer present — so a fold that degraded to <c>layers.Count</c> would see them as identical
+        /// and let the second style serve the first's stale bake. RED recipe: replace
+        /// <see cref="MapView.LayerNumbering"/>'s body with <c>layers.Count.ToString()</c> — both sides then
+        /// return <c>"1"</c> and this assertion fails.</summary>
+        [Test]
+        public void LayerNumbering_EqualSurvivorCount_DifferentSkipPattern_ProducesDifferentNumbering()
+        {
+            using RenderLayerSet extrusionPresent = Build(ExtrusionPresentOtherSkippedStyleJson);
+            Assert.AreEqual(1, extrusionPresent.Count, "drive precondition: only the extrusion layer survives.");
+
+            var extrusionLessMaterials = WithoutExtrusionMaterial();
+            try
+            {
+                using RenderLayerSet extrusionSkipped = new RenderLayerSet();
+                extrusionSkipped.Build(StyleParser.Parse(ExtrusionSkippedOtherPresentStyleJson), 0.0, extrusionLessMaterials);
+                Assert.AreEqual(1, extrusionSkipped.Count, "drive precondition: only the line layer survives.");
+
+                Assert.AreNotEqual(
+                    MapView.LayerNumbering(extrusionPresent), MapView.LayerNumbering(extrusionSkipped),
+                    "equal survivor counts from different skip patterns must still fold to different tokens.");
+            }
+            finally
+            {
+                // The RenderLayerSet above disposes (its `using`) BEFORE this — each layer's Material is a
+                // CLONE of extrusionLessMaterials' base materials, never the base itself, but disposing the
+                // consumer before its source is the safer order regardless.
+                Object.DestroyImmediate(extrusionLessMaterials);
+            }
+        }
+
+        // Same id SET, same count (2), different declared ORDER — the numbering fold's other blind spot: a
+        // fold that folded an unordered id set (or sorted the ids "for determinism") would pass the test
+        // above (one survivor each side) yet still miss this — dense POSITION is part of the cache key
+        // because cached geometry is baked against a dense INDEX, not just an id.
+        private const string FillThenLineStyleJson = @"{
+    ""version"": 8,
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""fill-a"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } },
+        { ""id"": ""line-b"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""b"", ""paint"": { ""line-color"": [""rgba"",0,255,0,1], ""line-width"": 2 } }
+    ]
+}";
+
+        private const string LineThenFillStyleJson = @"{
+    ""version"": 8,
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""line-b"", ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""b"", ""paint"": { ""line-color"": [""rgba"",0,255,0,1], ""line-width"": 2 } },
+        { ""id"": ""fill-a"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } }
+    ]
+}";
+
+        /// <summary>Pins that the fold is sensitive to dense POSITION, not just the id SET. RED recipe: fold
+        /// <c>layers[li].StyleLayer?.Id</c> into a set/sorted list instead of an ordered <c>(li, id)</c> walk
+        /// — both sides carry the same two ids and this assertion fails.</summary>
+        [Test]
+        public void LayerNumbering_SameIdSet_DifferentOrder_ProducesDifferentNumbering()
+        {
+            using RenderLayerSet fillThenLine = Build(FillThenLineStyleJson);
+            using RenderLayerSet lineThenFill = Build(LineThenFillStyleJson);
+            Assert.AreEqual(2, fillThenLine.Count);
+            Assert.AreEqual(2, lineThenFill.Count);
+
+            Assert.AreNotEqual(
+                MapView.LayerNumbering(fillThenLine), MapView.LayerNumbering(lineThenFill),
+                "the same two ids in a different declared order must fold to different tokens.");
+        }
+
+        // ── Layers that can never draw are never constructed ──────────────────────────────────────
+
+        // No shipped style uses either of these, so the cases are CONSTRUCTED here rather than sampled:
+        // a `visibility: none` layer, and one authored at a constant fully-transparent opacity. Both sit
+        // between two layers that do render, so the surviving slots are observable across the skip.
+        private const string NeverDrawnInterleavedStyleJson = @"{
+    ""version"": 8,
+    ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
+    ""layers"": [
+        { ""id"": ""fill-a"",      ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""a"", ""paint"": { ""fill-color"": [""rgba"",255,0,0,1] } },
+        { ""id"": ""hidden-b"",    ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""b"",
+          ""layout"": { ""visibility"": ""none"" }, ""paint"": { ""fill-color"": [""rgba"",0,255,0,1] } },
+        { ""id"": ""clear-c"",     ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""c"",
+          ""paint"": { ""fill-color"": [""rgba"",0,0,255,1], ""fill-opacity"": 0 } },
+        { ""id"": ""line-d"",      ""type"": ""line"", ""source"": ""s"", ""source-layer"": ""d"", ""paint"": { ""line-color"": [""rgba"",0,0,0,1] } }
+    ]
+}";
+
+        /// <summary>
+        /// A layer that can never draw takes no slot: <c>visibility: none</c> and a CONSTANT
+        /// fully-transparent opacity are both refused at construction, and the layers around them stay
+        /// contiguous — the same contract an unsupported kind already has.
+        /// </summary>
+        [Test]
+        public void NeverDrawnLayers_AreNeverConstructed_SurvivorsStayContiguous()
+        {
+            using RenderLayerSet set = Build(NeverDrawnInterleavedStyleJson);
+
+            Assert.AreEqual(2, set.Count,
+                "only fill-a and line-d can ever draw. A count of 4 means a layer that paints nothing at " +
+                "any zoom still owns a slot, a material and a backend registration.");
+            Assert.AreEqual("fill-a", set[0].StyleLayer.Id);
+            Assert.AreEqual(0, set[0].DrawIndex);
+            Assert.AreEqual("line-d", set[1].StyleLayer.Id);
+            Assert.AreEqual(1, set[1].DrawIndex,
+                "line-d must land at slot 1 — neither skipped layer may reserve a slot.");
+
+            var byId = new Dictionary<string, LayerSkipReason>();
+            foreach (SkippedLayer sl in set.SkippedLayers) byId[sl.Id] = sl.Reason;
+            Assert.AreEqual(LayerSkipReason.Hidden, byId["hidden-b"],
+                "a `visibility: none` layer must be reported as Hidden, not silently dropped.");
+            Assert.AreEqual(LayerSkipReason.FullyTransparent, byId["clear-c"],
+                "a constant fully-transparent layer must be reported as FullyTransparent — a DIFFERENT " +
+                "reason from Hidden, so the summary says which of the two the author wrote.");
+        }
+
+        /// <summary>
+        /// Neither never-drawn layer is a compatibility gap, so <see cref="MapView.LogSkippedLayers"/> stays
+        /// silent about both. Warning here would put a line in every log for a style doing what its author
+        /// asked.
+        /// </summary>
+        [Test]
+        public void LogSkippedLayers_SilentForALayerThatCanNeverDraw()
+        {
+            MapView.LogSkippedLayers(new List<SkippedLayer>
+            {
+                new SkippedLayer { Id = "hidden-b", RawType = "fill", Reason = LayerSkipReason.Hidden },
+                new SkippedLayer { Id = "clear-c", RawType = "fill", Reason = LayerSkipReason.FullyTransparent },
+            });
+            LogAssert.NoUnexpectedReceived();
+        }
+
+        /// <summary>
+        /// A source read only by layers that can never draw is never fetched, so its tiles are never
+        /// decoded either. <c>TryGetFetchSource</c> is the one registry <c>MapView.BuildSourceSpecs</c>
+        /// derives from, so excluding a layer here is what stops the whole per-tile pipeline for it.
+        /// </summary>
+        [Test]
+        public void TryGetFetchSource_RefusesALayerThatCanNeverDraw()
+        {
+            StyleDocument doc = StyleParser.Parse(NeverDrawnInterleavedStyleJson);
+            var fetched = new List<string>();
+            foreach (StyleLayer sl in doc.Layers)
+                if (RenderLayerFactory.TryGetFetchSource(sl, out string sid))
+                    fetched.Add(sl.Id + "=>" + sid);
+
+            CollectionAssert.AreEquivalent(new[] { "fill-a=>s", "line-d=>s" }, fetched,
+                "only the two layers that can draw may register a fetch source. Including hidden-b or " +
+                "clear-c downloads and MVT-decodes tiles for a layer whose pixels can never reach the " +
+                "screen — the cost the draw gate cannot reach, because it acts after the mesh exists.");
         }
     }
 }

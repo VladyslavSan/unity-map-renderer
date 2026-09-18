@@ -41,6 +41,24 @@ namespace MapRenderer.Unity.Rendering.Style
             StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex,
             out LayerSkipReason reason, Transform parent = null)
         {
+            // Before the kind switch: `visibility: none` takes no slot for THIS style load. Non-local
+            // invariant: a restyle can still flip it back on in place — SurvivingLayerGate strips
+            // layout.visibility from its comparison, so a surviving layer is never rebuilt for this alone.
+            if (layer is { Visible: false })
+            {
+                reason = LayerSkipReason.Hidden;
+                return null;
+            }
+
+            // Same class: an opacity that is a CONSTANT below one 8-bit step cannot rise at any zoom, so
+            // the layer is never built either. A zoom- or feature-dependent opacity is NOT this case —
+            // those are decided per frame by the draw gate.
+            if (AuthoredFullyTransparent(layer))
+            {
+                reason = LayerSkipReason.FullyTransparent;
+                return null;
+            }
+
             (IRenderLayer created, LayerSkipReason skipReason) = layer switch
             {
                 Fill.StyleLayer f                          => WithMaterialReason(FillRenderLayer.TryCreate(f, settings, initialZoom, drawIndex)),
@@ -67,19 +85,48 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
+        /// True when the layer's own opacity is a CONSTANT below one 8-bit step — invisible at every zoom,
+        /// so it is not worth constructing. False for a zoom-dependent opacity (the per-frame draw gate
+        /// decides that one), for a feature-dependent opacity (no per-layer scalar can represent it, so the
+        /// layer must be built and submitted), and for a kind that carries no opacity of its own.
+        /// </summary>
+        /// <param name="layer">The style layer to classify.</param>
+        private static bool AuthoredFullyTransparent(StyleLayer layer)
+        {
+            StyleProperty<float> opacity = layer switch
+            {
+                Fill.StyleLayer f           => f.Paint?.Opacity,
+                Line.StyleLayer l           => l.Paint?.Opacity,
+                Background.StyleLayer b     => b.Paint?.Opacity,
+                FillExtrusion.StyleLayer fe => fe.Paint?.Opacity,
+                _                           => null,
+            };
+            return opacity != null
+                && !opacity.DependsOnFeature
+                && !opacity.IsZoomDependent
+                && opacity.Evaluate(0.0) < ZoomStyleApplier.VisibleOpacityEpsilon;
+        }
+
+        /// <summary>
         /// Epic A / A2 (design §E step 5, HIGH c): the ONE registry of "which style layers fetch MVT tiles" —
         /// <see cref="Map.MapView.BuildSourceSpecs"/> derives its source-ids from this predicate instead of
         /// re-walking <c>style.Layers</c> with an ad-hoc <c>is</c>-check. <see langword="true"/> iff
-        /// <paramref name="layer"/> is an MVT-fetching kind (fill, line, symbol, fill-extrusion) AND declares a non-empty
+        /// <paramref name="layer"/> is an MVT-fetching kind (fill, line, symbol, fill-extrusion), is not
+        /// hidden, AND declares a non-empty
         /// <c>source</c> — background is source-less by design (excluded here, not just by having no
         /// <c>Source</c>), and raster/circle/hillshade/unknown are unsupported-for-now (excluded so no
-        /// non-MVT bytes are ever pushed through the MVT decode). Uses <see cref="StyleLayer.LayerType"/>
+        /// non-MVT bytes are ever pushed through the MVT decode). A layer that can never draw — hidden, or
+        /// authored at a constant fully-transparent opacity — is excluded for the same reason it is never
+        /// constructed: a source read by nothing that draws must not be fetched or decoded.
+        /// Uses <see cref="StyleLayer.LayerType"/>
         /// (never <c>.Type</c> — no such member). A pure predicate: never touches the active
         /// <see cref="RenderLayerSet"/> or any material state.
         /// </summary>
         internal static bool TryGetFetchSource(StyleLayer layer, out string sourceId)
         {
             if (layer != null
+                && layer.Visible
+                && !AuthoredFullyTransparent(layer)
                 && layer.LayerType is StyleLayerType.Fill or StyleLayerType.Line or StyleLayerType.Symbol
                     or StyleLayerType.FillExtrusion
                 && !string.IsNullOrEmpty(layer.Source))
@@ -98,7 +145,7 @@ namespace MapRenderer.Unity.Rendering.Style
     internal enum LayerSkipReason
     {
         /// <summary>Not skipped — a real layer was returned. The zero/default value, so an unreported
-        /// reason reads as "nothing to report" rather than as one of the three below.</summary>
+        /// reason reads as "nothing to report" rather than as one of the real reasons below.</summary>
         None = 0,
 
         /// <summary>The layer's <c>type</c> has no renderer yet — <c>raster</c>, <c>circle</c>,
@@ -121,5 +168,16 @@ namespace MapRenderer.Unity.Rendering.Style
         /// layer with no <c>source</c>) — not a compatibility problem, so a caller should not surface it as
         /// one.</summary>
         GenuinelyUnpainted,
+
+        /// <summary>The layer declares <c>layout: {"visibility": "none"}</c>. Not a compatibility problem
+        /// either: the style author asked for nothing to be drawn, so the layer is not constructed for
+        /// THIS style load — a restyle can still flip it back on in place (see <see cref="SurvivingLayerGate"/>).</summary>
+        Hidden,
+
+        /// <summary>The layer's opacity is a CONSTANT below one 8-bit step, so it paints nothing at every
+        /// zoom — the same never-constructed class as <see cref="Hidden"/>, and by design rather than a
+        /// compatibility gap. A zoom- or feature-dependent opacity is not this: those layers are built and
+        /// the per-frame draw gate decides them.</summary>
+        FullyTransparent,
     }
 }

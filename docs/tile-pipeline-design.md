@@ -312,13 +312,181 @@ The `RenderLayerSet` (render bundles) is stable for the object's life, so it's i
 ### 1.9 `TileManager.KickMeshBuild`'s bake-at-integer-zoom decision (moved from its method doc, UMR-118)
 
 The paint bake zoom is the tile's INTEGER zoom (`id.Z`), not the fractional camera zoom — a tile is built
-exactly once per load (never re-baked while `LoadedTile.Built`), so baking at `id.Z` makes the prepared
-artifact a pure function of `(styleId, tileId, layerId)` — the sound key `PreparedTileCache` needs.
-`CameraProperties` is not read for this purpose; the call sites take it only for other reasons.
+exactly once per load (never re-baked while `LoadedTile.Built`). `CameraProperties` is not read for this
+purpose; the call sites take it only for other reasons.
 
-This is the bake-parameter SSOT (alongside the clip-window bake parameter recorded as finding F-CLIP-1 in
-`docs/meshing-design.md`) — see the commit that introduced the bake-revision mechanism,
-`fix(tile-pipeline): key prepared tiles by bake revision`.
+**This is the bake-parameter SSOT.** The prepared artifact is a pure function of the closed set:
+
+> `{ Tile, Zoom = id.Z, origin = f(tile, projection), projection, bufferClip }` + the typed paint/layout
+> (i.e. the style content **and** `MapViewConfig.FillAntialiasing`) + the built layer numbering.
+
+The rule that licenses `PreparedTileCache` holding no purge of its own: **a new bake input either enters
+the cache token or gets its own purge.** Today's inputs split across the two mechanisms as follows —
+content, `FillAntialiasing` and the built layer numbering are folded into `TileManager.CurrentStyle`'s
+`StyleToken` (`MapView.SetStyle`, keyed via `JsonCanonical.Digest`); the clip window has its own
+diff-and-purge in `TileManager.TickCore` (a changed `BufferClip` clears `_prepared` directly); `Zoom = id.Z`
+and `projection` are session-constant, so neither needs a token component or a purge.
+
+**Why the layer-numbering fold is per-index, not a plain count.** `MapView.LayerNumbering` folds each
+`(li, StyleLayer.Id)` pair, not `RenderLayerSet.Count`.
+
+`MapMaterialSet.Validate()` enforces `FillMaterial`, `LineMaterial` and `SymbolTextWorld`.
+`FillExtrusionMaterial` is the one material whose absence makes a layer lose its SLOT:
+`FillExtrusionRenderLayer.TryCreate` returns null and `RenderLayerSet.Build` skips it. Symbol and background
+always take their declared slot whatever their material config — `RenderLayerFactory` routes them through a
+`Create` that never returns null, unlike the `TryCreate` the mesh kinds use — so the layers above them keep
+their numbering (`LayerSkipReason.MaterialUnconfigured` records that this reason is reachable only through
+`FillExtrusionMaterial` on the `SetStyle` path). That gives a `MaterialSet` mutation exactly one degree of
+freedom — it can change the built layer COUNT but never PERMUTE at a fixed count, since every other skip
+reason is content-driven and content already sits in the digest. A count-only fold is therefore
+behaviourally equivalent TODAY, but the equivalence rests on a property of today's `Validate()`, not a
+declared invariant: **a second SLOT-DROPPING material field — of ANY layer kind, mesh or not, since dense ids
+index the full layer list, so a non-mesh slot vanishing shifts every mesh layer after it —** would make
+permutation reachable, and a count fold would then serve one layer's mesh under another's material,
+silently. The per-index fold costs one `StringBuilder` per style load, on a path that already awaits — not
+on any measured budget.
+
+### 1.10 Partial-survival restyle (UMR-151, style-transitions Stage 3) — slot vs draw order, the tombstone, the three exits
+
+Before this stage `RenderLayerSet`'s list index was four things at once: declared order, draw order,
+material index, and backend slot. A restyle that reordered or removed even one layer had to collapse all
+four back to a fresh count-0..N-1 sequence, so it took the full rebuild — tearing down every tile's mesh
+for every layer, not just the one that actually changed.
+
+**E1 null placeholder (pre-existing, restated here since the per-backend doc blocks that used to carry it
+were trimmed).** A symbol/background slot whose base material is unconfigured stores a `null` entry in each
+backend's full-width material list — a placeholder, NOT registered with the engine — so the list stays
+full-width aligned; `AddTileLayer` is never called for that index either way.
+
+**Slot vs draw order.** `IRenderLayer.DrawIndex` is now purely the **slot** — the backend `materialIndex`,
+the `LoadedTile.MaterialIndices` entry, `PreparedKey`'s layer id — set once by `RenderLayerSet.Build` and
+STABLE across a restyle for a surviving layer. **Draw order** is a separate quantity, the layer's position
+in the CURRENT document's declared `layers` array, written only into `Material.renderQueue` via
+`IRenderLayer.SetDrawOrder` (`LayerDrawOrder.QueueFor`). A fresh `Build` is the only place the two coincide
+(no survivors yet); a reorder moves draw order without moving any slot.
+
+**The tombstone.** A layer's removed slot becomes a `TombstoneRenderLayer` — material-less, mesh-less,
+implementing neither `ITileMeshRenderLayer` nor `ISpriteConsumerRenderLayer` — never `null`. Every site that
+already tolerated a null `Material` (dense-layer-id computation, sprite push, `LayerMaterials`) skips it for
+free; the handful of sites that would NRE on a raw null (`ApplyZoom`, `TransitioningCount`, `ClearLayers`,
+`TileManager.LayerNames`/`LayerShadowModes`) needed no edit either. Exactly ONE site did need one:
+`TileManager.ConsumeMeshBuild`'s guard over an already-kicked mesh build, whose payload carries the slot it
+was built for. Because the width never shrinks, its `materialIndex < Count` check cannot see a retirement, so
+it tests for `TombstoneRenderLayer` itself. `ITileMeshRenderLayer` is NOT the right predicate there — a
+background layer implements neither interface yet does register a per-tile quad, so that test would drop
+every background payload.
+
+**`RenderLayerSet.TryRestyleInPlace`'s three exits**, an ID-keyed diff (not the old by-reference, same-index
+walk, which can't express removal or reorder at all): walk the new document's layers in order, look each
+one's id up among the OLD document's RENDERED layers —
+
+The old side is keyed TWICE, and both maps are needed. `_layers` holds only the layers `Build` could render,
+so it is SHORTER than `oldStyle.Layers` whenever any layer was skipped (an unsupported kind, an unconfigured
+material — 1 of `liberty.json`'s 111 is a `raster`): the slot map is built over `_layers`, and a rendered
+layer whose `StyleLayer.Id` is null refuses the whole restyle rather than risk pairing the wrong layer. The
+second map is over `oldStyle.Layers` and exists only so an unchanged NEVER-RENDERED layer can be told apart
+from a genuine addition at exit 1 — without it, `liberty.json`'s raster layer would pin every liberty
+restyle to a full rebuild, which the whole-document gate it replaces did not do either.
+
+1. **not found, and not an unchanged never-rendered layer either** (a genuinely ADDED layer, or one whose
+   never-rendered — e.g. `raster` — content changed) → refuse the whole restyle; falls through to the full
+   rebuild above (S4's territory — per-layer mesh build onto an already-loaded record — is what would let
+   an ADD survive in place, and is explicitly out of this stage's scope).
+2. **found, but its mesh-affecting signature changed** (`SurvivingLayerGate.LayerSurvives`) → refuse, same
+   fallthrough.
+3. **found and survives** → keep its slot, `Restyle` its uniform bindings, `SetDrawOrder` it to its new
+   declared position.
+
+Any old slot not claimed by exit 3 is a removal — tombstoned in a SECOND pass, after every layer has been
+classified, so a mid-walk refusal leaves `_layers` completely unmodified (the method's own contract).
+
+**The symbol-removal fence** (§6's deferred fence). A REMOVED layer never reaches `LayerSurvives` at all —
+the classification walk only visits layers present in the NEW document — so a fourth refusal runs over the
+unclaimed slots, STILL IN THE READ-ONLY PASS (a check where removal first becomes visible, in the mutation
+pass, would run after the first `Dispose()` and break the unmodified-on-refusal contract). Its predicate is
+*"this slot's render layer is referenced by a list the in-place arm does not refresh"*:
+`MapView._symbolRenderLayers` is the only field outside `RenderLayerSet` that holds render-layer references
+— every other site threads them as a parameter — so `SymbolRenderLayer` is the only kind that qualifies
+today, and a second such field is what would change the answer. Without the fence the removed symbol slot
+is disposed while `MapView.SetStyle`'s in-place arm returns without refreshing that list, and
+`SymbolPlacementSystem.Tick` then resolves materials `SymbolRenderLayer.Dispose` has destroyed. A removed
+symbol layer takes the full rebuild instead; `UMR-152` is what would let it survive in place.
+REORDER is deliberately NOT fenced: that arm skips the `_symbolRenderLayers` rebuild and
+`SymbolSubsystem.SetStyle` TOGETHER, so the list and the subsystem's slot numbering stay mutually
+consistent, and removal is the only class that mutates a slot.
+
+**The record-keep fence.** `TileManager.SetSources` (the full-rebuild entry point) is UNCHANGED — it still
+tears down every loaded record unconditionally, because a full rebuild replaces every render layer's
+Material and nothing else re-derives which already-loaded tile needs a fresh mesh against the new set. The
+partial-survival arm instead calls a separate, narrower entry point, `TileManager.RestyleSourcesInPlace`,
+which diffs the SOURCE-pipeline registry (`SourceRegistry.Rebuild`'s old-slot→new-slot map) and tears down
+only a record whose pipeline actually departed — everything else is re-keyed to its new slot, not rebuilt.
+`SourceRegistry.Rebuild` reuses the SYNTHETIC background pipeline's identity across the diff for the same
+reason it reuses a real one's: the background pipeline holds no resource, but if a fresh instance were
+minted each call, its old slot would read as departed on every restyle that has a background, tearing down
+every record parked there for no actual change.
+It also always pushes the current per-layer material/shadow lists into the backend
+(`ITileRenderBackend.SetLayerMaterials`), even for a pure reorder with no source change at all, because
+that is the only place the BRG backend's cached per-item render queue gets re-stamped (§3 below).
+
+**`MapView.SetStyle`'s in-place branch.** `TileManager.SourcesUnchanged(specs)` is evaluated BEFORE
+`Layers.TryRestyleInPlace` — the latter re-binds every surviving layer's applier (and, since this stage,
+retires a removed layer's slot), so there is no reason to pay it when the source set alone already
+disqualifies the restyle. That pre-diff answer is allowed to go STALE, because it only gates ENTRY to the
+arm: the one thing the layer diff can change — a background layer going away, which retires the synthetic
+source-less pipeline — is re-read INSIDE by `SourceRegistry.Rebuild(specs, HasBackgroundLayer())` after the
+diff, so `TeardownRecordsOnDepartedPipelines` still tears down exactly that record (T5 pins it), and
+evaluating it twice would buy nothing. Once inside the branch, `Layers.Build`, `TileManager.CurrentStyle`,
+`SymbolSubsystem.SetStyle`, `LogSkippedLayers` and `_symbolStyleLayers`/`_symbolRenderLayers` stay skipped
+because none of them has anything to redo: `Layers.Build` would discard and rebuild every layer, which is
+exactly what the in-place arm exists to avoid; `TileManager.CurrentStyle`'s token folds in the layer
+numbering, which an in-place restyle never moves (a removal only tombstones a slot, it never shifts one);
+`SymbolSubsystem.SetStyle` rebuilds label state for a changed symbol set, but a removed SYMBOL layer is
+refused by `TryRestyleInPlace`'s own removal fence above, before reaching here, so no symbol layer this
+branch reaches has been removed; and `LogSkippedLayers` would just re-log a compatibility summary that
+`Build` never re-populated, so it stays whatever the last full rebuild logged. This stage's only correction
+is that a removed layer leaves the token's numbering fold unchanged too (its vacated slot's cache entries
+are unreachable, evicted by budget — `UMR-141`'s territory). `TileManager.SetSources` (the
+full-rebuild one) is unreachable from this branch; `RestyleSourcesInPlace` is its counterpart, called
+UNCONDITIONALLY here — not gated to "only when something removed" — because it is the only place the BRG
+backend's cached per-item render queue gets re-stamped, even for a pure reorder with no source change.
+
+**No per-frame cost.** `SetLayerMaterials` re-stamps `BRG.TileRenderer.DrawItem.LayerRenderQueue` once, at
+restyle time — never a live `material.renderQueue` read inside the per-frame culling callback. A slot whose
+material went from a live one to `null` (a retired layer) has its live draw items removed right there too,
+in all three backends: nothing in the source-pipeline diff tears these down on its own, since a layer
+removal that doesn't touch any source pipeline leaves `TeardownRecordsOnDepartedPipelines` with nothing to
+tear down.
+
+The THREE BACKENDS DO NOT DO THE SAME WORK here, and are deliberately not described as if they did: BRG
+only drops the `DrawItem` dict entry (no per-item mesh unregister exists in that backend at all); the
+GameObjects backend parks the child in its pool, similarly no engine-side unregister; the Entities backend
+additionally calls `_eg.UnregisterMesh` and decrements `RegisteredMeshCount` IMMEDIATELY, ahead of the
+normal tile-release timing that count otherwise tracks (`EntitiesTileRendererTestExtensions`'
+`RegisteredMeshCount` teeth, and the PlayMode `PreparedCacheTests` leak tooth, both read it). In every
+backend the tile's `Mesh` ASSET itself is untouched by this cleanup — `TileManager` still owns it and
+destroys it at ordinary tile release, so the record briefly keeps a `Mesh` no backend draws, a bounded hold
+rather than a growing leak (`UMR-141`'s territory) — but how EARLY each backend's own bookkeeping reflects
+the retirement differs, and a reader comparing the three should expect that.
+
+**`SetLayerMaterials`'s two implementation traps.** (1) A retiring slot's OLD material must be compared by
+`ReferenceEquals(oldMat, null)`, never `oldMat != null` — Unity's overloaded `==`/`!=` reports a DESTROYED
+object as fake-null, and the old material IS already destroyed by the time this runs
+(`RenderLayerSet.TryRestyleInPlace` disposes a removed layer before `TileManager.RestyleSourcesInPlace`
+reaches the backend). `oldMat != null` would silently skip the unregister in EditMode (`DestroyImmediate`
+makes the fake-null show up immediately) while still running it in a shipped player (`Destroy` defers to
+frame end) — the two environments taking OPPOSITE branches, so an EditMode tooth over a registration count
+would measure a path production never takes. (2) A caller MUST call every survivor's
+`IRenderLayer.SetDrawOrder` before calling `SetLayerMaterials` — the BRG backend's render-queue re-stamp
+reads each slot's material AS IT IS at that moment, so calling them in the other order re-stamps the OLD
+queue.
+
+**`MapView.CommitProbe`** is a test-only seam over `SetStyle`'s FULL-REBUILD arm — an `Action<CommitPhase>`,
+null in production, invoked after each of six mutation sites in commit order: the `_style`/`StyleId`
+identity commit, the `_committedFillAntialiasing`/`_committedMaterials` memo write, `RenderLayerSet.Build`,
+the `TileManager.CurrentStyle` token write, `SymbolSubsystem.SetStyle`, and (the one INTERIOR site — the
+only phase that can fire more than once per call) inside `TileManager.SetSources`'s teardown loop, once per
+record. A test sets it to throw at a chosen phase to observe what an interrupted rebuild leaves behind.
 
 ---
 
@@ -660,6 +828,19 @@ layerId)` serving stale-style geometry; sidestepped entirely by never transferri
 keeps the always-destroy behaviour unchanged. `_cacheEnabled == false` skips the transfer entirely —
 `RenderTeardownRecord`'s `DestroyTrackedMeshes` then destroys `lt.Meshes` exactly as it did pre-cache.
 
+**The same release evicts the bytes** (UMR-139): `ReleaseTile` banks the meshes and then calls
+`_sources.ReleaseTile`, which drops the tile from the byte `TileCache`. A prepared-cache hit and a byte-cache
+hit are therefore mutually exclusive — for exactly the tiles the mesh cache can serve, a re-fetch is a real
+network round trip. That is why a refused hit costs a fetch, not just a decode.
+
+**A hit must be complete on BOTH sides** (UMR-139): a hit marks the record `Built`+`FetchCompleted`, so
+`PumpPending` never reaches it and its symbol build never kicks. `AdmitTile` therefore requires the symbol
+store to still hold a committed block for the tile (`ISymbolTileWorkerFactory.SymbolsCachedFor`) before it
+serves one. Without that, a full-rebuild restyle — which `Clear()`s the symbol store while the mesh cache
+keeps its entries under their content token — re-showed the panned-back tile as geometry with every label
+permanently gone. Same remedy as the S82 `allCached = _denseLayerIds.Count > 0` seed: make the hit predicate
+stricter, never loosen what a hit implies.
+
 ### 5.2 Batched removal — backend seam
 
 ```csharp
@@ -747,6 +928,126 @@ unregister); parity (GPU-snapshot byte-identical + Entities Hierarchy probes unc
 
 Steps 1–5 are independent of the decomposition and deliberately front-loaded; 7–8 must precede 9 so the two-phase
 kick lands in `TileMeshBuildEngine`, not in another 200 lines of the god-object. Step 10 can run any time after 2.
+
+## 7.5 A layer draws, or it is not submitted (the minzoom/maxzoom/visibility draw gate)
+
+One rule decides the whole section: **a layer that paints nothing the framebuffer can show does not reach
+the GPU.** Where that is decided depends on whether it can change while the style is loaded.
+
+### Decided once, at construction
+
+Two properties can never turn on later in the session, so `RenderLayerFactory.Create` refuses the layer
+outright — no `IRenderLayer`, no slot, no material, no backend registration, and no mesh built for it on any
+tile:
+
+| property | skip reason |
+|---|---|
+| `layout: {"visibility": "none"}` | `LayerSkipReason.Hidden` |
+| an opacity that is a **constant** below `ZoomStyleApplier.VisibleOpacityEpsilon` (one 8-bit step) | `LayerSkipReason.FullyTransparent` |
+
+`RenderLayerFactory.TryGetFetchSource` applies the same two tests, so a source whose only readers can never
+draw is never fetched and its tiles are never MVT-decoded. Both are the author's intent rather than a
+renderer limitation, so `MapView.LogSkippedLayers` stays silent about them, as it already does for a
+source-less symbol layer.
+
+A **zoom-dependent** or **feature-dependent** opacity is deliberately not in that table. Neither reduces to
+a decision that holds for the whole session: the first changes with the camera, and the second cannot be
+represented by any single per-layer scalar.
+
+### Decided per frame, at submission
+
+What is left varies with the camera, so each remaining layer carries a **fade factor** `p in [0,1]`. It
+is not a style property. Its target is a boolean from one predicate — `StyleLayer.IsVisibleAtZoom(liveZoom)`
+— evaluated per layer per frame in `RenderLayerSet.ApplyZoom`. `p` eases to its target over
+`StyleTransition` using a fourth copy of the ease `ZoomStyleApplier` already runs three times, and
+multiplies the layer's `_Opacity` at the one `SetFloat` that pushes it.
+
+The gate reads the product, not fade alone:
+
+```
+ZoomStyleApplier.EffectiveOpacityIsZero  ==  fade * authoredOpacity < VisibleOpacityEpsilon
+```
+
+`IFadeableRenderLayer` re-exposes it and `TileManager.PushLayerDrawGates` pushes it per slot into
+`ITileRenderBackend.SetLayerVisible`. That push sits beside **every** `RenderLayerSet.ApplyZoom` — the call
+that refreshes both terms — so no frame can render between the two. The authored term is the unscaled value
+`ApplyZoom` just pushed (the binding carrying `ScaledByFade`, of which `BindOpacity` is the sole writer), so
+it is never a frame stale; a settled Constant keeps its bind-time value, which is its value at every zoom.
+
+Two properties of that predicate are load-bearing and each has its own tooth:
+
+- **Settled, not merely heading for zero.** A layer mid-fade still shows something, so it keeps submitting —
+  the fade needs something to blend. `fill-extrusion` never takes an intermediate value at all:
+  `RenderLayerSet.AdvanceFade` substitutes `StyleTransition.Instant` for the ease's duration when
+  `FillExtrusionRenderLayer.FadesGradually` is `false`, because
+  `FillExtrusionTweaker.ApplyElevatedContract` blends `One/Zero` with `DepthWrite.On`, so alpha is discarded
+  there and a partly-present building would render solid rather than translucent.
+- **A feature-dependent opacity fails safe.** All four paint binders in `Materials.MaterialFactory` bind a
+  constant `1` when `Opacity.DependsOnFeature` (the per-feature value is baked into vertex alpha instead), so
+  the authored term reads 1 and such a layer is never gated out on a value that does not describe it.
+
+**Why it rides `_Opacity` rather than a dedicated uniform.** `_Opacity` has one binding path
+(`ZoomStyleApplier.BindOpacity`), so fade composes with authored opacity at a single site. A dedicated
+uniform would cost a shader Property, a CBUFFER member and a DOTS instanced prop in every one of the three
+kind families, and would move every parity count — for a value always multiplied into `_Opacity` anyway.
+
+### How each backend honours the gate
+
+The three differ in mechanism and must agree on outcome — the same shape `IRenderLayer.CastShadows` carries.
+
+| backend | mechanism | cost |
+|---|---|---|
+| BRG | the slot is skipped in `ComputeEmitOrder`, for the camera AND the light view | one list read per item per cull |
+| GameObjects | `Renderer.enabled = false` on that slot's layer children | one write per item, on CHANGE only |
+| Entities | `DisableRendering` added to that slot's entities | one batched structural change, on CHANGE only |
+
+`AddTileLayer` consults the gate too: tiles keep finishing while a layer is gated, so an item registered into
+an already-gated slot must arrive undrawn. BRG gets that from reading the gate at emit time; the other two
+apply it per item as they build it. The gate is two-way — lifting it re-enables the slot — which is the half
+a "the layer disappears" test cannot see, so each backend's tooth asserts the return trip explicitly.
+
+**No map fragment pass reads fade, and a structure fence keeps it that way.** A discard on `_Opacity`
+would be dead work, since a gated layer never reaches a fragment. The rule is enforced structurally rather
+than by a rendered tooth because most of the passes it covers cannot run: of the 18 fragment passes across
+Fill, Line and FillExtrusion only **7** can rasterise in the shipped configuration — the four forward passes
+of Fill and Line, the two fill-extrusion forward passes, and the fill-extrusion ShadowCaster. The GBuffer
+passes never run under Forward+ (`Renderer.asset` is `m_RenderingMode: 2`); DepthOnly and DepthNormals are
+built with `RenderQueueRange.opaque` while every map layer sits at queue >= 3000; and the Fill and Line
+ShadowCaster passes are dropped by all three backends because those kinds declare `ShadowCastingMode.Off`.
+Every row of that split is a configuration, not a construction, so
+`ShaderStructureTests.NoMapPassBody_DiscardsOnTheLayerFadeUniform` is the sole observer for the other 11.
+
+### What the gate costs, and the one thing it gives up
+
+A gated layer costs no vertex work, no draw call, no depth and no shadow — but its mesh still exists, because
+the gate acts after the tile is built. Removing the mesh too means removing the layer, and that is the
+subject of the next section.
+
+Construction-time refusal gives up one thing: a skipped layer cannot **ease** back in. Flipping
+`visibility` to `visible`, or an opacity from a constant `0` to a constant `0.8`, changes the built layer
+set, so `RenderLayerSet.TryRestyleInPlace`'s id-keyed diff refuses and the full-rebuild arm runs instead of a
+fade. Correct, merely not fast, and identical for both skip reasons.
+
+### Why a layer is NOT removed and rebuilt as the camera crosses its zoom bounds
+
+The obvious extension — drop an out-of-range layer entirely, rebuild it on re-entry — is not viable against
+this pipeline, and the reason is worth stating because the question keeps arising.
+
+The prepared mesh cache would not absorb the re-entry; it would be discarded wholesale on every crossing.
+`PreparedKey` is (`StyleToken`, `TileId`, `LayerId`), and `StyleToken` digests
+`MapView.LayerNumbering(Layers)` — the `index:id` pairing of the **built** set. A layer set that varies with
+zoom therefore changes the token at every crossing, re-keying every entry for every tile and every layer, not
+just the layer that moved. Independently, `LayerId` is the slot index, so removing a layer mid-list renumbers
+every later layer and their cached meshes are keyed wrong. Each crossing would cost a full re-decode and
+re-mesh of the whole cover, and `liberty.json` has 15 zoom-bounded layers.
+
+The slot model cannot express "absent at this zoom, present at another" either. A skipped layer COMPACTS the
+numbering — `RenderLayerSet.Build` increments `drawIndex` only on the real-layer branch — which is exactly
+what a zoom-varying set must not do. `TombstoneRenderLayer` is the construct that removes a layer while
+holding its slot width, and it is necessary but **not sufficient** here: it would fix `LayerId` and
+`LoadedTile.MaterialIndices`, while the style token would additionally have to stop depending on which layers
+are currently present. That is a separate decision about what the cache key means — today it captures the
+built numbering precisely so a style whose layer set changed cannot silently reuse meshes.
 
 ## 8. Resolved decisions (maintainer)
 

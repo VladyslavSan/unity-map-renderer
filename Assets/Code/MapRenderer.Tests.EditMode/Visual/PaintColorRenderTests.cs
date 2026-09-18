@@ -34,6 +34,7 @@ using Unity.Mathematics;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using Color = UnityEngine.Color;
 using Line = MapRenderer.Core.Style.Line;
+using Fill = MapRenderer.Core.Style.Fill;
 
 namespace MapRenderer.Tests.Visual
 {
@@ -110,7 +111,7 @@ namespace MapRenderer.Tests.Visual
             Assert.IsNotNull(mat, "Map/Line base material must be configured.");
             var applier = new ZoomStyleApplier(mat);
             MaterialFactory.BindLinePaintToApplier(paint, applier, mat);
-            applier.ApplyZoom(Zoom, 1.0);
+            applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
 
             Bounds b = mesh.bounds;
             float  orthoSize = math.max(b.extents.x, b.extents.z) * 1.2f;
@@ -263,6 +264,258 @@ namespace MapRenderer.Tests.Visual
                         $"1.0 means the fragment ignores _BaseColor.a: the constant colour moved to the " +
                         $"uniform but the two forward passes still compute alpha from vColor.a alone, so the " +
                         $"authored alpha is gone. 0.25 would mean it is applied twice.");
+            }
+            finally
+            {
+                RenderSettings.fog          = prevFog;
+                RenderSettings.ambientMode  = prevAmbientMode;
+                RenderSettings.ambientLight = prevAmbientLight;
+                QualitySettings.SetQualityLevel(prevQuality, false);
+            }
+        }
+
+        // ── fill: the site-2 gamma-convention pin (Stage 1) ──────────────────────────────────────
+
+        /// <summary>A square polygon well inside the tile, margined for the fill boundary band's feathered
+        /// edge — mirrors <see cref="LineFeature"/>'s "fat ribbon, sample the solid core" shape.</summary>
+        private static IFeature FillSquareFeature()
+        {
+            uint ZigZag(int n) => (uint)((n << 1) ^ (n >> 31));
+            return new DictionaryFeature(geometryType: TileGeometryType.Polygon, geometry: new uint[]
+            {
+                (1u << 3) | 1u, ZigZag(548),  ZigZag(548),   // MoveTo → (548, 548)
+                (3u << 3) | 2u,
+                ZigZag(3000),  ZigZag(0),                    // +x
+                ZigZag(0),     ZigZag(3000),                 // +y
+                ZigZag(-3000), ZigZag(0),                    // -x
+            });
+        }
+
+        /// <summary>Renders one fill layer end-to-end, the fill counterpart of <see cref="RenderLayer"/>.</summary>
+        private static double3? RenderFillLayer(string colorToken, string tag)
+        {
+            Fill.PaintProperties paint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":{colorToken}}}"));
+            Mesh mesh = TestTileMeshBuilder.BuildFill(new[] { FillSquareFeature() }, paint, Zoom, Extent, Tile);
+            Assert.IsNotNull(mesh, "the fixture feature must produce fill geometry.");
+
+            Material mat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
+            Assert.IsNotNull(mat, "Map/Fill base material must be configured.");
+            var applier = new ZoomStyleApplier(mat);
+            MaterialFactory.BindFillPaintToApplier(paint, applier, mat);
+            applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0));
+
+            Bounds b = mesh.bounds;
+            float  orthoSize = math.max(b.extents.x, b.extents.z) * 1.2f;
+
+            var fillGo = new GameObject("PaintColorRender_Fill");
+            fillGo.AddComponent<MeshFilter>().sharedMesh = mesh;
+            fillGo.AddComponent<MeshRenderer>().sharedMaterial = mat;
+
+            var camGo  = new GameObject("PaintColorRender_Camera");
+            var camera = camGo.AddComponent<Camera>();
+            camera.transform.position = new Vector3(b.center.x, 500f, b.center.z);
+            camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            camera.orthographic       = true;
+            camera.orthographicSize   = orthoSize;
+            camera.farClipPlane       = 5000f;
+            camera.clearFlags         = CameraClearFlags.SolidColor;
+            camera.backgroundColor    = Color.black;
+            camera.enabled            = false;
+
+            using var snap = new SnapshotRenderer(SnapW, SnapH);
+            try
+            {
+                snap.Render(camera);
+                snap.WritePng($"paint-color-fill-{tag}.png");
+                if (snap.IsAllBlack()) return null; // caller decides: no GPU, or a genuinely black arm
+                return SampleLinear(snap);
+            }
+            finally
+            {
+                Object.DestroyImmediate(camGo);
+                Object.DestroyImmediate(fillGo);
+                Object.DestroyImmediate(mat);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        /// <summary>
+        /// The rendered albedo of a CONSTANT fill-color must be the authored colour, not its square (both
+        /// carriers holding it) and not its raw sRGB triple (a <c>.linear</c> pre-conversion at the
+        /// <c>_BaseColor</c> bind site — Unity already converts a Color-typed material property on upload).
+        /// This is the only observer of the site-2 gamma convention; 2a/2b compose CPU-side read-backs and
+        /// cannot see an upload-time convention error.
+        /// </summary>
+        [Test]
+        public void ConstantFillColor_RenderedPixel_MatchesAuthored()
+        {
+            int   prevQuality      = QualitySettings.GetQualityLevel();
+            var   prevAmbientMode  = RenderSettings.ambientMode;
+            var   prevAmbientLight = RenderSettings.ambientLight;
+            bool  prevFog          = RenderSettings.fog;
+            QualitySettings.SetQualityLevel(0, false);
+            RenderSettings.ambientMode  = AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.6f, 0.6f, 0.6f, 1f);
+            RenderSettings.fog          = false;
+            try
+            {
+                double3? white = RenderFillLayer("\"#ffffff\"", "fill-white");
+                if (white == null)
+                {
+                    Assert.Inconclusive("No GPU context (the white reference arm rendered blank).");
+                    return;
+                }
+                double3 black = RenderFillLayer("\"#000000\"", "fill-black") ?? double3.zero;
+                double3? layer = RenderFillLayer($"\"{AuthoredHex}\"", "fill-authored");
+                Assert.IsNotNull(layer, "the #6699CC arm rendered blank while the white arm did not.");
+
+                double3 span = white.Value - black;
+                Assert.Greater(math.cmin(span), 0.05,
+                    $"the white and black reference arms must be separable to calibrate against " +
+                    $"(white={white.Value}, black={black}).");
+
+                double3 measured = (layer.Value - black) / span;
+
+                Assert.IsTrue(ColorUtility.TryParseHtmlString(AuthoredHex, out Color authored));
+                Color   expectedLinear = authored.linear;
+                double3 expect3  = new double3(expectedLinear.r, expectedLinear.g, expectedLinear.b);
+                double3 squared  = expect3 * expect3;
+                double3 srgb     = new double3(authored.r, authored.g, authored.b);
+
+                Debug.Log($"[PaintColorRender] fill measured={measured} authored(linear)={expect3} " +
+                          $"squared={squared} authored(sRGB)={srgb}");
+
+                for (int c = 0; c < 3; c++)
+                    Assert.That(measured[c], Is.EqualTo(expect3[c]).Within(0.02),
+                        $"channel {c}: a CONSTANT fill-color must reach the fragment ONCE, via the linear " +
+                        $"value Unity converts _BaseColor to on upload. measured={measured} " +
+                        $"authored(linear)={expect3} authored²={squared} authored(sRGB)={srgb}. " +
+                        $"Landing on authored² means both carriers hold it (site 2 shipped without the " +
+                        $"site-1 gate). Landing on the sRGB triple means a .linear conversion was added at " +
+                        $"the _BaseColor bind site — the UMR-135 defect.");
+            }
+            finally
+            {
+                RenderSettings.fog          = prevFog;
+                RenderSettings.ambientMode  = prevAmbientMode;
+                RenderSettings.ambientLight = prevAmbientLight;
+                QualitySettings.SetQualityLevel(prevQuality, false);
+            }
+        }
+
+        // ── style-transitions epic, Stage 2: tooth 21 — the eased colour renders in sRGB ─────────
+
+        /// <summary>As <see cref="RenderFillLayer"/>, but settles at <paramref name="oldColorToken"/> first,
+        /// then retargets to <paramref name="newColorToken"/> and samples mid-ease at <paramref name="atSeconds"/>
+        /// (duration 1s). Pins WHERE the mix happens: in sRGB (this file's authored space), with Unity
+        /// converting on upload — the same convention <see cref="ConstantFillColor_RenderedPixel_MatchesAuthored"/>
+        /// pins for the unanimated path.</summary>
+        private static double3? RenderFillLayerEased(string oldColorToken, string newColorToken, double atSeconds, string tag)
+        {
+            Fill.PaintProperties oldPaint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":{oldColorToken}}}"));
+            Fill.PaintProperties newPaint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":{newColorToken}}}"));
+            Mesh mesh = TestTileMeshBuilder.BuildFill(new[] { FillSquareFeature() }, oldPaint, Zoom, Extent, Tile);
+            Assert.IsNotNull(mesh, "the fixture feature must produce fill geometry.");
+
+            Material mat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
+            Assert.IsNotNull(mat, "Map/Fill base material must be configured.");
+            var applier = new ZoomStyleApplier(mat);
+            MaterialFactory.BindFillPaintToApplier(oldPaint, applier, mat);
+            applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, 0.0)); // settle at the origin colour
+
+            applier.SetTransition(new StyleTransition { DurationSeconds = 1.0 }, nowSeconds: 0.0);
+            MaterialFactory.BindFillPaintToApplier(newPaint, applier, mat);
+            applier.ApplyZoom(new StyleFrameInputs(Zoom, 1.0, atSeconds)); // sample mid-ease
+
+            Bounds b = mesh.bounds;
+            float  orthoSize = math.max(b.extents.x, b.extents.z) * 1.2f;
+
+            var fillGo = new GameObject("PaintColorRender_FillEased");
+            fillGo.AddComponent<MeshFilter>().sharedMesh = mesh;
+            fillGo.AddComponent<MeshRenderer>().sharedMaterial = mat;
+
+            var camGo  = new GameObject("PaintColorRender_CameraEased");
+            var camera = camGo.AddComponent<Camera>();
+            camera.transform.position = new Vector3(b.center.x, 500f, b.center.z);
+            camera.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
+            camera.orthographic       = true;
+            camera.orthographicSize   = orthoSize;
+            camera.farClipPlane       = 5000f;
+            camera.clearFlags         = CameraClearFlags.SolidColor;
+            camera.backgroundColor    = Color.black;
+            camera.enabled            = false;
+
+            using var snap = new SnapshotRenderer(SnapW, SnapH);
+            try
+            {
+                snap.Render(camera);
+                snap.WritePng($"paint-color-fill-eased-{tag}.png");
+                if (snap.IsAllBlack()) return null; // caller decides: no GPU, or a genuinely black arm
+                return SampleLinear(snap);
+            }
+            finally
+            {
+                Object.DestroyImmediate(camGo);
+                Object.DestroyImmediate(fillGo);
+                Object.DestroyImmediate(mat);
+                Object.DestroyImmediate(mesh);
+            }
+        }
+
+        /// <summary>
+        /// At t=0.25 of a #6699CC → #CC6633 transition (D=1), the measured albedo must equal
+        /// linear(MixPremultiplied(A,B,0.15625)) — the mix happens in sRGB (the authored space) and
+        /// Unity converts on upload, exactly like the unanimated Constant path. Both fixture colours are
+        /// non-white on every channel and their channels are permuted, so a channel swap cannot pass.
+        /// </summary>
+        [Test]
+        public void EasedColor_RendersTheMixedPixel_AtTheQuarterPoint()
+        {
+            const string HexA = "#6699CC";
+            const string HexB = "#CC6633";
+            var colorA = new MapRenderer.Core.Expressions.Color(0.4, 0.6, 0.8, 1.0);
+            var colorB = new MapRenderer.Core.Expressions.Color(0.8, 0.4, 0.2, 1.0);
+
+            int   prevQuality      = QualitySettings.GetQualityLevel();
+            var   prevAmbientMode  = RenderSettings.ambientMode;
+            var   prevAmbientLight = RenderSettings.ambientLight;
+            bool  prevFog          = RenderSettings.fog;
+            QualitySettings.SetQualityLevel(0, false);
+            RenderSettings.ambientMode  = AmbientMode.Flat;
+            RenderSettings.ambientLight = new Color(0.6f, 0.6f, 0.6f, 1f);
+            RenderSettings.fog          = false;
+            try
+            {
+                double3? white = RenderFillLayer("\"#ffffff\"", "fill-eased-white");
+                if (white == null)
+                {
+                    Assert.Inconclusive("No GPU context (the white reference arm rendered blank).");
+                    return;
+                }
+                double3 black = RenderFillLayer("\"#000000\"", "fill-eased-black") ?? double3.zero;
+                double3? layer = RenderFillLayerEased($"\"{HexA}\"", $"\"{HexB}\"", 0.25, "quarter");
+                Assert.IsNotNull(layer, "the eased arm rendered blank while the white arm did not.");
+
+                double3 span = white.Value - black;
+                Assert.Greater(math.cmin(span), 0.05,
+                    $"the white and black reference arms must be separable to calibrate against " +
+                    $"(white={white.Value}, black={black}).");
+
+                double3 measured = (layer.Value - black) / span;
+
+                var mixedSrgb = MapRenderer.Core.Expressions.Color.MixPremultiplied(colorA, colorB, 0.15625);
+                Color expectedLinear = new Color((float)mixedSrgb.R, (float)mixedSrgb.G, (float)mixedSrgb.B, 1f).linear;
+                double3 expect3 = new double3(expectedLinear.r, expectedLinear.g, expectedLinear.b);
+                double3 srgb    = new double3(mixedSrgb.R, mixedSrgb.G, mixedSrgb.B);
+
+                Debug.Log($"[PaintColorRender] eased measured={measured} authored(linear)={expect3} authored(sRGB)={srgb}");
+
+                for (int c = 0; c < 3; c++)
+                    Assert.That(measured[c], Is.EqualTo(expect3[c]).Within(0.02),
+                        $"channel {c}: the eased colour must reach the fragment as the LINEAR conversion of " +
+                        $"the sRGB mix. measured={measured} authored(linear)={expect3} authored(sRGB)={srgb}. " +
+                        $"Landing on the sRGB triple would mean the mix was pre-converted to linear before " +
+                        $"SetColor — the UMR-135 defect shape, applied to the transition path.");
             }
             finally
             {

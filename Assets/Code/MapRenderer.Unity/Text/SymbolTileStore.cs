@@ -336,6 +336,11 @@ namespace MapRenderer.Unity.Text
             if (_departingPurgeKeys.Count > 0) MarkCollectDirty();
         }
 
+        /// <summary>Whether this tile's symbols are warm — a block is COMMITTED for <paramref name="key"/>,
+        /// active or kept-warm. A slot <see cref="BeginBuild"/> reserved but <see cref="CompleteBuild"/> has
+        /// not filled reads false, so an admission-time caller fails safe toward a re-fetch.</summary>
+        internal bool HasCommittedBlock(Key key) => FindCurrent(key)?.Block != null;
+
         /// <summary>Test-only: the raw single-tile block committed for <paramref name="key"/> (what
         /// <see cref="CompleteBuild"/> stored), or null. Internal Debug-prefixed seam, no production caller.</summary>
         internal SymbolTileBlock DebugBlockFor(Key key) => (SymbolTileBlock)FindCurrent(key)?.Block?.Value;

@@ -45,9 +45,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
     ///   Stream 3 — Color (Float32x4, linearized sRGB).
     ///   Index buffer — UInt32.
     ///
-    /// Color (D2): per-feature sRGB color baked via <see cref="StyleProperty{T}"/>; converted to linear via
-    /// <c>Color.linear</c> off the main thread. <c>_BaseColor=white</c> on the Material (identity multiply).
-    /// Never set <c>_BaseColor</c> to the style color — that would double-apply gamma.
+    /// Color (D2): two-carrier split for <c>fill-color</c>. Data-driven bakes the per-feature sRGB colour,
+    /// converted to linear via <c>Color.linear</c> off the main thread, and leaves <c>_BaseColor</c> white.
+    /// Constant/zoom leaves the vertex white and rides the material's <c>_BaseColor</c> uniform instead,
+    /// bound by <see cref="Materials.MaterialFactory.BindFillPaintToApplier"/> (Unity converts sRGB→linear
+    /// on upload for a Color-typed shader property, so that site must NOT pre-convert).
     ///
     /// Thread-safety: <see cref="ScheduleWrite"/> touches only pure-managed, stateless Core code plus a
     /// caller-allocated <c>Mesh.MeshData</c> (whose <c>SetVertexBufferParams</c>/<c>GetVertexData</c>/… are
@@ -312,7 +314,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         continue;
 
                     Color featureColor = Color.white;
-                    if (paint.Color.TryEvaluate(zoom, feature, out var color))
+                    // DATA-DRIVEN ONLY: BindFillPaintToApplier binds _BaseColor for exactly
+                    // !DependsOnFeature. Ungated, the vertex stays white and the uniform carries the colour.
+                    if (paint.Color.DependsOnFeature && paint.Color.TryEvaluate(zoom, feature, out var color))
                         featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
 
                     // S13 D2 gamma fix (off main thread): sRGB→linear here. white.linear == white.

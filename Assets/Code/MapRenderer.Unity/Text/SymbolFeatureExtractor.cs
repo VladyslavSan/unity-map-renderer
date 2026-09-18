@@ -14,6 +14,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
+using MapRenderer.Core.Style;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
@@ -21,6 +22,7 @@ using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Unity.Text
 {
@@ -884,16 +886,24 @@ namespace MapRenderer.Unity.Text
 
         private static SymbolPaint EvaluatePaint(PaintProperties paint, double zoom, IFeature feature)
         {
-            Color textColor = paint.Color.Evaluate(zoom, feature);
-            Color haloColor = paint.HaloColor.Evaluate(zoom, feature);
             return new SymbolPaint
             {
-                TextColor   = ToFloat4(textColor),
+                TextColor   = StreamRgba(paint.Color, zoom, feature),
                 Opacity     = paint.Opacity.Evaluate(zoom, feature),
-                HaloColor   = ToFloat4(haloColor),
+                HaloColor   = StreamRgba(paint.HaloColor, zoom, feature),
                 HaloWidthPx = paint.HaloWidth.Evaluate(zoom, feature),
                 HaloBlurPx  = paint.HaloBlur.Evaluate(zoom, feature),
             };
+        }
+
+        /// <summary>Evaluates one colour for the vertex COLOR stream — the complement of
+        /// <c>SymbolRenderLayer.BindColorTint</c>: a CONSTANT rides the uniform, so the stream stays white
+        /// and the shader's uniform x vertex product is the colour ONCE. Alpha is untouched either way, it
+        /// has no uniform carrier.</summary>
+        private static float4 StreamRgba(StyleProperty<Color> color, double zoom, IFeature feature)
+        {
+            float4 rgba = ToFloat4(color.Evaluate(zoom, feature));
+            return SymbolTextColorCarrier.RidesUniform(color) ? new float4(1f, 1f, 1f, rgba.w) : rgba;
         }
 
         private static float4 ToFloat4(in Color c)

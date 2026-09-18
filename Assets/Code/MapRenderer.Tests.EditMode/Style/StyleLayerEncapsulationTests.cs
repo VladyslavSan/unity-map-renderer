@@ -8,13 +8,12 @@ using MapRenderer.Core.Style;
 namespace MapRenderer.Tests.Style
 {
     /// <summary>
-    /// S60 acceptance criterion 1: raw JSON fields are encapsulated.
-    /// Asserts that <see cref="StyleLayer.Raw"/> is NOT public (it is internal), while
-    /// <see cref="StyleLayer.Filter"/> remains public. <c>PaintJson</c>/<c>LayoutJson</c> no longer exist
-    /// (UMR-108: paint/layout are parsed eagerly, not retained as raw sub-trees) — there is nothing left to
-    /// assert non-public for them.
-    ///
-    /// Uses reflection so that an accidental <c>public</c> revert is a compile-time miss but a test fail.
+    /// S60 acceptance criterion 1: raw JSON fields are encapsulated, with one deliberate exception.
+    /// <see cref="StyleLayer.Raw"/> was widened to public in the style-transitions epic (Stage 2): the
+    /// restyle survivor gate lives outside <c>MapRenderer.Core</c> and must compare the whole raw layer
+    /// object, including unknown/forward-compat keys the typed <c>Paint</c>/<c>Layout</c> views drop.
+    /// <see cref="StyleLayer.Filter"/> remains public for the same pre-existing reason (S10).
+    /// <c>PaintJson</c>/<c>LayoutJson</c> no longer exist (UMR-108) — nothing left to assert for them.
     /// </summary>
     [TestFixture]
     public class StyleLayerEncapsulationTests
@@ -22,12 +21,12 @@ namespace MapRenderer.Tests.Style
         private const BindingFlags AnyInstance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
 
         [Test]
-        public void Raw_IsNotPublic()
+        public void Raw_IsPublic()
         {
             var fi = typeof(StyleLayer).GetField("Raw", AnyInstance);
             Assert.IsNotNull(fi, "Raw field must exist on StyleLayer.");
-            Assert.IsFalse(fi.IsPublic,
-                "Raw must NOT be public (S60: raw JSON encapsulated as internal).");
+            Assert.IsTrue(fi.IsPublic,
+                "Raw must be public (Stage 2: SurvivingLayerGate compares it from outside Core).");
         }
 
         [Test]

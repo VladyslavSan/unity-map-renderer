@@ -25,6 +25,12 @@ Shader "Map/Symbol/TextWorld"
         _SdfAaDevicePx       ("SDF AA Width, outside the edge (RASTER px; 1 = phase-invariant)", Range(0.05, 2)) = 1.0
         _SdfRangeTexels      ("SDF Distance Range (atlas texels; a property of the BAKE, ~8)", Float) = 8.0
 
+        // The two CONSTANT-kind colour tints — multipliers over the vertex COLOR stream, identity white.
+        // MUST default white: several tests construct this material raw and never bind either uniform, and
+        // every non-Constant expression kind leaves them here (see SymbolText_Input.hlsl).
+        _TextColor    ("Text Color (text-color multiplier, identity white)", Color) = (1, 1, 1, 1)
+        _HaloColor    ("Halo Color (text-halo-color multiplier, identity white)", Color) = (1, 1, 1, 1)
+
         // Render state — material-UI knobs (S58 pattern, mirrors Fill/Line's [_Cull]/[_ZWrite]/[_ZTest]
         // and Blend). Defaults match Map/Symbol/Text's: straight alpha, ZWrite Off, ZTest Always (unlit
         // UI-like text always renders on top), Cull Off (billboard corners have no meaningful winding).

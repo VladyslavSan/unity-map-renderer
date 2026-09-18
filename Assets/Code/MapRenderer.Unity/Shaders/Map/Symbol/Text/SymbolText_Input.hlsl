@@ -6,12 +6,16 @@
 // (one draw call per frame, SRP-Batcher-compatible CBUFFER), never BatchRendererGroup — there is nothing
 // to instance.
 //
-// Every property here is INTERNAL engine plumbing (SDF threshold, AA, per-frame screen size); the names
-// avoid every `text-*`/`symbol-*` style-spec term so a future style binding can never collide. There is no
-// style-bound group: every `text-*` paint term rides a vertex stream, so none of them appears here.
-// `text-color`/`text-opacity` are NOT material properties at all — Slice 1 (and S105) bake them into the
-// per-vertex COLOR stream instead (mirrors how `line-color` already rides vertex color in
-// StyledLineTileBuilder), so there is nothing here to collide with those two terms either.
+// Every property here is engine plumbing (SDF threshold, AA, per-frame screen size) EXCEPT the two colour
+// tints below; the plumbing names avoid every `text-*`/`symbol-*` style-spec term so a future style binding
+// can never collide.
+// `text-color`/`text-halo-color`: a two-carrier split (style-transitions epic). A CONSTANT value rides
+// `_TextColor`/`_HaloColor` below — a multiplier, identity white — so it can ease across a restyle; every
+// other kind (Zoom/Feature/Composite) bakes into the per-vertex COLOR stream (mirrors how `line-color` rides
+// vertex color in StyledLineTileBuilder), which then carries white for exactly the constant arm.
+// Every OTHER `text-*` paint term rides a vertex stream alone and appears nowhere here: `text-opacity` on
+// the opacity stream, and `text-halo-width`/`-blur` on WorldBillboardVertex.SdfWidenPx (the halo is real
+// geometry — a second copy of the glyph run — so the shader has no halo term of its own).
 
 #ifndef MAP_SYMBOL_INPUT_INCLUDED
 #define MAP_SYMBOL_INPUT_INCLUDED
@@ -46,6 +50,14 @@ float4 _MainTex_TexelSize;
 float _SdfEdge;
 float _SdfAaDevicePx;
 float _SdfRangeTexels;
+
+// The two CONSTANT-kind colour tints (see this file's header). Multipliers over the vertex COLOR stream,
+// identity white; `_HaloColor` tints the halo run and `_TextColor` the text run, told apart by
+// SdfWidenPx (see SymbolTextWorld_ForwardPass.hlsl). Both defaults MUST stay white
+// (SymbolTextWorld.shader) — every other expression kind leaves them there and carries its colour in the
+// vertex instead. The `.a` of both is deliberately unread: a colour's own alpha rides the opacity stream.
+float4 _TextColor;
+float4 _HaloColor;
 CBUFFER_END
 
 // Stage M: a Texture2DArray — one layer per GlyphAtlas page. Single-page maps (the invariant: any map

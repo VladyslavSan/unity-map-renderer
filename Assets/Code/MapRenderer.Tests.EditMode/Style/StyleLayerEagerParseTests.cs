@@ -168,5 +168,49 @@ namespace MapRenderer.Tests.Style
             Assert.IsNotNull(Background.PaintProperties.Parse(null));
             Assert.IsNotNull(FillExtrusion.PaintProperties.Parse(null));
         }
+
+        // ── layout.visibility parses into the one draw-gate predicate ──────────────────────────
+
+        /// <summary>
+        /// <c>StyleParser.ParseLayer</c> sets <c>Visible</c> to <c>false</c> only for
+        /// <c>visibility: "none"</c>. Any other value — including an absent layout, an absent key, and a
+        /// garbage string — is <c>true</c>, which the spec's default gives for free.
+        /// </summary>
+        /// <param name="layoutJson">The layer's <c>layout</c> block, or <c>null</c> to omit it entirely.</param>
+        [TestCase("{\"visibility\":\"none\"}",    false, TestName = "Visibility_None_Hides")]
+        [TestCase("{\"visibility\":\"visible\"}", true,  TestName = "Visibility_Visible_Draws")]
+        [TestCase("{}",                            true,  TestName = "Visibility_AbsentKey_Draws")]
+        [TestCase("{\"visibility\":\"NONE\"}",    true,  TestName = "Visibility_WrongCase_Draws")]
+        [TestCase(null,                            true,  TestName = "Visibility_NoLayoutBlock_Draws")]
+        public void ParseLayer_Visibility_SetsVisible(string layoutJson, bool expected)
+        {
+            string layout = layoutJson == null ? "" : $"\"layout\": {layoutJson},";
+            StyleDocument doc = StyleParser.Parse($@"{{
+    ""version"": 8, ""name"": ""T"",
+    ""sources"": {{ ""s"": {{ ""type"": ""vector"", ""tiles"": [""https://x/{{z}}/{{x}}/{{y}}.pbf""] }} }},
+    ""layers"": [ {{ ""id"": ""f0"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""f0"", {layout}
+        ""paint"": {{ ""fill-color"": [""rgba"",102,153,204,1] }} }} ]
+}}");
+            Assert.AreEqual(expected, doc.Layers[0].Visible,
+                $"layout {layoutJson ?? "(absent)"} must parse to Visible={expected}. Only the exact "
+                + "string \"none\" hides a layer; every other value is the spec default \"visible\".");
+        }
+
+        /// <summary>
+        /// A hidden layer is invisible even at a zoom strictly INSIDE its declared range — the row an
+        /// implementation that ANDs the flag in the wrong place fails.
+        /// </summary>
+        [Test]
+        public void HiddenLayer_IsNotVisible_EvenInsideItsZoomRange()
+        {
+            var layer = new StyleLayer { Id = "x", MinZoom = 5.0, MaxZoom = 20.0 };
+            Assert.IsTrue(layer.IsVisibleAtZoom(10.0), "precondition: z10 is inside [5,20), so it draws.");
+
+            layer.Visible = false;
+            Assert.IsFalse(layer.IsVisibleAtZoom(10.0),
+                "visibility:none must hide the layer at EVERY zoom, including one inside its declared "
+                + "range. A flag consulted only outside the bounds passes the out-of-range rows and fails "
+                + "exactly here.");
+        }
     }
 }

@@ -68,8 +68,8 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         internal readonly Dictionary<int, DrawItem> _items = new Dictionary<int, DrawItem>(64);
         private int _nextHandle;
 
-        // Per-layer materials registered with BRG in declared order (index == materialIndex == draw order).
-        // mat is referenced (not owned) — RenderLayerSet disposes materials on teardown.
+        // Per-layer materials in SLOT order (index == materialIndex == DrawIndex); draw order rides each
+        // DrawItem's LayerRenderQueue. mat is referenced, not owned — RenderLayerSet disposes them.
         private readonly List<(BatchMaterialID id, Material mat)> _layerMaterials
             = new List<(BatchMaterialID, Material)>(16);
 
@@ -94,6 +94,10 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         // verbatim from TileManager.LayerShadowModes. Absent or short ⇒ Off, identically in all three backends.
         private readonly List<ShadowCastingMode> _layerShadowModes = new List<ShadowCastingMode>();
 
+        // Per-layer draw gate (ITileRenderBackend.SetLayerVisible), parallel to _layerMaterials. True ⇒ this
+        // slot emits a draw command. Absent or short ⇒ visible, identically in all three backends.
+        private readonly List<bool> _layerVisible = new List<bool>();
+
         // CPU-side instance data (SoA layout). Grown on demand, never shrunk — no per-frame alloc.
         internal float[] _cpuBuffer = Array.Empty<float>();
 
@@ -103,23 +107,12 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         // ── Construction ──────────────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Constructs the BRG and registers each layer material from <paramref name="layerMaterials"/> — the
-        /// one ordered, FULL-WIDTH per-layer material list in declared order (<c>index == materialIndex ==
-        /// AddTileLayer index</c> == <see cref="Style.IRenderLayer.DrawIndex"/>). Materials are referenced
-        /// (not owned) — the <see cref="Style.RenderLayerSet"/> disposes them. Draw order is decided
-        /// per-item by <c>material.renderQueue</c> in <see cref="Rebuild"/>, independent of this
-        /// registration order. E1: a <c>null</c> entry (a symbol/background slot whose draw path has not
-        /// migrated yet, §3.3) is stored as a placeholder — NOT registered with BRG — so the list stays
-        /// full-width aligned; <see cref="AddTileLayer"/> is never called for that index (the tile produce
-        /// path filters to <c>ITileMeshRenderLayer</c> slots), so no further guard is needed.
-        /// </summary>
-        /// <param name="layerMaterials">The full-width per-layer material list, indexed by draw slot.</param>
-        /// <param name="layerShadowModes">
-        /// Optional per-layer <c>Style.IRenderLayer.CastShadows</c> declarations parallel to
-        /// <paramref name="layerMaterials"/>. When null/short, a slot falls back to
-        /// <see cref="ShadowCastingMode.Off"/> — see <see cref="ShadowModeFor"/>.
-        /// </param>
+        /// <summary>Constructs the BRG and registers each layer material — the one ordered, FULL-WIDTH
+        /// per-layer list in SLOT order (<c>index == materialIndex == AddTileLayer index ==
+        /// <see cref="Style.IRenderLayer.DrawIndex"/></c>). Materials are referenced, not owned. See
+        /// `docs/tile-pipeline-design.md` §1.10 for the E1 null-placeholder note.</summary>
+        /// <param name="layerMaterials">The full-width per-layer material list, indexed by slot.</param>
+        /// <param name="layerShadowModes">Per-layer shadow declarations; see <see cref="ShadowModeFor"/>.</param>
         public TileRenderer(
             System.Collections.Generic.IReadOnlyList<Material> layerMaterials,
             System.Collections.Generic.IReadOnlyList<ShadowCastingMode> layerShadowModes = null)
@@ -133,8 +126,54 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             {
                 var mat = layerMaterials[i];
                 if (mat == null) { _layerMaterials.Add((default, null)); continue; } // placeholder — keeps the list full-width aligned
-                var brgId = _brg.RegisterMaterial(mat);
-                _layerMaterials.Add((brgId, mat));
+                _layerMaterials.Add((_brg.RegisterMaterial(mat), mat));
+            }
+        }
+
+        /// <summary>UMR-151 restyle-time material/queue update — see `docs/tile-pipeline-design.md` §1.10.</summary>
+        public void SetLayerMaterials(
+            System.Collections.Generic.IReadOnlyList<Material> layerMaterials,
+            System.Collections.Generic.IReadOnlyList<ShadowCastingMode> layerShadowModes)
+        {
+            ThrowIfDisposed();
+
+            int oldCount = _layerMaterials.Count;
+            for (int i = 0; i < oldCount; i++)
+            {
+                var (oldId, oldMat) = _layerMaterials[i];
+                Material newMat = i < layerMaterials.Count ? layerMaterials[i] : null;
+                // Reference-null, NOT `!=` (Unity's fake-null hides a DESTROYED material — see
+                // docs/tile-pipeline-design.md §1.10's SetLayerMaterials note).
+                if (!ReferenceEquals(oldMat, null) && !ReferenceEquals(oldMat, newMat))
+                    _brg.UnregisterMaterial(oldId);
+            }
+
+            var next = new List<(BatchMaterialID id, Material mat)>(layerMaterials.Count);
+            for (int i = 0; i < layerMaterials.Count; i++)
+            {
+                Material mat    = layerMaterials[i];
+                Material oldMat = i < oldCount ? _layerMaterials[i].mat : null;
+                if (ReferenceEquals(mat, oldMat)) { next.Add(_layerMaterials[i]); continue; }
+                if (mat == null) { next.Add((default, null)); continue; }
+                next.Add((_brg.RegisterMaterial(mat), mat));
+            }
+            _layerMaterials.Clear();
+            _layerMaterials.AddRange(next);
+
+            _layerShadowModes.Clear();
+            if (layerShadowModes != null)
+                for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
+
+            // A retired slot's stale DrawItems are removed here (dict-entry drop only) — see
+            // docs/tile-pipeline-design.md §1.10 for why and how this differs from the other two backends.
+            foreach (int handle in new List<int>(_items.Keys))
+            {
+                DrawItem item = _items[handle];
+                Material mat = (uint)item.MaterialIndex < (uint)_layerMaterials.Count
+                    ? _layerMaterials[item.MaterialIndex].mat : null;
+                if (mat == null) { _items.Remove(handle); continue; }
+                item.LayerRenderQueue = mat.renderQueue;
+                _items[handle] = item;
             }
         }
 
@@ -184,7 +223,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         /// <summary>
         /// Registers a tile-layer mesh for BRG drawing. Returns a handle for later removal.
-        /// <paramref name="materialIndex"/> is the layer's global draw slot (<see cref="Style.IRenderLayer.DrawIndex"/>),
+        /// <paramref name="materialIndex"/> is the layer's global SLOT (<see cref="Style.IRenderLayer.DrawIndex"/>),
         /// indexing the full-width material list built at construction; non-tile-mesh slots are null and
         /// never receive an AddTileLayer call. <paramref name="tileId"/> is part of the shared
         /// <see cref="ITileRenderBackend"/> contract for the Entities backend's per-tile hierarchy; BRG
@@ -576,6 +615,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             for (int i = 0; i < _sortedItems.Count; i++)
             {
                 if (!_items.TryGetValue(_sortedItems[i].handle, out DrawItem item)) continue;
+                if (!Visible(item.MaterialIndex)) continue;
                 if (shadowView && ShadowModeFor(item.MaterialIndex) == ShadowCastingMode.Off) continue;
                 dst.Add(i);
             }
@@ -586,11 +626,27 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// <paramref name="materialIndex"/>, or <see cref="ShadowCastingMode.Off"/> when no list was supplied
         /// or it is short. The fallback must read identically in all three backends
         /// (<see cref="ITileRenderBackend"/>).</summary>
-        /// <param name="materialIndex">The layer's global draw slot.</param>
+        /// <param name="materialIndex">The layer's global SLOT.</param>
         private ShadowCastingMode ShadowModeFor(int materialIndex)
             => (uint)materialIndex < (uint)_layerShadowModes.Count
                 ? _layerShadowModes[materialIndex]
                 : ShadowCastingMode.Off;
+
+        /// <summary>True when <paramref name="materialIndex"/>'s slot is visible, so it emits a draw
+        /// command in every view it is not otherwise excluded from. One list read per item per cull — see
+        /// <see cref="ComputeEmitOrder"/>.</summary>
+        /// <param name="materialIndex">The layer's global SLOT.</param>
+        private bool Visible(int materialIndex)
+            => (uint)materialIndex >= (uint)_layerVisible.Count || _layerVisible[materialIndex];
+
+        /// <inheritdoc cref="ITileRenderBackend.SetLayerVisible"/>
+        public void SetLayerVisible(int slot, bool visible)
+        {
+            if (IsDisposed || slot < 0) return;
+            while (_layerVisible.Count <= slot) _layerVisible.Add(true);
+            if (_layerVisible[slot] == visible) return; // unchanged ⇒ nothing to update
+            _layerVisible[slot] = visible;
+        }
 
         /// <summary>
         /// Run-length groups <paramref name="emitOrder"/> (already in emission order) by declared shadow-cast

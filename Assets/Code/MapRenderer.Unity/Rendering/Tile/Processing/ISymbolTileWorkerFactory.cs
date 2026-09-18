@@ -20,6 +20,13 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// glyph pipeline). Does the main-thread prologue: reserve the store slot + generation, capture
         /// camera zoom + projection, build the per-layer processors + context.</summary>
         ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile);
+
+        /// <summary>MAIN THREAD (admission time, <see cref="Tile.TileManager"/>'s prepared-cache probe): the
+        /// counterpart to <see cref="TryBeginBuild"/> — true iff serving this tile from the prepared mesh
+        /// cache would lose no labels, either because the source produces none or because a committed block
+        /// is still warm. False refuses the hit, so the tile re-fetches and its labels rebuild. Pure: unlike
+        /// <see cref="TryBeginBuild"/> it reserves nothing.</summary>
+        bool SymbolsCachedFor(string sourceId, TileId tile);
     }
 
     /// <summary>The handle <see cref="ISymbolTileWorkerFactory.TryBeginBuild"/> returns — carries one

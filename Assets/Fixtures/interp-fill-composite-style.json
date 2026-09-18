@@ -1,0 +1,22 @@
+{
+    "version": 8,
+    "name": "InterpFillComposite",
+    "sources": {
+        "maplibre": { "type": "vector", "tiles": ["https://example.com/{z}/{x}/{y}.pbf"] }
+    },
+    "layers": [
+        {
+            "id": "countries-fill",
+            "type": "fill",
+            "source": "maplibre",
+            "source-layer": "countries",
+            "paint": {
+                "fill-color": [
+                    "interpolate", ["linear"], ["zoom"],
+                    1, ["match", ["get", "CONTINENT"], "Asia", ["rgba", 255, 0, 0, 1], ["rgba", 0, 255, 0, 1]],
+                    5, ["match", ["get", "CONTINENT"], "Asia", ["rgba", 0, 0, 255, 1], ["rgba", 255, 255, 0, 1]]
+                ]
+            }
+        }
+    ]
+}
