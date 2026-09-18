@@ -118,7 +118,7 @@ Material:
     - _Parallax: 0.005
     - _QueueOffset: 0
     - _ReceiveShadows: 1
-    - _SdfAaDevicePx: 0.4
+    - _SdfAaDevicePx: 1
     - _SdfEdge: 0.75
     - _SdfRangeTexels: 8
     - _Smoothness: 0.5

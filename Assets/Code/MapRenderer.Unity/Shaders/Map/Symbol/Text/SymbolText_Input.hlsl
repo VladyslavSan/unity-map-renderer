@@ -29,15 +29,15 @@ float4 _ScreenParamsLogical;
 float4 _MainTex_TexelSize;
 // _SdfEdge          — the SDF's fill iso level, normalized [0,1]. 0.75 matches S18's on-disk convention
 //                      (GlyphSdf/SdfDistanceFieldTests.IsoLevel = 191/255 ≈ 0.75), NOT the generic 0.5.
-// _SdfAaDevicePx    — how far the antialiasing fades out BEYOND the outline, in DEVICE px (~0.4 = crisp).
-//   DEVICE, not logical: it divides a distance the fragment derives from fwidth(uv), which is a raster
-//   derivative. _ScreenParamsLogical above is the OTHER unit — do not mix them (that pairing has bitten
-//   this shader before).
-//   The band sits entirely OUTSIDE the outline (the fragment's `+ 1.0`), so it never erodes stroke weight —
-//   but it is also ALL outside, so the whole value shows as fringe. Roughly 0.4 px matches the 0.05-of-field
-//   step the glyph bake antialiases over. Around 1 px it stops reading as an edge and starts reading as a
-//   glow around every glyph, which is NOT what this is for — the halo is real geometry, emitted as a second
-//   glyph run, and has nothing to do with this knob.
+// _SdfAaDevicePx    — the coverage ramp's width BEYOND the outline, in RASTER px. KEEP IT AT 1.0.
+//   RASTER, not logical: it divides a distance the fragment derives from fwidth(uv), a derivative on the
+//   render target's grid. _ScreenParamsLogical above is the OTHER unit and scales vertex corner offsets
+//   only — do not mix them (that pairing has bitten this shader before).
+//   1.0 is not a taste setting. A linear ramp one sample-pitch wide is the only width whose summed ink is
+//   invariant to sub-pixel phase; narrower and a stroke's ink freezes for some phases and snaps at others,
+//   which reads as glyphs morphing under pan. MSAA is off project-wide, so this band is the ONLY
+//   antialiasing text has. Measured at 0.4: centroid steps 0.009..0.287 px against a uniform 0.125 ideal.
+//   Pinned by SymbolTextResamplingTests — and pinned to the shipped .mat, which is the value that ships.
 // _SdfRangeTexels    — how many ATLAS TEXELS the field's full distance range spans: the texel count of one unit
 //   of normalized distance value (≈ the fontnik radius, 8). The analytic AA scales the signed distance
 //   (distSample - _SdfEdge) by this to recover screen-pixel distance, so the edge is crisp at every zoom

@@ -22,7 +22,7 @@ Shader "Map/Symbol/TextWorld"
         // refreshed every frame by the world-anchored label renderer (A1).
         _ScreenParamsLogical ("Screen Params Logical (px)", Vector) = (1920, 1080, 0, 0)
         _SdfEdge             ("SDF Edge (iso, fontnik = 0.75)", Range(0, 1)) = 0.75
-        _SdfAaDevicePx       ("SDF AA Width, outside the edge (DEVICE px, ~0.4 = crisp)", Range(0.05, 2)) = 0.4
+        _SdfAaDevicePx       ("SDF AA Width, outside the edge (RASTER px; 1 = phase-invariant)", Range(0.05, 2)) = 1.0
         _SdfRangeTexels      ("SDF Distance Range (atlas texels; a property of the BAKE, ~8)", Float) = 8.0
 
         // Render state — material-UI knobs (S58 pattern, mirrors Fill/Line's [_Cull]/[_ZWrite]/[_ZTest]
