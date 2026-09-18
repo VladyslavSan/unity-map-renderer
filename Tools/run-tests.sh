@@ -11,9 +11,9 @@
 # and main sat red there for eight days (UMR-164). Iterate with an explicit `EditMode` when you
 # want the faster half; the unqualified command stays the whole gate.
 #
-# testFilter (optional) is passed straight to Unity's -testFilter (a regex over test
-# full names), e.g. 'MapRenderer.Tests.Visual' runs just the snapshot suites. Startup
-# (asset import + domain reload) still dominates; the filter only trims which tests run.
+# testFilter (optional) becomes `unity test --filter` (a regex over test full names), e.g.
+# 'MapRenderer.Tests.Visual' runs just the snapshot suites. Startup (asset import + domain
+# reload) still dominates; the filter only trims which tests run.
 #
 # Before the Unity launch, this also runs the fast `Tools/core-tests` (dotnet, no Editor, no project
 # lock) loop — see the "Fast loop" block below for why: it is part of the gate, not a separate
@@ -22,15 +22,15 @@
 # Exit codes (in Both mode: the code of the first platform that failed, else 0):
 #   0 = compiled, results were written BY THIS RUN, and every test passed
 #   1 = tests ran and something failed (or the run result is not "Passed")
-#   2 = setup error (no repo / no editor binary)
+#   2 = setup error (not a repo, or the `unity` CLI is not on PATH)
 #   3 = a live Unity process has this project open (Editor open, project locked)
 #   4 = compilation failed (`error CS` in the log) — no tests ran
 #   5 = Unity produced no results for this run (crashed/died before writing the XML)
 #   6 = the Tools/core-tests fast loop failed — Unity was never launched
-#   otherwise = Unity's own non-zero exit
+#   otherwise = the `unity` CLI's own non-zero exit, reported verbatim
 #
-# Do not trust Unity's exit code. It has been observed returning BOTH 0 and 1 for the same
-# kind of compile failure, and when compilation fails it does not rewrite
+# Do not trust the exit code of the run. Unity has been observed returning BOTH 0 and 1 for the
+# same kind of compile failure, and when compilation fails it does not rewrite
 # Logs/test-results.xml — so a naive reader sees the PREVIOUS run's green summary for code
 # that never built. Two defences, neither relying on the exit code: any existing results are
 # moved aside before launching (see RESULTS_PREV), so "results absent" is unambiguous; and the
@@ -38,13 +38,16 @@
 # Each platform prints its own `VERDICT [<platform>]:` line, and Both mode prints a combined
 # `VERDICT:` line after them — so "read the last VERDICT line" stays the whole answer.
 #
+# `unity test` (the CLI) does split its own codes — 8 for "tests ran and failed", 6 for "no verdict
+# at all" — but 6 collides with the fast-loop code above, so the verdict below still comes from the
+# results XML and the log. The CLI's code is only ever reported, never believed.
+#
 # A *stale* lockfile (present but no Unity process — e.g. a prior batch run was killed)
 # is cleared automatically; only a live process makes this refuse.
 set -uo pipefail
 
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "not inside a git repo" >&2; exit 2; }
 . "$ROOT/Tools/lib.sh"   # this_project_editor_open, shared with build.sh
-VERSION="$(awk '/^m_EditorVersion:/ {print $2}' "$ROOT/ProjectSettings/ProjectVersion.txt" 2>/dev/null)"
 FILTER="${2:-}"
 case "${1:-Both}" in
   EditMode|PlayMode) PLATFORMS="${1}" ;;
@@ -52,33 +55,11 @@ case "${1:-Both}" in
   *) echo "unknown test platform '${1}' — expected Both, EditMode or PlayMode" >&2; exit 2 ;;
 esac
 
-# Locate the Unity editor binary for this project's version (Unity Hub defaults).
-case "$(uname -s)" in
-  Darwin)
-    UNITY="/Applications/Unity/Hub/Editor/$VERSION/Unity.app/Contents/MacOS/Unity"
-    [ -x "$UNITY" ] || UNITY="$HOME/Applications/Unity/Hub/Editor/$VERSION/Unity.app/Contents/MacOS/Unity"
-    ;;
-  Linux)
-    UNITY="$HOME/Unity/Hub/Editor/$VERSION/Editor/Unity"
-    ;;
-  *) # Windows (Git Bash / MSYS)
-    UNITY="/c/Program Files/Unity/Hub/Editor/$VERSION/Editor/Unity.exe"
-    ;;
-esac
-
-if [ -z "$VERSION" ]; then echo "could not read m_EditorVersion from ProjectSettings/ProjectVersion.txt" >&2; exit 2; fi
-if [ ! -x "$UNITY" ]; then echo "Unity editor for version $VERSION not found at: $UNITY" >&2; exit 2; fi
-# this_project_editor_open lives in Tools/lib.sh — build.sh needs the identical check, and the two
-# copies were previously kept in sync by hand.
-if this_project_editor_open; then
-  echo "The Unity Editor for THIS project is open — close it before running batch tests." >&2
-  echo "(A Unity editing a different clone is fine.)" >&2
-  exit 3
-fi
-if [ -e "$ROOT/Temp/UnityLockfile" ]; then
-  echo "Stale Unity lockfile present but this project's Editor isn't open — removing it and continuing." >&2
-  rm -f "$ROOT/Temp/UnityLockfile"
-fi
+# The `unity` CLI reads ProjectVersion.txt and locates the editor itself — the same division of
+# labour Tools/build.sh uses for `unity build`. Four hand-written Unity Hub paths (macOS x2, Linux,
+# Windows) used to live here and only ever covered the default install locations.
+require_unity_cli "runs the tests" || exit 2
+require_project_unlocked tests || exit 3
 
 mkdir -p "$ROOT/Logs"
 
@@ -137,12 +118,16 @@ if [ -f "$SCENE_SETUP" ]; then cp -f "$SCENE_SETUP" "$SCENE_SETUP_BAK"; else rm 
 restore_scene_setup() { [ -f "$SCENE_SETUP_BAK" ] && cp -f "$SCENE_SETUP_BAK" "$SCENE_SETUP"; }
 trap restore_scene_setup EXIT
 
-run_unity() { # $1 = platform, $2 = testResults path, $3 = logFile path
-  "$UNITY" -runTests -batchmode -projectPath "$ROOT" \
-    -testPlatform "$1" \
-    ${FILTER:+-testFilter "$FILTER"} \
-    -testResults "$2" \
-    -logFile "$3"
+run_unity() { # $1 = platform, $2 = results path, $3 = editor log path
+  # --mode is never omitted: without it the CLI runs "the editor's default platform", which would
+  # silently run the wrong half of the gate. -logFile is forwarded to the editor (it is not one of
+  # the CLI's reserved flags) because the `error CS` grep below has nothing else to read.
+  unity test "$ROOT" \
+    --mode "$1" \
+    ${FILTER:+--filter "$FILTER"} \
+    --output "$2" \
+    --no-banner --non-interactive \
+    -- -logFile "$3"
 }
 
 # Cold- OR stale-shader-cache warm-up pass.
@@ -216,9 +201,9 @@ run_platform() { # $1 = EditMode|PlayMode
   # Ordered by what makes the rest of the output meaningless: a compile failure means no tests ran,
   # and a missing XML means nothing can be concluded at all.
   if [ -n "$compile_errors" ]; then
-    echo "VERDICT [$platform]: COMPILE ERROR — no tests ran. (Unity's own exit was $code; it is not" >&2
-    echo "  reliable here — 0 and 1 have both been observed for the same kind of failure, which is why" >&2
-    echo "  this greps the log.)$FAST_LOOP_NOTE" >&2
+    echo "VERDICT [$platform]: COMPILE ERROR — no tests ran. (\`unity test\` exited $code; neither its" >&2
+    echo "  code nor Unity's is reliable here — 0 and 1 have both been observed for the same kind of" >&2
+    echo "  failure, which is why this greps the log.)$FAST_LOOP_NOTE" >&2
     return 4
   fi
 
@@ -250,7 +235,8 @@ run_platform() { # $1 = EditMode|PlayMode
   fi
 
   if [ "$code" != "0" ]; then
-    echo "VERDICT [$platform]: all $run_total tests passed, but Unity exited $code — investigate $LOG.$FAST_LOOP_NOTE" >&2
+    echo "VERDICT [$platform]: all $run_total tests passed, but \`unity test\` exited $code (its own" >&2
+    echo "  code, not this script's table — 6 means it reached no verdict) — investigate $LOG.$FAST_LOOP_NOTE" >&2
     return "$code"
   fi
 

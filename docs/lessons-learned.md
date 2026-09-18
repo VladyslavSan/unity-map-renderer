@@ -724,7 +724,7 @@ the fixture, because a full run costs minutes and a filtered one costs seconds. 
 well-scoped measurement — `result="Failed(Child)"` with a plausible per-case message each time — so it
 reads as "I broke something" rather than "I measured wrong".
 
-**The rule: RED-verify anything in this fixture with a FULL `./Tools/run-tests.sh`, never `-testFilter`.**
+**The rule: RED-verify anything in this fixture with a FULL `./Tools/run-tests.sh`, never a testFilter.**
 Budget the wall-clock accordingly; there is no fast loop for this fixture.
 
 `Assert.Inconclusive`/`NoGpuContext` does NOT fire here — a GPU context is present and

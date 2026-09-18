@@ -8,9 +8,11 @@
 # OS. What it still owns: the this-project's-Editor-is-open guard, the target keyword -> BuildScript
 # method mapping, and reading the verdict out of the log rather than trusting an exit code.
 #
-# `Assets/Editor/BuildScript.cs` stays: `unity build` REQUIRES --execute-method ("Unity has no
-# built-in command-line build"), so the C# entry points are not removable — only the editor-discovery
-# and flag-assembly boilerplate that used to live here was.
+# `Assets/Editor/BuildScript.cs` stays, but NOT because the CLI forces it: --execute-method is
+# OPTIONAL as of CLI 1.0.0-beta.10, which falls back to Unity's own built-in build without it. It
+# stays because it owns what that fallback does not — the output path lib.sh mirrors, the --dev
+# variant selection (the method NAME is the whole mechanism), and the `BUILD OK <path>` sentinel
+# this script reads its verdict from.
 set -uo pipefail
 
 usage() {
@@ -191,26 +193,9 @@ export UMR_ALLOW_DEBUGGING=$([ "$DEBUG" -eq 1 ] && echo on || echo off)
 export UMR_GRAPHICS_JOBS="$GFXJOBS"
 set -- ${ARGS+"${ARGS[@]}"}   # ${ARGS+...} so an empty array is safe under `set -u`
 
-# The CLI's own install dir is not on PATH by default.
-command -v unity >/dev/null 2>&1 || export PATH="$HOME/.unity/bin:$PATH"
-if ! command -v unity >/dev/null 2>&1; then
-  echo "the \`unity\` CLI was not found on PATH (nor in ~/.unity/bin)." >&2
-  echo "This script builds through it; install it, or add its bin dir to PATH." >&2
-  exit 2
-fi
+require_unity_cli builds || exit 2
 
-# Batch mode can't share the project with an open Editor — but only THIS project's Editor matters.
-# this_project_editor_open lives in lib.sh; run-tests.sh needs the identical check and the two copies
-# used to be maintained by hand.
-if this_project_editor_open; then
-  echo "The Unity Editor for THIS project is open — close it before running batch builds." >&2
-  echo "(A Unity editing a different clone is fine.)" >&2
-  exit 3
-fi
-if [ -e "$ROOT/Temp/UnityLockfile" ]; then
-  echo "Stale Unity lockfile present but this project's Editor isn't open — removing it and continuing." >&2
-  rm -f "$ROOT/Temp/UnityLockfile"
-fi
+require_project_unlocked builds || exit 3
 
 mkdir -p "$ROOT/Logs"
 

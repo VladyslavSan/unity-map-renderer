@@ -62,8 +62,8 @@ in-Editor Test Runner if headless licensing is unavailable (see caveats).
 ./Tools/run-tests.sh EditMode   # EditMode only — the faster loop to iterate against
 ./Tools/run-tests.sh PlayMode   # PlayMode only
 ```
-It is self-locating, finds the Editor binary for this project's Unity version, refuses to run if the
-Editor is open (exit 3), runs the tests, then prints the per-test results, any `error CS` lines, and a
+It is self-locating, drives `unity test` (which finds the Editor for this project's Unity version),
+refuses to run if the Editor is open (exit 3), runs the tests, then prints the per-test results, any `error CS` lines, and a
 **`VERDICT:` line last** — read that. **Run it in the background** (`run_in_background`): the first
 batch launch does a full asset import + compile and can take minutes; you'll be notified on completion.
 
@@ -77,7 +77,7 @@ with `EditMode` is fine; **declaring done on it is not** — PlayMode carries wh
 exercise (multi-frame/async settle), and it sat red and unlooked-at for eight days (UMR-164) precisely
 because the default skipped it.
 
-The script's own exit code IS trustworthy — but only because it ignores Unity's. Unity has been observed
+The script's own exit code IS trustworthy — but only because it ignores the run's. Unity has been observed
 returning both `0` and `1` for the same compile failure, and it does **not** rewrite
 `Logs/test-results.xml` when compilation fails, so the previous run's green summary sits there looking
 current. The script therefore moves any existing results to `Logs/test-results.prev.xml` before
@@ -88,7 +88,7 @@ launching (so the file existing proves *this* run wrote it), greps the log for `
 |---|---|
 | `0` | compiled, results written by this run, every test passed |
 | `1` | tests ran and something failed (or the run result isn't `Passed`) |
-| `2` | setup error (not a repo / no editor binary) |
+| `2` | setup error (not a repo, or the `unity` CLI is not on PATH) |
 | `3` | this project's Editor is open — close it |
 | `4` | compilation failed; **no tests ran** |
 | `5` | no results produced for this run (crash), or an unfiltered run matched zero tests |
@@ -101,19 +101,17 @@ means every platform ran green.
 > without a permission prompt. What it does, expanded, in case you need to invoke a step by hand:
 > ```bash
 > ROOT="$(git rev-parse --show-toplevel)"
-> VERSION="$(awk '/^m_EditorVersion:/ {print $2}' "$ROOT/ProjectSettings/ProjectVersion.txt")"
-> # Editor binary — Unity Hub default install locations (macOS):
-> UNITY="/Applications/Unity/Hub/Editor/$VERSION/Unity.app/Contents/MacOS/Unity"
-> [ -x "$UNITY" ] || UNITY="$HOME/Applications/Unity/Hub/Editor/$VERSION/Unity.app/Contents/MacOS/Unity"
-> # (Linux: .../Editor/$VERSION/Editor/Unity ; Windows: .../Editor/$VERSION/Editor/Unity.exe)
 > mkdir -p "$ROOT/Logs"
 > # Move any existing results aside FIRST — Unity leaves them untouched when compilation fails, so
 > # without this you cannot tell this run's results from the last one's.
 > [ -f "$ROOT/Logs/test-results.xml" ] && mv -f "$ROOT/Logs/test-results.xml" "$ROOT/Logs/test-results.prev.xml"
 > # Once per platform — EditMode then PlayMode, never concurrently (the project lock is exclusive),
 > # moving the results aside again between the two.
-> "$UNITY" -runTests -batchmode -projectPath "$ROOT" -testPlatform EditMode \
->   -testResults "$ROOT/Logs/test-results.xml" -logFile "$ROOT/Logs/test-run.log"
+> # `unity test` reads ProjectVersion.txt and locates the Editor itself. Always pass --mode: without
+> # it the CLI runs "the editor's default platform". -logFile is forwarded to the Editor (the CLI has
+> # no option of its own for it) because the `error CS` grep below has nothing else to read.
+> unity test "$ROOT" --mode EditMode --output "$ROOT/Logs/test-results.xml" \
+>   --no-banner --non-interactive -- -logFile "$ROOT/Logs/test-run.log"
 > # Compile errors FIRST — they mean no tests ran, whatever the exit code says:
 > grep -E 'error CS' "$ROOT/Logs/test-run.log" | sort -u
 > # Then the results. An ABSENT file here means this run produced none — never read the .prev one as current.
@@ -151,7 +149,11 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
 
 ### Unity CLI caveats
 - **The Editor must be closed.** Unity locks the project; batch mode can't run alongside an open Editor.
-  Check before running: `[ -e "$ROOT/Temp/UnityLockfile" ]` (present ⇒ likely open), or `pgrep -x Unity`.
+  Check before running with `unity editors running` — it enumerates from the process table plus each
+  project's Pipeline lockfile, needs no package in the project it reports on, and is cross-platform.
+  **Do not use `pgrep -x Unity`**, the old advice here: it does not exist on Git Bash / MSYS, where it
+  fails OPEN — reporting no Editor while one holds the project. A bare `Temp/UnityLockfile` proves
+  nothing either; it survives a killed batch run.
   If it's open, ask the user to quit Unity (Cmd+Q) — this is the one step you can't do for them.
 - **Licensing.** Batch mode needs an activated license; the user should have opened the Editor via Unity
   Hub at least once so a license is cached. `Licensing::Module` handshake warnings in the log are

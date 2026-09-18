@@ -57,19 +57,53 @@ build_artifact() {
   echo "$dir/$artifact"
 }
 
+# ── The unity CLI ────────────────────────────────────────────────────────────────────────────────────
+# Both scripts drive the editor through it — `unity build` and `unity test` — and neither can do
+# anything without it. Having it installed and on PATH is a REQUIREMENT of working on this repo, so
+# this refuses rather than hunting for it: a script that guesses at install locations is the thing the
+# CLI was adopted to delete.
+require_unity_cli() { # $1 = what the caller does with it, for the error message
+  command -v unity >/dev/null 2>&1 && return 0
+  echo "the \`unity\` CLI is not on PATH. This script ${1} through it — install it and re-run." >&2
+  return 1
+}
+
 # ── Editor state ─────────────────────────────────────────────────────────────────────────────────────
 # Batch mode cannot share the project with an open Editor — but only THIS project's Editor matters: a
-# Unity editing a *different* clone (e.g. unity-map-renderer-test) is fine and must not block us.
-# Exact-equality is deliberate: a substring match would wrongly fire on a sibling like "${ROOT}-test".
-# The lowercase compare handles the Editor's `-projectpath` vs batch mode's `-projectPath`. A lockfile
-# with no such process is STALE (a prior batch run was killed and left it behind) — callers clear it
-# rather than refuse forever. Requires $ROOT to be set by the caller.
+# Unity editing a *different* clone (e.g. unity-map-renderer-test) is fine and must not block us, so
+# the path compare is exact. `unity editors running` enumerates from the process table plus each
+# project's Pipeline lockfile, and needs no package in the project it reports on.
+#
+# This used to read `pgrep -x Unity` and parse -projectPath out of `ps`. That FAILED OPEN wherever
+# pgrep does not exist — Git Bash / MSYS, which this repo's scripts supported — reporting "no editor"
+# with a live Unity on the project and no error. Measured, not assumed: with pgrep off PATH the old
+# body returned "not open" against a running batch Unity.
+#
+# It therefore fails CLOSED now. If the CLI cannot answer, callers refuse: being told to close an
+# Editor that is not open costs a second, and the other direction costs a corrupted Library.
+# Requires $ROOT to be set by the caller.
 this_project_editor_open() {
-  local pid pp
-  for pid in $(pgrep -x Unity 2>/dev/null); do
-    pp="$(ps -ww -o command= -p "$pid" 2>/dev/null \
-          | awk '{for(i=1;i<NF;i++) if(tolower($i)=="-projectpath"){print $(i+1);exit}}')"
-    [ "$pp" = "$ROOT" ] && return 0
-  done
-  return 1
+  local running
+  if ! running="$(unity editors running --format tsv 2>/dev/null)"; then
+    echo "could not ask the \`unity\` CLI which Editors are running — refusing rather than guessing." >&2
+    return 0
+  fi
+  # Columns: Project, Version, PID, Path. Header row skipped; command substitution is never a TTY,
+  # so tsv stays tsv here (on a terminal it would render as the human table instead).
+  printf '%s\n' "$running" | awk -F'\t' -v root="$ROOT" 'NR>1 && $4==root {f=1} END {exit !f}'
+}
+
+# The whole preflight both scripts run before launching batch mode: refuse a live Editor, clear a
+# stale lockfile. Callers map the refusal to exit 3.
+require_project_unlocked() { # $1 = what the caller is about to run, for the error message
+  if this_project_editor_open; then
+    echo "The Unity Editor for THIS project is open — close it before running batch ${1}." >&2
+    echo "(A Unity editing a different clone is fine.)" >&2
+    return 1
+  fi
+  if [ -e "$ROOT/Temp/UnityLockfile" ]; then
+    echo "Stale Unity lockfile present but this project's Editor isn't open — removing it and continuing." >&2
+    rm -f "$ROOT/Temp/UnityLockfile"
+  fi
+  return 0
 }
