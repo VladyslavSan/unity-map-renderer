@@ -31,10 +31,10 @@ supported / not-yet-supported layer kinds — that class doc is the single sourc
 with the render pipeline by construction.
 
 ## Setup & test commands
-- `./Tools/run-tests.sh` — headless Unity EditMode tests (the full gate).
+- `./Tools/run-tests.sh` — headless Unity tests, EditMode **and** PlayMode (the full gate).
 - `dotnet test Tools/core-tests` — the fast `MapRenderer.Core` loop, no Editor lock.
 
-See `AGENTS.md` for the full recipe (exit codes, licensing/lockfile caveats, PlayMode variant).
+See `AGENTS.md` for the full recipe (exit codes, licensing/lockfile caveats, single-platform runs).
 
 ## License
 Proprietary — all rights reserved. Not open source.

@@ -2,7 +2,14 @@
 # Headless Unity test runner for unity-map-renderer.
 # Self-locating: run from anywhere inside the repo.
 #
-#   Tools/run-tests.sh [EditMode|PlayMode] [testFilter]   (default: EditMode, no filter)
+#   Tools/run-tests.sh [Both|EditMode|PlayMode] [testFilter]   (default: Both, no filter)
+#
+# Both — the DEFAULT, and the gate a stage is declared done against — runs EditMode and then
+# PlayMode, one Unity at a time (the project lock is exclusive), and stops at the first platform
+# that fails. It is the default because the other shape of this (a documented rule saying "also
+# pass PlayMode") is a sentence a session can skip, and did: PlayMode went unrun by the workflow
+# and main sat red there for eight days (UMR-164). Iterate with an explicit `EditMode` when you
+# want the faster half; the unqualified command stays the whole gate.
 #
 # testFilter (optional) is passed straight to Unity's -testFilter (a regex over test
 # full names), e.g. 'MapRenderer.Tests.Visual' runs just the snapshot suites. Startup
@@ -12,7 +19,7 @@
 # lock) loop — see the "Fast loop" block below for why: it is part of the gate, not a separate
 # convenience script, and this is what makes that true.
 #
-# Exit codes:
+# Exit codes (in Both mode: the code of the first platform that failed, else 0):
 #   0 = compiled, results were written BY THIS RUN, and every test passed
 #   1 = tests ran and something failed (or the run result is not "Passed")
 #   2 = setup error (no repo / no editor binary)
@@ -28,6 +35,8 @@
 # that never built. Two defences, neither relying on the exit code: any existing results are
 # moved aside before launching (see RESULTS_PREV), so "results absent" is unambiguous; and the
 # log is grepped for `error CS`. A VERDICT line is printed last, so `| tail` always shows it.
+# Each platform prints its own `VERDICT [<platform>]:` line, and Both mode prints a combined
+# `VERDICT:` line after them — so "read the last VERDICT line" stays the whole answer.
 #
 # A *stale* lockfile (present but no Unity process — e.g. a prior batch run was killed)
 # is cleared automatically; only a live process makes this refuse.
@@ -36,8 +45,12 @@ set -uo pipefail
 ROOT="$(git rev-parse --show-toplevel 2>/dev/null)" || { echo "not inside a git repo" >&2; exit 2; }
 . "$ROOT/Tools/lib.sh"   # this_project_editor_open, shared with build.sh
 VERSION="$(awk '/^m_EditorVersion:/ {print $2}' "$ROOT/ProjectSettings/ProjectVersion.txt" 2>/dev/null)"
-PLATFORM="${1:-EditMode}"
 FILTER="${2:-}"
+case "${1:-Both}" in
+  EditMode|PlayMode) PLATFORMS="${1}" ;;
+  Both)              PLATFORMS="EditMode PlayMode" ;;
+  *) echo "unknown test platform '${1}' — expected Both, EditMode or PlayMode" >&2; exit 2 ;;
+esac
 
 # Locate the Unity editor binary for this project's version (Unity Hub defaults).
 case "$(uname -s)" in
@@ -124,12 +137,12 @@ if [ -f "$SCENE_SETUP" ]; then cp -f "$SCENE_SETUP" "$SCENE_SETUP_BAK"; else rm 
 restore_scene_setup() { [ -f "$SCENE_SETUP_BAK" ] && cp -f "$SCENE_SETUP_BAK" "$SCENE_SETUP"; }
 trap restore_scene_setup EXIT
 
-run_unity() { # $1 = testResults path, $2 = logFile path
+run_unity() { # $1 = platform, $2 = testResults path, $3 = logFile path
   "$UNITY" -runTests -batchmode -projectPath "$ROOT" \
-    -testPlatform "$PLATFORM" \
+    -testPlatform "$1" \
     ${FILTER:+-testFilter "$FILTER"} \
-    -testResults "$1" \
-    -logFile "$2"
+    -testResults "$2" \
+    -logFile "$3"
 }
 
 # Cold- OR stale-shader-cache warm-up pass.
@@ -161,12 +174,100 @@ shaders_need_warmup() {
 if [ -z "${UMR_SKIP_SHADER_WARMUP:-}" ] && shaders_need_warmup; then
   echo "Cold/stale shader cache — running a throwaway warm-up pass first so GPU-snapshot variants" >&2
   echo "are compiled before the measuring run (set UMR_SKIP_SHADER_WARMUP=1 to skip)." >&2
-  run_unity "$ROOT/Logs/test-results.warmup.xml" "$ROOT/Logs/test-run.warmup.log"
+  # Once per invocation, not per platform: Library/ShaderCache is shared, so warming under the first
+  # platform leaves the second one warm too.
+  run_unity "${PLATFORMS%% *}" "$ROOT/Logs/test-results.warmup.xml" "$ROOT/Logs/test-run.warmup.log"
   echo "Warm-up pass complete (shader variants cached) — running the real test pass." >&2
 fi
 
-run_unity "$RESULTS" "$LOG"
-CODE=$?
+# ── One platform: run it, print its results, return ITS exit code ─────────────────────────────
+# Same contract as the whole script had when it ran one platform — the codes below are the
+# documented ones. Both mode calls this twice and stops at the first nonzero.
+run_platform() { # $1 = EditMode|PlayMode
+  local platform="$1"
+
+  # The staleness defence again, per platform: the FIRST platform's results must not be readable as
+  # the second's when the second fails to compile (the header's hazard, one level up). The
+  # per-platform copies are removed for the same reason — this platform's copy existing afterwards
+  # must prove THIS run wrote it, not that some earlier invocation did.
+  [ -f "$RESULTS" ] && mv -f "$RESULTS" "$RESULTS_PREV"
+  rm -f "$ROOT/Logs/test-results-$platform.xml" "$ROOT/Logs/test-run-$platform.log"
+
+  run_unity "$platform" "$RESULTS" "$LOG"
+  local code=$?
+
+  # Keep a per-platform copy: in Both mode the PlayMode run overwrites $RESULTS, and "verify the new
+  # test names appear in the XML" must stay answerable for BOTH runs after the script exits.
+  [ -f "$RESULTS" ] && cp -f "$RESULTS" "$ROOT/Logs/test-results-$platform.xml"
+  [ -f "$LOG" ]     && cp -f "$LOG"     "$ROOT/Logs/test-run-$platform.log"
+
+  echo "exit: $code  ($platform)"
+  if [ -f "$RESULTS" ]; then
+    grep -oE '<test-run [^>]*result="[^"]*"[^>]*' "$RESULTS" | head -1
+    grep -oE '<test-case [^>]*' "$RESULTS" \
+      | sed -E 's/.*fullname="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
+  fi
+
+  local compile_errors
+  compile_errors="$(grep -E 'error CS' "$LOG" 2>/dev/null | sort -u)"
+  [ -n "$compile_errors" ] && printf '%s\n' "$compile_errors"
+
+  # ── Verdict — printed LAST so `| tail` always shows it, and independent of Unity's exit code ──
+  # Ordered by what makes the rest of the output meaningless: a compile failure means no tests ran,
+  # and a missing XML means nothing can be concluded at all.
+  if [ -n "$compile_errors" ]; then
+    echo "VERDICT [$platform]: COMPILE ERROR — no tests ran. (Unity's own exit was $code; it is not" >&2
+    echo "  reliable here — 0 and 1 have both been observed for the same kind of failure, which is why" >&2
+    echo "  this greps the log.)$FAST_LOOP_NOTE" >&2
+    return 4
+  fi
+
+  if [ ! -f "$RESULTS" ]; then
+    echo "VERDICT [$platform]: NO RESULTS — Unity wrote no test-results.xml for this run (crash, or it" >&2
+    echo "  died before writing). Nothing can be concluded; see $LOG. Previous results, if any:" >&2
+    echo "  $RESULTS_PREV$FAST_LOOP_NOTE" >&2
+    return 5
+  fi
+
+  local run_tag run_result run_total run_passed run_failed
+  run_tag="$(grep -oE '<test-run [^>]*' "$RESULTS" | head -1)"
+  run_attr() { printf '%s' "$run_tag" | grep -oE "(^| )$1=\"[^\"]*\"" | head -1 | sed -E 's/.*="([^"]*)"/\1/'; }
+  run_result="$(run_attr result)"
+  run_total="$(run_attr total)"
+  run_passed="$(run_attr passed)"
+  run_failed="$(run_attr failed)"
+
+  if [ "${run_failed:-0}" != "0" ] || [ "$run_result" != "Passed" ]; then
+    echo "VERDICT [$platform]: TESTS FAILED — result=$run_result total=$run_total passed=$run_passed failed=$run_failed$FAST_LOOP_NOTE" >&2
+    return 1
+  fi
+
+  # A filtered run legitimately matches nothing; an unfiltered one that ran zero tests is a broken setup
+  # dressed up as success, which is the same trap as the stale XML.
+  if [ -z "$FILTER" ] && [ "${run_total:-0}" = "0" ]; then
+    echo "VERDICT [$platform]: NO TESTS RAN — the results XML reports total=0 with no -testFilter. Treating as failure.$FAST_LOOP_NOTE" >&2
+    return 5
+  fi
+
+  if [ "$code" != "0" ]; then
+    echo "VERDICT [$platform]: all $run_total tests passed, but Unity exited $code — investigate $LOG.$FAST_LOOP_NOTE" >&2
+    return "$code"
+  fi
+
+  echo "VERDICT [$platform]: PASS — $run_passed/$run_total tests passed, compiled clean, results written by this run.$FAST_LOOP_NOTE"
+  return 0
+}
+
+# ── Drive the platforms, one Unity at a time (the project lock is exclusive) ──────────────────
+# Stop at the first failure: a red EditMode cannot be "done" either way, and stopping keeps the
+# exit code naming exactly one platform.
+RAN=""
+for platform in $PLATFORMS; do
+  run_platform "$platform"
+  CODE=$?
+  RAN="${RAN:+$RAN, }$platform"
+  [ "$CODE" != "0" ] && break
+done
 
 # Stamp the cache as warm-for-the-current-shaders, so the next run skips the warm-up unless a shader
 # changes. The stamp is per-filter (see WARM_STAMP above): an unfiltered run claims the whole set,
@@ -177,54 +278,12 @@ if [ -d "$SHADER_CACHE" ] && [ -n "$(ls -A "$SHADER_CACHE" 2>/dev/null)" ]; then
   touch "$WARM_STAMP"
 fi
 
-echo "exit: $CODE"
-if [ -f "$RESULTS" ]; then
-  grep -oE '<test-run [^>]*result="[^"]*"[^>]*' "$RESULTS" | head -1
-  grep -oE '<test-case [^>]*' "$RESULTS" \
-    | sed -E 's/.*fullname="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
+# In Both mode the per-platform verdicts are no longer the last line, so restate the combined one.
+if [ "$PLATFORMS" != "${PLATFORMS% *}" ]; then
+  if [ "$CODE" = "0" ]; then
+    echo "VERDICT: PASS — both runners green ($RAN)."
+  else
+    echo "VERDICT: FAILED — ran $RAN; the last one failed (exit $CODE). See its VERDICT line above." >&2
+  fi
 fi
-
-COMPILE_ERRORS="$(grep -E 'error CS' "$LOG" 2>/dev/null | sort -u)"
-[ -n "$COMPILE_ERRORS" ] && printf '%s\n' "$COMPILE_ERRORS"
-
-# ── Verdict — printed LAST so `| tail` always shows it, and independent of Unity's exit code ──
-# Ordered by what makes the rest of the output meaningless: a compile failure means no tests ran,
-# and a missing XML means nothing can be concluded at all.
-if [ -n "$COMPILE_ERRORS" ]; then
-  echo "VERDICT: COMPILE ERROR — no tests ran. (Unity's own exit was $CODE; it is not reliable here —" >&2
-  echo "  0 and 1 have both been observed for the same kind of failure, which is why this greps the log.)$FAST_LOOP_NOTE" >&2
-  exit 4
-fi
-
-if [ ! -f "$RESULTS" ]; then
-  echo "VERDICT: NO RESULTS — Unity wrote no test-results.xml for this run (crash, or it died before" >&2
-  echo "  writing). Nothing can be concluded; see $LOG. Previous run's results, if any: $RESULTS_PREV$FAST_LOOP_NOTE" >&2
-  exit 5
-fi
-
-RUN_TAG="$(grep -oE '<test-run [^>]*' "$RESULTS" | head -1)"
-run_attr() { printf '%s' "$RUN_TAG" | grep -oE "(^| )$1=\"[^\"]*\"" | head -1 | sed -E 's/.*="([^"]*)"/\1/'; }
-RUN_RESULT="$(run_attr result)"
-RUN_TOTAL="$(run_attr total)"
-RUN_PASSED="$(run_attr passed)"
-RUN_FAILED="$(run_attr failed)"
-
-if [ "${RUN_FAILED:-0}" != "0" ] || [ "$RUN_RESULT" != "Passed" ]; then
-  echo "VERDICT: TESTS FAILED — result=$RUN_RESULT total=$RUN_TOTAL passed=$RUN_PASSED failed=$RUN_FAILED$FAST_LOOP_NOTE" >&2
-  exit 1
-fi
-
-# A filtered run legitimately matches nothing; an unfiltered one that ran zero tests is a broken setup
-# dressed up as success, which is the same trap as the stale XML.
-if [ -z "$FILTER" ] && [ "${RUN_TOTAL:-0}" = "0" ]; then
-  echo "VERDICT: NO TESTS RAN — the results XML reports total=0 with no -testFilter. Treating as failure.$FAST_LOOP_NOTE" >&2
-  exit 5
-fi
-
-if [ "$CODE" != "0" ]; then
-  echo "VERDICT: all $RUN_TOTAL tests passed, but Unity exited $CODE — investigate $LOG.$FAST_LOOP_NOTE" >&2
-  exit "$CODE"
-fi
-
-echo "VERDICT: PASS — $RUN_PASSED/$RUN_TOTAL tests passed, compiled clean, results written by this run.$FAST_LOOP_NOTE"
-exit 0
+exit "$CODE"

@@ -120,8 +120,8 @@ shrinks as subsystems nativize.
 | `MapRenderer.Jobs` | **the product** | the native/decode assembly: Burst + `Unity.Collections` jobs, the **tile decoders**, and the types that **own** blittable geometry |
 | `MapRenderer.Core` | **legacy — no new code** | engine-free code that predates this rule: tile/Web-Mercator math, geometry, earcut, style/expression evaluation, text shaping |
 | `MapRenderer.App` | **the product** | the composition root (`MapHost`, scene wiring) plus the dev-facing surfaces built on it — camera control, menus, diagnostics/telemetry panels |
-| `MapRenderer.Tests.EditMode` | test runner | headless EditMode tests (the primary gate, `./Tools/run-tests.sh`) |
-| `MapRenderer.Tests.PlayMode` | test runner | PlayMode tests (multi-frame/async behaviour EditMode can't exercise) |
+| `MapRenderer.Tests.EditMode` | test runner | headless EditMode tests (the bulk of the gate, `./Tools/run-tests.sh`) |
+| `MapRenderer.Tests.PlayMode` | test runner | PlayMode tests (multi-frame/async behaviour EditMode can't exercise); the same gate runs them |
 | `MapRenderer.Tests.Shared` | shared test infra | fixtures/helpers referenced by both test runners |
 | `MapRenderer.Unity.Editor` | editor-only | the URP `ShaderGUI` for the map shaders (`Editor/ShaderGUI/`); Editor platform only, never in a player build |
 

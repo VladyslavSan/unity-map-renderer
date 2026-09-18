@@ -58,13 +58,24 @@ in-Editor Test Runner if headless licensing is unavailable (see caveats).
 
 **Recipe** — use the committed wrapper script (canonical command; run it from the repo root):
 ```bash
-./Tools/run-tests.sh            # EditMode (default)
-./Tools/run-tests.sh PlayMode   # PlayMode
+./Tools/run-tests.sh            # BOTH runners: EditMode, then PlayMode (default) — THE gate
+./Tools/run-tests.sh EditMode   # EditMode only — the faster loop to iterate against
+./Tools/run-tests.sh PlayMode   # PlayMode only
 ```
 It is self-locating, finds the Editor binary for this project's Unity version, refuses to run if the
 Editor is open (exit 3), runs the tests, then prints the per-test results, any `error CS` lines, and a
 **`VERDICT:` line last** — read that. **Run it in the background** (`run_in_background`): the first
 batch launch does a full asset import + compile and can take minutes; you'll be notified on completion.
+
+**A stage is done only against the unqualified command — both runners.** They run sequentially (one
+Unity at a time; the project lock is exclusive) and the script stops at the first platform that fails,
+so its exit code names exactly one. Each platform prints `VERDICT [EditMode]:` / `VERDICT [PlayMode]:`
+and the combined `VERDICT:` is last. Each platform's XML is also kept as
+`Logs/test-results-<platform>.xml` (and its log as `Logs/test-run-<platform>.log`), because the second
+run overwrites `Logs/test-results.xml` — verify a new test name in the per-platform file. Iterating
+with `EditMode` is fine; **declaring done on it is not** — PlayMode carries what EditMode cannot
+exercise (multi-frame/async settle), and it sat red and unlooked-at for eight days (UMR-164) precisely
+because the default skipped it.
 
 The script's own exit code IS trustworthy — but only because it ignores Unity's. Unity has been observed
 returning both `0` and `1` for the same compile failure, and it does **not** rewrite
@@ -83,6 +94,9 @@ launching (so the file existing proves *this* run wrote it), greps the log for `
 | `5` | no results produced for this run (crash), or an unfiltered run matched zero tests |
 | `6` | the `Tools/core-tests` fast loop failed (or ran zero tests) — Unity was never launched |
 
+Running both runners does not change that table: the code is the **first failing platform's**, and `0`
+means every platform ran green.
+
 > The script is allowlisted in `.claude/settings.json` (`Bash(./Tools/run-tests.sh:*)`) so it runs
 > without a permission prompt. What it does, expanded, in case you need to invoke a step by hand:
 > ```bash
@@ -96,6 +110,8 @@ launching (so the file existing proves *this* run wrote it), greps the log for `
 > # Move any existing results aside FIRST — Unity leaves them untouched when compilation fails, so
 > # without this you cannot tell this run's results from the last one's.
 > [ -f "$ROOT/Logs/test-results.xml" ] && mv -f "$ROOT/Logs/test-results.xml" "$ROOT/Logs/test-results.prev.xml"
+> # Once per platform — EditMode then PlayMode, never concurrently (the project lock is exclusive),
+> # moving the results aside again between the two.
 > "$UNITY" -runTests -batchmode -projectPath "$ROOT" -testPlatform EditMode \
 >   -testResults "$ROOT/Logs/test-results.xml" -logFile "$ROOT/Logs/test-run.log"
 > # Compile errors FIRST — they mean no tests ran, whatever the exit code says:
