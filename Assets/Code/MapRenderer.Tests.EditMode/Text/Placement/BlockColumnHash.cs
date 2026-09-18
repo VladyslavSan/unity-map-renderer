@@ -216,6 +216,9 @@ namespace MapRenderer.Tests.Text.Placement
             h = Combine(h, (int)p.TranslateAnchor);
             h = Combine(h, (int)p.RotationAlignment);
             h = Combine(h, HashFloat4(p.Color));
+            h = Combine(h, HashFloat4(p.HaloColor));
+            h = Combine(h, HashFloat(p.HaloWidthPx));
+            h = Combine(h, HashFloat(p.HaloBlurPx));
             h = Combine(h, HashLong(p.FadeId));
             h = Combine(h, HashBool(p.WasPlacedLastFrame));
             h = Combine(h, (int)p.AtlasKind);
@@ -247,6 +250,9 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(a.TranslateAnchor, b.TranslateAnchor, msg + ".TranslateAnchor");
             Assert.AreEqual(a.RotationAlignment, b.RotationAlignment, msg + ".RotationAlignment");
             AssertFloat4Equal(a.Color, b.Color, msg + ".Color");
+            AssertFloat4Equal(a.HaloColor, b.HaloColor, msg + ".HaloColor");
+            AssertFloatEqual(a.HaloWidthPx, b.HaloWidthPx, msg + ".HaloWidthPx");
+            AssertFloatEqual(a.HaloBlurPx, b.HaloBlurPx, msg + ".HaloBlurPx");
             Assert.AreEqual(a.FadeId, b.FadeId, msg + ".FadeId");
             Assert.AreEqual(a.WasPlacedLastFrame, b.WasPlacedLastFrame, msg + ".WasPlacedLastFrame");
             Assert.AreEqual(a.AtlasKind, b.AtlasKind, msg + ".AtlasKind");
@@ -273,6 +279,9 @@ namespace MapRenderer.Tests.Text.Placement
             h = Combine(h, HashFloat(c.MaxAngleDeg));
             h = Combine(h, HashBool(c.KeepUpright));
             h = Combine(h, HashFloat4(c.Color));
+            h = Combine(h, HashFloat4(c.HaloColor));
+            h = Combine(h, HashFloat(c.HaloWidthPx));
+            h = Combine(h, HashFloat(c.HaloBlurPx));
             h = Combine(h, HashDouble3(c.TileOriginRender));
             h = Combine(h, (int)c.AtlasKind);
             h = Combine(h, HashFloat(c.IconRotateRadians));
@@ -296,6 +305,9 @@ namespace MapRenderer.Tests.Text.Placement
             AssertFloatEqual(a.MaxAngleDeg, b.MaxAngleDeg, msg + ".MaxAngleDeg");
             Assert.AreEqual(a.KeepUpright, b.KeepUpright, msg + ".KeepUpright");
             AssertFloat4Equal(a.Color, b.Color, msg + ".Color");
+            AssertFloat4Equal(a.HaloColor, b.HaloColor, msg + ".HaloColor");
+            AssertFloatEqual(a.HaloWidthPx, b.HaloWidthPx, msg + ".HaloWidthPx");
+            AssertFloatEqual(a.HaloBlurPx, b.HaloBlurPx, msg + ".HaloBlurPx");
             AssertDouble3Equal(a.TileOriginRender, b.TileOriginRender, msg + ".TileOriginRender");
             Assert.AreEqual(a.AtlasKind, b.AtlasKind, msg + ".AtlasKind");
             AssertFloatEqual(a.IconRotateRadians, b.IconRotateRadians, msg + ".IconRotateRadians");

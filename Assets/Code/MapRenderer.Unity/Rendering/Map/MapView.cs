@@ -164,8 +164,8 @@ namespace MapRenderer.Unity.Rendering.Map
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolTextWorld : null,
                 _config.MaterialSet != null ? _config.MaterialSet.SymbolIconWorld : null);
             // S105: the decoupled symbol subsystem produces the real map symbols SymbolPlacementSystem.Tick renders.
-            // D11/E2: per-layer materials (SymbolTextWorld clone + text-halo-* bind) now live on each
-            // SymbolRenderLayer (Layers.Build), not here. A5b: DATA arrives via TileManager's per-tile KICK
+            // D11/E2: per-layer materials (the SymbolTextWorld clone) and the resolved text-halo-* now live
+            // on each SymbolRenderLayer (Layers.Build), not here. A5b: DATA arrives via TileManager's per-tile KICK
             // (SymbolSubsystem implements ISymbolTileWorkerFactory); the tile LIFECYCLE is PULLED — each frame we
             // hand it TileManager's loaded set and it reconciles (no release/restore callbacks). cacheEnabled
             // drives keep-warm-on-release so it matches the prepared mesh cache.

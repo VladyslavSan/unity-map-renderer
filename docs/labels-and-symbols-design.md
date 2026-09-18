@@ -1389,3 +1389,107 @@ and no longer is (P-A's pairs are disjoint).
 committed fixture), as do `label_town`/`label_village` at their real offsets. `poi_transit` is the only
 horizontally-offset layer in the style and so the only exercise of a non-vertical pair. Maintainer eyeball
 at z15+ is the only check.
+
+---
+
+# 8. The halo left the shader
+
+The SDF text shader used to compute the glyph fill and its halo in ONE fragment and combine them
+(`lerp(_HaloColor.rgb, textColor, fillAlpha)` + `max(fillAlpha, haloAlpha·haloA)`). That could not produce
+correct text. With one quad per glyph and `ZWrite Off`, submission order is the only layering there is, so
+the *next* glyph's quad painted its halo over the *previous* glyph's fill wherever the two quads overlap —
+which, for kerned text, is most of them. No per-fragment combine can fix it: by the time glyph n+1's fragment
+runs, glyph n's ink is already in the framebuffer and indistinguishable from background.
+
+**The shader now renders one thing.** It takes a colour (vertex `COLOR`) and a pair of device-px widenings
+(`WorldBillboardVertex.SdfWidenPx`, TEXCOORD7) that push the SDF fill edge out and widen the AA transition,
+and emits that colour at the resulting coverage. `_HaloColor`, `_HaloWidthPx` and `_HaloBlurPx` are gone from
+the CBUFFER, the Properties block and `SymbolRenderLayer`'s binds. There is no halo branch, because there is
+no halo concept.
+
+**A halo is a second copy of the label's glyphs.** `WorldSymbolRenderer.Emit` writes each label's whole glyph
+run twice into the same mesh: the halo run first, carrying `text-halo-color` in the colour stream and
+`text-halo-width`/`-blur` in `SdfWidenPx`, then the text run with the text colour and zero widening. The two
+runs are contiguous blocks of one index buffer, so the whole label's halo rasterizes before any of its text.
+
+Decisions worth keeping:
+
+- **Grouping is per label, not per layer.** One `CandidateEmit` carries every glyph of every line a label
+  shapes to, so "per `Emit` call" *is* "per label". A full halo-layer-then-text-layer separation would also
+  order two overlapping labels against each other, but that costs a second index accumulator per slot and
+  collision already keeps overlapping labels from arising. Per-label is enough; it is what the Unreal
+  renderer does.
+- **One mesh, one material, one draw call.** Not two materials at two queues: index order inside one draw
+  call is ordered by the rasterization rules, while two materials at the same `renderQueue` are not, and
+  forcing them apart means a third `LayerSubSlot` — which drags in `LayerDrawOrder.QueueFor`,
+  `RenderLayerSet.Build`, `SetDrawOrder` and the G7/D7 icon-under-text invariant.
+- **The halo comes from where it was already evaluated, not from a new per-layer carrier.**
+  `SymbolFeatureExtractor` has always evaluated `text-halo-color/-width/-blur` PER FEATURE into `SymbolPaint`
+  — and nothing read them. They now ride `PointStageInput`/`CurvedStageInput` → `CandidateEmit` → the vertex
+  stream, exactly as `text-color` does. A first cut resolved the halo per layer instead, to avoid touching
+  those three blittable structs; that was the wrong trade, because it built a second path for a value the
+  codebase already computed and discarded. Consequence: a **data-driven** `text-halo-*` now works, and the
+  zoom-expression halo deferred as §7 risk 9 stops being deferred — both fall out of using the per-feature
+  evaluation rather than a style-load-zoom snapshot.
+- **`text-halo-color` is now `.linear` on the CPU**, in `SymbolPlacementSystem.LinearHaloColor` — the exact
+  sibling of `LinearColor`. This is the inversion of UMR-135, and the reason is mechanical: UMR-135 found
+  that `_HaloColor` was a Color-TYPED material property, which Unity converts on upload, so pre-converting
+  double-applied it. Unity does not convert a vertex stream, so the conversion has to move upstream. Same
+  rendered colour. `SymbolHaloColorRenderTests` carries the inversion in its header; without that note a
+  future reader finds UMR-135's rationale and "fixes" it back.
+- **Width and blur stay LOGICAL px all the way to the emit**, where they take the logical→device conversion
+  together (S107) against the LIVE ratio. So a dpr change re-scales the halo on the next Tick with no
+  re-bake, no change detection, and no frozen-zoom bookkeeping — `SymbolRenderLayer.ApplyZoom` became a
+  genuine no-op and its `_haloZoom`/`_haloDpr` pair is gone.
+- **The halo copy is the same quad**, not an inflated one. A halo wider than the glyph cell's SDF padding
+  clips at the cell edge — exactly as it did when one fragment computed both, so this is not a regression to
+  chase.
+- **A haloless label pays nothing.** A zero `text-halo-width` or a transparent `text-halo-color` gates the
+  second run off, and a zero width is the spec default. Icons never take it — no `icon-halo-*` path.
+
+Two behaviour changes that are correct, not bugs:
+
+- **Fade compositing.** A half-faded label's interior alpha is now `o + h·o·(1−o)` rather than `o`: the halo
+  shows through the fill it used to be replaced by. That is what a real two-pass renderer does.
+- **A data-driven `text-halo-*` now renders** instead of silently falling back to the base material's
+  inherited halo, an arbitrary asset default. It was never a design position that it should not — only that
+  no carrier reached the GPU.
+
+**Residual, out of scope:** two tiles in the same layer are separate renderers at the same `renderQueue`, so
+halo-over-fill across a tile boundary is still order-undefined. Global collision (D8) is what keeps those
+labels from overlapping in the first place.
+
+---
+
+# 9. SDF text weight: where the AA band sits, and the knob that is still wrong
+
+Two defects hid behind each other while the glyph atlas was handing out the wrong face (§8 of this doc /
+the font-key fix). With the right faces drawing, both became visible at once.
+
+**The AA ramp was centred on the outline.** `saturate(screenDist / aa + 0.5)` puts the 50% point exactly at
+the iso, so half the band eats INWARD — up to `aa/2` device px removed from both edges of every stroke. On a
+1–2 px stem that is most of the ink. It also caps coverage: glyph interiors peak at **0.878** of the field,
+not 1.0 (thin stems never saturate a distance field), so a minified glyph — a distant label, a foreshortened
+along-road name — can never reach full alpha and washes out. The `+ 1.0` form puts the whole band OUTSIDE
+the outline: at or inside the iso is solid at any scale, and the falloff is the band just beyond.
+
+**`_SdfEdge` was 0.60 against a 0.75 iso.** That is `0.15 × 8 = 1.2` texels of dilation per edge, ~2.4
+texels of extra stroke — visibly bold, and easy to mistake for a font-weight bug. It was NOT per-source
+calibration: measured, the live openfreemap PBFs and the committed fixture are the same fontnik bake
+(global max 255, median glyph interior peak 224 ≈ 0.878, p10 219). The note in `GlyphPbfDecodeTests` carries
+the measurement so the calibration argument is not re-derived. 0.60 predates the analytic AA and was a
+compensator for the fwidth-based AA it replaced.
+
+**Naming.** `_SdfSoftness` → `_SdfAaDevicePx` and `_SdfPixelRange` → `_SdfRangeTexels`. The old names
+described implementation trivia; the new ones state the unit and whether the value is a look knob at all
+(`_SdfRangeTexels` is not — it describes how the glyphs were BAKED). DEVICE px is qualified because this
+shader also carries `_ScreenParamsLogical`, which is logical px, and mixing the two has bitten it before.
+
+**Open — the band width is a constant where the model wants a function.** `_SdfAaDevicePx` is a fixed device-px
+width for every glyph at every size. The physically right band scales with how many device px one unit of
+field distance covers, i.e. with glyph size: one constant cannot be simultaneously right for a 10 px street
+name and a 28 px city label, so the current setting is a compromise and small text still reads slightly
+thin. Fixing it means deriving the band from `screenPxRange` (already computed in the fragment) rather than
+from a uniform — a shader change, not a knob. The render fixtures will not catch a regression here: they
+build their material from `Shader.Find` and assert ink counts and centroids with tolerances, so a
+half-pixel edge shift passes. Only an eyeball tells.

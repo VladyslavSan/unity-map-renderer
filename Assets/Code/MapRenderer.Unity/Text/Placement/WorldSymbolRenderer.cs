@@ -232,10 +232,22 @@ namespace MapRenderer.Unity.Text.Placement
         /// Appends <paramref name="emit"/>'s already-staged glyph quads (<paramref name="quads"/>, the SAME
         /// pool <c>SymbolPlacementSystem</c>'s screen path reads — D6, no new staged-quad stream) into the
         /// slot for <c>(emit.TileKey, emit.Slot, emit.AtlasKind)</c>, creating it lazily on first use.
-        /// Returns the quad count emitted (for <c>LastQuadCount</c>). Reads the world payload ONLY from
-        /// <paramref name="emit"/> — never a batch tile array (D2).
+        /// Returns the quad count emitted (for <c>LastQuadCount</c>) — the LABEL's quad count, which a halo
+        /// run does not change. Reads the world payload ONLY from <paramref name="emit"/> — never a batch
+        /// tile array (D2).
+        ///
+        /// <para><b>A visible <c>text-halo-*</c> emits this label's glyph run twice</b> — the halo copy
+        /// first, then the text copy. The two runs are contiguous blocks of ONE index buffer, so the whole
+        /// label's halo is behind the whole label's text however its glyphs overlap each other. Grouping is
+        /// per CALL, i.e. per label (one <see cref="CandidateEmit"/> carries every glyph of every line a
+        /// label shapes to): two labels that overlap are still ordered only by which emitted first, which
+        /// collision already keeps from mattering.</para>
         /// </summary>
-        public int Emit(in CandidateEmit emit, NativeArray<PlacedQuad> quads, float fadeOpacity)
+        /// <param name="haloDevicePixelRatio">Scales <see cref="CandidateEmit.HaloWidthPx"/>/
+        /// <see cref="CandidateEmit.HaloBlurPx"/> from the style's logical px into the device px the SDF
+        /// shader measures in. Read per Tick against the live ratio, so a dpr change needs no re-bake.</param>
+        public int Emit(in CandidateEmit emit, NativeArray<PlacedQuad> quads, float fadeOpacity,
+            float haloDevicePixelRatio)
         {
             var key = new WorldSymbolKey(emit.TileKey, emit.Slot, emit.AtlasKind);
             if (!_slots.TryGetValue(key, out Slot slot))
@@ -261,14 +273,28 @@ namespace MapRenderer.Unity.Text.Placement
             // written values and index bases are byte-identical to the per-Add form (only the store mechanism
             // changes); the billboard math below is untouched. Trims Editor collections-check overhead; the
             // release delta is negligible (the real per-quad cost is BillboardMath.BuildWorldQuad, unchanged).
+            // Icons have no `icon-halo-*` path, and a zero-width or fully transparent halo is the spec
+            // default — all three emit the text run alone, so a haloless layer pays nothing.
+            bool drawHalo = emit.AtlasKind != SymbolKind.Icon
+                         && emit.HaloWidthPx > 0f && emit.HaloColor.w > 0f;
+            int  runs     = drawHalo ? 2 : 1;
+
             int vBaseAll = slot.Vertices.Length;
             int iBaseAll = slot.Indices.Length;
-            slot.Vertices.ResizeUninitialized(vBaseAll + quadCount * 4);
-            slot.Opacity.ResizeUninitialized(vBaseAll + quadCount * 4); // stream-1 opacity is 1:1 with vertices
-            slot.Indices.ResizeUninitialized(iBaseAll + quadCount * 6);
+            slot.Vertices.ResizeUninitialized(vBaseAll + quadCount * 4 * runs);
+            slot.Opacity.ResizeUninitialized(vBaseAll + quadCount * 4 * runs); // stream-1 opacity is 1:1 with vertices
+            slot.Indices.ResizeUninitialized(iBaseAll + quadCount * 6 * runs);
             NativeArray<WorldBillboardVertex> vView = slot.Vertices.AsArray();
             NativeArray<float>                oView = slot.Opacity.AsArray();
             NativeArray<int>                  iView = slot.Indices.AsArray();
+
+            // The halo run OWNS the first index block so it rasterizes first; its VERTICES sit after the text
+            // run's, which keeps the text quad at the base of the block it has always been at.
+            int haloVertBase  = vBaseAll + quadCount * 4;
+            int textIndexBase = iBaseAll + (drawHalo ? quadCount * 6 : 0);
+            float  haloOpacityScale = emit.HaloColor.w;
+            float3 haloColorLinear  = emit.HaloColor.xyz;
+            float2 haloWiden        = new float2(emit.HaloWidthPx, emit.HaloBlurPx) * haloDevicePixelRatio;
 
             for (int k = 0; k < quadCount; k++)
             {
@@ -330,16 +356,49 @@ namespace MapRenderer.Unity.Text.Placement
                 oView[v + 2] = opacity;
                 oView[v + 3] = opacity;
 
-                int i = iBaseAll + k * 6;
-                iView[i + 0] = v + 0;
-                iView[i + 1] = v + 1;
-                iView[i + 2] = v + 2;
-                iView[i + 3] = v + 0;
-                iView[i + 4] = v + 2;
-                iView[i + 5] = v + 3;
+                WriteQuadIndices(iView, textIndexBase + k * 6, v);
+
+                if (!drawHalo) continue;
+
+                // The halo copy is the SAME geometry — only the colour and the SDF widening differ, which is
+                // all "halo" means to the shader. So a halo wider than the glyph cell's SDF padding clips at
+                // the cell edge, exactly as it did when one fragment computed both.
+                tl.ColorRGB = haloColorLinear; tl.SdfWidenPx = haloWiden;
+                tr.ColorRGB = haloColorLinear; tr.SdfWidenPx = haloWiden;
+                br.ColorRGB = haloColorLinear; br.SdfWidenPx = haloWiden;
+                bl.ColorRGB = haloColorLinear; bl.SdfWidenPx = haloWiden;
+
+                int h = haloVertBase + k * 4;
+                vView[h + 0] = tl;
+                vView[h + 1] = tr;
+                vView[h + 2] = br;
+                vView[h + 3] = bl;
+
+                // text-halo-color's own alpha rides the opacity stream, the one channel the shader
+                // multiplies coverage by. The quad's alpha already carries text-opacity, which is why
+                // LinearHaloColor does not fold it in again.
+                float haloOpacity = opacity * haloOpacityScale;
+                oView[h + 0] = haloOpacity;
+                oView[h + 1] = haloOpacity;
+                oView[h + 2] = haloOpacity;
+                oView[h + 3] = haloOpacity;
+
+                WriteQuadIndices(iView, iBaseAll + k * 6, h);
             }
 
             return quadCount;
+        }
+
+        /// <summary>Writes one quad's two triangles at <paramref name="at"/>, over the four corners starting
+        /// at <paramref name="corner"/> — the winding <c>BillboardMath.BuildWorldQuad</c> emits.</summary>
+        private static void WriteQuadIndices(NativeArray<int> indices, int at, int corner)
+        {
+            indices[at + 0] = corner + 0;
+            indices[at + 1] = corner + 1;
+            indices[at + 2] = corner + 2;
+            indices[at + 3] = corner + 0;
+            indices[at + 4] = corner + 2;
+            indices[at + 5] = corner + 3;
         }
 
         private static readonly int AtlasPropId               = Shader.PropertyToID("_MainTex");

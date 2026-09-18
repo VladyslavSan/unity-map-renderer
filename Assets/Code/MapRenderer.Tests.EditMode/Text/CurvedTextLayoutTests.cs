@@ -50,8 +50,8 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A']);
-            GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a']);
+            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
+            GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a'], 0);
             ShapedRun run = MakeRun((uint)'A', (uint)'a');
 
             IReadOnlyList<CurvedGlyph> glyphs = CurvedTextLayout.Layout(run, atlas);
@@ -96,9 +96,9 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A']);
-            GlyphAtlasEntry entrySpace = atlas.Append(latin.Glyphs[(uint)' ']);
-            GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a']);
+            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
+            GlyphAtlasEntry entrySpace = atlas.Append(latin.Glyphs[(uint)' '], 0);
+            GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a'], 0);
             ShapedRun run = MakeRun((uint)'A', (uint)' ', (uint)'a');
 
             IReadOnlyList<CurvedGlyph> glyphs = CurvedTextLayout.Layout(run, atlas);

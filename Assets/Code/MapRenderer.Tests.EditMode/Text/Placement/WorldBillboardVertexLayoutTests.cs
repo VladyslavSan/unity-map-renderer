@@ -45,10 +45,10 @@ namespace MapRenderer.Tests.Text.Placement
             Mesh mesh = BuildFourVertexMesh();
             try
             {
-                // 72 B: 15 pre-P2 floats + Up's 3 floats (60 B -> 72 B, +20%). A field added without a matching
-                // descriptor (or vice versa) mismatches the struct size against Unity's own byte accounting.
+                // 80 B: 18 pre-halo floats + SdfWidenPx's 2 floats (72 B -> 80 B). A field added without a
+                // matching descriptor (or vice versa) mismatches the struct size against Unity's own accounting.
                 Assert.AreEqual(UnsafeUtility.SizeOf<WorldBillboardVertex>(), mesh.GetVertexBufferStride(0));
-                Assert.AreEqual(72, mesh.GetVertexBufferStride(0), "stream 0 grew 60 B -> 72 B for P2's Up field");
+                Assert.AreEqual(80, mesh.GetVertexBufferStride(0), "stream 0 grew 72 B -> 80 B for SdfWidenPx");
             }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }
@@ -68,6 +68,20 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         [Test]
+        public void Build_DeclaresTexCoord7_Float32x2_OnStream0()
+        {
+            Mesh mesh = BuildFourVertexMesh();
+            try
+            {
+                Assert.IsTrue(mesh.HasVertexAttribute(VertexAttribute.TexCoord7), "SdfWidenPx must be declared as TEXCOORD7");
+                Assert.AreEqual(2, mesh.GetVertexAttributeDimension(VertexAttribute.TexCoord7), "SdfWidenPx is a float2 — edge widening and AA widening");
+                Assert.AreEqual(VertexAttributeFormat.Float32, mesh.GetVertexAttributeFormat(VertexAttribute.TexCoord7));
+                Assert.AreEqual(0, mesh.GetVertexAttributeStream(VertexAttribute.TexCoord7), "SdfWidenPx rides stream 0 — it is fixed per run, unlike the per-frame Opacity stream");
+            }
+            finally { UnityEngine.Object.DestroyImmediate(mesh); }
+        }
+
+        [Test]
         public void Build_VertexAttributeArray_StaysStrictlyAscendingByAttributeAcrossBothStreams()
         {
             Mesh mesh = BuildFourVertexMesh();
@@ -81,9 +95,10 @@ namespace MapRenderer.Tests.Text.Placement
                         "({descriptors[i].attribute}) — Unity's silent non-standard-order re-adjustment (zero ink) " +
                         "triggers the instant this is violated, REGARDLESS of which stream each attribute is on.");
 
-                // The array's LAST element must be TexCoord6 (Up) — P2's frozen "append, never reshuffle" rule.
-                Assert.AreEqual(VertexAttribute.TexCoord6, descriptors[descriptors.Length - 1].attribute,
-                    "TexCoord6 (Up) must be the new truly-last descriptor");
+                // The array's LAST element must be TexCoord7 (SdfWidenPx) — the frozen "append, never
+                // reshuffle" rule, now one append further on than P2's Up.
+                Assert.AreEqual(VertexAttribute.TexCoord7, descriptors[descriptors.Length - 1].attribute,
+                    "TexCoord7 (SdfWidenPx) must be the new truly-last descriptor");
             }
             finally { UnityEngine.Object.DestroyImmediate(mesh); }
         }

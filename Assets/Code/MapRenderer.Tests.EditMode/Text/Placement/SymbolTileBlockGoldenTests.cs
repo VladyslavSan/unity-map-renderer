@@ -50,9 +50,9 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void HashedStructs_FieldCounts_MatchHasherCoverage()
         {
-            Assert.AreEqual(26, PublicFieldCount<PointStageInput>(),
+            Assert.AreEqual(29, PublicFieldCount<PointStageInput>(),
                 "PointStageInput gained/lost a field — update BlockColumnHash.HashPointStageInput/AssertPointStageInputEqual to match, THEN update this count");
-            Assert.AreEqual(18, PublicFieldCount<CurvedStageInput>(),
+            Assert.AreEqual(21, PublicFieldCount<CurvedStageInput>(),
                 "CurvedStageInput gained/lost a field — update BlockColumnHash.HashCurvedStageInput/AssertCurvedStageInputEqual to match, THEN update this count");
             Assert.AreEqual(6, PublicPropertyCount<SymbolQuad>(),
                 "SymbolQuad gained/lost a property — update BlockColumnHash.HashSymbolQuad/AssertSymbolQuadEqual to match, THEN update this count");
@@ -372,10 +372,16 @@ namespace MapRenderer.Tests.Text.Placement
         /// failure message. Paste that dump here (replacing the sentinel) to make this a real, committed,
         /// fixed-oracle golden. Once pasted, DO NOT re-bake a snapshot to go green on a later divergence —
         /// a moved digest means behaviour changed; find and fix the cause instead
-        /// (`snapshot-moved-suspect-the-fixture` / `never re-bake a snapshot to go green`).</summary>
+        /// (`snapshot-moved-suspect-the-fixture` / `never re-bake a snapshot to go green`).
+        ///
+        /// <para><b>Moved ONCE since capture</b>, when <c>PointStageInput</c> gained the three
+        /// <c>text-halo-*</c> fields: <c>Points</c> 1107115275 → -1357632509. That it was purely additive was
+        /// PROVED, not assumed — excluding just those three lines from
+        /// <c>BlockColumnHash.HashPointStageInput</c> reproduced the old digest exactly, and no other column
+        /// moved. Hold any future move to that same standard.</para></summary>
         private const string CapturedGoldenHash =
             "Kinds=-13491713 Detail=1233695479 WorldStart=1233695479 WorldCount=-1252581121 RepAnchor=515797947 " +
-            "MaterialIndexes=-2021596801 PairRoles=-13491713 Points=1107115275 " +
+            "MaterialIndexes=-2021596801 PairRoles=-13491713 Points=-1357632509 " +
             "PointQuadStart=-1852567463 PointQuadCount=648814877 Curveds=527 CurvedGlyphStart=527 " +
             "CurvedGlyphCount=527 CurvedAnchorStart=527 CurvedAnchorCount=527 CurvedAnchorFadeStart=527 " +
             "Quads=-1354314655 Glyphs=527 Anchors=527 WorldPoints=515797947 WorldUps=2133991935 " +

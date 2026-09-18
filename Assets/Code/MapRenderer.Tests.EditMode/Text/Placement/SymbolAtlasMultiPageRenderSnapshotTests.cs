@@ -47,9 +47,10 @@ namespace MapRenderer.Tests.Text.Placement
             private readonly IGlyphAtlasView _atlas;
             public AtlasMetrics(IGlyphAtlasView atlas) => _atlas = atlas;
 
-            public bool TryGetAdvance(uint codepoint, out float advance)
+            public bool TryResolveGlyph(uint codepoint, out float advance, out int fontId)
             {
-                if (_atlas.TryGetEntry(codepoint, out GlyphAtlasEntry e)) { advance = e.Advance; return true; }
+                fontId = 0;
+                if (_atlas.TryGetEntry(0, codepoint, out GlyphAtlasEntry e)) { advance = e.Advance; return true; }
                 advance = 0f;
                 return false;
             }
@@ -63,7 +64,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             // (1) Baseline: normal single-page (grow-mode) atlas — 'A' packs at Page 0.
             var page0Atlas = new GlyphAtlas();
-            GlyphAtlasEntry page0Entry = page0Atlas.Append(a);
+            GlyphAtlasEntry page0Entry = page0Atlas.Append(a, 0);
             Assert.AreEqual(0, page0Entry.Page, "fixture precondition: a fresh grow-mode atlas never pages");
             Assert.AreEqual(1, page0Atlas.PageCount);
 
@@ -73,8 +74,8 @@ namespace MapRenderer.Tests.Text.Placement
             int2 cellA = a.CellSize;
             var page1Atlas = new GlyphAtlas(width: cellA.x, fixedHeight: cellA.y);
             var filler = new SdfGlyph { Codepoint = 0xFFFEu, Width = a.Width, Height = a.Height, Left = 0, Top = 0, Advance = 0, Bitmap = null };
-            page1Atlas.Append(filler);
-            GlyphAtlasEntry page1Entry = page1Atlas.Append(a);
+            page1Atlas.Append(filler, 0);
+            GlyphAtlasEntry page1Entry = page1Atlas.Append(a, 0);
             Assert.AreEqual(1, page1Entry.Page, "fixture precondition: 'A' must have overflowed onto page 1");
             Assert.AreEqual(2, page1Atlas.PageCount);
 

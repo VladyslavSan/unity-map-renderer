@@ -51,7 +51,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Bitmap = new byte[16 * 16], // CellSize = (10+2*3, 10+2*3) = (16,16)
             };
             var atlas = new GlyphAtlas();
-            atlas.Append(glyph);
+            atlas.Append(glyph, 0);
 
             var texture = new GlyphAtlasTexture();
             texture.Upload(atlas);

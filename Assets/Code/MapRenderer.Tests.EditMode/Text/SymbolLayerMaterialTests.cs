@@ -35,7 +35,7 @@ namespace MapRenderer.Tests.Text
         }";
 
         [Test]
-        public void Build_PerLayerMaterials_AreDistinctClonesWithBoundHalo()
+        public void Build_PerLayerMaterials_AreDistinctClones()
         {
             var set = ScriptableObject.CreateInstance<MapMaterialSet>();
             set.SymbolTextWorld = new Material(Shader.Find("Map/Symbol/TextWorld"));
@@ -59,10 +59,9 @@ namespace MapRenderer.Tests.Text
                 Assert.AreNotSame(m0, m1, "per-layer materials are DISTINCT instances, not one shared material");
                 Assert.AreNotSame(set.SymbolTextWorld, m0, "a layer material is a CLONE of the SymbolTextWorld base, not the base asset");
 
-                // Each layer's text-halo-width is bound onto its own material by name (F1) — now owned by
-                // SymbolRenderLayer (D11), not the subsystem.
-                Assert.AreEqual(1f, m0.GetFloat("_HaloWidthPx"), 1e-4f, "layer a's text-halo-width binds to its material");
-                Assert.AreEqual(3f, m1.GetFloat("_HaloWidthPx"), 1e-4f, "layer b's text-halo-width binds to its material");
+                // No paint assertion here any more: a symbol layer's materials carry engine plumbing only.
+                // Every text-* term, text-halo-* included, is evaluated per feature and rides the vertex
+                // stream — SymbolHaloEmitTests reads it where it actually lands, on the emitted mesh.
             }
             finally
             {

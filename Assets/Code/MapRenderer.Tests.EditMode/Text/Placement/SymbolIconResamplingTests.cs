@@ -477,7 +477,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Application.dataPath, "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes"));
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(pbf).Stacks[0];
             var atlas = new GlyphAtlas();
-            atlas.Append(stack.Glyphs[65u]); // 'A' — never drawn; it exists only to make the atlas non-empty
+            atlas.Append(stack.Glyphs[65u], 0); // 'A' — never drawn; it exists only to make the atlas non-empty
             var texture = new GlyphAtlasTexture();
             texture.Upload(atlas);
             Assert.IsNotNull(texture.Texture, "precondition: the glyph atlas texture must exist or no icon places.");

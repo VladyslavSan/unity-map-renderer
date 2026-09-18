@@ -1,9 +1,9 @@
 // SymbolIconWorld.shader — Map/Symbol/IconWorld (Epic A / A1: world-anchored icon billboards).
 //
 // The world-anchored sibling of the retired screen-space icon shader — the A0 SymbolTextWorld vertex stage
-// (world MVP + px offset + near-pin) with the retired shader's fragment (plain sprite sample, no SDF/halo).
+// (world MVP + px offset + near-pin) with the retired shader's fragment (plain sprite sample, no SDF).
 // Reuses SymbolIcon_Input.hlsl verbatim (its CBUFFER already carries exactly what this needs — engine-only
-// _ScreenParamsLogical + a plain Texture2D _MainTex, no SDF/halo props) — no new Input file. See
+// _ScreenParamsLogical + a plain Texture2D _MainTex, no SDF props) — no new Input file. See
 // SymbolTextWorld.shader's header for the shared "object-to-world transform is MEANINGFUL here" rationale.
 //
 // Submission: the world-anchored label renderer (WorldSymbolRenderer) sets this material's per-frame

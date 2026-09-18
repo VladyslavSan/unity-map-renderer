@@ -52,9 +52,10 @@ namespace MapRenderer.Tests.Text.Placement
             private readonly IGlyphAtlasView _atlas;
             public AtlasMetrics(IGlyphAtlasView atlas) => _atlas = atlas;
 
-            public bool TryGetAdvance(uint codepoint, out float advance)
+            public bool TryResolveGlyph(uint codepoint, out float advance, out int fontId)
             {
-                if (_atlas.TryGetEntry(codepoint, out GlyphAtlasEntry e)) { advance = e.Advance; return true; }
+                fontId = 0;
+                if (_atlas.TryGetEntry(0, codepoint, out GlyphAtlasEntry e)) { advance = e.Advance; return true; }
                 advance = 0f;
                 return false;
             }
@@ -67,7 +68,7 @@ namespace MapRenderer.Tests.Text.Placement
             //    header for why 'A' would be an unsafe choice for an orientation-sensitive tooth).
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadFixtureBytes("0-255.pbf.bytes")).Stacks[0];
             var atlas = new GlyphAtlas();
-            atlas.Append(stack.Glyphs[70u]);
+            atlas.Append(stack.Glyphs[70u], 0);
             var atlasTexture = new GlyphAtlasTexture();
             atlasTexture.Upload(atlas);
             var shaper = new CodepointTextShaper();

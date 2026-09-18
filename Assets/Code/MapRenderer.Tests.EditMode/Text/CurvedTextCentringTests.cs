@@ -76,7 +76,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
+            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
 
             int bareHeight = BareHeight(entryFive);
             Assert.AreEqual(17, bareHeight,
@@ -119,7 +119,7 @@ namespace MapRenderer.Tests.Text
             var atlas = new GlyphAtlas();
             uint[] codepoints = { (uint)'A', (uint)'g', (uint)'5' };
             var entries = new GlyphAtlasEntry[codepoints.Length];
-            for (int i = 0; i < codepoints.Length; i++) entries[i] = atlas.Append(latin.Glyphs[codepoints[i]]);
+            for (int i = 0; i < codepoints.Length; i++) entries[i] = atlas.Append(latin.Glyphs[codepoints[i]], 0);
 
             // Vacuity guard: a run whose glyphs share their metrics could not distinguish per-glyph from
             // per-symbol centring at all.
@@ -161,7 +161,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            atlas.Append(latin.Glyphs[(uint)'5']);
+            atlas.Append(latin.Glyphs[(uint)'5'], 0);
             ShapedRun run = MakeRun((uint)'5');
 
             var options = new TextLayoutOptions

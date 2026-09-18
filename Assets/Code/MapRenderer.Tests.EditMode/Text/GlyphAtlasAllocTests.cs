@@ -34,12 +34,12 @@ namespace MapRenderer.Tests.Text
 
             // Warm-up: the FIRST Append legitimately allocates (buffer created from empty, dictionary
             // backing arrays initialized on the first Add).
-            atlas.Append(glyph);
+            atlas.Append(glyph, 0);
 
             // Block-bodied lambda (not an expression lambda): Append returns a value (GlyphAtlasEntry),
             // and Assert.That needs a void TestDelegate here — an expression lambda binds to the wrong
             // overload and fails with "actual value must be a TestDelegate" (see TileLoadMeasurementTests).
-            Assert.That(() => { atlas.Append(glyph); }, Is.Not.AllocatingGCMemory(),
+            Assert.That(() => { atlas.Append(glyph, 0); }, Is.Not.AllocatingGCMemory(),
                 "re-appending an already-decoded glyph (same codepoint, same cell height, same open shelf) " +
                 "must not allocate: GrowToFit no-ops once the shelf's used height stops increasing, and " +
                 "Dictionary[key]= on an EXISTING key overwrites in place without growing capacity.");
@@ -87,8 +87,9 @@ namespace MapRenderer.Tests.Text
         {
             private readonly float _advance;
             public FixedAdvanceMetrics(float advance) => _advance = advance;
-            public bool TryGetAdvance(uint codepoint, out float advance)
+            public bool TryResolveGlyph(uint codepoint, out float advance, out int fontId)
             {
+                fontId = 0;
                 advance = _advance;
                 return true;
             }

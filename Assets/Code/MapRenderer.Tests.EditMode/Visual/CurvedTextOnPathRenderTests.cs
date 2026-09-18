@@ -223,7 +223,7 @@ namespace MapRenderer.Tests.Visual
 
                 FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadFixtureBytes("0-255.pbf.bytes")).Stacks[0];
                 var atlas = new GlyphAtlas();
-                atlas.Append(stack.Glyphs[(uint)'5']);
+                atlas.Append(stack.Glyphs[(uint)'5'], 0);
                 texture = new GlyphAtlasTexture();
                 texture.Upload(atlas);
 

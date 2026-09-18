@@ -2,9 +2,9 @@
 //
 // Cloned from SymbolText_Input.hlsl (see its header for the full "not derived from URP LitInput.hlsl /
 // Graphics.RenderMesh submission" rationale — applies identically here). Delta (b): only the internal
-// engine-plumbing props survive — no `text-halo-*` style-bound group (icons have no halo), no SDF props
-// (icons sample the sprite atlas directly, no distance field). `_MainTex_TexelSize` is SDF-only in the
-// text shader's fragment AA, so it is dropped here too — nothing in SymbolPassFragment needs it.
+// engine-plumbing props survive — no SDF props (icons sample the sprite atlas directly, no distance
+// field). `_MainTex_TexelSize` is SDF-only in the text shader's fragment AA, so it is dropped here too —
+// nothing in SymbolPassFragment needs it.
 
 #ifndef MAP_SYMBOL_ICON_INPUT_INCLUDED
 #define MAP_SYMBOL_ICON_INPUT_INCLUDED

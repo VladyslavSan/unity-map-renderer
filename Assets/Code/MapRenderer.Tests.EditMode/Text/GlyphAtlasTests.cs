@@ -45,13 +45,58 @@ namespace MapRenderer.Tests.Text
         // (b) + (c) + (d): a single bitmap-bearing glyph packs a correctly-sized cell, blits its bytes
         //     row-major at the packed origin, and round-trips through TryGetEntry.
         // =========================================================================================
+        /// <summary>
+        /// <b>The atlas must key on the FONT as well as the codepoint.</b> One shared
+        /// <see cref="GlyphAtlas"/> serves every layer (<c>SymbolSubsystem</c> builds exactly one), and a
+        /// Liberty-style document mixes faces — <c>label_city</c> asks for Noto Sans Regular while
+        /// <c>water_name_*</c> and <c>poi_r1</c> ask for Noto Sans Italic. Keyed on the codepoint alone,
+        /// whichever face decodes first claims 'B' forever and <c>GlyphManager.AppendToAtlas</c>'s
+        /// "already present" skip silently discards every other face's 'B' — so the whole map renders in one
+        /// arbitrary face. That is a wrong-glyph bug, not a styling nicety: it rendered Berlin in italic.
+        /// </summary>
+        [Test]
+        public void Append_SameCodepointFromTwoFonts_KeepsThemApart()
+        {
+            SdfGlyph regular = LoadLatinStack().Glyphs[66u]; // 'B'
+            // A second face's 'B': same codepoint, deliberately different metrics so a collision is visible
+            // as a WRONG entry rather than merely a missing one.
+            SdfGlyph italic = new SdfGlyph
+            {
+                Codepoint = 66u,
+                Width     = regular.Width,
+                Height    = regular.Height,
+                Left      = regular.Left + 3,
+                Top       = regular.Top + 5,
+                Advance   = regular.Advance + 7,
+                Bitmap    = regular.Bitmap,
+            };
+
+            var atlas = new GlyphAtlas();
+            int regularFont = atlas.FontId("Noto Sans Regular");
+            int italicFont  = atlas.FontId("Noto Sans Italic");
+
+            atlas.Append(regular, regularFont);
+            atlas.Append(italic, italicFont);
+
+            Assert.IsTrue(atlas.TryGetEntry(regularFont, 66u, out GlyphAtlasEntry fromRegular),
+                "the regular face's 'B' must be retrievable under its OWN font");
+            Assert.IsTrue(atlas.TryGetEntry(italicFont, 66u, out GlyphAtlasEntry fromItalic),
+                "the italic face's 'B' must not be swallowed by the regular one already occupying codepoint 66");
+
+            Assert.AreEqual(regular.Advance, fromRegular.Advance, "regular 'B' kept its own advance");
+            Assert.AreEqual(italic.Advance, fromItalic.Advance,
+                "italic 'B' read back the REGULAR face's advance — the two faces share one atlas slot");
+            Assert.AreNotEqual(fromRegular.AtlasOrigin, fromItalic.AtlasOrigin,
+                "two faces' glyphs must occupy two cells; one origin for both means one bitmap for both");
+        }
+
         [Test]
         public void Append_BitmapGlyph_PacksCellBlitsBytesAndRoundTripsLookup()
         {
             SdfGlyph a = LoadLatinStack().Glyphs[65u]; // 'A'
             var atlas = new GlyphAtlas();
 
-            GlyphAtlasEntry entry = atlas.Append(a);
+            GlyphAtlasEntry entry = atlas.Append(a, 0);
 
             Assert.AreEqual(65u, entry.Codepoint);
             Assert.AreEqual(new int2(a.Width + 6, a.Height + 6), entry.CellSize,
@@ -76,12 +121,12 @@ namespace MapRenderer.Tests.Text
                 }
             }
 
-            Assert.IsTrue(atlas.TryGetEntry(65u, out GlyphAtlasEntry roundTrip), "'A' must round-trip through TryGetEntry");
+            Assert.IsTrue(atlas.TryGetEntry(0, 65u, out GlyphAtlasEntry roundTrip), "'A' must round-trip through TryGetEntry");
             Assert.AreEqual(entry.Codepoint, roundTrip.Codepoint);
             Assert.AreEqual(entry.AtlasOrigin, roundTrip.AtlasOrigin);
             Assert.AreEqual(entry.CellSize, roundTrip.CellSize);
 
-            Assert.IsFalse(atlas.TryGetEntry(0xFFFFu, out _), "an unappended codepoint must not be found");
+            Assert.IsFalse(atlas.TryGetEntry(0, 0xFFFFu, out _), "an unappended codepoint must not be found");
         }
 
         // =========================================================================================
@@ -95,11 +140,11 @@ namespace MapRenderer.Tests.Text
             Assert.IsFalse(space.HasBitmap, "fixture precondition: space carries no bitmap");
             var atlas = new GlyphAtlas();
 
-            GlyphAtlasEntry entry = atlas.Append(space);
+            GlyphAtlasEntry entry = atlas.Append(space, 0);
 
             Assert.AreEqual(32u, entry.Codepoint);
             Assert.AreEqual(new int2(space.Width + 6, space.Height + 6), entry.CellSize);
-            Assert.IsTrue(atlas.TryGetEntry(32u, out _), "a no-bitmap glyph still gets an entry");
+            Assert.IsTrue(atlas.TryGetEntry(0, 32u, out _), "a no-bitmap glyph still gets an entry");
 
             int2 origin = entry.AtlasOrigin;
             int2 cell = entry.CellSize;
@@ -129,7 +174,7 @@ namespace MapRenderer.Tests.Text
 
             foreach (var kv in stack.Glyphs)
             {
-                entries.Add((atlas.Append(kv.Value), kv.Value));
+                entries.Add((atlas.Append(kv.Value, 0), kv.Value));
             }
 
             int2 atlasSize = atlas.Size;

@@ -54,7 +54,15 @@ namespace MapRenderer.Core.Text
 
         private readonly List<GlyphAtlasPacker> _packers = new List<GlyphAtlasPacker>();
         private readonly List<byte[]> _pixelPages = new List<byte[]>();
-        private readonly Dictionary<uint, GlyphAtlasEntry> _entries = new Dictionary<uint, GlyphAtlasEntry>();
+        // Keyed by (font, codepoint), NOT codepoint alone. One atlas is shared by every layer
+        // (SymbolSubsystem builds exactly one), and a style mixes faces — Liberty asks for Noto Sans Regular,
+        // Italic and Bold in different layers. On a codepoint-only key the first face to decode claims 'B'
+        // and every other face's 'B' is silently discarded, so the whole map renders in one arbitrary face.
+        private readonly Dictionary<long, GlyphAtlasEntry> _entries = new Dictionary<long, GlyphAtlasEntry>();
+
+        // Font name -> dense id. Interned here because the atlas is the thing keyed by it; GlyphManager
+        // stamps ids onto the shaped glyphs from the same table, so both sides agree by construction.
+        private readonly Dictionary<string, int> _fontIds = new Dictionary<string, int>(StringComparer.Ordinal);
 
         private int _committedHeight; // grow-mode only (page 0's row-preserving resize watermark)
         private readonly int _fixedHeight;
@@ -115,15 +123,34 @@ namespace MapRenderer.Core.Text
         /// (<c>[0, PageCount)</c>), exactly <c>Size.x * Size.y</c> bytes.</summary>
         public byte[] PagePixels(int page) => _pixelPages[page];
 
-        /// <summary>Looks up a previously appended glyph's atlas entry by codepoint.</summary>
-        public bool TryGetEntry(uint codepoint, out GlyphAtlasEntry entry) => _entries.TryGetValue(codepoint, out entry);
+        /// <summary>The dense id for <paramref name="fontName"/>, assigned on first use and stable for this
+        /// atlas's lifetime. A null name interns as the empty name — one shared id, not a per-call new one.
+        /// <see cref="MapRenderer.Unity.Text.GlyphManager"/> stamps the SAME id onto every shaped glyph, which
+        /// is what makes <see cref="TryGetEntry"/> find the face the style asked for.</summary>
+        public int FontId(string fontName)
+        {
+            string key = fontName ?? string.Empty;
+            if (_fontIds.TryGetValue(key, out int id)) return id;
+            id = _fontIds.Count;
+            _fontIds[key] = id;
+            return id;
+        }
+
+        /// <summary>Looks up a previously appended glyph's atlas entry by (font, codepoint). The font half is
+        /// load-bearing: two faces' same codepoint are two different bitmaps.</summary>
+        public bool TryGetEntry(int fontId, uint codepoint, out GlyphAtlasEntry entry)
+            => _entries.TryGetValue(EntryKey(fontId, codepoint), out entry);
+
+        /// <summary>Packs a font id and a codepoint into one dictionary key. A codepoint is at most 21 bits
+        /// and the id is an <c>int</c>, so the two never overlap in a <c>long</c>.</summary>
+        private static long EntryKey(int fontId, uint codepoint) => ((long)fontId << 32) | codepoint;
 
         /// <summary>
         /// Packs the glyph's cell into the atlas and, if it has a bitmap, blits it row-major at the
         /// packed origin. A glyph with no bitmap (<see cref="SdfGlyph.HasBitmap"/> false, e.g. space)
         /// still packs a cell and gets an entry (metrics/advance for layout) but blits nothing.
         /// </summary>
-        public GlyphAtlasEntry Append(in SdfGlyph glyph)
+        public GlyphAtlasEntry Append(in SdfGlyph glyph, int fontId)
         {
             int2 cellSize = glyph.CellSize;
             int2 origin;
@@ -160,7 +187,7 @@ namespace MapRenderer.Core.Text
                 Advance = glyph.Advance,
                 Page = page,
             };
-            _entries[glyph.Codepoint] = entry;
+            _entries[EntryKey(fontId, glyph.Codepoint)] = entry;
             return entry;
         }
 

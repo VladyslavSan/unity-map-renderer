@@ -17,7 +17,7 @@
 // (road_one_way_arrow*) would draw unrotated — every arrow pointing screen-right regardless of the road.
 //
 // FRAGMENT: was DUPLICATED from the retired screen-space icon shader (delta (a): plain sprite sample x
-// vertex color, no SDF/halo) — not factored out at the time, same A4 dedupe-fence rationale as
+// vertex color, no SDF) — not factored out at the time, same A4 dedupe-fence rationale as
 // SymbolTextWorld_ForwardPass.hlsl's header. Now the only surviving copy.
 
 // W2: the map-pitch branch, on the same terms as the TEXT pass. This arm is NOT optional —

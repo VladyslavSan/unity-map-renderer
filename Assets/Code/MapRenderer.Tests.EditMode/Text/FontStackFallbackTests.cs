@@ -175,7 +175,7 @@ namespace MapRenderer.Tests.Text
         // with the same fallback-aware resolution (0 / false for a not-found codepoint).
         // =========================================================================================
         [Test]
-        public void TryGetAdvance_DelegatesToFallbackAwareResolve()
+        public void TryResolveGlyph_DelegatesToFallbackAwareResolve()
         {
             FontStackGlyphs font1Range0 = BuildHandGlyphs("Font1", 0, 255, 65u, advance: 11);
             var cache = new GlyphCache();
@@ -184,10 +184,10 @@ namespace MapRenderer.Tests.Text
             var stack = new FontStack { Names = new[] { "Font1" } };
             IGlyphMetricsProvider metrics = new FontStackResolver(stack, cache);
 
-            Assert.IsTrue(metrics.TryGetAdvance(65u, out float advance));
+            Assert.IsTrue(metrics.TryResolveGlyph(65u, out float advance, out _));
             Assert.AreEqual(11f, advance);
 
-            Assert.IsFalse(metrics.TryGetAdvance(66u, out float missingAdvance));
+            Assert.IsFalse(metrics.TryResolveGlyph(66u, out float missingAdvance, out _));
             Assert.AreEqual(0f, missingAdvance);
         }
     }

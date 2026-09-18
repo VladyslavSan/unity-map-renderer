@@ -6,10 +6,9 @@
 // (one draw call per frame, SRP-Batcher-compatible CBUFFER), never BatchRendererGroup — there is nothing
 // to instance.
 //
-// Two deliberately-separate property groups (the `_Blur`/line-blur lesson):
-//   (A) STYLE-BOUND — genuine `text-halo-*` spec terms; production S105 binds these by name.
-//   (B) INTERNAL    — engine plumbing (SDF threshold, AA, per-frame screen size). Names avoid every
-//                     `text-*`/`symbol-*` style-spec term so a future style binding can never collide.
+// Every property here is INTERNAL engine plumbing (SDF threshold, AA, per-frame screen size); the names
+// avoid every `text-*`/`symbol-*` style-spec term so a future style binding can never collide. There is no
+// style-bound group: every `text-*` paint term rides a vertex stream, so none of them appears here.
 // `text-color`/`text-opacity` are NOT material properties at all — Slice 1 (and S105) bake them into the
 // per-vertex COLOR stream instead (mirrors how `line-color` already rides vertex color in
 // StyledLineTileBuilder), so there is nothing here to collide with those two terms either.
@@ -20,7 +19,6 @@
 #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/Core.hlsl"
 
 CBUFFER_START(UnityPerMaterial)
-// (B) Internal — engine plumbing, never style-bound:
 // _ScreenParamsLogical — (logicalWidth, logicalHeight, 0, 0) in pixels; refreshed every frame by
 //   SymbolPlacementSystem/WorldSymbolRenderer. Scales the constant-px glyph-corner OFFSET into clip space
 //   (see the world pass's vertex stage) — the vertex POSITION itself comes from the stock
@@ -31,20 +29,23 @@ float4 _ScreenParamsLogical;
 float4 _MainTex_TexelSize;
 // _SdfEdge          — the SDF's fill iso level, normalized [0,1]. 0.75 matches S18's on-disk convention
 //                      (GlyphSdf/SdfDistanceFieldTests.IsoLevel = 191/255 ≈ 0.75), NOT the generic 0.5.
-// _SdfSoftness       — antialiasing width in SCREEN PIXELS (~1 = a crisp 1px edge; higher = softer).
-// _SdfPixelRange     — the SDF distance field's range in ATLAS TEXELS: the texel count spanned by one unit
+// _SdfAaDevicePx    — how far the antialiasing fades out BEYOND the outline, in DEVICE px (~0.4 = crisp).
+//   DEVICE, not logical: it divides a distance the fragment derives from fwidth(uv), which is a raster
+//   derivative. _ScreenParamsLogical above is the OTHER unit — do not mix them (that pairing has bitten
+//   this shader before).
+//   The band sits entirely OUTSIDE the outline (the fragment's `+ 1.0`), so it never erodes stroke weight —
+//   but it is also ALL outside, so the whole value shows as fringe. Roughly 0.4 px matches the 0.05-of-field
+//   step the glyph bake antialiases over. Around 1 px it stops reading as an edge and starts reading as a
+//   glow around every glyph, which is NOT what this is for — the halo is real geometry, emitted as a second
+//   glyph run, and has nothing to do with this knob.
+// _SdfRangeTexels    — how many ATLAS TEXELS the field's full distance range spans: the texel count of one unit
 //   of normalized distance value (≈ the fontnik radius, 8). The analytic AA scales the signed distance
 //   (distSample - _SdfEdge) by this to recover screen-pixel distance, so the edge is crisp at every zoom
-//   and the halo width/blur are real screen pixels. Tune if glyphs read too soft (raise) or aliased (lower).
+//   and WorldBillboardVertex.SdfWidenPx is in those same real screen pixels. NOT a look knob: it describes
+//   how the glyphs were BAKED, so it is only ever changed to match a different glyph source.
 float _SdfEdge;
-float _SdfSoftness;
-float _SdfPixelRange;
-
-// (A) Style-bound — genuine MapLibre text-halo-* spec terms (production binds text-halo-color/width/blur
-// onto these BY NAME once S105 lands; Slice 1's demo leaves them at their Inspector/default values):
-float4 _HaloColor;
-float  _HaloWidthPx;
-float  _HaloBlurPx;
+float _SdfAaDevicePx;
+float _SdfRangeTexels;
 CBUFFER_END
 
 // Stage M: a Texture2DArray — one layer per GlyphAtlas page. Single-page maps (the invariant: any map

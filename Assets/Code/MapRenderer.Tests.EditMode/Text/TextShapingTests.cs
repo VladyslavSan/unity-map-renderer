@@ -116,8 +116,11 @@ namespace MapRenderer.Tests.Text
                 _advances = new Dictionary<uint, float>(advances);
             }
 
-            public bool TryGetAdvance(uint codepoint, out float advance)
-                => _advances.TryGetValue(codepoint, out advance);
+            public bool TryResolveGlyph(uint codepoint, out float advance, out int fontId)
+            {
+                fontId = 0; // one synthetic face — this fixture never mixes fonts
+                return _advances.TryGetValue(codepoint, out advance);
+            }
         }
 
         private static (FixtureGlyphMetricsProvider metrics, HashSet<uint> allPresentationFormCodepoints) LoadPresentationFormFixtures()

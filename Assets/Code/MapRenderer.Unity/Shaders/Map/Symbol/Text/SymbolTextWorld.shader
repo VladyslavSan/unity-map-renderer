@@ -18,20 +18,14 @@ Shader "Map/Symbol/TextWorld"
         // Stage M: a Texture2DArray — one layer per GlyphAtlas page (see SymbolText_Input.hlsl).
         _MainTex("Atlas (R8 SDF, Texture2DArray)", 2DArray) = "white" {}
 
-        // (B) Internal render/engine params — NOT style properties (see Symbol_Input.hlsl's doc comment
-        // for the full two-group rule); refreshed every frame by the world-anchored label renderer (A1).
+        // Internal render/engine params — NOT style properties (see SymbolText_Input.hlsl's doc comment);
+        // refreshed every frame by the world-anchored label renderer (A1).
         _ScreenParamsLogical ("Screen Params Logical (px)", Vector) = (1920, 1080, 0, 0)
         _SdfEdge             ("SDF Edge (iso, fontnik = 0.75)", Range(0, 1)) = 0.75
-        _SdfSoftness         ("SDF AA Width (screen px, ~1 = crisp)", Range(0.1, 4)) = 1.0
-        _SdfPixelRange       ("SDF Range (atlas texels, fontnik ~8)", Float) = 8.0
+        _SdfAaDevicePx       ("SDF AA Width, outside the edge (DEVICE px, ~0.4 = crisp)", Range(0.05, 2)) = 0.4
+        _SdfRangeTexels      ("SDF Distance Range (atlas texels; a property of the BAKE, ~8)", Float) = 8.0
 
-        // (A) Style-bound — genuine text-halo-* spec terms (production binds by name once S105 lands).
-        // Default: a small visible halo so a bare-material render shows halo-under-fill out of the box.
-        _HaloColor    ("Halo Color (text-halo-color)", Color) = (1, 1, 1, 1)
-        _HaloWidthPx  ("Halo Width (text-halo-width, px)", Float) = 1.0
-        _HaloBlurPx   ("Halo Blur (text-halo-blur, px)", Float) = 0.5
-
-        // (C) Render state — material-UI knobs (S58 pattern, mirrors Fill/Line's [_Cull]/[_ZWrite]/[_ZTest]
+        // Render state — material-UI knobs (S58 pattern, mirrors Fill/Line's [_Cull]/[_ZWrite]/[_ZTest]
         // and Blend). Defaults match Map/Symbol/Text's: straight alpha, ZWrite Off, ZTest Always (unlit
         // UI-like text always renders on top), Cull Off (billboard corners have no meaningful winding).
         [Enum(UnityEngine.Rendering.BlendMode)]    _SrcBlend      ("Blend Src (RGB)", Float) = 5

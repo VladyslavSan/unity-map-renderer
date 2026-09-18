@@ -40,11 +40,17 @@ namespace MapRenderer.Core.Text
     {
         private readonly FontStack _fontStack;
         private readonly GlyphCache _cache;
+        private readonly GlyphAtlas _atlas;
 
-        public FontStackResolver(FontStack fontStack, GlyphCache cache)
+        /// <param name="atlas">The atlas whose font-id table stamps <see cref="PositionedGlyph.FontId"/>.
+        /// Null only for a metrics-only test: every id then resolves to 0, which is correct for a
+        /// single-face fixture and wrong for a mixed one — production passes the real atlas
+        /// (<c>GlyphManager.CreateResolver</c>).</param>
+        public FontStackResolver(FontStack fontStack, GlyphCache cache, GlyphAtlas atlas = null)
         {
             _fontStack = fontStack ?? throw new ArgumentNullException(nameof(fontStack));
             _cache = cache ?? throw new ArgumentNullException(nameof(cache));
+            _atlas = atlas;
         }
 
         /// <summary>The 256-aligned range base containing <paramref name="codepoint"/>.</summary>
@@ -83,13 +89,15 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// <see cref="IGlyphMetricsProvider"/>: the fallback-resolved glyph's advance, or false (advance
-        /// 0) when the codepoint is not found anywhere in the stack.
+        /// <see cref="IGlyphMetricsProvider"/>: the fallback-resolved glyph's advance AND the atlas id of
+        /// the face that answered, or false (advance 0, id 0) when the codepoint is not found anywhere in
+        /// the stack.
         /// </summary>
-        public bool TryGetAdvance(uint codepoint, out float advance)
+        public bool TryResolveGlyph(uint codepoint, out float advance, out int fontId)
         {
             GlyphResolution resolution = Resolve(codepoint);
             advance = resolution.Found ? resolution.Glyph.Advance : 0f;
+            fontId  = resolution.Found && _atlas != null ? _atlas.FontId(resolution.ResolvedFontName) : 0;
             return resolution.Found;
         }
     }

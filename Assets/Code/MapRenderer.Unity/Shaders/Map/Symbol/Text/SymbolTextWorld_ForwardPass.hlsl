@@ -16,9 +16,16 @@
 // — instead of the point/icon north-up passthrough. Point/icon never take this branch (bit1 clear), so
 // their render stays byte-identical.
 //
-// FRAGMENT: was DUPLICATED verbatim from the retired screen-space shader (not factored out at the time —
-// that would have risked the OLD path's frozen goldens). Now the only surviving copy; a follow-up may
-// still fold it into a shared include (no functional change either way).
+// FRAGMENT: shades ONE thing. It takes a colour (vertex COLOR) and a pair of device-px widenings
+// (TEXCOORD7, WorldBillboardVertex.SdfWidenPx) that push the SDF fill edge out and widen the AA transition,
+// and it emits that colour at the resulting coverage. At a zero widening that is the plain glyph.
+//
+// There is deliberately no second colour and no second coverage term to combine with: what a draw paints is
+// decided entirely by the vertex stream that fed it, so submission order alone decides what ends up on top.
+// WorldSymbolRenderer.Emit is what uses the widening, and its doc says why.
+//
+// The fragment body was DUPLICATED verbatim from the retired screen-space shader (not factored out at the
+// time — that would have risked the OLD path's frozen goldens). Now the only surviving copy.
 
 // W2: when AlignFlags bit2 is ALSO set (map pitch alignment, curved only), `offsetPx` is not pixels at all —
 // it is WORLD METRES, and the corner is displaced in the ground plane at the anchor BEFORE projection so the
@@ -46,6 +53,7 @@ struct SymbolWorldAttributes
     float  opacity    : TEXCOORD4; // stream 1 — A0: constant 1
     float3 tangentOS  : TEXCOORD5; // Stage AC: tile-local WORLD tangent along the line; zero/unread for point/icon
     float3 up         : TEXCOORD6; // P2: the unit surface normal at the anchor; read only by W2's map-pitch branch
+    float2 sdfWidenPx : TEXCOORD7; // device px the glyph grows past its fill edge: x = edge, y = AA transition
 };
 
 struct SymbolWorldVaryings
@@ -54,6 +62,7 @@ struct SymbolWorldVaryings
     float2 uv         : TEXCOORD0;
     float4 color      : COLOR;
     float  page       : TEXCOORD1;
+    float2 sdfWidenPx : TEXCOORD2;
 };
 
 // Stage AC D-E: rotates a 2D vector CCW (y-up logical-px frame) by `ang` — the SAME convention
@@ -127,6 +136,7 @@ SymbolWorldVaryings SymbolWorldPassVertex(SymbolWorldAttributes input)
     output.uv    = input.uv;
     output.page  = input.page;
     output.color = float4(input.colorRGB, input.opacity);     // fragment's input.color.a still works unchanged
+    output.sdfWidenPx = input.sdfWidenPx;
     return output;
 }
 
@@ -140,22 +150,26 @@ half4 SymbolWorldPassFragment(SymbolWorldVaryings input) : SV_Target
     // it over-softened and forced a low _SdfEdge to stay visible). screenDist is then the signed distance
     // from the fill edge in SCREEN PIXELS: the transition is a fixed ~1px at every zoom, and the body is
     // solid the instant distSample passes _SdfEdge (the "above threshold => solid" behaviour we want).
-    float2 unitRange     = _SdfPixelRange * _MainTex_TexelSize.xy;   // SDF range, in uv units
+    float2 unitRange     = _SdfRangeTexels * _MainTex_TexelSize.xy;   // SDF range, in uv units
     float2 screenTexSize = 1.0 / max(fwidth(input.uv), 1e-6);        // screen px per uv unit
     float  screenPxRange = max(0.5 * dot(unitRange, screenTexSize), 1.0);
 
     half screenDist = (distSample - _SdfEdge) * screenPxRange;       // signed screen px from the fill edge
-    half fillAlpha  = saturate(screenDist / max(_SdfSoftness, 1e-3h) + 0.5h);
 
-    // Halo: the SAME signed field, with the edge pushed OUT by _HaloWidthPx screen px and the transition
-    // widened by _HaloBlurPx — both now real screen pixels (size-independent), no px->SDF approximation.
-    half haloAlpha = saturate((screenDist + _HaloWidthPx) / max(_SdfSoftness + _HaloBlurPx, 1e-3h) + 0.5h);
+    // The edge is pushed OUT by sdfWidenPx.x and the transition widened by sdfWidenPx.y — both real screen
+    // pixels (size-independent), no px->SDF approximation. At (0,0) this is the plain glyph coverage.
+    //
+    // The `+ 1.0` biases the AA ramp ENTIRELY OUTSIDE the outline: a fragment at or inside the iso is
+    // solid, and the falloff occupies the band just beyond it. The obvious `+ 0.5` centres the ramp on the
+    // iso instead, which eats up to half the band off BOTH sides of every stroke — on a 1-2px stem that is
+    // most of the ink, and it is why small labels read thin. It also caps coverage: glyph interiors peak
+    // at ~0.878 of the field, not 1.0, so a centred ramp can never saturate a minified glyph (screenDist
+    // shrinks with screenPxRange) and distant text washes out. Biased outward, any fragment past the iso
+    // is opaque at every scale, and the band stays ~1 SCREEN px rather than a fixed slice of the field.
+    half coverage = saturate((screenDist + input.sdfWidenPx.x)
+                             / max(_SdfAaDevicePx + input.sdfWidenPx.y, 1e-3h) + 1.0h);
 
-    half4 result;
-    result.rgb = lerp(_HaloColor.rgb, input.color.rgb, fillAlpha);
-    half coverage = max(fillAlpha, haloAlpha * _HaloColor.a);
-    result.a = coverage * input.color.a;
-    return result;
+    return half4(input.color.rgb, coverage * input.color.a);
 }
 
 #endif // MAP_SYMBOL_WORLD_FORWARD_PASS_INCLUDED

@@ -47,6 +47,7 @@ namespace MapRenderer.Unity.Text.Placement
             SymbolPairRole pairRole)
         {
             float4 color  = SymbolPlacementSystem.LinearColor(symbol.Paint);
+            float4 halo   = SymbolPlacementSystem.LinearHaloColor(symbol.Paint);
             // I6: icon FadeId identity now rides symbol.IconImage (null for text, so a text symbol's FadeId
             // is unchanged — PointFadeId's guard-skip fold). §10 D9: UNCONDITIONAL on pairRole — a pair's
             // identity IS the owner's existing icon identity; a rider's FadeId is never read by a candidate
@@ -72,6 +73,7 @@ namespace MapRenderer.Unity.Text.Placement
                 AllowOverlap = symbol.AllowOverlap, IgnorePlacement = symbol.IgnorePlacement,
                 TranslatePx = symbol.TranslatePx, TranslateAnchor = symbol.TranslateAnchor,
                 RotationAlignment = symbol.RotationAlignment, Color = color,
+                HaloColor = halo, HaloWidthPx = symbol.Paint.HaloWidthPx, HaloBlurPx = symbol.Paint.HaloBlurPx,
                 IconRotateRadians = symbol.IconRotateRadians,
                 FadeId = fadeId,
                 // I5a: thread the icon/text discriminator through — NOT yet consumed by the draw side (I5b).
@@ -102,7 +104,10 @@ namespace MapRenderer.Unity.Text.Placement
                 AllowOverlap = symbol.AllowOverlap, IgnorePlacement = symbol.IgnorePlacement,
                 TranslatePx = symbol.TranslatePx, TranslateAnchor = symbol.TranslateAnchor,
                 MaxAngleDeg = symbol.MaxAngleDeg, KeepUpright = symbol.KeepUpright,
-                Color = SymbolPlacementSystem.LinearColor(symbol.Paint), TileOriginRender = tileOriginRender,
+                Color = SymbolPlacementSystem.LinearColor(symbol.Paint),
+                HaloColor = SymbolPlacementSystem.LinearHaloColor(symbol.Paint),
+                HaloWidthPx = symbol.Paint.HaloWidthPx, HaloBlurPx = symbol.Paint.HaloBlurPx,
+                TileOriginRender = tileOriginRender,
                 // P-B: the icon/text discriminator, textually identical to BuildPointInput's above — a
                 // map-aligned line icon is a one-glyph curved symbol sampling the SPRITE sheet.
                 AtlasKind = symbol.Kind == SymbolKind.Icon ? SymbolKind.Icon : SymbolKind.Text,

@@ -55,7 +55,7 @@ namespace MapRenderer.Tests.Text
         {
             SdfGlyph a = LoadUppercaseA();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entry = atlas.Append(a);
+            GlyphAtlasEntry entry = atlas.Append(a, 0);
 
             var atlasTexture = new GlyphAtlasTexture();
             try
@@ -110,12 +110,12 @@ namespace MapRenderer.Tests.Text
 
             try
             {
-                atlas.Append(stack.Glyphs[65u]); // 'A'
+                atlas.Append(stack.Glyphs[65u], 0); // 'A'
                 atlasTexture.Upload(atlas);
                 int2 firstSize = new int2(atlasTexture.Texture.width, atlasTexture.Texture.height);
 
                 // Appending enough more glyphs to force the packer/atlas to grow taller.
-                foreach (var kv in stack.Glyphs) atlas.Append(kv.Value);
+                foreach (var kv in stack.Glyphs) atlas.Append(kv.Value, 0);
                 atlasTexture.Upload(atlas);
 
                 Assert.AreEqual(atlas.Size.x, atlasTexture.Texture.width);
@@ -148,8 +148,8 @@ namespace MapRenderer.Tests.Text
             int pageHeight = math.max(cellA.y, cellB.y);
             var atlas = new GlyphAtlas(width: pageWidth, fixedHeight: pageHeight);
 
-            GlyphAtlasEntry entryA = atlas.Append(a);
-            GlyphAtlasEntry entryB = atlas.Append(b);
+            GlyphAtlasEntry entryA = atlas.Append(a, 0);
+            GlyphAtlasEntry entryB = atlas.Append(b, 0);
             Assert.AreEqual(0, entryA.Page, "fixture precondition: 'A' fits page 0");
             Assert.AreEqual(1, entryB.Page, "fixture precondition: 'B' overflows onto page 1");
             Assert.AreEqual(2, atlas.PageCount);

@@ -105,9 +105,15 @@ namespace MapRenderer.Tests.Text
         // OUTLINE at 191/255 ≈ 0.75 and the interior should climb well above it (toward 255) for any stroke
         // more than a couple px thick. If a standard glyph's interior barely clears 0.75, either the glyph
         // source encodes a shallow field OR our decode compresses the range. This measures the committed
-        // NotoSans fixture (a known-standard fontnik bake) to tell those apart: if IT reaches ~255, our
-        // pipeline is faithful and the live low-peak is an encoding property of the OTHER glyph source
-        // (→ a lower _SdfEdge is the correct per-source calibration, not a bug).
+        // NotoSans fixture (a known-standard fontnik bake) to tell those apart.
+        //
+        // MEASURED, both sources, 0-255 range: byte-for-byte the same encoding — global max 255, MEDIAN
+        // per-glyph interior peak 224 (0.878), p10 219 (0.859). So openfreemap serves the same fontnik bake
+        // as the fixture and the "other source encodes a shallower field" arm is NOT what was happening.
+        // A lower _SdfEdge is therefore NOT per-source calibration here: at the 0.75 iso a median stroke
+        // still clears the threshold by ~1 atlas texel, and every 0.01 below it dilates each edge by
+        // 0.08 texels (_SdfRangeTexels 8). The material ran at 0.60 for a long time, which is ~1.2 texels of
+        // dilation PER EDGE — visibly bold text, mistaken for a font-weight problem.
         // =========================================================================================
         [Test]
         public void SdfInteriorPeak_StandardFontnikGlyphsClimbWellAbove075()

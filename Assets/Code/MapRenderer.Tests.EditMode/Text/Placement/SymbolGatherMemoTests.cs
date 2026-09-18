@@ -172,7 +172,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
                 var glyph = new SdfGlyph { Codepoint = 65, Width = 10, Height = 10, Left = 0, Top = 8, Advance = 12, Bitmap = new byte[16 * 16] };
                 var glyphAtlas = new GlyphAtlas();
-                glyphAtlas.Append(glyph);
+                glyphAtlas.Append(glyph, 0);
                 Atlas = new GlyphAtlasTexture();
                 Atlas.Upload(glyphAtlas);
                 _baseMaterial = new Material(Shader.Find("Map/Symbol/TextWorld"));

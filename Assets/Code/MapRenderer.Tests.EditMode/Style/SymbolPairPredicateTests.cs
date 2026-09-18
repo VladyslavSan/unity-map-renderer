@@ -154,7 +154,7 @@ namespace MapRenderer.Tests.Style
             var glyphs = new List<PositionedGlyph>();
             foreach (uint codepoint in new uint[] { 'A', 'b' })
             {
-                GlyphAtlasEntry entry = glyphAtlas.Append(latin.Glyphs[codepoint]);
+                GlyphAtlasEntry entry = glyphAtlas.Append(latin.Glyphs[codepoint], 0);
                 glyphs.Add(new PositionedGlyph
                 {
                     AtlasCodepoint = codepoint, XAdvance = entry.Advance, Cluster = glyphs.Count,

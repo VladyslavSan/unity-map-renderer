@@ -255,7 +255,7 @@ namespace MapRenderer.Core.Text
         /// </summary>
         private static float PlaceGlyph(PositionedGlyph glyph, IGlyphAtlasView atlas, float penX, float baselineY, int lineIndex, List<SymbolQuad> output, out bool isWhitespace)
         {
-            if (!atlas.TryGetEntry(glyph.AtlasCodepoint, out GlyphAtlasEntry entry))
+            if (!atlas.TryGetEntry(glyph.FontId, glyph.AtlasCodepoint, out GlyphAtlasEntry entry))
             {
                 isWhitespace = false;
                 return glyph.XAdvance;
@@ -301,7 +301,7 @@ namespace MapRenderer.Core.Text
             => entry.CellSize.x <= 2 * GlyphSdf.Buffer && entry.CellSize.y <= 2 * GlyphSdf.Buffer;
 
         private static bool ClassifyWhitespace(PositionedGlyph glyph, IGlyphAtlasView atlas)
-            => atlas.TryGetEntry(glyph.AtlasCodepoint, out GlyphAtlasEntry entry) && IsWhitespaceEntry(entry);
+            => atlas.TryGetEntry(glyph.FontId, glyph.AtlasCodepoint, out GlyphAtlasEntry entry) && IsWhitespaceEntry(entry);
 
         /// <summary>Lookahead-only Σadvance + interior-letter-spacing measurement over [start,end) — no placement, no output mutation.</summary>
         private static float MeasureRange(IReadOnlyList<PositionedGlyph> glyphs, int start, int end, IGlyphAtlasView atlas, float letterPx)
@@ -309,7 +309,7 @@ namespace MapRenderer.Core.Text
             float width = 0f;
             for (int k = start; k < end; k++)
             {
-                float advance = atlas.TryGetEntry(glyphs[k].AtlasCodepoint, out GlyphAtlasEntry entry) ? entry.Advance : glyphs[k].XAdvance;
+                float advance = atlas.TryGetEntry(glyphs[k].FontId, glyphs[k].AtlasCodepoint, out GlyphAtlasEntry entry) ? entry.Advance : glyphs[k].XAdvance;
                 width += advance;
                 if (k < end - 1) width += letterPx;
             }

@@ -37,9 +37,10 @@ namespace MapRenderer.Unity.Text.Placement
         // worst: 0 ink pixels). TexCoord4 (Opacity) is stream 1 — a SEPARATE vertex buffer, so re-uploading
         // it per frame (A2) never touches stream 0 — but it still occupies enum slot 8, so Stage AC's
         // TexCoord5 (Tangent, enum 9, stream 0) MUST be declared after it, and P2's TexCoord6 (Up, enum 10,
-        // stream 0) after THAT — the new truly-LAST element — to keep 0,3,4,5,6,7,8,9,10 ascending. Putting
-        // TexCoord5/6 before TexCoord4 would read descending — the exact hazard this codebase's
-        // vertex-descriptor convention exists to prevent.
+        // stream 0) after THAT, and the halo stage's TexCoord7 (SdfWidenPx, enum 11, stream 0) after THAT —
+        // the new truly-LAST element — to keep 0,3,4,5,6,7,8,9,10,11 ascending. Putting TexCoord5/6/7 before
+        // TexCoord4 would read descending — the exact hazard this codebase's vertex-descriptor convention
+        // exists to prevent.
         private static readonly VertexAttributeDescriptor[] VertexDescriptors =
         {
             new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0), // AnchorLocal
@@ -50,7 +51,8 @@ namespace MapRenderer.Unity.Text.Placement
             new VertexAttributeDescriptor(VertexAttribute.TexCoord3, VertexAttributeFormat.Float32, 1, stream: 0), // AlignFlags
             new VertexAttributeDescriptor(VertexAttribute.TexCoord4, VertexAttributeFormat.Float32, 1, stream: 1), // Opacity
             new VertexAttributeDescriptor(VertexAttribute.TexCoord5, VertexAttributeFormat.Float32, 3, stream: 0), // Tangent (Stage AC)
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord6, VertexAttributeFormat.Float32, 3, stream: 0), // Up (P2) — truly LAST
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord6, VertexAttributeFormat.Float32, 3, stream: 0), // Up (P2)
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord7, VertexAttributeFormat.Float32, 2, stream: 0), // SdfWidenPx — truly LAST
         };
 
         // Skip main-thread index validation + redundant bounds recompute (mirrors SymbolPlacementSystem's

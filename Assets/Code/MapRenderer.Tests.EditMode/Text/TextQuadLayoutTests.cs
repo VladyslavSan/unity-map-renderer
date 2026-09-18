@@ -65,8 +65,8 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A']);
-            GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a']);
+            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
+            GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a'], 0);
 
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance), ((uint)'a', entryLowerA.Advance));
 
@@ -145,8 +145,8 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A']);
-            GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a']);
+            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
+            GlyphAtlasEntry entryLowerA = atlas.Append(latin.Glyphs[(uint)'a'], 0);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance), ((uint)'a', entryLowerA.Advance));
 
             var resultQuads = new List<SymbolQuad>();
@@ -244,7 +244,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A']);
+            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance));
 
             TextLayoutOptions zeroOptions = default;

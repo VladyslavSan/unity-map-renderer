@@ -69,7 +69,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var glyph = new SdfGlyph { Codepoint = 65, Width = 10, Height = 10, Left = 0, Top = 8, Advance = 12, Bitmap = new byte[16 * 16] };
             var atlas = new GlyphAtlas();
-            atlas.Append(glyph);
+            atlas.Append(glyph, 0);
             var texture = new GlyphAtlasTexture();
             texture.Upload(atlas);
             return texture;

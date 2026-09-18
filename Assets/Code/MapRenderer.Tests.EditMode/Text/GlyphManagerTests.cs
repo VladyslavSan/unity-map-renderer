@@ -59,7 +59,7 @@ namespace MapRenderer.Tests.Text
                 "the decoded range must be stored in the cache under (fontName, rangeStart)");
             Assert.IsTrue(glyphs.Glyphs.TryGetValue(65u, out SdfGlyph expectedA), "fixture precondition: 'A' must decode");
 
-            Assert.IsTrue(manager.Atlas.TryGetEntry(65u, out GlyphAtlasEntry entry),
+            Assert.IsTrue(manager.Atlas.TryGetEntry(0, 65u, out GlyphAtlasEntry entry),
                 "the decoded glyph must be appended to the shared atlas");
             Assert.AreEqual(expectedA.Advance, entry.Advance);
             Assert.AreEqual(expectedA.Left, entry.Left);
@@ -130,8 +130,20 @@ namespace MapRenderer.Tests.Text
             Assert.IsTrue(arabicResolution.Found, "the fallback font's glyph must resolve");
             Assert.AreEqual("ArabicFont", arabicResolution.ResolvedFontName);
 
-            Assert.IsTrue(manager.Atlas.TryGetEntry((uint)'A', out _), "LatinFont's glyph must be in the shared atlas");
-            Assert.IsTrue(manager.Atlas.TryGetEntry(0x0600u, out _), "ArabicFont's fallback glyph must be in the shared atlas");
+            // Under each font's OWN id — the atlas is shared by every layer, so a glyph filed under the
+            // wrong face is a glyph the layer that asked for it will never see.
+            int latinFont  = manager.Atlas.FontId("LatinFont");
+            int arabicFont = manager.Atlas.FontId("ArabicFont");
+            Assert.AreEqual(latinFont, manager.Atlas.FontId(latinResolution.ResolvedFontName),
+                "the resolver and the atlas must agree on LatinFont's id");
+            Assert.AreEqual(arabicFont, manager.Atlas.FontId(arabicResolution.ResolvedFontName),
+                "the resolver and the atlas must agree on ArabicFont's id");
+            Assert.AreNotEqual(latinFont, arabicFont, "two font names must intern to two ids");
+
+            Assert.IsTrue(manager.Atlas.TryGetEntry(latinFont, (uint)'A', out _), "LatinFont's glyph must be in the shared atlas");
+            Assert.IsTrue(manager.Atlas.TryGetEntry(arabicFont, 0x0600u, out _), "ArabicFont's fallback glyph must be in the shared atlas");
+            Assert.IsFalse(manager.Atlas.TryGetEntry(arabicFont, (uint)'A', out _),
+                "'A' was decoded for LatinFont only — finding it under ArabicFont means the atlas ignores the font half of its key");
 
             // Repeat: every (name, rangeStart) pair involved is now cached (including the two absent
             // misses) -> zero additional fetches.

@@ -70,8 +70,11 @@ namespace MapRenderer.Unity.Text
         /// <summary>The keep-all-per-session decoded-range cache (§6.4a) backing <see cref="CreateResolver"/>.</summary>
         public GlyphCache Cache => _cache;
 
-        /// <summary>Builds a fallback-aware resolver over this manager's cache for the given font stack.</summary>
-        public FontStackResolver CreateResolver(FontStack fontStack) => new FontStackResolver(fontStack, _cache);
+        /// <summary>Builds a fallback-aware resolver over this manager's cache for the given font stack.
+        /// It is handed the ATLAS as well, so the font ids it stamps onto shaped glyphs come from the same
+        /// table <see cref="AppendToAtlas"/> keys the entries by.</summary>
+        public FontStackResolver CreateResolver(FontStack fontStack)
+            => new FontStackResolver(fontStack, _cache, _atlas);
 
         /// <summary>
         /// Ensures every font in <paramref name="fontStack"/>'s <see cref="FontStack.Names"/> has the
@@ -106,7 +109,7 @@ namespace MapRenderer.Unity.Text
             GlyphRangeResponse response = await _source.FetchAsync(fontName, rangeStart, ct);
             FontStackGlyphs glyphs = DecodeOrEmpty(fontName, rangeStart, response);
             _cache.Store(fontName, rangeStart, glyphs);
-            AppendToAtlas(glyphs);
+            AppendToAtlas(fontName, glyphs);
         }
 
         private static FontStackGlyphs DecodeOrEmpty(string fontName, int rangeStart, GlyphRangeResponse response)
@@ -131,14 +134,22 @@ namespace MapRenderer.Unity.Text
             };
         }
 
-        private void AppendToAtlas(FontStackGlyphs glyphs)
+        /// <param name="fontName">The REQUESTED name, not <see cref="FontStackGlyphs.Name"/>. The two
+        /// differ: the decoder fills Name from the name embedded IN the PBF, while the cache and
+        /// <see cref="FontStackResolver"/> both key on what the style asked for. Interning the embedded one
+        /// files every glyph under an id no lookup ever asks for, and the map renders no text at all.</param>
+        private void AppendToAtlas(string fontName, FontStackGlyphs glyphs)
         {
             if (glyphs.Glyphs == null) return;
+            // The id is per FONT, so it is taken once per decoded range, not per glyph. Without it the
+            // "already present" skip below reads as "some other face already has this codepoint" and drops
+            // this face's glyph — which is how a whole map ends up rendering in one arbitrary face.
+            int fontId = _atlas.FontId(fontName);
             foreach (var kv in glyphs.Glyphs)
             {
-                if (!_atlas.TryGetEntry(kv.Key, out _))
+                if (!_atlas.TryGetEntry(fontId, kv.Key, out _))
                 {
-                    _atlas.Append(kv.Value);
+                    _atlas.Append(kv.Value, fontId);
                 }
             }
         }

@@ -11,8 +11,10 @@ namespace MapRenderer.Core.Text
     /// </summary>
     public interface IGlyphAtlasView
     {
-        /// <summary>Looks up a previously appended glyph's atlas entry by codepoint.</summary>
-        bool TryGetEntry(uint codepoint, out GlyphAtlasEntry entry);
+        /// <summary>Looks up a previously appended glyph's atlas entry by (font, codepoint). The font half
+        /// is load-bearing — one atlas serves every layer, and two faces' same codepoint are two different
+        /// bitmaps. A view with only one face (a sprite sheet, a test double) ignores it.</summary>
+        bool TryGetEntry(int fontId, uint codepoint, out GlyphAtlasEntry entry);
 
         /// <summary>Current atlas size in pixels — the UV-normalization denominator.</summary>
         int2 Size { get; }

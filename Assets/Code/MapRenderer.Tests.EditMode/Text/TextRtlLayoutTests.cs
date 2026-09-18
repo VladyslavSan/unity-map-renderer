@@ -50,7 +50,11 @@ namespace MapRenderer.Tests.Text
         {
             private readonly Dictionary<uint, float> _advances;
             public FixtureGlyphMetricsProvider(IReadOnlyDictionary<uint, float> advances) => _advances = new Dictionary<uint, float>(advances);
-            public bool TryGetAdvance(uint codepoint, out float advance) => _advances.TryGetValue(codepoint, out advance);
+            public bool TryResolveGlyph(uint codepoint, out float advance, out int fontId)
+            {
+                fontId = 0;
+                return _advances.TryGetValue(codepoint, out advance);
+            }
         }
 
         /// <summary>Builds a real <see cref="GlyphAtlas"/> (and a matching advance-only metrics provider for shaping) from BOTH presentation-form fixture ranges.</summary>
@@ -61,8 +65,8 @@ namespace MapRenderer.Tests.Text
 
             var atlas = new GlyphAtlas();
             var advances = new Dictionary<uint, float>();
-            foreach (var kv in presentationFormsA.Glyphs) { atlas.Append(kv.Value); advances[kv.Key] = kv.Value.Advance; }
-            foreach (var kv in presentationFormsB.Glyphs) { atlas.Append(kv.Value); advances[kv.Key] = kv.Value.Advance; }
+            foreach (var kv in presentationFormsA.Glyphs) { atlas.Append(kv.Value, 0); advances[kv.Key] = kv.Value.Advance; }
+            foreach (var kv in presentationFormsB.Glyphs) { atlas.Append(kv.Value, 0); advances[kv.Key] = kv.Value.Advance; }
 
             return (atlas, new FixtureGlyphMetricsProvider(advances));
         }
@@ -109,7 +113,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(5, resultQuads.Count, "no whitespace in \"marhaba\" -- one quad per glyph");
 
             // First visual glyph (ALEF) sits at the line's left edge: penX = 0.
-            Assert.IsTrue(atlas.TryGetEntry(run.Glyphs[0].AtlasCodepoint, out GlyphAtlasEntry entryFirst));
+            Assert.IsTrue(atlas.TryGetEntry(0, run.Glyphs[0].AtlasCodepoint, out GlyphAtlasEntry entryFirst));
             float expectedFirstMinX = 0f + entryFirst.Left - GlyphSdf.Buffer;
             Assert.AreEqual(expectedFirstMinX, resultQuads[0].TopLeft.x, Tolerance, "the first VISUAL glyph must sit at the line's left edge");
 
@@ -118,11 +122,11 @@ namespace MapRenderer.Tests.Text
             float expectedTotalAdvance = 0f;
             foreach (PositionedGlyph g in run.Glyphs)
             {
-                Assert.IsTrue(atlas.TryGetEntry(g.AtlasCodepoint, out GlyphAtlasEntry e));
+                Assert.IsTrue(atlas.TryGetEntry(0, g.AtlasCodepoint, out GlyphAtlasEntry e));
                 expectedTotalAdvance += e.Advance;
             }
 
-            Assert.IsTrue(atlas.TryGetEntry(run.Glyphs[4].AtlasCodepoint, out GlyphAtlasEntry entryLast));
+            Assert.IsTrue(atlas.TryGetEntry(0, run.Glyphs[4].AtlasCodepoint, out GlyphAtlasEntry entryLast));
             float expectedLastMinX = (expectedTotalAdvance - entryLast.Advance) + entryLast.Left - GlyphSdf.Buffer;
             Assert.AreEqual(expectedLastMinX, resultQuads[4].TopLeft.x, Tolerance, "pen must accumulate every preceding glyph's advance, in visual order");
         }
@@ -151,8 +155,8 @@ namespace MapRenderer.Tests.Text
             var resultQuads = new List<SymbolQuad>();
             TextQuadLayout.Layout(run, atlas, in options, resultQuads);
 
-            Assert.IsTrue(atlas.TryGetEntry(0xFE8Eu, out GlyphAtlasEntry entryAlef)); // visual position 0
-            Assert.IsTrue(atlas.TryGetEntry(0xFEE3u, out GlyphAtlasEntry entryMeem)); // visual position 4
+            Assert.IsTrue(atlas.TryGetEntry(0, 0xFE8Eu, out GlyphAtlasEntry entryAlef)); // visual position 0
+            Assert.IsTrue(atlas.TryGetEntry(0, 0xFEE3u, out GlyphAtlasEntry entryMeem)); // visual position 4
             Assert.AreNotEqual(entryAlef.CellSize.x, entryMeem.CellSize.x, "sanity: ALEF and MEEM cell widths must differ for this tooth to be decisive");
 
             float actualFirstWidth = resultQuads[0].BottomRight.x - resultQuads[0].TopLeft.x;
@@ -181,7 +185,7 @@ namespace MapRenderer.Tests.Text
             float lineWidth = 0f;
             foreach (PositionedGlyph g in run.Glyphs)
             {
-                Assert.IsTrue(atlas.TryGetEntry(g.AtlasCodepoint, out GlyphAtlasEntry e));
+                Assert.IsTrue(atlas.TryGetEntry(0, g.AtlasCodepoint, out GlyphAtlasEntry e));
                 lineWidth += e.Advance;
             }
 

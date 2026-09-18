@@ -31,7 +31,7 @@ namespace MapRenderer.Tests.Text
             var atlas = new GlyphAtlas();
             for (uint codepoint = 1; codepoint <= 5; codepoint++)
             {
-                atlas.Append(MakeSyntheticGlyph(codepoint, width: 10, height: 12, advance: 14));
+                atlas.Append(MakeSyntheticGlyph(codepoint, width: 10, height: 12, advance: 14), 0);
             }
 
             var glyphs = new List<PositionedGlyph>();

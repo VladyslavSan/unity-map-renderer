@@ -95,10 +95,12 @@ namespace MapRenderer.Core.Text
         private static PositionedGlyph BuildGlyph(uint atlasCodepoint, int cluster, IGlyphMetricsProvider metrics)
         {
             float advance = 0f;
-            metrics?.TryGetAdvance(atlasCodepoint, out advance);
+            int fontId = 0;
+            if (metrics != null) metrics.TryResolveGlyph(atlasCodepoint, out advance, out fontId);
             return new PositionedGlyph
             {
                 AtlasCodepoint = atlasCodepoint,
+                FontId = fontId,
                 XAdvance = advance,
                 YAdvance = 0f,
                 XOffset = 0f,

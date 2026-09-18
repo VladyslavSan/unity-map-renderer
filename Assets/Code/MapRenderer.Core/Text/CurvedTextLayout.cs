@@ -41,7 +41,7 @@ namespace MapRenderer.Core.Text
             for (int i = 0; i < glyphs.Count; i++)
             {
                 PositionedGlyph glyph = glyphs[i];
-                if (!atlas.TryGetEntry(glyph.AtlasCodepoint, out GlyphAtlasEntry entry))
+                if (!atlas.TryGetEntry(glyph.FontId, glyph.AtlasCodepoint, out GlyphAtlasEntry entry))
                 {
                     // notdef: no quad, fall back to the shaped advance (mirrors TextQuadLayout).
                     penX += glyph.XAdvance;

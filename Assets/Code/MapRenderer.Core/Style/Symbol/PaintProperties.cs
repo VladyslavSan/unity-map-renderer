@@ -14,10 +14,9 @@ namespace MapRenderer.Core.Style.Symbol
     /// <c>icon-color</c> and the <c>icon-halo-*</c> trio are deferred to the SDF epic.
     ///
     /// <para>How each is consumed (S20/S105 F1): <see cref="Color"/>/<see cref="Opacity"/> bake into the
-    /// per-vertex billboard COLOUR stream (works for constant AND data-driven); the halo trio binds by name
-    /// onto the per-layer material's <c>_HaloColor</c>/<c>_HaloWidthPx</c>/<c>_HaloBlurPx</c> uniforms
-    /// (constant/zoom only in the first cut). <see cref="IconOpacity"/> is parsed here; consumption
-    /// (icon quad alpha) is a later stage.</para>
+    /// per-vertex billboard COLOUR stream, and the halo trio bakes into that same stream on a second copy of
+    /// each label's glyphs. All five evaluate per feature, so constant, zoom and data-driven all work.
+    /// <see cref="IconOpacity"/> is parsed here; consumption (icon quad alpha) is a later stage.</para>
     /// </summary>
     public sealed class PaintProperties
     {

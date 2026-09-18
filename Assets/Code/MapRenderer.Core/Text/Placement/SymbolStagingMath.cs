@@ -187,6 +187,9 @@ namespace MapRenderer.Core.Text.Placement
                 AnchorLocal = s.AnchorLocal, TileOriginRender = s.TileOriginRender, TileKey = s.TileKey,
                 TranslateDeltaPx = translatedScreenPx - screenPx, IsWorld = true,
                 SurfaceUp = surfaceUp,
+                // text-halo-*: carried per emit, not per quad — the halo is a second copy of THIS label's
+                // whole glyph run (WorldSymbolRenderer.Emit), so one set of values covers all of it.
+                HaloColor = s.HaloColor, HaloWidthPx = s.HaloWidthPx, HaloBlurPx = s.HaloBlurPx,
             };
         }
 
@@ -569,6 +572,10 @@ namespace MapRenderer.Core.Text.Placement
                 QuadStart = quadStart, QuadCount = glyphs.Length, Slot = s.Slot, AtlasKind = s.AtlasKind,
                 TileKey = s.TileKey, TileOriginRender = s.TileOriginRender, TranslateDeltaPx = translateDeltaPx,
                 IsWorld = true, AlongLine = true,
+                // text-halo-*: carried per emit, not per quad — the halo is a second copy of THIS label's
+                // whole glyph run (WorldSymbolRenderer.Emit), so one set of values covers all of it.
+                HaloColor = s.HaloColor, HaloWidthPx = s.HaloWidthPx, HaloBlurPx = s.HaloBlurPx,
+
                 // W2: the corner unit, decided ONCE by StageCurved's `worldArc` and only carried here. It is
                 // the same MetresPerLogicalPixel factor `arcScale` above already spaces these glyphs with, so
                 // a map-pitched symbol's spacing and its drawn cell size come from one constant.

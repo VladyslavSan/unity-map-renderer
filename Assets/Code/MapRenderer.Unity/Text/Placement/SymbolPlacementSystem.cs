@@ -462,6 +462,10 @@ namespace MapRenderer.Unity.Text.Placement
                 double2 viewportLogicalPx = _camera.ViewportLogicalPx;
                 // The world ruler for map-pitched curved symbols — converts device pixels to logical pixels once, here.
                 float metresPerLogicalPixel = (float)(_camera.MetresPerDevicePixel * _camera.DevicePixelRatio);
+                // text-halo-width/-blur are LOGICAL px on the emit; the SDF shader measures in DEVICE px.
+                // Read once per Tick against the LIVE ratio, so a dpr change needs no re-bake anywhere.
+                float haloDevicePixelRatio =
+                    (float)DeviceScaling.LogicalToDevicePx(1.0, PixelSpace.Device, _camera.DevicePixelRatio);
 
                 LastCandidateCount = 0;
                 LastDistanceCulledCount = 0;
@@ -563,7 +567,8 @@ namespace MapRenderer.Unity.Text.Placement
                                 {
                                     if (droppedHalves != 0 && (droppedHalves & (1 << (e - cand.EmitStart))) != 0) continue;
                                     CandidateEmit emit = _stageEmit[e];
-                                    totalQuads += WorldRenderer.Emit(in emit, _stageQuads.AsArray(), opacity);
+                                    totalQuads += WorldRenderer.Emit(in emit, _stageQuads.AsArray(), opacity,
+                                        haloDevicePixelRatio);
                                 }
                             }
                         }
@@ -829,6 +834,15 @@ namespace MapRenderer.Unity.Text.Placement
             float4 srgb   = paint.TextColor;
             Color  linear = new Color(srgb.x, srgb.y, srgb.z, 1f).linear;
             return new float4(linear.r, linear.g, linear.b, srgb.w * paint.Opacity);
+        }
+
+        // The halo sibling of LinearColor. text-opacity is deliberately NOT folded in: it already rides the
+        // quad's own colour, which the emit multiplies this alpha onto, so folding it here applies it twice.
+        internal static float4 LinearHaloColor(in SymbolPaint paint)
+        {
+            float4 srgb   = paint.HaloColor;
+            Color  linear = new Color(srgb.x, srgb.y, srgb.z, 1f).linear;
+            return new float4(linear.r, linear.g, linear.b, srgb.w);
         }
 
         // Demo path / out-of-range material index → default slot 0.

@@ -21,6 +21,14 @@ namespace MapRenderer.Core.Text
         /// </summary>
         public uint AtlasCodepoint { get; init; }
 
+        /// <summary>
+        /// The atlas font id this glyph resolved to (<see cref="GlyphAtlas.FontId"/>). Per GLYPH, not per
+        /// label: <see cref="FontStackResolver"/> falls back down the stack codepoint by codepoint, so one
+        /// label can legitimately draw from two faces. Pairs with <see cref="AtlasCodepoint"/> to key the
+        /// atlas — neither half alone identifies a bitmap.
+        /// </summary>
+        public int FontId { get; init; }
+
         /// <summary>Horizontal pen advance to the next glyph, in the glyph-PBF's pixel units.</summary>
         public float XAdvance { get; init; }
 

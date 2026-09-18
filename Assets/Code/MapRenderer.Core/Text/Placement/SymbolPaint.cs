@@ -12,10 +12,11 @@ namespace MapRenderer.Core.Text.Placement
     /// <c>TextQuadLayout.Layout</c> already baked into <see cref="SymbolQuad"/>s). Every color is
     /// straight RGBA (0..1, already linear-space).
     ///
-    /// <para><see cref="TextColor"/>/<see cref="Opacity"/> feed the billboard vertex color stream; halo
-    /// (<see cref="HaloColor"/>/<see cref="HaloWidthPx"/>/<see cref="HaloBlurPx"/>) is declared here and
-    /// honoured by the shader; <see cref="Default"/> supplies a constant halo until per-symbol
-    /// <c>text-halo-*</c> values are wired.</para>
+    /// <para><see cref="TextColor"/>/<see cref="Opacity"/> feed the billboard vertex color stream, and the
+    /// halo trio (<see cref="HaloColor"/>/<see cref="HaloWidthPx"/>/<see cref="HaloBlurPx"/>) feeds the SAME
+    /// stream on a second copy of the label's glyphs — the text shader has no halo term of its own. All five
+    /// are evaluated PER FEATURE by <c>SymbolFeatureExtractor</c>, so a data-driven <c>text-halo-*</c>
+    /// behaves like a data-driven <c>text-color</c>.</para>
     /// </summary>
     public readonly struct SymbolPaint
     {

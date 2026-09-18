@@ -122,5 +122,21 @@ namespace MapRenderer.Core.Text.Placement
         /// <c>text-size</c> is X px TOP-DOWN, like <c>line-width</c>).</para>
         /// </summary>
         public float CornerMetresPerLogicalPixel;
+
+        /// <summary><c>text-halo-color</c>, pre-linearized, with the halo colour's OWN alpha in <c>.w</c>
+        /// (text-opacity rides the quad's colour, and the emit multiplies the two). Carried per emit because
+        /// a halo is drawn as a SECOND copy of this label's glyph run — see
+        /// <c>WorldSymbolRenderer.Emit</c>.</summary>
+        public float4 HaloColor;
+
+        /// <summary><c>text-halo-width</c> in LOGICAL px — how far the halo run grows the glyph past its
+        /// fill edge. Zero means no halo run at all, which is the spec default.</summary>
+        public float HaloWidthPx;
+
+        /// <summary><c>text-halo-blur</c> in LOGICAL px — how much the halo run widens the AA transition.
+        /// Scaled to device px by the SAME factor as <see cref="HaloWidthPx"/> (S107: both are added to a
+        /// signed distance the SDF shader carries in device px, so scaling one without the other renders the
+        /// halo inconsistently at dpr ≠ 1).</summary>
+        public float HaloBlurPx;
     }
 }

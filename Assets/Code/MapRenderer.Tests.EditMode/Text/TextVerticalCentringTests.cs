@@ -101,7 +101,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
+            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
 
             // Top anchor => globalY = 0, so quad y is baselineY-relative with no anchor shift --
@@ -127,7 +127,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
+            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
 
             var resultQuads = new List<SymbolQuad>();
@@ -146,7 +146,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
+            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
 
             var textResultQuads = new List<SymbolQuad>();
@@ -186,7 +186,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
+            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
 
             var tightQuads = new List<SymbolQuad>();
@@ -210,8 +210,8 @@ namespace MapRenderer.Tests.Text
             // (their real ink centres differ by ~2px even under a perfectly symmetric formula).
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
-            GlyphAtlasEntry entrySpace = atlas.Append(latin.Glyphs[(uint)' ']);
+            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
+            GlyphAtlasEntry entrySpace = atlas.Append(latin.Glyphs[(uint)' '], 0);
             ShapedRun run = MakeRun(TextDirection.LeftToRight,
                 ((uint)'5', entryFive.Advance), ((uint)' ', entrySpace.Advance), ((uint)'5', entryFive.Advance));
 
@@ -246,7 +246,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A']);
+            GlyphAtlasEntry entryA = atlas.Append(latin.Glyphs[(uint)'A'], 0);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'A', entryA.Advance));
 
             float lineHeightPx = 1.2f * TextQuadLayout.OneEm;
@@ -288,10 +288,10 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
-            GlyphAtlasEntry entryZero = atlas.Append(latin.Glyphs[(uint)'0']);
-            GlyphAtlasEntry entryG = atlas.Append(latin.Glyphs[(uint)'g']);
-            GlyphAtlasEntry entryX = atlas.Append(latin.Glyphs[(uint)'x']);
+            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
+            GlyphAtlasEntry entryZero = atlas.Append(latin.Glyphs[(uint)'0'], 0);
+            GlyphAtlasEntry entryG = atlas.Append(latin.Glyphs[(uint)'g'], 0);
+            GlyphAtlasEntry entryX = atlas.Append(latin.Glyphs[(uint)'x'], 0);
 
             ShapedRun runFive = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
             ShapedRun runFiveZero = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance), ((uint)'0', entryZero.Advance));
@@ -325,7 +325,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
+            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
             ShapedRun run = MakeRun(TextDirection.LeftToRight, ((uint)'5', entryFive.Advance));
 
             var leftQuads = new List<SymbolQuad>();
@@ -361,7 +361,7 @@ namespace MapRenderer.Tests.Text
         {
             FontStackGlyphs latin = DecodeLatin();
             var atlas = new GlyphAtlas();
-            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5']);
+            GlyphAtlasEntry entryFive = atlas.Append(latin.Glyphs[(uint)'5'], 0);
 
             int bareHeight = entryFive.CellSize.y - 2 * GlyphSdf.Buffer;
             float baselineBelowReference = bareHeight - entryFive.Top;

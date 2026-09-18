@@ -31,7 +31,6 @@ using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using Line = MapRenderer.Core.Style.Line;
 using Fill = MapRenderer.Core.Style.Fill;
-using Symbol = MapRenderer.Core.Style.Symbol;
 
 namespace MapRenderer.Tests.Style
 {
@@ -71,15 +70,6 @@ namespace MapRenderer.Tests.Style
     ""layers"": [
         { ""id"": ""ground"", ""type"": ""fill"", ""source"": ""s"", ""source-layer"": ""l"",
           ""paint"": { ""fill-translate"": [9, -11] } }
-    ]
-}";
-
-        private const string HaloStyleJson = @"{
-    ""version"": 8,
-    ""layers"": [
-        { ""id"": ""label"", ""type"": ""symbol"", ""source"": ""s"", ""source-layer"": ""l"",
-          ""layout"": { ""text-field"": ""{NAME}"" },
-          ""paint"": { ""text-halo-width"": 2.5, ""text-halo-blur"": 1.5 } }
     ]
 }";
 
@@ -228,51 +218,17 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── The halo pair ────────────────────────────────────────────────────────────────────────
+        // ── The halo pair: moved out ──────────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// <b>T4 (halo rows).</b> <c>text-halo-width</c> and <c>text-halo-blur</c> are added directly to a
-        /// signed distance the SDF shader expresses in DEVICE px (<c>fwidth</c>-derived), so both scale — and
-        /// they scale TOGETHER: splitting the pair would render the halo inconsistently at any ratio ≠ 1.
-        ///
-        /// <para>Note this is a uniform assertion on purpose. The halo's rendered transition is
-        /// <c>(_SdfSoftness + blur)</c> — an AA constant in device px summed with the style's blur — so a
-        /// RENDERED halo-softness ratio would NOT be 2 even on a correct build. Do not write one.</para>
-        /// </summary>
-        [Test]
-        public void HaloUniforms_ScaleWithDpr_AndAreStyledValuesAtDpr1()
-        {
-            var layer = FirstLayer<Symbol.StyleLayer>(HaloStyleJson);
-            var renderLayer = SymbolRenderLayer.Create(layer, MapMaterialSetTestUtil.Load(), Zoom, drawIndex: 0);
-            try
-            {
-                Material mat = renderLayer.WorldTextMaterial;
-                Assert.IsNotNull(mat, "MapMaterialSet.SymbolTextWorld must be assigned.");
-                int widthId = Shader.PropertyToID("_HaloWidthPx");
-                int blurId  = Shader.PropertyToID("_HaloBlurPx");
-
-                // Create binds at dpr 1 — the seed. Byte-identical to the pre-change build.
-                Assert.That(mat.GetFloat(widthId), Is.EqualTo(2.5f).Within(1e-4f),
-                    "text-halo-width must bind as the styled logical value at construction (dpr 1).");
-                Assert.That(mat.GetFloat(blurId), Is.EqualTo(1.5f).Within(1e-4f),
-                    "text-halo-blur must bind as the styled logical value at construction (dpr 1).");
-
-                renderLayer.ApplyZoom(Zoom, 2.0);
-                Assert.That(mat.GetFloat(widthId), Is.EqualTo(5.0f).Within(1e-4f),
-                    "text-halo-width must read 5.0 at dpr 2 — it is added to a signed distance the shader " +
-                    "carries in device px, so an unscaled halo is half as thick as styled on a 2× panel.");
-                Assert.That(mat.GetFloat(blurId), Is.EqualTo(3.0f).Within(1e-4f),
-                    "text-halo-blur must read 3.0 at dpr 2 — the same device-px scale as _HaloWidthPx. " +
-                    "Scaling one without the other renders the halo inconsistently.");
-
-                renderLayer.ApplyZoom(Zoom, 1.0);
-                Assert.That(mat.GetFloat(widthId), Is.EqualTo(2.5f).Within(1e-4f),
-                    "the halo must follow the ratio back down, not latch at the highest value it saw.");
-                Assert.That(mat.GetFloat(blurId), Is.EqualTo(1.5f).Within(1e-4f),
-                    "the halo blur must follow the ratio back down too.");
-            }
-            finally { renderLayer.Dispose(); }
-        }
+        // text-halo-width/-blur are no longer material uniforms to read back. They are evaluated PER FEATURE
+        // onto the vertex stream and take the logical→device conversion at emit, against the LIVE ratio — so
+        // the tooth has to read the emitted mesh. It lives in
+        // SymbolHaloEmitTests.HaloWidthAndBlur_ScaleTogetherWithDevicePixelRatio, which asserts the same two
+        // claims this arm did: both terms scale, and they scale TOGETHER.
+        //
+        // Kept from the old arm because it is still true and still worth not re-learning: do NOT rewrite this
+        // as a RENDERED softness ratio. The halo's rendered transition is (_SdfAaDevicePx + blur) — an AA
+        // constant in device px summed with the style's blur — so that ratio is not 2 even on a correct build.
 
         // ── The BRG arm (design-doc C2) ──────────────────────────────────────────────────────────
 

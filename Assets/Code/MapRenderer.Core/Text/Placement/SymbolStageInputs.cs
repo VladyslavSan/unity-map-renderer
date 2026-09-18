@@ -51,6 +51,14 @@ namespace MapRenderer.Core.Text.Placement
         public TextTranslateAnchor TranslateAnchor;
         public AlignmentMode       RotationAlignment;
         public float4 Color;                        // pre-linearized × opacity
+        // text-halo-*, straight off SymbolPaint (SymbolFeatureExtractor evaluates all three PER FEATURE).
+        // HaloColor is pre-linearized like Color, but its .w is the halo colour's OWN alpha only — the
+        // emit multiplies it onto the text opacity, which is where text-opacity already lives.
+        // Width/blur stay LOGICAL px; they are scaled to device px together (S107) at emit, against the
+        // live ratio, so a dpr change needs no re-bake.
+        public float4 HaloColor;
+        public float  HaloWidthPx;
+        public float  HaloBlurPx;
         public long   FadeId;                       // A-4 point identity (pre-hashed)
         public bool   WasPlacedLastFrame;           // A-5 incumbency (pre-resolved)
 
@@ -103,6 +111,14 @@ namespace MapRenderer.Core.Text.Placement
         public float  MaxAngleDeg;                  // text-max-angle
         public bool   KeepUpright;                  // text-keep-upright
         public float4 Color;                        // pre-linearized × opacity
+        // text-halo-*, straight off SymbolPaint (SymbolFeatureExtractor evaluates all three PER FEATURE).
+        // HaloColor is pre-linearized like Color, but its .w is the halo colour's OWN alpha only — the
+        // emit multiplies it onto the text opacity, which is where text-opacity already lives.
+        // Width/blur stay LOGICAL px; they are scaled to device px together (S107) at emit, against the
+        // live ratio, so a dpr change needs no re-bake.
+        public float4 HaloColor;
+        public float  HaloWidthPx;
+        public float  HaloBlurPx;
 
         /// <summary>Stage AC (curved-world): the render-space tile origin this symbol's per-glyph
         /// <see cref="PlacedQuad.AnchorLocal"/> bakes are baked against — resolved by

@@ -4,8 +4,9 @@
 // DECLARATION order is the vertex stream byte layout and MUST match
 // WorldBillboardMeshBuilder.VertexDescriptors' order EXACTLY: Position (AnchorLocal), Color (ColorRGB),
 // TexCoord0 (Uv), TexCoord1 (Page), TexCoord2 (Offset), TexCoord3 (AlignFlags), TexCoord5 (Tangent),
-// TexCoord6 (Up) — Unity's canonical ascending VertexAttribute enum order (Position=0, Color=3,
-// TexCoord0=4, TexCoord1=5, TexCoord2=6, TexCoord3=7, TexCoord5=9, TexCoord6=10; see
+// TexCoord6 (Up), TexCoord7 (SdfWidenPx) — Unity's canonical ascending VertexAttribute enum order
+// (Position=0, Color=3, TexCoord0=4, TexCoord1=5, TexCoord2=6, TexCoord3=7, TexCoord5=9, TexCoord6=10,
+// TexCoord7=11; see
 // BillboardVertex/StyledLineTileBuilder's identical rule). Declaring these out of order triggers Unity's
 // "non-standard order" auto-adjustment, which silently reinterprets the byte layout against a DIFFERENT
 // stream than this struct actually writes (BillboardVertex's header documents the exact failure mode: the
@@ -14,7 +15,8 @@
 // FROZEN at A0: A1/A2/A3 are purely additive on top of this layout — never a reshuffle of stream 0. Stage
 // AC (curved-world) appended Tangent as the LAST field at the time (TEXCOORD5) — AlignFlags was no longer
 // last, Tangent was; P2 now appends Up (TEXCOORD6) as the new LAST field (see its own doc below) —
-// Tangent is no longer last, Up is. Both still honor "append, never reshuffle existing attributes."
+// Tangent is no longer last, Up is; the halo stage now appends SdfWidenPx (TEXCOORD7) as the new last
+// field. All three still honor "append, never reshuffle existing attributes."
 // Opacity is NOT here — it is stream 1 (a separate per-frame dynamic array, TexCoord4 on the mesh) so a
 // fade update (A2) never touches this stream's topology.
 
@@ -81,5 +83,14 @@ namespace MapRenderer.Core.Text.Placement
         /// supplied by <c>IProjection.ProjectPoint(...).Up</c> via <see cref="BillboardMath.BuildWorldQuad"/>.
         /// WRITTEN by P2, UNREAD by every shader — the pitch-alignment tangent-frame branch is P3.</summary>
         public float3 Up;
+
+        /// <summary>TEXCOORD7, the new LAST field (see this file's header): how far this corner's glyph is
+        /// grown past the SDF fill edge, in DEVICE px — x pushes the edge OUT, y widens the AA transition.
+        /// <para>Zero on a text run, which makes the shader's one shading path reproduce the plain fill.
+        /// A halo run carries <c>text-halo-width</c>/<c>text-halo-blur</c> here and the halo colour in
+        /// <see cref="ColorRGB"/>, which is the whole of what makes it a halo — the shader has no halo
+        /// concept. Written by <c>WorldSymbolRenderer.Emit</c>, not by
+        /// <see cref="BillboardMath.BuildWorldQuad"/> (same split as the opacity stream).</para></summary>
+        public float2 SdfWidenPx;
     }
 }
