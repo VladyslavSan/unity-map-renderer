@@ -199,15 +199,13 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ConstrainedAngleTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Projection/ProjectionMathTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/CameraPropertiesTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/EarcutTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/EarcutDegenerateTriangleTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/EarcutEarTestScanBoundTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/PolygonAssemblerTests.cs" />
-    <!-- Engine-free (ProtobufReader + uint[]) — UMR-106 Stage 2's scan-bound teeth decode fixtures
-         through these directly, so MeshCoverageValidator's MapRenderer.Jobs.Mvt dependency stays out
-         of this project. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/MvtFixtureStreams.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/MvtGeometry.cs" />
+    <!-- A0 (Core oracle cleanup): EarcutTests / EarcutDegenerateTriangleTests / EarcutEarTestScanBoundTests
+         moved off this project — they now drive MapRenderer.Jobs.Fill.EarcutJob (NativeArray/Burst),
+         which this project cannot compile. A permanent loss to the fast loop; see
+         docs/mesh-triangulation-robustness-design.md. MvtFixtureStreams/MvtGeometry were those three
+         tests' only registered consumers here (verified: no other registered file has a symbol use,
+         only a doc-comment mention in GeoJsonParserTests.cs) — removed with them. -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/LineTessellatorTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ViewMathTests.cs" />

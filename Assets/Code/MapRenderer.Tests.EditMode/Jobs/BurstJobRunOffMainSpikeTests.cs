@@ -174,6 +174,7 @@ namespace MapRenderer.Tests.Jobs
                 var outIndexCount  = new NativeArray<int>(1, Allocator.Persistent);
                 var force   = new NativeArray<int>(1, Allocator.Persistent);
                 var mergedVC = new NativeArray<int>(1, Allocator.Persistent);
+                var candidateVisits = new NativeArray<long>(1, Allocator.Persistent);
                 var v = new NativeArray<double2>(4, Allocator.Persistent);
                 var prev = new NativeArray<int>(4, Allocator.Persistent);
                 var next = new NativeArray<int>(4, Allocator.Persistent);
@@ -193,7 +194,7 @@ namespace MapRenderer.Tests.Jobs
                         SortedHoleCounts = sortedHoleCounts, HoleCount = 0,
                         OutIndices = outIdx, OutIndexOffset = 0,
                         OutIndexCount = outIndexCount, OutForceClipCount = force,
-                        OutMergedVertexCount = mergedVC,
+                        OutMergedVertexCount = mergedVC, OutCandidateVisits = candidateVisits,
                         Verts = v, Prev = prev, Next = next,
                         IsBridgeCopy = isBridge, Removed = removed, IsEar = isEar,
                     }.Run();
@@ -203,7 +204,7 @@ namespace MapRenderer.Tests.Jobs
                 finally
                 {
                     verts.Dispose(); sortedHoleCounts.Dispose(); outIdx.Dispose(); outIndexCount.Dispose(); force.Dispose();
-                    mergedVC.Dispose();
+                    mergedVC.Dispose(); candidateVisits.Dispose();
                     v.Dispose(); prev.Dispose(); next.Dispose();
                     isBridge.Dispose(); removed.Dispose(); isEar.Dispose();
                 }

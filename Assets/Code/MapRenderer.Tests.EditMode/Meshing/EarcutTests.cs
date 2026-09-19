@@ -2,12 +2,13 @@ using System;
 using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
-using MapRenderer.Core.Geometry;
 
 namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
-    /// EditMode tests for the clean-room Earcut triangulator.
+    /// EditMode tests for <see cref="EarcutJobPolygonRunner"/>, the H1 driver for
+    /// <see cref="MapRenderer.Jobs.Fill.EarcutJob"/> (Unity EditMode only — NativeArray/Burst; not
+    /// registered in Tools/core-tests).
     /// All geometry is defined in tile-space double2 (Y-down, origin top-left).
     ///
     /// Triangle count formula for a simple polygon with holes:
@@ -15,7 +16,6 @@ namespace MapRenderer.Tests.Meshing
     ///   (each hole adds 2 bridge verts, each new poly needs n-2 triangles)
     ///
     /// Area conservation: Σ|triArea| should equal |outerArea| − Σ|holeAreas|, within epsilon.
-    /// Tests use Earcut.Result.Vertices for index lookup (no out-of-band reconstruction needed).
     /// </summary>
     public class EarcutTests
     {
@@ -63,7 +63,7 @@ namespace MapRenderer.Tests.Meshing
                 new double2(0, 100),
             };
 
-            var result = Earcut.Triangulate(square, null);
+            var result = EarcutJobPolygonRunner.Run(square);
             Assert.AreEqual(6, result.Indices.Length, "Square should produce 6 indices (2 triangles).");
 
             // All indices must be in range.
@@ -86,7 +86,7 @@ namespace MapRenderer.Tests.Meshing
                 pentagon.Add(new double2(100 + 50 * Math.Cos(angle), 100 + 50 * Math.Sin(angle)));
             }
 
-            var result = Earcut.Triangulate(pentagon, null);
+            var result = EarcutJobPolygonRunner.Run(pentagon);
             Assert.AreEqual(9, result.Indices.Length, "Pentagon should produce 9 indices (3 triangles).");
 
             foreach (int idx in result.Indices)
@@ -119,7 +119,7 @@ namespace MapRenderer.Tests.Meshing
                 new double2(150, 50),
             };
 
-            var result = Earcut.Triangulate(outer, new List<List<double2>> { hole });
+            var result = EarcutJobPolygonRunner.Run(outer, hole);
             Assert.AreEqual(24, result.Indices.Length, "Square+hole should produce 24 indices (8 triangles).");
 
             foreach (int idx in result.Indices)
@@ -149,7 +149,7 @@ namespace MapRenderer.Tests.Meshing
                 new double2(300, 100),
             };
 
-            var result = Earcut.Triangulate(outer, new List<List<double2>> { hole });
+            var result = EarcutJobPolygonRunner.Run(outer, hole);
             Assert.Greater(result.Indices.Length, 0, "Should produce triangles.");
 
             double triArea = TotalTriArea(result.Vertices, result.Indices);
@@ -174,7 +174,7 @@ namespace MapRenderer.Tests.Meshing
                 new double2(0, 300),
             };
 
-            var result = Earcut.Triangulate(outer, null);
+            var result = EarcutJobPolygonRunner.Run(outer);
             double triArea = TotalTriArea(result.Vertices, result.Indices);
             double expectedArea = RingArea(outer);
 
@@ -200,7 +200,7 @@ namespace MapRenderer.Tests.Meshing
                 new double2(250, 250), new double2(250, 50),
             };
 
-            var result = Earcut.Triangulate(outer, new List<List<double2>> { hole });
+            var result = EarcutJobPolygonRunner.Run(outer, hole);
             foreach (int idx in result.Indices)
                 Assert.That(idx, Is.GreaterThanOrEqualTo(0).And.LessThan(result.Vertices.Length),
                     $"Index {idx} out of range [0, {result.Vertices.Length})");
@@ -213,7 +213,7 @@ namespace MapRenderer.Tests.Meshing
         [Test]
         public void NullOuter_ReturnsEmpty()
         {
-            var result = Earcut.Triangulate(null, null);
+            var result = EarcutJobPolygonRunner.Run(null);
             Assert.AreEqual(0, result.Indices.Length);
             Assert.AreEqual(0, result.Vertices.Length);
         }
@@ -222,7 +222,7 @@ namespace MapRenderer.Tests.Meshing
         public void TooFewVerts_ReturnsEmpty()
         {
             var ring = new List<double2> { new double2(0, 0), new double2(1, 1) };
-            var result = Earcut.Triangulate(ring, null);
+            var result = EarcutJobPolygonRunner.Run(ring);
             Assert.AreEqual(0, result.Indices.Length);
         }
     }

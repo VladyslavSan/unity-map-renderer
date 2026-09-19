@@ -305,6 +305,30 @@ Concretely, measured on the committed corpus + a fetched panel of coastline-dens
   is insufficient (it passes without touching the path). Minor observability follow-up: a
   headroom-exhaustion drop is currently indistinguishable from a genuine-degeneracy drop (both `ForceClips++`).
 
+## 6.3 Coverage shape after the managed triangulator was removed
+
+Triangulation correctness is proven by *property* coverage against geometric ground truth
+(`PolygonAssembler` + `SignedArea` + even-odd rasterisation) run over the Burst `EarcutJob`'s own
+output. There is no second, independently-implemented triangulator to arm-check the Burst port
+against — that arm-agreement coverage ended when the managed triangulator was removed, with no
+replacement; property coverage is independent of the triangulator under test but weaker than a
+bit-identity check would be.
+
+**Permanent loss to the `Tools/core-tests` fast loop.** `EarcutTests.cs`, `EarcutDegenerateTriangleTests.cs`
+and `EarcutEarTestScanBoundTests.cs` (~14 test cases total: `Earcut.Triangulate`'s degenerate-input
+handling, synthetic hole triangulation, `PointInTriangle`'s degenerate branch, and the whole UMR-106
+Stage 2 scan-bound corpus sweep) moved off `core-tests.csproj`. They now drive `MapRenderer.Jobs.Fill.EarcutJob`
+— `NativeArray`, Burst, `Unity.Collections` — which `core-tests` cannot compile (no shim may bridge this;
+see that project's own doc for the silent-no-op `AsArray()` dispose hazard a shim would reintroduce). This
+is a durable consequence of going Burst-only, not a stage artefact: there is no future stage that restores
+these ~14 cases to the sub-second loop. They still run — every commit — as part of the Unity EditMode gate.
+
+**`TriangulationBuffers.HoleCountOffsets` is capacity, `PolyHoleCount` is truth.** `HoleCountOffsets[pi+1]
+- HoleCountOffsets[pi]` is the sizing pass's per-polygon CAPACITY — padded to 1 even for a zero-hole
+polygon, to match `EarcutJob.SortedHoleCounts`'s own length-1-when-empty contract. It is not that
+polygon's real hole count; `PolyHoleCount[pi]` is. Reconstructing a polygon's holes from the offsets
+column alone silently manufactures one zero-vertex phantom hole per zero-hole polygon.
+
 ## 7. Scope fences (out of this epic)
 
 - **Globe fill T-junction seams** between adjacently-subdivided tiles (`GlobeFillSubdivideJob` refines each

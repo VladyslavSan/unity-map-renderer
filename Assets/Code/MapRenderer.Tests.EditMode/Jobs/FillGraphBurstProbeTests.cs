@@ -25,6 +25,7 @@ using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Projection;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Tests.TestSupport;
+using static MapRenderer.Tests.Meshing.EarcutJobGatherHarness;
 
 namespace MapRenderer.Tests.Jobs
 {
@@ -40,137 +41,16 @@ namespace MapRenderer.Tests.Jobs
             return File.ReadAllBytes(path);
         }
 
-        // ── Shared setup: derive the visited-ring buffer + assemble polygons + size the flat buffers, ──────
-        // ── exactly what the retired synchronous FillMeshPipeline.Schedule's private code did (Stage 1/2/3a; ─
-        // ── job-scheduling-design.md §8 stage 4 Group B retired it), duplicated here because SizingJob ──
-        // ── did not exist yet at stage 1 — it exists now, in FillMeshGraph.cs's own sizing node. ───────────
-
-        private struct GatherState
-        {
-            public NativeArray<int> PolyOuterIdx, PolyHoleStart, PolyHoleCount, HoleRingIdxs, PolyCountArr;
-            public int PolyCount;
-            public TriangulationBuffers Buffers;
-
-            public void Dispose()
-            {
-                PolyOuterIdx.Dispose(); PolyHoleStart.Dispose(); PolyHoleCount.Dispose();
-                HoleRingIdxs.Dispose(); PolyCountArr.Dispose();
-                Buffers.DisposeAfter(default).Complete();
-            }
-        }
-
-        /// <summary>Derives the visited-ring buffer (RingSelectJob's no-clip fast path — every unset caller's
-        /// path), assembles polygons (RingAssemblyJob, unmodified), sizes the flat buffers (hand-reproducing
-        /// FillMeshPipeline.cs:312–371 — SizingJob's future job, not yet written), then runs
-        /// <see cref="FillGatherJob{TComparer}"/> to populate the flat vertex/hole-count/outer-count/feature-idx
-        /// outputs. Caller disposes the returned <paramref name="derived"/> buffer and <paramref name="state"/>.
-        ///
-        /// <para>The hand-written <c>PerPolyFeatureIndex</c>/<c>PerPolyOuterCount</c> pre-sizing below (mirroring
-        /// <see cref="SizingJob"/>, which did not exist yet when this helper was written) is NOT incidental
-        /// setup: <see cref="FillGatherJob{TComparer}"/> now bounds its own loop by
-        /// <c>Buffers.PerPolyOuterCount.Length</c>, so removing it as "redundant" would silently zero the
-        /// gather loop's bound.</para></summary>
-        private static void BuildGatherState(
-            TileGeometryBuffers geometry, NativeArray<int> visitOrder,
-            out TileGeometryBuffers derived, out GatherState state)
-        {
-            var outVerts   = new NativeList<double2>(Allocator.Persistent);
-            var outOffsets = new NativeList<int>(Allocator.Persistent);
-            var outFeatIdx = new NativeList<int>(Allocator.Persistent);
-            new RingSelectJob
-            {
-                Vertices = geometry.Vertices, RingOffsets = geometry.RingOffsets, RingFeatureIdx = geometry.RingFeatureIdx,
-                RingVisitOrder = visitOrder,
-                OutVertices = outVerts, OutRingOffsets = outOffsets, OutRingFeatureIdx = outFeatIdx,
-            }.Run();
-            derived = TileGeometryBuffers.AdoptDerivedLists(
-                geometry.Tile, geometry.Extent, geometry.FeatureGeometryType, outVerts, outOffsets, outFeatIdx);
-            Assert.Greater(derived.RingCount, 0, "precondition: the derived buffer has rings to assemble");
-
-            int maxPolygons = math.max(1, derived.RingCapacity);
-            var polyOuterIdx  = new NativeArray<int>(maxPolygons, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var polyHoleStart = new NativeArray<int>(maxPolygons, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var polyHoleCount = new NativeArray<int>(maxPolygons, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var holeRingIdxs  = new NativeArray<int>(maxPolygons, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            var polyCountArr  = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
-            var holeCountArr  = new NativeArray<int>(1, Allocator.Persistent, NativeArrayOptions.ClearMemory);
-
-            new RingAssemblyJob
-            {
-                Vertices = derived.Vertices, RingOffsets = derived.RingOffsets, RingFeatureIdx = derived.RingFeatureIdx,
-                RingCount = derived.RingCount, FeatureGeometryType = derived.FeatureGeometryType,
-                OutPolyOuterRingIdx = polyOuterIdx, OutPolyHoleListStart = polyHoleStart, OutPolyHoleCount = polyHoleCount,
-                OutHoleRingIdxs = holeRingIdxs, OutPolygonCount = polyCountArr, OutHoleCount = holeCountArr,
-            }.Run();
-
-            int polyCount = polyCountArr[0];
-            holeCountArr.Dispose();
-            Assert.Greater(polyCount, 0, "precondition: the water layer has polygons");
-
-            TriangulationBuffers buffers = TriangulationBuffers.Allocate();
-            NativeList<int> vertexOffsets    = buffers.VertexOffsets;
-            NativeList<int> holeCountOffsets = buffers.HoleCountOffsets;
-            NativeList<int> workOffsets = buffers.WorkOffsets;
-            NativeList<int> indexOffsets     = buffers.IndexOffsets;
-            vertexOffsets.Add(0); holeCountOffsets.Add(0); workOffsets.Add(0); indexOffsets.Add(0);
-
-            for (int pi = 0; pi < polyCount; pi++)
-            {
-                int outerRi   = polyOuterIdx[pi];
-                int outerLen  = derived.RingOffsets[outerRi + 1] - derived.RingOffsets[outerRi];
-                int holeCount = polyHoleCount[pi];
-                int hStart    = polyHoleStart[pi];
-
-                int holeVertTotal = 0;
-                for (int hi = 0; hi < holeCount; hi++)
-                {
-                    int hri = holeRingIdxs[hStart + hi];
-                    holeVertTotal += derived.RingOffsets[hri + 1] - derived.RingOffsets[hri];
-                }
-
-                int polyVC        = outerLen + holeVertTotal;
-                int baseCap       = polyVC + holeCount * 2;
-                int splitBudget   = math.min(EarcutJob.MaxSplits, math.max(8, holeCount * 4));
-                int workCap       = baseCap + splitBudget * 2;
-                int idxCap        = workCap > 2 ? (workCap - 2) * 3 : 3;
-                int sortedHoleLen = holeCount > 0 ? holeCount : 1;
-
-                vertexOffsets.Add(vertexOffsets[pi] + polyVC);
-                holeCountOffsets.Add(holeCountOffsets[pi] + sortedHoleLen);
-                workOffsets.Add(workOffsets[pi] + workCap);
-                indexOffsets.Add(indexOffsets[pi] + idxCap);
-            }
-
-            buffers.FlatPolyVerts.Resize(vertexOffsets[polyCount], NativeArrayOptions.UninitializedMemory);
-            buffers.FlatSortedHoleCounts.Resize(holeCountOffsets[polyCount], NativeArrayOptions.ClearMemory);
-            buffers.PerPolyFeatureIndex.Resize(polyCount, NativeArrayOptions.UninitializedMemory);
-            buffers.PerPolyOuterCount.Resize(polyCount, NativeArrayOptions.UninitializedMemory);
-
-            var comparer = new FillMeshPipeline.HoleRingComparer(derived.Vertices, derived.RingOffsets);
-            new FillGatherJob<FillMeshPipeline.HoleRingComparer>
-            {
-                Vertices = derived.Vertices, RingOffsets = derived.RingOffsets, RingFeatureIdx = derived.RingFeatureIdx,
-                PolyOuterRingIdx = polyOuterIdx, PolyHoleListStart = polyHoleStart, PolyHoleCount = polyHoleCount,
-                HoleRingIdxs = holeRingIdxs,
-                Comparer = comparer,
-                Buffers = buffers,
-            }.Run();
-
-            state = new GatherState
-            {
-                PolyOuterIdx = polyOuterIdx, PolyHoleStart = polyHoleStart, PolyHoleCount = polyHoleCount,
-                HoleRingIdxs = holeRingIdxs, PolyCountArr = polyCountArr, PolyCount = polyCount,
-                Buffers = buffers,
-            };
-        }
+        // ── Shared setup moved to EarcutJobGatherHarness.BuildGatherState (A0) — the real per-polygon ────
+        // ── gather chain, now also driving the re-homed corpus and full-pipeline teeth. ───────────────────
 
         // ── (1) EarcutBatchJob — unknown (i): GetSubArray + nested EarcutJob.Execute() inside a job ────────
 
         /// <summary>A dispatch parity oracle, not a kernel oracle: both arms below call <c>EarcutJob</c>
         /// itself, so a defect inside <c>EarcutJob</c> reproduces identically on both sides and this test
-        /// cannot see it (RED-verified: a transposed vertex here stayed green). For kernel correctness
-        /// against the managed reference, see
-        /// <c>JobifiedPipelineTests.JobifiedPipeline_VertexAndIndexContentHash_MatchManagedPath</c>.</summary>
+        /// cannot see it (RED-verified: a transposed vertex here stayed green). Kernel correctness is
+        /// pinned by <c>WaterTriangulationTests</c>' 8-tile corpus sweep instead (property coverage against
+        /// geometric ground truth, not arm agreement with a managed twin — see A0 stage report).</summary>
         [Test]
         public void EarcutBatchJob_MatchesPerPolygonEarcutJobRun()
         {
@@ -198,6 +78,7 @@ namespace MapRenderer.Tests.Jobs
                 var refIndexCounts   = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 var refForce    = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 var refMergedVC = new NativeArray<int>(polyCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+                var refVisits = new NativeArray<long>(polyCount, Allocator.Persistent, NativeArrayOptions.ClearMemory);
                 var refV = new NativeArray<double2>(s.Buffers.WorkOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 var refPrev = new NativeArray<int>(s.Buffers.WorkOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
                 var refNext = new NativeArray<int>(s.Buffers.WorkOffsets[polyCount], Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
@@ -222,6 +103,7 @@ namespace MapRenderer.Tests.Jobs
                         OutIndexCount        = refIndexCounts.GetSubArray(pi, 1),
                         OutForceClipCount    = refForce.GetSubArray(pi, 1),
                         OutMergedVertexCount = refMergedVC.GetSubArray(pi, 1),
+                        OutCandidateVisits   = refVisits.GetSubArray(pi, 1),
                         Verts = refV.GetSubArray(sOff, sLen),
                         Prev = refPrev.GetSubArray(sOff, sLen), Next = refNext.GetSubArray(sOff, sLen),
                         IsBridgeCopy = refBridge.GetSubArray(sOff, sLen), Removed = refRemoved.GetSubArray(sOff, sLen),
@@ -290,6 +172,7 @@ namespace MapRenderer.Tests.Jobs
                 }
 
                 refIdx.Dispose(); refIndexCounts.Dispose(); refForce.Dispose(); refMergedVC.Dispose();
+                refVisits.Dispose();
                 refV.Dispose(); refPrev.Dispose(); refNext.Dispose();
                 refBridge.Dispose(); refRemoved.Dispose(); refIsEar.Dispose();
                 batchIdx.Dispose(); batchIndexCounts.Dispose(); batchForce.Dispose(); batchMergedVC.Dispose();

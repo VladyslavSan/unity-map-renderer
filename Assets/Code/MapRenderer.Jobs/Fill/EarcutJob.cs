@@ -7,12 +7,12 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// Burst job: ear-clipping polygon triangulator over NativeArrays. Faithful port of
-    /// <c>Earcut.Triangulate</c> from MapRenderer.Core — same algorithm, same tie-breaking,
-    /// same bridge/hole logic, same cure → split → clean-drop failure cascade (mesh-triangulation-
-    /// robustness Stage 3 — mirrors the Stage 2 managed fix). Produces bit-identical output to the
-    /// managed reference (integer tile-space coords are exact; pinned by
-    /// <c>JobifiedPipelineTests.JobifiedPipeline_VertexAndIndexContentHash_MatchManagedPath</c>).
+    /// Burst job: ear-clipping polygon triangulator over NativeArrays — the same algorithm, tie-
+    /// breaking, bridge/hole logic, and cure → split → clean-drop failure cascade this codebase has
+    /// used since mesh-triangulation-robustness Stage 3. Output correctness is pinned by the
+    /// property teeth in <c>WaterTriangulationTests</c>' 8-tile corpus sweep (ground truth via
+    /// <c>PolygonAssembler</c> + even-odd rasterisation) and by <c>FillGraphBurstProbeTests</c>'
+    /// dispatch parity against the same gather state.
     ///
     /// Input: vertices for ONE polygon (outer + bridged holes packed contiguously), ring metadata
     /// from <see cref="RingAssemblyJob"/> output.
@@ -77,6 +77,11 @@ namespace MapRenderer.Jobs.Fill
 
         [ReadOnly] public int HoleCount;
 
+        /// <summary>Test-only override: forces every ear test onto the full linear scan, bypassing the
+        /// bounding-box grid. The parity arm for EarcutEarTestScanBoundTests. Default false — every
+        /// production construction site leaves it unset, so the shipping path is unchanged.</summary>
+        public bool ForceLinearEarScan;
+
         // ── Output ───────────────────────────────────────────────────────────────────────────
         /// <summary>Triangle index output. Pre-allocated by the coordinator.</summary>
         [WriteOnly] public NativeArray<int> OutIndices;
@@ -99,6 +104,14 @@ namespace MapRenderer.Jobs.Fill
         /// how many of <see cref="Verts"/> are meaningful; the tail beyond this count is
         /// unwritten scratch, not part of the triangulation.</summary>
         public NativeArray<int> OutMergedVertexCount;
+
+        /// <summary>Test-only [0] = total ear-test candidate visits. Left default by every production
+        /// caller, in which case nothing is written.</summary>
+        public NativeArray<long> OutCandidateVisits;
+
+        /// <summary>Running count of ear-test candidate visits in <see cref="ComputeIsEar"/> this
+        /// polygon, flushed to <see cref="OutCandidateVisits"/> once at the end of <see cref="Execute"/>.</summary>
+        private long _candidateVisits;
 
         // ── Working buffers (pre-allocated by the coordinator, size = capacity + split headroom) ────
         // Using NativeArrays for all internal buffers so the job has no GC allocations.
@@ -193,6 +206,7 @@ namespace MapRenderer.Jobs.Fill
                 OutIndexCount[0]        = 0;
                 OutForceClipCount[0]    = 0;
                 OutMergedVertexCount[0] = 0;
+                if (OutCandidateVisits.IsCreated) OutCandidateVisits[0] = 0;
                 return;
             }
 
@@ -335,6 +349,7 @@ namespace MapRenderer.Jobs.Fill
             OutIndexCount[0]        = outCount;
             OutForceClipCount[0]    = forceClipCount;
             OutMergedVertexCount[0] = total;
+            if (OutCandidateVisits.IsCreated) OutCandidateVisits[0] = _candidateVisits;
         }
 
         // ── Ear-clip one ring to completion (mirrors managed EarClipRing) ───────────────────────
@@ -899,10 +914,13 @@ namespace MapRenderer.Jobs.Fill
 
             // Wide-AABB guard: fall back to the linear scan rather than walk more cells than a
             // linear pass would cost anyway. Same answer either way — this only bounds the worst case.
-            if (overlappedCells > (long)grid.Dim * grid.Dim / 4)
+            if (ForceLinearEarScan || overlappedCells > (long)grid.Dim * grid.Dim / 4)
             {
                 for (int i = 0; i < total; i++)
+                {
+                    _candidateVisits++;
                     if (BlocksEar(i, p, v, n, a, b, c)) return false;
+                }
                 return true;
             }
 
@@ -914,11 +932,17 @@ namespace MapRenderer.Jobs.Fill
                     int cell = rowBase + gx;
                     int start = grid.CellStart[cell], end = grid.CellStart[cell + 1];
                     for (int k = start; k < end; k++)
+                    {
+                        _candidateVisits++;
                         if (BlocksEar(grid.CellItems[k], p, v, n, a, b, c)) return false;
+                    }
                 }
             }
             for (int oi = 0; oi < grid.Overflow.Length; oi++)
+            {
+                _candidateVisits++;
                 if (BlocksEar(grid.Overflow[oi], p, v, n, a, b, c)) return false;
+            }
             return true;
         }
 
@@ -952,9 +976,12 @@ namespace MapRenderer.Jobs.Fill
                    Area2(Verts[pn], Verts[m], Verts[mn]) < 0.0;
         }
 
-        /// <summary>Mirror of <see cref="MapRenderer.Core.Geometry.Earcut.PointInTriangle"/> — see its doc
-        /// for the degenerate-candidate branch this predicate needs and why.</summary>
-        private bool PointInTriangle(
+        /// <summary>True if P lies in or on triangle ABC. A degenerate (collinear) ABC is the segment
+        /// hull of its corners, not the whole plane: collinear corners make every cross product zero, so
+        /// without the explicit branch below a point at any distance on the shared line would read as
+        /// contained. <c>internal</c>: the direct-call arm for <c>EarcutDegenerateTriangleTests</c> —
+        /// see its doc for why a static call, not the Burst kernel, exercises this branch.</summary>
+        internal static bool PointInTriangle(
             double ax, double ay, double bx, double by, double cx, double cy,
             double px, double py)
         {

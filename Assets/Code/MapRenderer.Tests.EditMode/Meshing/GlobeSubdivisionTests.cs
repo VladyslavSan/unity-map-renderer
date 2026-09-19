@@ -4,15 +4,15 @@ using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Geometry;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
-    /// Globe-fill SUBDIVISION testbench (design §6.2). Unity EditMode only — it drives
-    /// <see cref="SubdivisionCoverageValidator"/>, which is itself Unity-only (see that class's header).
-    /// See <see cref="SubdivisionCoverageValidator"/> for the managed mirror + gap/coverage/quality
-    /// analysis this exercises.
+    /// Globe-fill SUBDIVISION testbench (design §6.2), driving <see cref="SubdivisionCoverageValidator"/>.
+    /// The 3 real-tile tests re-home onto the REAL jobified fill path via
+    /// <see cref="EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph"/>; the 2 synthetic tests earcut
+    /// via <see cref="EarcutJobPolygonRunner"/> (H1).
     /// </summary>
     public class GlobeSubdivisionTests
     {
@@ -34,13 +34,26 @@ namespace MapRenderer.Tests.Meshing
 
         private static readonly TileId Water63220 = new TileId { Z = 6, X = 32, Y = 20 };
 
+        /// <summary>Gets one fixture/layer's earcut-only tile-space root triangles via
+        /// <see cref="EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph"/> (see its doc for why
+        /// extraction always runs non-curved), then runs <paramref name="mirrorProjection"/>'s own
+        /// managed-mirror subdivision over them.</summary>
+        private static SubdivisionCoverageValidator.Report RunOnBurstArm(
+            byte[] mvtBytes, string layerName, in TileId id, IProjection mirrorProjection)
+        {
+            var (tileVerts, triangleIndices, vertexFeatureIdx, extent) =
+                EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph(mvtBytes, layerName, id);
+            return SubdivisionCoverageValidator.ValidateTriangulation(
+                tileVerts, triangleIndices, vertexFeatureIdx, id, mirrorProjection, extent);
+        }
+
         // ---- always-on guard — Mercator is a pass-through no-op (design §6.2: "Mercator moves zero pixels") ----
 
         [Test]
         public void Mercator_IsPassThrough_NoOp()
         {
             var mvt = LoadFixture("water-6-32-20.pbf.bytes");
-            var rep = SubdivisionCoverageValidator.ValidateTileLayer(mvt, "water", Water63220, new WebMercatorProjection());
+            var rep = RunOnBurstArm(mvt, "water", Water63220, new WebMercatorProjection());
 
             Assert.AreEqual(0, rep.MaxDepthReached, "a constant-up projection must never subdivide: " + rep.Summary);
             Assert.IsFalse(rep.Subdivided, "Mercator subdivided — invariant broken: " + rep.Summary);
@@ -63,9 +76,11 @@ namespace MapRenderer.Tests.Meshing
             {
                 new double2(0, 0), new double2(4096, 0), new double2(4096, 4096), new double2(0, 4096),
             };
-            var poly = new Polygon(outer);
+            var res = EarcutJobPolygonRunner.Run(outer);
+            var vertexFeatureIdx = new int[res.Vertices.Length];
 
-            var rep = SubdivisionCoverageValidator.Validate(new[] { poly }, Water63220, new SphericalProjection(), extent: 4096);
+            var rep = SubdivisionCoverageValidator.ValidateTriangulation(
+                res.Vertices, res.Indices, vertexFeatureIdx, Water63220, new SphericalProjection(), extent: 4096);
 
             Assert.AreEqual(0, rep.FlippedTris, "clean square must not fold: " + rep.Summary);
             Assert.AreEqual(0, rep.DegenerateTris, "clean square must not collapse: " + rep.Summary);
@@ -84,7 +99,7 @@ namespace MapRenderer.Tests.Meshing
         public void Corpus_Water_6_32_20_Globe_SubdivisionIsConforming()
         {
             var mvt = LoadFixture("water-6-32-20.pbf.bytes");
-            var rep = SubdivisionCoverageValidator.ValidateTileLayer(mvt, "water", Water63220, new SphericalProjection());
+            var rep = RunOnBurstArm(mvt, "water", Water63220, new SphericalProjection());
 
             Assert.IsTrue(rep.Passes(), "globe fill subdivision has a visible T-junction crack: " + rep.Summary);
             Assert.IsFalse(rep.BudgetFired, "a conforming result must not have relied on the Budget cutoff: " + rep.Summary);
@@ -105,8 +120,11 @@ namespace MapRenderer.Tests.Meshing
             {
                 new double2(0, 0), new double2(4096, 0), new double2(4096, 4096), new double2(0, 4096),
             };
-            var rep = SubdivisionCoverageValidator.Validate(
-                new[] { new Polygon(outer) }, new TileId { Z = 2, X = 0, Y = 0 }, new SphericalProjection(), extent: 4096);
+            var res = EarcutJobPolygonRunner.Run(outer);
+            var vertexFeatureIdx = new int[res.Vertices.Length];
+
+            var rep = SubdivisionCoverageValidator.ValidateTriangulation(
+                res.Vertices, res.Indices, vertexFeatureIdx, new TileId { Z = 2, X = 0, Y = 0 }, new SphericalProjection(), extent: 4096);
 
             Assert.IsTrue(rep.Passes(), "deep (z2, depth>=2) globe subdivision has a T-junction crack: " + rep.Summary);
             Assert.IsFalse(rep.BudgetFired, "a conforming result must not have relied on the Budget cutoff: " + rep.Summary);
@@ -123,7 +141,7 @@ namespace MapRenderer.Tests.Meshing
         [Test]
         public void RealZ0Tile_NonUniformCurvature_IsConforming()
         {
-            var rep = SubdivisionCoverageValidator.ValidateTileLayer(
+            var rep = RunOnBurstArm(
                 LoadFixture("sample-tile.bytes"), "countries", new TileId { Z = 0, X = 0, Y = 0 }, new SphericalProjection());
 
             Assert.IsTrue(rep.Passes(),

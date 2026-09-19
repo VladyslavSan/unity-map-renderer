@@ -3,9 +3,6 @@ using System.Collections.Generic;
 using System.Text;
 using Unity.Mathematics;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Mvt;
-using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests
 {
@@ -21,9 +18,6 @@ namespace MapRenderer.Tests
     ///   • AreaRelError small     — Σ tri area ≈ Σ(outer − holes);
     ///   • MismatchPct small      — rasterised coverage matches the even-odd source fill, so no phantom holes
     ///                              (source-inside-but-untriangulated) and no spill (triangulated-but-outside).
-    ///
-    /// Unity EditMode only — it depends on <c>MapRenderer.Jobs.Mvt</c> (the decode seam), which
-    /// <c>Tools/core-tests</c> does not compile.
     /// </summary>
     public static class MeshCoverageValidator
     {
@@ -57,79 +51,18 @@ namespace MapRenderer.Tests
                 $"(missing={MissingCells} extra={ExtraCells} of {PolyCells})";
         }
 
-        /// <summary>Decode a tile, take one polygon layer, run decode → assemble → earcut, and validate.</summary>
-        public static Report ValidateTileLayer(byte[] mvt, string layerName, int rasterN = 192)
-        {
-            // IR C1 P3: read the command streams from the bytes directly (MvtFixtureStreams), so this
-            // validator shares no code with the decoder whose output it validates.
-            var layer = MvtFixtureStreams.ReadLayer(mvt, layerName);
-            if (layer == null) return new Report(0, 0, 0, 0, 0, 0, 0, 0, 0, "(no layer)");
-            var polys = new List<Polygon>();
-            for (int fi = 0; fi < layer.Kinds.Count; fi++)
-                if (layer.Kinds[fi] == TileGeometryType.Polygon)
-                    polys.AddRange(PolygonAssembler.Assemble(MvtGeometry.Decode(layer.Commands[fi])));
-            return Validate(polys, (int)layer.Extent, rasterN);
-        }
-
-        /// <summary>Validate already-assembled polygons against their earcut triangulations.</summary>
-        public static Report Validate(IReadOnlyList<Polygon> polys, int extent, int rasterN = 192)
-        {
-            int forceClips = 0, windingFlips = 0, triangles = 0;
-            double expected = 0, actual = 0;
-            var rings = new List<List<double2>>();
-            var tris  = new List<(double2 a, double2 b, double2 c)>();
-
-            foreach (var poly in polys)
-            {
-                if (poly.Outer == null || poly.Outer.Count < 3) continue;
-                double holeSum = 0;
-                rings.Add(poly.Outer);
-                if (poly.Holes != null)
-                    foreach (var h in poly.Holes) { holeSum += SignedArea.AbsArea(h); rings.Add(h); }
-                expected += math.max(0.0, SignedArea.AbsArea(poly.Outer) - holeSum);
-
-                var res = Earcut.Triangulate(poly.Outer, poly.Holes);
-                forceClips += res.ForceClips;
-
-                // Winding: earcut normalises the outer to CCW-on-screen, so the dominant sign is expected;
-                // a triangle of the opposite sign is a fold. (Zero-area triangles are ignored.)
-                int pos = 0, neg = 0;
-                var triSigns = new List<int>();
-                for (int i = 0; i + 2 < res.Indices.Length; i += 3)
-                {
-                    double2 a = res.Vertices[res.Indices[i]], b = res.Vertices[res.Indices[i + 1]], c = res.Vertices[res.Indices[i + 2]];
-                    double s2 = (b.x - a.x) * (c.y - a.y) - (c.x - a.x) * (b.y - a.y);
-                    actual += math.abs(0.5 * s2);
-                    tris.Add((a, b, c));
-                    triangles++;
-                    int sign = s2 > 1e-9 ? 1 : s2 < -1e-9 ? -1 : 0;
-                    triSigns.Add(sign);
-                    if (sign > 0) pos++; else if (sign < 0) neg++;
-                }
-                int majority = pos >= neg ? 1 : -1;
-                foreach (int s in triSigns) if (s != 0 && s != majority) windingFlips++;
-            }
-
-            var (missing, extra, polyCells, ascii) = CoverageDiff(rings, tris, extent, rasterN);
-            return new Report(polys.Count, triangles, forceClips, windingFlips, expected, actual,
-                              polyCells, missing, extra, ascii);
-        }
-
         /// <summary>
-        /// Validate an ALREADY-triangulated result against its ground-truth polygon rings — unlike
-        /// <see cref="Validate"/> (which triangulates internally via the managed <see cref="Earcut"/>),
-        /// this takes the triangles as given, so it can validate any triangulation source, including the
-        /// jobified Burst <c>EarcutJob</c> path (mesh-triangulation-robustness Stage 3's visible-path
-        /// tooth — <see cref="Validate"/> would silently re-triangulate with the managed twin and prove
-        /// nothing about the Burst port). <paramref name="forceClips"/> is supplied by the caller (the
-        /// triangulator's own clean-drop count).
+        /// Validate an ALREADY-triangulated result against its ground-truth polygon rings — the caller
+        /// triangulates (via the Burst <c>EarcutJob</c>, directly or through the production fill path)
+        /// and supplies both the triangles and <paramref name="forceClips"/> (the triangulator's own
+        /// clean-drop count); this validator only checks the result, so it works for any triangulation
+        /// source.
         ///
         /// Winding-flip detection uses ONE global majority sign across every triangle in
-        /// <paramref name="tris"/> (unlike <see cref="Validate"/>'s per-polygon majority): Earcut
-        /// normalises every polygon's outer ring to the same CCW-on-screen convention, so a whole tile's
-        /// triangles share one winding sign on clean output — a flip anywhere is a fold. This is the only
-        /// option available here since the caller's flat triangle list carries no per-polygon boundary
-        /// markers (and is at least as strong a check as the per-polygon variant for that purpose).
+        /// <paramref name="tris"/>: the triangulator normalises every polygon's outer ring to the same
+        /// CCW-on-screen convention, so a whole tile's triangles share one winding sign on clean output —
+        /// a flip anywhere is a fold. This is the only option available here since the caller's flat
+        /// triangle list carries no per-polygon boundary markers.
         /// </summary>
         public static Report ValidateTriangulation(
             IReadOnlyList<Polygon> groundTruthPolys, List<(double2 a, double2 b, double2 c)> tris,

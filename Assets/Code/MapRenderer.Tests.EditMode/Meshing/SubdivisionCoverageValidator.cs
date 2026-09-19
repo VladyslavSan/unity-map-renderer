@@ -2,10 +2,7 @@ using System;
 using System.Collections.Generic;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Mvt;
-using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests
 {
@@ -19,9 +16,6 @@ namespace MapRenderer.Tests
     /// traversal, same 1→4 child push order, same flat/Budget stop test, same <c>Project</c>. Parity with
     /// the real job is proven separately (Unity-only <c>GlobeSubdivisionJobParityTests</c>) by ORDERED
     /// OUTPUT-STREAM equality — this class must not diverge from that mirror.
-    ///
-    /// Unity EditMode only, like <see cref="MeshCoverageValidator"/> — it depends on
-    /// <c>MapRenderer.Jobs.Mvt</c> (the decode seam), which <c>Tools/core-tests</c> does not compile.
     ///
     /// Checks — magnitude AND fidelity AND coverage (design §6.2 "severity, not count"):
     ///   • MaxGapFracTile  — the worst render-space T-junction gap, as a fraction of the tile's render-space
@@ -110,35 +104,18 @@ namespace MapRenderer.Tests
         // Public entry points
         // -----------------------------------------------------------------------------------------------
 
-        /// <summary>Decode a tile, take one polygon layer, earcut every polygon, and validate its
-        /// managed-mirror subdivision. <paramref name="extent"/> is taken from the layer.</summary>
-        public static Report ValidateTileLayer(byte[] mvt, string layerName, in TileId id, IProjection projection)
+        /// <summary>
+        /// Validate an ALREADY-triangulated result against the managed subdivision mirror — the caller
+        /// triangulates (via the Burst <c>EarcutJob</c> path) and supplies the flat triangles plus the
+        /// per-vertex feature index (see <see cref="BuildRootsFromRaw"/>'s first-index feature pick).
+        /// Mirrors the shape <c>MeshCoverageValidator.ValidateTriangulation</c> already has — this class's
+        /// former <c>Validate</c>/<c>ValidateTileLayer</c> triangulated internally via the managed
+        /// <c>Earcut</c>, retired with it.
+        /// </summary>
+        public static Report ValidateTriangulation(
+            double2[] tileVerts, int[] triangleIndices, int[] vertexFeatureIdx, in TileId id, IProjection projection, double extent)
         {
-            // IR C1 P3: command streams straight from the bytes — see MvtFixtureStreams.
-            var layer = MvtFixtureStreams.ReadLayer(mvt, layerName);
-            if (layer == null) return new Report(0, 0, 0, false, 0, 0, 0, 0, new int[6], 0, 0, 0, 0, default);
-
-            var polys = new List<Polygon>();
-            for (int fi = 0; fi < layer.Kinds.Count; fi++)
-                if (layer.Kinds[fi] == TileGeometryType.Polygon)
-                    polys.AddRange(PolygonAssembler.Assemble(MvtGeometry.Decode(layer.Commands[fi])));
-
-            return Validate(polys, id, projection, layer.Extent);
-        }
-
-        /// <summary>Earcut every already-assembled polygon and run the managed subdivision mirror over the
-        /// result, on the given projection.</summary>
-        public static Report Validate(IReadOnlyList<Polygon> polys, in TileId id, IProjection projection, double extent)
-        {
-            var roots = new List<RootTri>();
-            foreach (var poly in polys)
-            {
-                if (poly.Outer == null || poly.Outer.Count < 3) continue;
-                var res = Earcut.Triangulate(poly.Outer, poly.Holes);
-                for (int i = 0; i + 2 < res.Indices.Length; i += 3)
-                    roots.Add(new RootTri(
-                        res.Vertices[res.Indices[i]], res.Vertices[res.Indices[i + 1]], res.Vertices[res.Indices[i + 2]]));
-            }
+            var roots = BuildRootsFromRaw(tileVerts, triangleIndices, vertexFeatureIdx, tileVerts.Length, triangleIndices.Length);
 
             double cosThresh = math.cos(DefaultMaxEdgeAngleRad);
             RunMirror(roots, id, projection, extent, new double3(0, 0, 0), cosThresh, DefaultMaxDepth, DefaultBudget,

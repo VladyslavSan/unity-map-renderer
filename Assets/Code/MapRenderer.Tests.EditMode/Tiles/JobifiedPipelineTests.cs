@@ -232,79 +232,6 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── (3) End-to-end jobified vs managed — content hash (strict) ────────────────────────
-
-        [Test]
-        public void JobifiedPipeline_VertexAndIndexContentHash_MatchManagedPath()
-        {
-            Assert.IsTrue(File.Exists(FixturePath), $"Fixture missing: {FixturePath}");
-            byte[] mvtBytes = File.ReadAllBytes(FixturePath);
-
-            var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
-            Assert.IsNotNull(layer);
-
-            double extent  = layer.Extent;
-            var tileId     = new TileId { Z = 0, X = 0, Y = 0 };
-            var (bMin, _)  = tileId.MercatorBounds();
-            double originX = bMin.x, originY = bMin.y;
-
-            // ── Managed reference path.
-            var (managedVertHash, managedIdxHash, managedForceClips) =
-                BuildManagedHash(mvtBytes, "countries", 0, 0, 0, extent, originX, originY);
-
-            // ── Jobified path.
-            var polygonKinds    = new List<TileGeometryType>();
-            var polygonCommands = new List<uint[]>();
-            for (int fi = 0; fi < layer.Kinds.Count; fi++)
-                if (layer.Kinds[fi] == TileGeometryType.Polygon && layer.Commands[fi] != null)
-                { polygonKinds.Add(layer.Kinds[fi]); polygonCommands.Add(layer.Commands[fi]); }
-
-            TileGeometryBuffers geometry = MvtGeometryMaterializerTestFactory.Materialize(
-                new TileId { Z = 0, X = 0, Y = 0 }, extent, polygonKinds, polygonCommands);
-            NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
-            var pipelineInput = new FillMeshPipeline.LayerInput
-            {
-                Geometry       = geometry,
-                RingVisitOrder = visitOrder,
-                OriginRender   = new double3(originX, 0.0, originY), // == TileRenderOrigin.Project bit-for-bit for Mercator
-                Projection     = new WebMercatorProjection(), // was implicit (null ⇒ Mercator); now explicit
-                // The managed reference this is hashed against predates the outward boundary band and emits
-                // none; the claim here is about earcut's merged-vertex ORDER, so both arms must be band-free.
-                SuppressBoundaryBand = true,
-            };
-
-            FillGraphOutput buffers = FillMeshGraph.Schedule(pipelineInput);
-            buffers.Handle.Complete();
-            try
-            {
-                int vertCount  = buffers.TileVertices.Length;
-                int indexCount = buffers.TriangleIndices.Length;
-
-                string jobVertHash = HashDouble2ArrayFromList(buffers.TileVertices, vertCount);
-                string jobIdxHash  = HashIntArrayFromList(buffers.TriangleIndices, indexCount);
-
-                Assert.AreEqual(managedVertHash, jobVertHash,
-                    $"Jobified vertex content hash does not match managed reference (vertCount: job={vertCount}). " +
-                    "This means the Burst earcut produces different merged ring vertex order.");
-
-                Assert.AreEqual(managedIdxHash, jobIdxHash,
-                    $"Jobified index content hash does not match managed reference (indexCount: job={indexCount}). " +
-                    "This means the Burst earcut produces different triangle indices.");
-
-                // Force-clip count must match the managed pinned invariant.
-                int jobForceClips = buffers.Counts[0].ForceClipCount;
-                Assert.AreEqual(managedForceClips, jobForceClips,
-                    $"Force-clip count: job={jobForceClips}, managed={managedForceClips}. " +
-                    "Stall-guard behaviour must be identical between paths.");
-            }
-            finally
-            {
-                buffers.Dispose();
-                visitOrder.Dispose();
-                geometry.Dispose();
-            }
-        }
-
         // ── (4) Multi-tile throughput ──────────────────────────────────────────────────────────
 
         [Test]
@@ -395,57 +322,6 @@ namespace MapRenderer.Tests.Tiles
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────
-
-        /// <summary>
-        /// Runs the managed S02 pipeline and returns SHA-256 hashes of the tile-space earcut
-        /// vertex array and earcut indices (strict integer hash — no tolerance).
-        /// Also returns total force-clip count for the pinned invariant.
-        /// </summary>
-        private static (string vertHash, string idxHash, int forceClips) BuildManagedHash(
-            byte[] mvtBytes, string layerName,
-            int tileZ, int tileX, int tileY,
-            double extent, double originX, double originY)
-        {
-            var layer = MvtFixtureStreams.ReadLayer(mvtBytes, layerName);
-            Assert.IsNotNull(layer, $"Layer '{layerName}' must be present");
-
-            var vertBytes  = new List<byte>();
-            var idxBytes   = new List<byte>();
-            int forceClips = 0;
-            int globalVertBase = 0;
-
-            for (int fi = 0; fi < layer.Kinds.Count; fi++)
-            {
-                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
-                var rings    = MvtGeometry.Decode(layer.Commands[fi]);
-                var polygons = PolygonAssembler.Assemble(rings);
-
-                foreach (var polygon in polygons)
-                {
-                    var result = Earcut.Triangulate(polygon.Outer, polygon.Holes);
-                    if (result.Indices == null || result.Indices.Length == 0) continue;
-                    forceClips += result.ForceClips;
-
-                    // Hash the managed Earcut.Result.Vertices (the merged ring including bridge copies).
-                    foreach (var v in result.Vertices)
-                    {
-                        vertBytes.AddRange(BitConverter.GetBytes(v.x));
-                        vertBytes.AddRange(BitConverter.GetBytes(v.y));
-                    }
-                    // Hash indices re-offset by global vertex base (matches jobified aggregation).
-                    foreach (int idx in result.Indices)
-                        idxBytes.AddRange(BitConverter.GetBytes(idx + globalVertBase));
-
-                    globalVertBase += result.Vertices.Length;
-                }
-            }
-
-            using var sha256 = SHA256.Create();
-            string vHash = Convert.ToBase64String(sha256.ComputeHash(vertBytes.ToArray()));
-            sha256.Initialize();
-            string iHash = Convert.ToBase64String(sha256.ComputeHash(idxBytes.ToArray()));
-            return (vHash, iHash, forceClips);
-        }
 
         private static string HashRings(List<List<double2>> rings)
         {

@@ -29,11 +29,10 @@ namespace MapRenderer.Core.Geometry
     public static class LineTessellator
     {
         /// <summary>
-        /// Result of a polyline mesh build: flat vertex array and triangle indices,
-        /// mirroring <see cref="Earcut.Result"/> shape.
-        /// OUTPUT WINDING: CCW — the pipeline's single canonical winding (same as <see cref="Earcut"/>),
-        /// reversed once to Unity-front at the mesh-write boundary (`StyledLineTileBuilder`) for stock Cull
-        /// Back; the producer never bakes the render convention. See `docs/coordinates-and-projections.md` §7.1.
+        /// Result of a polyline mesh build: flat vertex array and triangle indices.
+        /// OUTPUT WINDING: CCW — the pipeline's single canonical winding, reversed once to Unity-front
+        /// at the mesh-write boundary (`StyledLineTileBuilder`) for stock Cull Back; the producer never
+        /// bakes the render convention. See `docs/coordinates-and-projections.md` §7.1.
         /// </summary>
         public readonly struct Result
         {

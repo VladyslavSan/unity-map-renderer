@@ -29,15 +29,16 @@ namespace MapRenderer.Tests.DataSources
 {
     /// <summary>
     /// Proves that <see cref="FileDataSource"/> feeds the render path correctly: bytes round-trip
-    /// through the source and produce an identical vertex/index CONTENT HASH
-    /// (not just count) from the full decode→assemble→earcut→job pipeline.
+    /// through the source and produce an identical vertex CONTENT HASH (not just count) from the
+    /// decode→assemble→project pipeline.
     ///
-    /// S04 upgrade: asserts buffer content hashes (SHA-256 over vertex positions and index arrays)
-    /// rather than just counts. A count-only comparison is blind to divergent vertex positions —
-    /// two pipelines could produce the same count with completely different geometry. Content hash
-    /// guards against any regression in decode / assembly / triangulation across sources.
+    /// This is an A-vs-A comparison — the same bytes through two sources must produce identical render
+    /// input — so triangulation contributes nothing to what it proves (A0: dropped; the hash covers
+    /// the assembled ring vertices, outer then holes, projected through the existing
+    /// TileToGeoJob → ProjectPointsJob chain, which is the projection coverage this test actually
+    /// carries). A count-only comparison would be blind to divergent vertex positions; content hash
+    /// guards against any regression in decode / assembly / projection across sources.
     ///
-    /// This subsumes the earlier S03 "count-only" follow-up.
     /// S51: HttpDataSource deleted from Core; HTTP is now UnityWebRequestDataSource (Unity layer).
     /// </summary>
     [TestFixture]
@@ -77,28 +78,28 @@ namespace MapRenderer.Tests.DataSources
                     Directory.Delete(tempRoot, recursive: true);
             }
 
-            // 2. Run the full render pipeline on each source's bytes; compare CONTENT HASHES.
-            // Hash includes vertex positions and triangle indices (not just counts).
-            var (baselineVH, baselineIH) = BuildContentHashes(fixtureBytes);
-            var (fileVH,     fileIH)     = BuildContentHashes(fileBytes);
+            // 2. Run the same decode→assemble→project pipeline on each source's bytes; compare the
+            // CONTENT HASH (an A-vs-A comparison — the triangulator contributes nothing to it, see
+            // class doc).
+            string baselineHash = BuildContentHash(fixtureBytes);
+            string fileHash     = BuildContentHash(fileBytes);
 
-            Assert.AreEqual(baselineVH, fileVH,
-                "FileDataSource render path vertex content hash must match the direct baseline. " +
+            Assert.AreEqual(baselineHash, fileHash,
+                "FileDataSource render path content hash must match the direct baseline. " +
                 "A mismatch means the file source returns different bytes or the decode path is non-deterministic.");
-            Assert.AreEqual(baselineIH, fileIH,
-                "FileDataSource render path index content hash must match the direct baseline.");
 
-            Debug.Log($"[DataSourceRenderPathTests] FileDataSource produces identical vertex+index content hashes: {baselineVH[..16]}...");
+            Debug.Log($"[DataSourceRenderPathTests] FileDataSource produces an identical content hash: {baselineHash[..16]}...");
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Runs the full managed pipeline on MVT bytes and returns SHA-256 hashes of the flat
-        /// vertex position array and flat index array (both in pipeline order across all features).
-        /// Vertex positions are double3 origin-relative world positions (TileToGeoJob → ProjectPointsJob).
+        /// Decodes and assembles MVT bytes and returns a SHA-256 hash of the flat, projected ring-vertex
+        /// array — outer then holes, in assembly order, across all polygons (world positions via
+        /// TileToGeoJob → ProjectPointsJob). No triangulation: this test is an A-vs-A comparison of two
+        /// sources' bytes, so the triangulator is not part of the property it proves.
         /// </summary>
-        private static (string vertHash, string idxHash) BuildContentHashes(byte[] mvtBytes)
+        private static string BuildContentHash(byte[] mvtBytes)
         {
             var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
             Assert.IsNotNull(layer, "countries layer must be present");
@@ -111,8 +112,6 @@ namespace MapRenderer.Tests.DataSources
 
             using var sha256 = SHA256.Create();
             var vertBytes = new List<byte>();
-            var idxBytes  = new List<byte>();
-            int globalIndexOffset = 0;
 
             for (int fi = 0; fi < layer.Kinds.Count; fi++)
             {
@@ -125,12 +124,11 @@ namespace MapRenderer.Tests.DataSources
 
                 foreach (var polygon in polygons)
                 {
-                    Earcut.Result earcutResult = Earcut.Triangulate(polygon.Outer, polygon.Holes);
-                    if (earcutResult.Indices == null || earcutResult.Indices.Length == 0) continue;
-
-                    double2[] flatVerts = earcutResult.Vertices;
-                    int[]     triIdx    = earcutResult.Indices;
-                    int       vCount    = flatVerts.Length;
+                    var flatVerts = new List<double2>(polygon.Outer);
+                    if (polygon.Holes != null)
+                        foreach (var hole in polygon.Holes) flatVerts.AddRange(hole);
+                    int vCount = flatVerts.Count;
+                    if (vCount == 0) continue;
 
                     // Not using 'using var' — CS1654 makes using-var NativeArrays read-only in C# 8+.
                     var tileCoords = new NativeArray<double2>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
@@ -164,11 +162,6 @@ namespace MapRenderer.Tests.DataSources
                             vertBytes.AddRange(BitConverter.GetBytes(worldPos[i].y));
                             vertBytes.AddRange(BitConverter.GetBytes(worldPos[i].z));
                         }
-
-                        foreach (int idx in triIdx)
-                            idxBytes.AddRange(BitConverter.GetBytes(globalIndexOffset + idx));
-
-                        globalIndexOffset += vCount;
                     }
                     finally
                     {
@@ -180,9 +173,7 @@ namespace MapRenderer.Tests.DataSources
                 }
             }
 
-            string vh = Convert.ToBase64String(sha256.ComputeHash(vertBytes.ToArray()));
-            string ih = Convert.ToBase64String(sha256.ComputeHash(idxBytes.ToArray()));
-            return (vh, ih);
+            return Convert.ToBase64String(sha256.ComputeHash(vertBytes.ToArray()));
         }
     }
 }

@@ -15,10 +15,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Jobs.Mvt;
-using MapRenderer.Tests.TestSupport;
 
 using MapRenderer.Jobs.Fill;
 namespace MapRenderer.Tests.Meshing
@@ -39,6 +36,14 @@ namespace MapRenderer.Tests.Meshing
             }
             throw new FileNotFoundException(name);
         }
+
+        // Earcut-only, tile-space root-triangle extraction is shared with GlobeSubdivisionTests via
+        // EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph (A0) — see that method's doc for why
+        // extraction always runs under a non-curved projection regardless of the target projection under
+        // test here, and why the countries-z0 case below must use the REAL per-source-feature index, not
+        // an all-zero placeholder: zeros are dishonest input regardless of what the fence below catches.
+        // A0 measured that the fence does NOT in fact detect Feature being dropped from the merge key
+        // (UMR-187) — see that assert's own comment; do not read this file as proof it does.
 
         // -----------------------------------------------------------------------------------------------
         // Shared ordered-parity assertion: dispatches the REAL Burst job AND the managed mirror over the
@@ -180,27 +185,13 @@ namespace MapRenderer.Tests.Meshing
         {
             var id = new TileId { Z = 6, X = 32, Y = 20 };
             var proj = new SphericalProjection();
-            // IR C1 P3: command streams read from the bytes (MvtFixtureStreams), not off a decoded feature.
-            var layer = MvtFixtureStreams.ReadLayer(LoadFixture("water-6-32-20.pbf.bytes"), "water");
-            Assert.IsNotNull(layer);
-            double extent = layer.Extent;
-
-            var verts = new List<double2>();
-            var indices = new List<int>();
-            for (int fi = 0; fi < layer.Kinds.Count; fi++)
-            {
-                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
-                foreach (var poly in PolygonAssembler.Assemble(MvtGeometry.Decode(layer.Commands[fi])))
-                {
-                    var res = Earcut.Triangulate(poly.Outer, poly.Holes);
-                    int baseIdx = verts.Count;
-                    verts.AddRange(res.Vertices);
-                    for (int i = 0; i < res.Indices.Length; i++) indices.Add(baseIdx + res.Indices[i]);
-                }
-            }
-            double2[] tileVerts = verts.ToArray();
-            int[] triangleIndices = indices.ToArray();
-            int[] vertexFeatureIdx = new int[tileVerts.Length]; // single feature 0 — irrelevant to gap analysis
+            // IR C1 P3's "independent of the decoded feature" property is superseded here (A0): this now
+            // decodes through the production MvtDecoder as part of the real FillMeshGraph earcut
+            // extraction, not an independent MvtFixtureStreams read — fine for this test's own property
+            // (ordered-stream parity given identical input arrays to both arms), which never depended on
+            // decode independence.
+            var (tileVerts, triangleIndices, vertexFeatureIdx, extent) =
+                EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph(LoadFixture("water-6-32-20.pbf.bytes"), "water", id);
 
             ParityRun run = AssertOrderedParity(
                 proj, id, extent, new double3(0, 0, 0), tileVerts, triangleIndices, vertexFeatureIdx,
@@ -227,12 +218,11 @@ namespace MapRenderer.Tests.Meshing
         }
 
         // -----------------------------------------------------------------------------------------------
-        // T-C4 (vertex sharing): the z0 "countries" fixture is the measurement corpus. The headline
-        // measurement 346,542 → 75,733 is the BANDED scenario — it assumes the per-vertex band/side column
-        // that lives only on the parked feat/fill-boundary-antialiasing branch (off `main`, no Band field).
-        // THIS branch realises the NO-BAND case instead: 161,676 emitted → 44,915 unique. The banded 75,733
-        // figure only becomes reachable if/when the band branch rebases onto this change and extends
-        // GlobeFillVertexKey.
+        // T-C4 (vertex sharing): the z0 "countries" fixture is the measurement corpus, fed through the REAL
+        // FillMeshGraph earcut extraction (A0) with SuppressBoundaryBand = true — an explicit choice, not
+        // an incidental "no band" (these triangles become the mirror's root list; a degenerate band quad
+        // would inflate it, same reasoning as GlobeSubdivisionTests). The measured emitted/unique split for
+        // THIS arm is in the stage report and restated at the fence below.
         // Same ordered-parity + gap-corollary treatment as the water tile above, so the
         // SubdivisionCoverageValidator report (gap/coverage/quality) is proven unchanged on the SAME real-job
         // run T-C2 measures the sharing ratio from.
@@ -243,32 +233,15 @@ namespace MapRenderer.Tests.Meshing
         {
             var id = new TileId { Z = 0, X = 0, Y = 0 };
             var proj = new SphericalProjection();
-            var layer = MvtFixtureStreams.ReadLayer(LoadFixture("sample-tile.bytes"), "countries");
-            Assert.IsNotNull(layer);
-            double extent = layer.Extent;
-
-            var verts = new List<double2>();
-            var featureIdx = new List<int>();
-            var indices = new List<int>();
-            for (int fi = 0; fi < layer.Kinds.Count; fi++)
-            {
-                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
-                foreach (var poly in PolygonAssembler.Assemble(MvtGeometry.Decode(layer.Commands[fi])))
-                {
-                    var res = Earcut.Triangulate(poly.Outer, poly.Holes);
-                    int baseIdx = verts.Count;
-                    verts.AddRange(res.Vertices);
-                    // T-C3 (vertex sharing): REAL per-source-feature indices, not a
-                    // single constant 0 — a fixture where every vertex reads feature 0 makes "drop Feature
-                    // from the key" a no-op (nothing to wrongly merge), which would make T-C3's RED recipe
-                    // ("hash on Tile only ⇒ two features share an index") untestable here.
-                    for (int k = 0; k < res.Vertices.Length; k++) featureIdx.Add(fi);
-                    for (int i = 0; i < res.Indices.Length; i++) indices.Add(baseIdx + res.Indices[i]);
-                }
-            }
-            double2[] tileVerts = verts.ToArray();
-            int[] triangleIndices = indices.ToArray();
-            int[] vertexFeatureIdx = featureIdx.ToArray();
+            // T-C3 (vertex sharing): the REAL per-source-feature index off the graph output — see
+            // BuildEarcutRootsFromFillGraph's doc. NOT a single constant 0: zeroing every vertex's
+            // feature is dishonest input regardless of what the fence below is proven to catch — A0
+            // measured that the fence's lower bound does NOT in fact detect the drop (UniqueVertexCount
+            // moves only 45,268 → 44,772 under an all-zero array, nowhere near the 35,000 bound —
+            // tracked as UMR-187). Use the real index anyway; do not rely on this comment as proof the
+            // bound guards it.
+            var (tileVerts, triangleIndices, vertexFeatureIdx, extent) =
+                EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph(LoadFixture("sample-tile.bytes"), "countries", id);
 
             ParityRun run = AssertOrderedParity(
                 proj, id, extent, new double3(0, 0, 0), tileVerts, triangleIndices, vertexFeatureIdx,
@@ -292,10 +265,23 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(mirrorReport.MaxGapMeters, hybridReport.MaxGapMeters, mirrorReport.MaxGapMeters * 1e-6 + 1e-6,
                 $"real job's own gap analysis must match the mirror's: mirror={mirrorReport.Summary} hybrid={hybridReport.Summary}");
 
-            // T-C2 ("it actually shares"): a fence with headroom bracketing the measured value
-            // (mirror-measured 44,915 unique of 161,676 emitted, no band, on this fixture).
-            // RED-verified: reverting Emit to sequential indices (git stash the production edit) makes
-            // UniqueVertexCount == EmittedCount == 161,676, well outside this fence.
+            TestContext.WriteLine($"countries z0 (Burst arm, SuppressBoundaryBand=true): " +
+                $"emitted={run.EmittedCount} unique={run.UniqueVertexCount}");
+
+            // T-C2 ("it actually shares"): a fence with headroom bracketing the measured value —
+            // re-measured for the Burst-arm FillMeshGraph extraction in A0: 45,268 unique of 164,112
+            // emitted (SuppressBoundaryBand=true) — different from the pre-A0 raw-decode-loop figures
+            // (161,676 / 44,915) since the upstream is now the real gather chain, not a hand-rolled loop.
+            //
+            // T-A0.7 RED check, RUN and its result RECORDED here rather than left implied: substituting
+            // an all-zero vertexFeatureIdx array on this same extraction measures unique=44,772 — NOT
+            // below the 35,000 lower bound (it barely moves off the real-feature 45,268). On THIS
+            // fixture/pipeline, the lower bound does not actually discriminate on Feature being dropped
+            // from the merge key; whatever the prior expectation, this fence is not proven to catch that
+            // regression. Flagged, not silently patched (A0 plan §10 — escalate, do not invent): fixing
+            // the fence itself is outside A0's mandate (re-home the triangulator, not redesign the
+            // subdivision-parity oracle) — tracked as UMR-187, left as an open, explicitly recorded
+            // finding rather than a bound quietly widened or a claim quietly kept.
             Assert.Less(run.UniqueVertexCount, 55_000,
                 $"sharing must collapse the countries z0 tile's unique vertex count well below its emitted " +
                 $"count: emitted={run.EmittedCount} unique={run.UniqueVertexCount}");
@@ -305,6 +291,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.Less(run.UniqueVertexCount, run.EmittedCount,
                 "a genuinely curved z0 tile must have SOME shared conforming split-edge midpoints");
         }
+
 
         // -----------------------------------------------------------------------------------------------
         // Discriminating crafted cases — each fires a path the shallow (depth-1, no-budget) water corpus
@@ -387,13 +374,14 @@ namespace MapRenderer.Tests.Meshing
             // the diagonal, so a correct vertex key must merge every conforming split-edge midpoint the two
             // root triangles compute — Mid() is exactly order-symmetric ((a+b)*0.5 commutes bit-for-bit), so
             // every genuine shared-edge midpoint is bit-identical on both sides.
-            var outer = new List<double2>
+            // Hand-written, not earcut: a whole-tile square split along its diagonal into 2 triangles —
+            // the diagonal split is what makes the midpoint-merge case meaningful (a correct vertex key
+            // must merge the shared-diagonal midpoint computed independently by each root's subdivision).
+            double2[] tileVerts =
             {
                 new double2(0, 0), new double2(Extent, 0), new double2(Extent, Extent), new double2(0, Extent),
             };
-            var res = Earcut.Triangulate(outer, new List<List<double2>>());
-            double2[] tileVerts = res.Vertices;
-            int[] triangleIndices = res.Indices;
+            int[] triangleIndices = { 0, 1, 2, 0, 2, 3 };
             int[] vertexFeatureIdx = new int[tileVerts.Length];
 
             var id = new TileId { Z = 2, X = 0, Y = 0 };
