@@ -200,6 +200,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Projection/ProjectionMathTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/CameraPropertiesTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/EarcutTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/EarcutDegenerateTriangleTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/PolygonAssemblerTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/LineTessellatorTests.cs" />

@@ -117,9 +117,25 @@ namespace MapRenderer.Tests.Meshing
         [Test]
         public void Corpus_Water_6_32_20_TriangulatesFaithfully()
         {
+            // water-6-32-20's poly 0 (outer=879, 13 holes) hits ONE locus the cure -> split cascade cannot
+            // resolve, and drops it cleanly. Measured at the drop site (UMR-106): 5 live vertices, residual
+            // signed area +33.5 tile-space units^2 in a 4096^2 tile = 0.000206% of the outer ring, bounding box
+            // 24x3, sub-pixel at z6. The ring is SIMPLE (no self-crossing, so the shoelace value is the true
+            // covered area) and NOT degenerate (not collinear under exact integer arithmetic). It is a
+            // hole-bridging seam residual. MeshCoverageValidator cannot see it: one raster cell at rasterN=192
+            // is ~455 units^2, so this drop is ~13x smaller than the oracle's resolution, and ForceClips is the
+            // only instrument that observes it. The count is pinned EXACTLY, not bounded, to keep that sentinel
+            // armed.
             var rep = MeshCoverageValidator.ValidateTileLayer(LoadFixture("water-6-32-20.pbf.bytes"), "water");
-            Assert.IsTrue(rep.Passes(areaEps: 0.01, mismatchEps: 1.0),
-                "water z6/32/20 triangulation is broken: " + rep.Summary + "\n" + rep.AsciiMap);
+            Assert.AreEqual(0, rep.WindingFlips, "water z6/32/20: NO folds/inversions allowed - " + rep.Summary);
+            Assert.LessOrEqual(rep.AreaRelError, 0.01, "water z6/32/20: area conserved within 1% - " + rep.Summary);
+            Assert.LessOrEqual(rep.MismatchPct, 1.0, "water z6/32/20: coverage matches the source - " + rep.Summary);
+            Assert.AreEqual(1, rep.ForceClips,
+                "water z6/32/20's clean-drop count moved off its pinned value of 1. " +
+                "Reading 0 means the locus was RESOLVED - that is an IMPROVEMENT, not a regression: re-pin this " +
+                "to 0 and delete the justification comment above. Reading 2 or more means a NEW drop appeared and " +
+                "must be investigated before this pin is touched. Either way, do not widen this to an inequality - " +
+                "ForceClips is the only instrument in this suite that can see a sub-cell drop. " + rep.Summary);
         }
 
         // ---- real coastline-dense tiles (fjords / archipelagos) — the case the fix targets --------------

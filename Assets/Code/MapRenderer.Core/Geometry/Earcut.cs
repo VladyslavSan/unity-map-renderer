@@ -973,13 +973,28 @@ namespace MapRenderer.Core.Geometry
             return true;
         }
 
-        private static bool PointInTriangle(
+        /// <summary>True if P lies in or on triangle ABC. A degenerate (collinear) ABC is the segment
+        /// hull of its corners, not the whole plane: without the explicit branch below, a point at ANY
+        /// distance on the shared line reads as contained. <c>internal</c>: no production caller outside
+        /// this file, and the one test that needs it lives in an assembly Core already grants
+        /// <c>InternalsVisibleTo</c>.</summary>
+        internal static bool PointInTriangle(
             double ax, double ay, double bx, double by, double cx, double cy,
             double px, double py)
         {
             double d1 = Cross(ax, ay, bx, by, px, py);
             double d2 = Cross(bx, by, cx, cy, px, py);
             double d3 = Cross(cx, cy, ax, ay, px, py);
+            if (d1 == 0.0 && d2 == 0.0 && d3 == 0.0)
+            {
+                // Degenerate candidate: the corners are collinear, so the triangle's point set is the
+                // segment hull of its corners and containment is the bounding-box test.
+                double minx = ax < bx ? (ax < cx ? ax : cx) : (bx < cx ? bx : cx);
+                double maxx = ax > bx ? (ax > cx ? ax : cx) : (bx > cx ? bx : cx);
+                double miny = ay < by ? (ay < cy ? ay : cy) : (by < cy ? by : cy);
+                double maxy = ay > by ? (ay > cy ? ay : cy) : (by > cy ? by : cy);
+                return px >= minx && px <= maxx && py >= miny && py <= maxy;
+            }
             bool hasNeg = (d1 < 0.0) || (d2 < 0.0) || (d3 < 0.0);
             bool hasPos = (d1 > 0.0) || (d2 > 0.0) || (d3 > 0.0);
             return !(hasNeg && hasPos);

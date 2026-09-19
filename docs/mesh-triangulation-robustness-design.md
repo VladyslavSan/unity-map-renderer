@@ -63,9 +63,19 @@ Two independent mechanisms, same stage:
 
 The **correctness** bug is *force-clip emits garbage*. The triangulator's **O(n³)** cost (`IsEar` scans all
 vertices, per clip) is an **independent** performance concern. They must not be conflated: the fix for the
-visible bug is "on failure, degrade correctly (never emit a fold)"; z-order/hashed acceleration is a
-separate, optional perf item that changes no output. This doc scopes **robustness first**; perf is deferred
-(§6).
+visible bug is "on failure, degrade correctly (never emit a fold)"; spatial acceleration of the ear scan is
+a separate perf item. **UMR-106 Stage 1 measured false the earlier claim that acceleration "changes no
+output"**: on a degenerate candidate triangle, `IsEar`'s linear scan is load-bearing — a distant collinear
+vertex is visited by the scan and, under the old predicate, wrongly reported as contained; that wrong
+answer is what today's output depends on (§6.1's `water-6-32-20` re-pin). Post-fix, the same vertex is
+correctly reported as not contained. So spatial acceleration is answer-preserving only once Stage 1's
+explicit degenerate-AABB test replaces the bare cross-product sign check (§6.1). This doc scopes
+**robustness first**; perf is deferred (§6).
+
+The degenerate-AABB test is safe at any coordinate precision, not just on the integer tile-space input this
+corpus happens to carry (production clips introduce fractional coordinates — `RingClipJob.Intersect`). A
+triangle's point set is always a subset of its own bounding box, so the branch can only turn a spurious
+`true` into a correct `false`; it can never discard a genuine containment.
 
 ## 3. Invariants the fix must hold
 
@@ -232,6 +242,15 @@ Concretely, measured on the committed corpus + a fetched panel of coastline-dens
   Palawan, Stockholm arch./28k tris, Croatia, Raja Ampat): 4 perfectly clean (ForceClips=0, WindingFlips=0,
   area 0.00%); 2 with a **single surfaced clean drop** (ForceClips=1, area <0.8%, no fold). No folds, no
   islands-as-water. These are committed as corpus teeth (4 strict, 2 graceful-bound).
+- **UMR-106 Stage 1 update — a sixth strict fixture, not five, and one of the six now pins a drop.**
+  `water-6-32-20` (the original stage-0/1/2 corpus tile, tested separately from the 6-tile panel above)
+  stays in the strict tier, but Stage 1's degenerate-candidate fix (§2.1) surfaces one clean drop there that
+  did not exist before: `ForceClips` moves 0 → 1. Measured at the drop site: 5 live vertices, residual
+  signed area +33.5 tile-space units² (0.000206% of the outer ring) in a 24×3 bounding box, a simple
+  (non-self-crossing) non-degenerate hole-bridging seam residual. The count is pinned EXACTLY
+  (`Corpus_Water_6_32_20_TriangulatesFaithfully`), not widened to an inequality, because `ForceClips` is the
+  only instrument in the suite that can see a drop this small — `MeshCoverageValidator`'s raster coverage
+  check cannot resolve below ~455 units² at its default `rasterN`, ~13× larger than this sliver.
 - **No folds anywhere.** 60 000 adversarial synthetic star polygons: **WindingFlips=0 across all** (no
   inversions). Only 0.45% exceed 1% exact-area error (bounded overlaps, invisible for opaque fill; max
   12.82% on 2 spiky stars). `ForceClips` surfaces genuine clean drops.
@@ -267,7 +286,8 @@ Concretely, measured on the committed corpus + a fetched panel of coastline-dens
 - **Globe fill T-junction seams** between adjacently-subdivided tiles (`GlobeFillSubdivideJob` refines each
   tile's boundary edges independently) — a *separate* globe-fill watertightness issue; skirts or conforming
   boundary tessellation. Tracked separately, not here.
-- **Triangulator performance** (O(n³) → z-order/hashed ear search) — §2.1; correctness-neutral; deferred.
+- **Triangulator performance** (O(n³) → spatial ear search) — §2.1; deferred to UMR-106 Stage 2, which
+  Stage 1's degenerate-AABB fix is the answer-preserving precondition for (§2.1, §6.1).
 - **Curved-line / symbol tile-bounds clipping** — unrelated prior work.
 - **Input sanitization** for genuinely self-intersecting source rings — not needed for these tiles (check A
   clean); if a future corpus tile has dirty input, the correct-degradation path (§3.1) must still not fold.

@@ -839,6 +839,8 @@ namespace MapRenderer.Jobs.Fill
                    Area2(Verts[pn], Verts[m], Verts[mn]) < 0.0;
         }
 
+        /// <summary>Mirror of <see cref="MapRenderer.Core.Geometry.Earcut.PointInTriangle"/> — see its doc
+        /// for the degenerate-candidate branch this predicate needs and why.</summary>
         private bool PointInTriangle(
             double ax, double ay, double bx, double by, double cx, double cy,
             double px, double py)
@@ -846,6 +848,16 @@ namespace MapRenderer.Jobs.Fill
             double d1 = Cross(ax, ay, bx, by, px, py);
             double d2 = Cross(bx, by, cx, cy, px, py);
             double d3 = Cross(cx, cy, ax, ay, px, py);
+            if (d1 == 0.0 && d2 == 0.0 && d3 == 0.0)
+            {
+                // Degenerate candidate: the corners are collinear, so the triangle's point set is the
+                // segment hull of its corners and containment is the bounding-box test.
+                double minx = ax < bx ? (ax < cx ? ax : cx) : (bx < cx ? bx : cx);
+                double maxx = ax > bx ? (ax > cx ? ax : cx) : (bx > cx ? bx : cx);
+                double miny = ay < by ? (ay < cy ? ay : cy) : (by < cy ? by : cy);
+                double maxy = ay > by ? (ay > cy ? ay : cy) : (by > cy ? by : cy);
+                return px >= minx && px <= maxx && py >= miny && py <= maxy;
+            }
             bool hasNeg = (d1 < 0.0) || (d2 < 0.0) || (d3 < 0.0);
             bool hasPos = (d1 > 0.0) || (d2 > 0.0) || (d3 > 0.0);
             return !(hasNeg && hasPos);

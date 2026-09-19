@@ -62,15 +62,18 @@ namespace MapRenderer.Tests.Tiles
 
         // ── Frozen goldens (R6) — captured from FillMeshPipeline.Schedule on commit f5e13c19, before Group B
         // deleted it. See this file's header comment for the capture methodology and provenance.
+        // Re-captured for UMR-106 Stage 1: the degenerate-candidate ear-predicate fix (Earcut.PointInTriangle)
+        // moves the corpus's triangulated output, so these digests were recomputed against the fixed predicate.
         internal const string FrozenGoldensMercator =
-            "Vertex=BGT9vCbMRHS/Ni3PF1gWcHP4HK8NZKoEh+0AX5qcjyY= World=e5Kjjs7aiA1F+5QY8M53IoLBxLSTuEKehkCzPIMXCO8= " +
-            "Up=8j1uwFahQZ2mr/d02vWtnxyHtzu+DFiN5jMA/6NRO/k= FeatIdx=FufcsnPOzP5M4IKJAwSFCfn8TPyaCN/bm14hxU4Cs3Q= " +
-            "Indices=NHdZriRpUzF7iiWCExTHR6Iz5GwlLlBkZiyA/dG8Cdk= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
+            "Vertex=abw1RVTEKTX0q2SAH1frMmR5klneemBfwyLltWhcC9Q= World=ix/06MAQIOpWn5DSnMXHtCoVJJOMR5ZlDZ1RPmZ4jos= " +
+            "Up=ewzYSZfuaKsiX83I/hDgjTGtdNN/hOAoc/9I01wENsQ= FeatIdx=9LQBKkxJtx4HO+DNPANmTtZ4ZXhWRF4muz+8lUw4UQw= " +
+            "Indices=ibY64qOJPV0HG+vpmH423n2jBLqjxYDgNT6EoQxbnMs= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
             "RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= " +
-            "ForceClip=vZan4ovogL6+dDbAOpmv82Z1gd89/Piwz4fRI1hmd8w=";
+            "ForceClip=Vpd9xrW9d4LB+WVE++TrZdW/iYFu85X89YP3j2yGX7M=";
+        // Re-captured for UMR-106 Stage 1 (same cause as FrozenGoldensMercator above).
         internal const string FrozenGoldensSpherical =
             "PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= " +
-            "HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=vZan4ovogL6+dDbAOpmv82Z1gd89/Piwz4fRI1hmd8w=";
+            "HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=Vpd9xrW9d4LB+WVE++TrZdW/iYFu85X89YP3j2yGX7M=";
 
         /// <summary>Walks the same (corpus fixture × 2 clip arms) + 1 synthetic-hole-layer sequence, in the
         /// same fixed order, that <see cref="Schedule_MatchesFrozenSynchronousPipelineGoldens_AcrossCorpusAndSyntheticLayer"/>
