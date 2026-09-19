@@ -1419,7 +1419,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// curved cells optically on the path, and every other synthetic cell here is <c>Cell(hw)</c> =
         /// <c>(±hw, ±6)</c> — so a flipped ŷ was measured (injection I2) to leave the ENTIRE suite green,
         /// W3-T1, W3-T2 and W3-T3 included. W2's 22.56 px flipped-sign separation was an ink-CENTROID reading
-        /// and does not carry to an AABB. <c>sign-constants-render-at-a-discriminating-value</c>: a sign must be
+        /// and does not carry to an AABB. A sign must be
         /// read where the code is not inert, and for an AABB that means a cell whose y extent does NOT
         /// straddle its anchor.</para>
         ///

@@ -120,7 +120,7 @@ namespace MapRenderer.Unity.Text
         /// <para>Correct incremental layout relies on a FIXED-size shared atlas (the subsystem builds the
         /// production atlas with a fixed dimension): the atlas <c>Size</c> never changes as glyphs append,
         /// so a tile laid out early keeps valid UVs when a later tile adds glyphs. A growing atlas would
-        /// invalidate earlier tiles' UVs — see the glyph-atlas-uv-growth-staleness lesson.</para></summary>
+        /// invalidate earlier tiles' UVs.</para></summary>
         /// <param name="materialIndices">Optional per-layer owning-material index (parallel to
         /// <paramref name="symbolLayers"/>) stamped onto each symbol's <see cref="ShapedSymbol.MaterialIndex"/>
         /// for the per-layer draw grouping (S105 F1). Null → all 0 (single-material / demo path).</param>

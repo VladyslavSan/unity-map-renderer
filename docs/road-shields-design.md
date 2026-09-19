@@ -10,25 +10,6 @@ and an empirical probe over a committed fixture. **No MapLibre source was read**
 
 ---
 
-## 0. Revision — what the adversarial pass changed (2026-07-29)
-
-The first draft of this doc claimed **five** gates and asserted that fixing all five makes shields render at
-z13. An adversarial review of the implementation plan falsified that claim in two places and found three
-defective acceptance teeth. The reversals, recorded here rather than silently absorbed:
-
-| Was | Is now | Why |
-|---|---|---|
-| Five gates, extractor-only scope | **Six gates** — **G6**, the sprite-atlas readiness race, is IN scope (**D6**) | A tile committed before the async sprite fetch resolves is permanently icon-free. The extractor fix alone therefore does **not** make shields render in the demo — the very claim this epic exists to deliver. Verified in source (as of 2026-07-29): `SymbolLabelSubsystem.TryBeginBuild:433` captures `_spriteAtlas` (may be null); `FetchSpriteSheetAsync:651-652` assigns it with no invalidation; the doc at `:252-255` admits the tile only "self-heals on its next rebuild". |
-| D5 "the centred icon+text pair is **one symbol**"; the G5 row said D5 **fixes** G5 | D5 is a **named approximation** with a new, strictly-narrower harm profile; G5 is **mitigated**, not fixed | No flag-only formulation makes two independent collision candidates place/drop atomically. Claiming "one symbol" overstated it. The passenger text now also carries `IgnorePlacement = true`, so it can never *block* an unrelated label — the one harm that was removable at zero cost. It can still survive alone (a bare number), which is now a **pinned, tested** decision rather than a latent surprise. |
-| T9 "both boxes survive `LabelCollision`" was the G5 tooth | T9 is **replaced** — it was **disarmed** | `LabelCollision.cs:72` is `bool place = boxes[i].AllowOverlap;`, so a hand-built box with `AllowOverlap = true` already survives against **un-fixed** code. T9 tested existing `AllowOverlap` semantics, never the extractor. The replacement runs the **extractor** and feeds its real output to `LabelCollision`. |
-| D2: mid-arc is "stable under tile clipping" | Claim **dropped**. Anchor-clip semantics are now stated explicitly (§3 D2) with a recorded loss case and a tooth | Arc length is a function of the *buffered* decoded path; changing the clip changes the midpoint by definition. A buffer-dominated path can lose its only anchor to the `[0, extent)` clip. |
-| Teeth over one shield layer (`highway-shield-non-us`) | All **three** shield layers, via synthetic `transportation_name` features + atlas entries | The Berlin fixture carries no US-network features, so `highway-shield-us-interstate` / `road_shield_us` were entirely untested — and their `icon-image` expressions and step stops differ. |
-| `symbol-placement` described as "zoom-evaluated" | Always qualified as **build-zoom**-evaluated, and pinned by a tooth | The property is evaluated once, at the tile's build zoom; an overzoomed tile keeps its old placement. This is the visible z11 pop. |
-
-Four attack axes were tried and **held** — see §8.
-
----
-
 ## 1. The evidence
 
 A probe ran the real `SymbolFeatureExtractor` over the real fixture
@@ -241,7 +222,7 @@ unconditionally and blocks no-one.
 liberty as authored, and nothing else: every other layer carrying both `icon-image` and `text-field` offsets
 or re-anchors its text (`poi_r*` `text-offset [0, 0.6]` + anchor top, `poi_transit` `[0.9, 0]` + anchor
 left, `airport` `[0, 0.6]` + top, `label_town/village` anchor bottom, `label_city*` anchor bottom +
-offset). Independently re-checked by the adversarial pass (§8). So no existing layer's emit order,
+offset). Independently re-checked, layer by layer, across liberty. So no existing layer's emit order,
 `FeatureIndex` ordinals or fade ids change. Note `text-radial-offset` is evaluated per feature, so a
 *future* style could author an expression evaluating to 0 and trip the predicate — no liberty layer authors
 it at all.
@@ -303,7 +284,7 @@ once the fetch has been waited on past a bounded deadline: `UnityWebRequestSprit
 timeout, so a genuinely hung endpoint (connects, never responds — NOT the 404/204 path) would otherwise
 leave `_spriteFetchTask` `Pending` forever, making the parking PERMANENT — zero symbol labels ever, for the
 whole style, plus an unbounded `_pendingSpriteQueue` (every parked build retains its
-`IDecodedTileHandle`). `SpriteFetchDeadlineSeconds` (**8s**, `internal const`
+`SharedDisposable<IDecodedTile>`). `SpriteFetchDeadlineSeconds` (**8s**, `internal const`
 `SymbolSubsystem.SpriteFetchDeadlineSeconds`) bounds that: `SpritesSettled` also goes true once that
 many seconds have elapsed since the fetch started (`SymbolSubsystem.NowSeconds`, a test-overridable
 clock — `NowSecondsOverride` — mirroring `GlyphSourceFactoryOverride`/`SpriteSourceFactoryOverride`),
@@ -370,7 +351,7 @@ runner and `Tools/core-tests`. Counts are structural or independently derived in
 | T6 | `AlignmentResolution.Resolve` — `(Auto, Line)`/`(Auto, LineCenter)` == `Map`, `(Auto, Point)` == `Viewport`, `Map`/`Viewport` pass through | the helper does not exist (guards the fix) |
 | T7 | map-aligned line layer, **non-empty output** required: `labels.Count` equals the independently counted number of eligible decoded paths (≥ 2 points), and one identified record matches field-for-field on paint, `SpacingPx`, `MaxAngleDeg`, `KeepUpright`, `AllowOverlap`, `IgnorePlacement`, `TranslatePx`, `TranslateAnchor`, `SortKey`, contiguous `FeatureIndex` ordinals, `PathRender.Length`, non-empty `LineAnchors` | — (guards the invariant; a regression that drops every map-aligned label now fails) |
 | T8 | a map-aligned **icon** line layer emits zero icon labels with an atlas supplied (the surviving fence), with > 0 features selected | — (guards the fence) |
-| T9 | **extractor → collision**: run the real extractor over a centred-pair tile, build `SymbolBox`es from its emitted labels' own flags/ordinals with two overlapping boxes, run `SymbolCollision.SelectSurvivors`; assert both survive **and** that the emitted order is icon-then-text | un-fixed emits text-then-icon with both flags false, so the collision drops the icon. (The old hand-built version of this tooth was **disarmed** — see §0) |
+| T9 | **extractor → collision**: run the real extractor over a centred-pair tile, build `SymbolBox`es from its emitted labels' own flags/ordinals with two overlapping boxes, run `SymbolCollision.SelectSurvivors`; assert both survive **and** that the emitted order is icon-then-text | un-fixed emits text-then-icon with both flags false, so the collision drops the icon. (The old hand-built version of this tooth was **disarmed**: `LabelCollision.cs:72` is `bool place = boxes[i].AllowOverlap;`, so a hand-built box with `AllowOverlap = true` already survived against un-fixed code — it tested existing `AllowOverlap` semantics, never the extractor) |
 | T12 | **three candidates**: a higher-priority blocker A, the shield icon I, its passenger text T, all overlapping, plus a later label B. Assert A places, **I is dropped**, **T places anyway** (the accepted bare number), and **B still places** (T does not block it) | the `IgnorePlacement`-less version drops B; pins the D5 approximation as a decision |
 | T13 | the two US shield layers select **zero** features from the Berlin fixture | — (records *why* synthetic features exist; alarms if the fixture is ever swapped) |
 | T14 | anchor-clip semantics: a synthetic path from `x = -1000` to `x = 100` under point placement emits **zero** labels (mid-arc in the buffer — the accepted loss); a path whose mid-arc is in-tile emits exactly one, at the mid-arc point; under line placement, only the in-tile anchors of an edge-crossing path emit | — (pins the semantics D2 now states) |
@@ -418,30 +399,6 @@ point branches), `Style/Symbol/IconImageResolver`, `Text/AlignmentMode` (+ the n
 D5). Style: `Assets/StreamingAssets/Fixtures/liberty.json` (the 3 shield layers). Related:
 `docs/labels-and-symbols-design.md` §3 (curved along-line text) and §5 (icon support — the I3 fence this
 lifts), `docs/maplibre-spec.md` (symbol support matrix).
-
----
-
-## 8. Confirmed by the adversarial pass (attacked, held)
-
-Recorded so a later reader knows these axes were probed and did not move:
-
-- **D5's predicate breadth is correct for current liberty.** Independently re-checked layer by layer over
-  every layer carrying both `icon-image` and `text-field`: each non-shield one has a non-center text anchor
-  or a non-zero offset (`poi_r*` `liberty.json:4366-4425`, `poi_transit` `:4663-4711`, the place labels
-  `:5360-5421`, `:5444-5505`, `:5612-5679`). No current-liberty false positive exists.
-- **D1's reader migration is complete.** A repository-wide search finds exactly one production reader of
-  `LayoutProperties.SymbolPlacement` (`SymbolFeatureExtractor`) plus `SymbolStyleLayerTests`. Nothing else
-  breaks on the type change.
-- **D2's reuse of `LineCenter` is mechanically safe.** `LineAnchorPlacement.Compute` returns one valid
-  `(Segment, T)` for every non-degenerate path and an empty array for a degenerate one. The defect the
-  review found was the *semantic* clipping claim, now fixed — not an invalid segment index.
-- **D4's `Auto → Map` guard is the right branch order.** Resolving alignment *before* choosing the emit
-  shape is what stops liberty's unset-alignment waterways and one-way arrows from flipping to
-  viewport-upright. No current liberty non-shield icon+text layer uses line placement with viewport
-  alignment.
-- **`AllowOverlap` plumbing is inert.** The flag rewrites no sort keys, fade ids, dedup keys or SoA layout;
-  its only effects are the survivor bit and (absent `IgnorePlacement`) blocking — which is exactly why D5
-  now sets both.
 
 ---
 
@@ -556,41 +513,13 @@ Every tooth above asserts an integer queue value or a file's absence from a diff
 number** is confirmable only by eye: **maintainer eyeball at z13 on `OpenStreetMapLiberty.unity`**, same
 standing as §6's Stage-1 eyeball row. A green gate here is necessary, not sufficient.
 
-### Confirmed by the adversarial pass on this stage (attacked, held)
-
-The load-bearing premise — *"a queue delta between two coplanar symbol quads reorders the paint"* — was
-attacked directly and survived **more strongly** than §9 originally claimed:
-
-- **Zero depth arbitration.** Both `Map/Symbol/IconWorld` and `Map/Symbol/TextWorld` are `ZWrite Off` **and**
-  `ZTest Always` — not merely "ZWrite off"; there is no depth path at all, so submission order alone paints.
-  (This retires the "premise to re-verify" note the plan carried.)
-- **No submission path bypasses `material.renderQueue`.** Labels draw through a plain `MeshRenderer` tree
-  (`WorldSymbolRenderer`), explicitly **not** an `ITileRenderBackend`, so no BRG/command-buffer path can
-  reorder them; and the project overrides neither `SortingCriteria` nor `TransparencySortMode`.
-- **Live GPU proof already exists.** `SymbolLayerOrderSnapshotTests` reads back pixels showing that swapping
-  `renderQueue` between two symbol **text** materials flips the composite — the same mechanism D7 uses for
-  icon-vs-text.
-- **The edit surface is closed.** The four `IRenderLayer` implementers are exhaustive, and there is no third
-  production caller of `QueueFor` / `ComputeQueues` beyond `RenderLayerSet.Build` and `SymbolRenderLayer.Create`.
-- **The two test replacements are genuine strengthenings**, not relabeled re-bakes (independently checked —
-  see "corrections, not re-bakes" below).
-
-**RED-verification procedure** (per `docs/lessons-learned.md`'s "a green test can be degenerate"): a brand-new
-API cannot "fail to compile" its way to a RED. After implementing, the developer injects each defect, records
-which teeth go red, and reverts:
-
-- **I-A** — `Above = 0`: N1, U1 must go RED (this is the production bug reproduced at the sub-slot level).
-- **I-B** — `SubSlotsPerLayer = 1` (keeping `Above = 1`): N2, N6, U2 must go RED.
-- **I-C** — `ComputeQueues` left at `baseQueue + i`: N3 must go RED.
-- N7 needs no injection: run it against the pre-fix tree.
-
 ### The two existing tests that must change — corrections, not re-bakes
 
 Called out because both look like the thing this repo forbids.
 
 1. **`RenderLayerSetTests.cs:189,191`** currently asserts `WorldTextMaterial.renderQueue == QueueFor(i)`
    **and** `WorldIconMaterial.renderQueue == QueueFor(i)` — i.e. it *pins G7*. It was written to prove both
-   queues are set at Build time with no Tick (the §0.1 commit-2 deletion); that intent survives, but the
+   queues are set at Build time with no Tick (an earlier, since-removed Tick-based mechanism); that intent survives, but the
    asserted value was wrong. The replacement (U1) keeps the no-Tick intent and adds the ordering the old pair
    asserted away: icon `== QueueFor(i, Base)`, text `== QueueFor(i, Above)`, **icon < text**. A reviewer
    distinguishes this from a re-bake by the added strict inequality — a re-bake would restate equality at new
@@ -834,28 +763,6 @@ Every tooth above asserts a count, a flag or an identity. That the badge and its
 vanish together on screen** is confirmable only by eye: **maintainer eyeball at z13 on
 `OpenStreetMapLiberty.unity`** — same standing as §6's and §9's eyeball rows. After this stage neither
 symptom (bare number, badge-over-number) may remain.
-
-### Confirmed by the adversarial pass on this stage (attacked, held)
-
-D8's load-bearing premise — *"a candidate does not have to own exactly one `CandidateEmit`, and the
-multi-box candidate already gives MapLibre's combined box"* — was attacked against the working tree (not
-against this prose) and held on every axis. Recorded so a later reader knows these were probed:
-
-- **The "false dilemma" call is itself confirmed.** The reviewer that first raised the
-  instance-link-or-per-quad-`AtlasKind` dilemma **retracted it**: `WorldSymbolRenderer.Emit` keys its slot
-  off `CandidateEmit`'s own fields, never off `SymbolCandidate`, so an emit RANGE leaves the draw side
-  untouched. Every prior pass had accepted the dilemma as a constraint.
-- **All-or-nothing is real, not assumed.** `SymbolCollision.SelectSurvivors:216-234` tests every box in the
-  range before inserting ANY — the property that makes two overlapping boxes in ONE candidate legal and
-  two independent candidates self-blocking. Curved along-line labels already ship on it.
-- **`MaxCandidates` covers the emit pool exactly**; the derivation (a pair reserves 2 across its two records
-  and uses exactly 2) was re-checked independently, so `PreSizeStageOutputs` genuinely needs no change.
-- **"The rider is the next point record" is a property, not an assertion:** `SymbolGatherJob`'s
-  point-compaction preserves winner-list order, and the reconciler emits owner→rider adjacently.
-- **`pairedInstance` is structurally unreachable from the curved path**, so "a curved label is never paired"
-  needs no guard beyond the fence.
-- **P3/P4 close exactly the gap T12 recorded as accepted** — this eliminates the bare-number symptom rather
-  than relabelling it.
 
 ### Deferred — explicitly NOT this stage
 
@@ -1120,13 +1027,3 @@ site records that the fixture quad inherits point-layout anchoring, so the next 
 | **Deriving `BaselineBelowReferencePx` per font stack** instead of a constant | The constant is a property of the glyph-PBF baking (the PBF carries **no** font-level metrics, so every consumer must assume one); 26 is measured from the committed fixture and pinned by **V9**, which re-derives it from a baseline-resting glyph's own metrics rather than restating it. A font baked against a different ascent would need `IGlyphAtlasView` to expose a per-stack metric plus a policy for stacks with no baseline-resting reference glyph (CJK-only labels) — a real improvement, an unrelated amount of surface. |
 | **`text-variable-anchor`, `text-writing-mode`, vertical CJK** | Untouched by this stage and unaffected by it. |
 | **Re-tuning `NominalCapHeightEm` per script** | `17/24` em is measured from Latin Noto Sans. Non-Latin runs centre by the same band; no reported symptom, and V6's content-independence is what keeps it predictable. |
-
-### Followups recorded at review (not acted on)
-
-| Item | Standing |
-|---|---|
-| **A recalled MapLibre `SHAPING_DEFAULT_OFFSET = -17` vs this stage's 17.5** — a 0.5 baked px residual. | **RECALLED, NOT VERIFIED — and deliberately not to be verified.** This repo is clean-room (`ARCHITECTURE.md` §4): the MapLibre source is not to be consulted, so this cannot be checked without violating that, and a recalled constant is not evidence. Recorded only so a future reader does not mistake it for a new discovery. **Do not act on it.** 0.5 px is also at the edge of the ±0.5 px band the teeth already tolerate and an order below the 3.1 px defect this stage fixed. |
-| **`WorldCurvedAbRenderSnapshotTests` is the suite's ONLY absolute vertical-position tooth.** | Every other `Center`-anchored render test asserts *relatively* (deltas between anchors, symmetry about the anchor, independence from line-height/content), so a future change to vertical layout is caught in absolute terms by exactly one test — and that one is a curved fixture that only sees point anchoring by borrowing `TextQuadLayout` as a quad factory. That is a thin and slightly accidental net. Noted, not fixed: adding an absolute point-render tooth is its own stage, and this stage must not grow a new render golden while re-minting one. |
-
-Item (c) from the review — deriving `BaselineBelowReferencePx` per font stack, and the `IGlyphAtlasView` +
-CJK-policy surface it needs — is **already** recorded in the deferred table above and is not restated here.

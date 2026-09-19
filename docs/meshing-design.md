@@ -138,25 +138,31 @@ rule in [`conventions-short.md`](conventions-short.md).
 > no-MSAA decisions recorded there. This section stays the record of *why* the removed AA failed; that doc
 > is where the rebuild is designed.
 
-**State:** line edge antialiasing is **removed** (commit `0b910c7`). Lines render with a **hard edge**, the
-configured width drawn **solid**, thin lines held at ≥ 1 px by a **min-width floor**. `line-blur` (`_Blur`) is
-kept as an opt-in soft edge; dashing is unchanged. This section is the SSOT for *why* there is no edge AA and
-what a correct version looks like — it supersedes the earlier "opaque-core + feathered edge" AA model (which the
-lit-rendering convention in §3 no longer describes).
+**History, not current state:** line edge antialiasing was **removed** at commit `0b910c7`, leaving a hard
+edge, the configured width drawn solid, and thin lines held at >= 1 px by a min-width floor. It was later
+rebuilt: the shipped shader antialiases by default, and the hard edge survives only behind
+`_EDGE_ANTIALIASING_OFF` — see "What the shader does now" below. `line-blur` (`_Blur`) is kept as an opt-in
+soft edge; dashing is unchanged. This section records *why the removed AA failed*; `docs/line-antialiasing-design.md`
+designs the version that shipped.
 
 ## What the shader does now
 
 `Line_VertexExtrude.hlsl` extrudes the ribbon to exactly the styled half-width (screen-space pixel width from the
-projection measurement, `_MetersPerPixel` retired). `LineCoverage`:
+projection measurement, `_MetersPerPixel` retired). By default `LineCoverage` antialiases both ribbon edges with
+a one-device-pixel straddle, centred on the styled edge:
 
-- **Outer edge:** hard — the ribbon spans `|side| ≤ 1`, coverage is `1` up to the rasterized triangle silhouette.
-  No feather.
-- **Gap hole (cased/hollow lines):** hard cut at `|side| < innerFrac`.
-- **`_Blur` (MapLibre line-blur):** opt-in inward soft edge, `0` ⇒ no-op. Not antialiasing.
+- **Outer edge:** `coverage = saturate((1 − |side|) / |∇side|)` — the ramp centres on the styled edge, so
+  `a == 1` from the centreline out to half a pixel inside it and `a == 0` half a pixel outside it. The
+  `_EDGE_ANTIALIASING_OFF` build flag restores a hard edge instead (coverage `1` up to the rasterized triangle
+  silhouette, no feather).
+- **Gap hole (cased/hollow lines):** the same straddle, centred on `|side| = innerFrac`; under
+  `_EDGE_ANTIALIASING_OFF` this is a hard cut at `|side| < innerFrac` instead.
+- **`_Blur` (MapLibre line-blur):** opt-in inward soft edge on top of the straddle, `0` ⇒ no-op. Not
+  antialiasing.
 - **Dash:** unchanged (its own along-line `fwidth` feather stays — a different aliasing axis).
 
-The **only** thin-line safeguard is the min-width floor: half-width `≥ 0.5 px`, so a sub-pixel line renders a
-stable 1 px hairline instead of dropping out.
+The min-width floor (half-width `≥ 0.5 px`) still guards a sub-pixel line from dropping out — see
+[`line-antialiasing-design.md`](line-antialiasing-design.md) for the ramp's full derivation.
 
 ## Why edge AA was removed, and how it came back — the trilemma, resolved
 
@@ -233,19 +239,14 @@ it is the compositing model.
 
 ## The way forward — single-pass cased line (not yet built)
 
-The fix changes the **architecture**, not a shader knob. Two viable directions:
-
-1. **Single-pass cased line (preferred).** Fuse the `*_casing` + main layers into **one** mesh / one draw. The
-   fragment picks fill-vs-casing colour by **signed distance** from the centreline, antialiases only the
-   **outer** silhouette, and treats the internal fill↔casing boundary as a hard colour swap (or a 1 px
-   colour-to-colour AA). No transparent stacking → nothing to bleed. This is how SDF text and MapLibre-style
-   casing work. Cost: the two style layers must be recognised and fused at build time.
-2. **Opaque line compositing.** Draw lines opaque (`ZWrite On`, opaque queue, depth-offset off the fills) so the
-   fill *replaces* the casing instead of blending, with MSAA for the outer edge. Crisp boundary because it is a
-   replace. Cost: coplanar-depth handling against the fills.
-
-MSAA is **orthogonal** and complementary once compositing is fixed: with hard geometry edges and no shader fade,
-it cleans the outer silhouettes cheaply. It is currently off (`m_MSAA: 1`) in the URP assets.
+Both directions sketched for this — fusing the casing and fill into one draw, and opaque replace-compositing
+— are rejected, with the full reasoning in [`line-antialiasing-design.md`](line-antialiasing-design.md) §4.1
+and §4.2: fusion regresses junction draw order on real styles (45 of 67 line layers are unpaired, and the
+style interleaves other layers between a casing block and its fill block, so no single fused slot reproduces
+the declared compositing), and replace-compositing is dead on two locked maintainer rulings — no depth (map
+layers never ZWrite) and no MSAA (tried up to 16× with no meaningful improvement). Neither is a prerequisite
+for antialiased lines any more (§2 above); single-pass cased rendering remains the better architecture for the
+cased-line case specifically, and is still not built.
 
 ## What was deliberately kept
 
@@ -399,16 +400,10 @@ deliberate verbatim fork of `LitInput.hlsl` (full URP Lit CBUFFER body copied, t
 
 ## Gotchas to design around
 
-- `MaterialPropertyBlock` silently kills the SRP Batcher + GPU instancing — per-layer materials / DOTS-instanced
-  props instead.
-- The vertex offset must be in EVERY pass via the shared include, or shadows/depth/SSAO desync.
-- Don't overload the lighting `NORMAL` with the extrusion direction.
 - Coplanar fill-vs-line z-fighting — mitigated by a tiny lift (~`0.001` world-m) along the **per-vertex surface
   normal** (`upWS`, from the mesh `NORMAL` stream — not a hardcoded `+Y`, so it holds on the globe too) in the
   line's vertex function, added to the world-space offset before rounding back to object space (in addition to
   the `Queue=Transparent`/`ZWrite Off` painter ordering). Invisible at any map scale.
-- Deferred renders transparents (lines) in forward anyway; don't expect lines in the GBuffer.
-- The pass list and MSAA-in-deferred / alpha-to-coverage behavior are URP-version-dependent; pin them.
 
 ## Material inspector — clean-room, not a URP subclass (S58)
 
@@ -665,16 +660,10 @@ globe track.)
   material invariant (per-layer materials are shared across tiles; a raster tile needs its own texture →
   texture-array / BRG per-instance texture id / per-tile material — decided in the raster stage).
 - **Fill-extrusion** = `TileMesh` + `Persistent` + ZWrite on. One `ITileMeshRenderLayer` class + one factory arm;
-  the depth-vs-transparent-band interaction is its stage's design problem.
-  **Update (job-scheduling-design.md §8 stage 4, Group A):** the roof now meshes on the job graph, same as
-  fill (`ITileMeshRenderLayer.BuildGraphRequest`, `FillMeshGraph` — the capability lived on the now-deleted
-  `IGraphInputRenderLayer` at the time this note was written; §8 stage 5 Group B merged it into
-  `ITileMeshRenderLayer` itself); at the time this note was written the walls stayed a prologue-built managed
-  loop (`BuildLayerInput`'s `WriteWalls` call) — unchanged by the line graph landing, since walls read raw
-  ring vertices directly, not earcut/ribbon output (`docs/job-scheduling-design.md` §8 stage 4's own "what
-  stage 4 actually does" note). **Update (job-scheduling-design.md §8 stage 5, the wall-job-graph stage):**
-  the walls moved off the prologue too — `WriteWalls` is deleted, and the wall chain now schedules alongside
-  the roof in `FillExtrusionMeshGraph.Schedule`, owned by `TileBuildGraph.LayerBuild`, not `BuildLayerInput`.
+  the depth-vs-transparent-band interaction is its stage's design problem. Both the roof and the walls mesh on
+  the job graph: `FillExtrusionMeshGraph.Schedule` builds both, owned by `TileBuildGraph.LayerBuild` via
+  `ITileMeshRenderLayer.BuildGraphRequest` — no managed prologue step remains (`BuildLayerInput`'s `WriteWalls`
+  call is deleted).
 
 ## Non-goals / open questions
 
@@ -688,63 +677,8 @@ globe track.)
   look in that stage.
 - **Raster per-tile texture vs per-layer material** — unresolved by design; decided in the raster stage.
 
-### Review findings recorded at merge (dual-arm, 2026-08-03)
+### Buffer-clip default (2026-08-03)
 
-Non-blocking; recorded per `AGENTS.md` rather than fixed in-stage.
-
-**F-CLIP-1 — a knob change does not reliably reach every mesh, and the obvious reading of the code says it
-does.** `TileManager.Tick` calls `_prepared.Clear()` when `BufferClip` changes, which evicts what is in the
-`PreparedTileCache` *at that instant*. A tile in cover keeps its stale-window mesh; when it later **leaves**
-cover that mesh is `Put()` into the now-clean cache under a `PreparedKey` of `(Style, Tile, LayerId)` — which
-carries **no clip component** — so it is indistinguishable from a fresh entry, and re-entering cover serves it
-verbatim. The stale geometry survives arbitrarily many leave/re-enter cycles; only an LRU eviction or a
-restyle clears it. Visual-only, no crash or leak, and narrow — but it is exactly the live-tuning workflow the
-knob exists for. The comments at all three sites now state this instead of promising otherwise.
-*Fix shape:* put the bake parameters in the cache key (or fold them into `StyleToken`), which also makes the
-`Clear()` unnecessary. Nothing currently tests a live config change with a tile cycling through cover.
-
-**F-CLIP-2 — flip the default to 0. DONE 2026-08-03.** T5 measured a **zero-pixel** crack at `b = 0` at
-both altitudes, and the maintainer confirmed it on a real basemap ("at 0 buffer it works okay"), so the
-hazard the non-zero default hedged against is not real and the knob now defaults to **0**.
-
-What had blocked it was never rendering. Two **parity oracles**
-(`MapViewAsyncMeshBuildTests.Tooth3_AsyncPath_ProducesSameGeometryAsSyncPath`,
-`MapViewLiveLoopTests.MapView_GoLive_ProducesSameGeometryAsDirectBuilder`) compare the MapView path against
-the direct sync builder, and the reference arm passed **no clip** — so at any non-disabled default the two
-arms built under *different windows* and the oracle silently stopped being a comparison. They were green at
-16 only because `sample-tile`'s 6-unit overshoot fits inside a 16-unit window: luck, not design.
-Both arms now decode the same config field through `TileBufferClip.FromInspectorUnits` — which **restores**
-the precondition rather than relaxing it — and both pass at 0. That factory also absorbed the review NIT
-about the negative-means-disabled sentinel being inline in `MapView`, unreachable and untested.
-
-*Left deliberately:* `BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh` also calls `BuildFill`, but
-compares two direct-builder paths that never read config, so it was never affected and takes no clip.
-
-**F-CLIP-3 — arm the two would-be falsifiers.** `A6NonMvtDecoderTests` and `TileBackgroundQuadProjectionTests`
-assert the synthetic full-extent ring produces exactly 4 vertices, and the plan leaned on them as free
-falsifiers for a boundary slip. Both build a `TileLayerProcessContext` with `BufferClip` unset ⇒ disabled, so
-neither exercises the clip — including now, when production clips the background quad. Thread a non-default
-clip into their contexts.
-
-**F-CLIP-4 — scratch headroom.** `ScratchLengthMultiplier = 16` is the loose per-plane bound (2⁴). The tight
-bound is 1.5⁴ ≈ 5.06× — the alternating case that maximises output also forces `#entering == #exiting`. Safe
-as-is (over-estimating is the only safe direction under Burst), but ~3× more than needed, and it is ~26 MB
-transient for a 50 k-vertex ring.
-
-**F-CLIP-5 — MOOT: `FillMeshPipeline.Schedule` is retired.** job-scheduling-design.md §8 stage 4 Group B
-deleted the method this finding named (no `try/finally` around its allocations; a throw between an
-allocation and an exit leaked `tileVerts`, the per-poly arrays, and — after the clip stage — three more
-containers). The replacement, `FillMeshGraph.Schedule`, disposes through dispose NODES scheduled onto the
-job graph rather than a main-thread `try/finally` — a different mechanism this finding was never re-derived
-against, so whether an equivalent leak-on-throw risk exists there is genuinely open, not closed by this
-retirement. Re-assess against `FillMeshGraph.Schedule`/`FillGraphOutput`'s dispose-node graph if this class
-of leak matters again.
-
-**F-CLIP-6 — hole containment after clipping.** `RingAssemblyJob.RingContainedIn` tests a hole's centroid (then
-its first vertex) against the outer ring. Clipping can move a hole's centroid, so for a strongly concave
-clipped outer the containment test could in principle now miss. Not observed on the corpus; recorded as a
-pre-existing weakness the clip makes marginally easier to reach.
-
-**Lines still paint their buffer** — by decision, not omission. Clipping an input polyline at the boundary
-turns the join at that vertex into a cap, trading the band for a notch. The equivalent for lines is clipping
-the tessellated ribbon.
+The fill clip window (`TileBufferClip`, §1) defaults to **0** tile units. A prior non-zero default hedged
+against a seam crack that measurement showed does not exist — zero pixels, at both tested altitudes — and
+the maintainer confirmed it against a real basemap.

@@ -74,7 +74,7 @@ namespace MapRenderer.Core.Text
         /// <param name="fixedHeight">0 = classic height-grows atlas (single page, never pages); a positive
         /// value = a FIXED-capacity <c>width x fixedHeight</c> PAGE whose <see cref="Size"/> never changes
         /// (its pixel buffer is pre-allocated in full) — S105 uses a big fixed atlas so incremental
-        /// per-tile layout never invalidates earlier tiles' UVs (glyph-atlas-uv-growth-staleness lesson).
+        /// per-tile layout never invalidates earlier tiles' UVs.
         /// Stage M: a glyph that no longer fits the current page opens a NEW page (own buffer + packer)
         /// instead of dropping — see the class doc's multi-page section. <see cref="OverflowCount"/> now
         /// only counts a cell that doesn't fit even a fresh empty page.</param>

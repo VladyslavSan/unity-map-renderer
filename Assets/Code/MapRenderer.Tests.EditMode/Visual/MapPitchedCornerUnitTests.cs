@@ -150,7 +150,7 @@ namespace MapRenderer.Tests.Visual
         /// <c>0 · k == 0</c>.</para>
         ///
         /// <para><b>This tooth is the answer to "which test goes RED if this stops being deliberate?"</b>
-        /// (<c>recorded-limitation-needs-an-observing-tooth</c>). Without it the scaling is an unobserved
+        /// A recorded limitation needs a tooth that observes it. Without one the scaling is an unobserved
         /// path, and this epic has already shipped one of those.</para>
         ///
         /// <para><b>Method: a DIFFERENCE, so the corner geometry cancels.</b> The same map-pitched symbol is

@@ -25,7 +25,7 @@ namespace MapRenderer.Tests.Text.Placement
     [TestFixture]
     public class WorldSurfaceUpPopulationTests
     {
-        // A deliberately non-equator, non-prime-meridian anchor (sign-constants-render-at-a-discriminating-value):
+        // A non-equator, non-prime-meridian anchor, so the sign constants are read where the code is not inert:
         // all three closed-form components (cosφcosλ, sinφ, cosφsinλ) are distinct and nonzero here.
         private static readonly GeoCoordinate Anchor = new GeoCoordinate { Latitude = 47.0, Longitude = 8.0 };
 

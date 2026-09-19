@@ -235,6 +235,25 @@ on the first day.
 
 ---
 
+## 5. Dash distance-along reset
+
+The managed producer's `LineVertex.DistanceAlong` and the Burst producer's `LineRibbonVertex.DistanceAlong`
+reset to 0 at the start of each RING (each geometry part), not once per tile. A source feature can decode
+into many rings — boundary and transportation layers split at attribute changes and way boundaries, not at
+the tile grid, so a feature that looks like one road on screen is rarely one part.
+
+**Most dash joints sit inside a tile, not on its edge.** Measured on a real z9 transportation layer: 74
+features decode into 1665 parts, and of the resulting shared endpoints, 1817 are interior to a tile against
+309 on a tile edge — roughly 85% of joints are interior. A dash-continuity scheme that reasons only about
+tile-edge seams addresses the smaller part of the problem.
+
+**Fit a dash pattern by JOINT count, not by length.** Length-weighting hides the defect: a few long,
+well-phased parts can outweigh many short, badly-phased ones in a metre-weighted average, even though the
+visible artefact (a phase jump) is per joint. Pinned by
+`LineGraphSchedulingTests.LineMeshGraph_DistanceAlong_ResetsPerRing_NotAccumulatedAcrossRings`.
+
+---
+
 ## References
 
 - `docs/line-antialiasing-design.md` — the coverage ramp, unaffected by any of the above.

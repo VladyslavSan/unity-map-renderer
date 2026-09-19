@@ -314,7 +314,7 @@ namespace MapRenderer.Tests.Visual
             // NOT frame.Coverage().IsBlank: SnapshotCoverage.IsBlank fires at >=97% BACKGROUND fraction
             // (SnapshotCoverage.cs), but two small glyph cells cover well under 1% of a 512x512 frame (the
             // POSITIVE fixture measured 0.27% filled) — IsBlank would read TRUE on the positive frame too,
-            // making this control vacuous (lessons blind-spots-dont-transfer-between-instruments: G-V0's
+            // making this control vacuous (one instrument's blind spot does not transfer to another: G-V0's
             // fill negative control legitimately used IsBlank because a fill covers tens of percent of the
             // frame; that does not transfer to an instrument reading two glyph cells). InkStatsIn over the
             // WHOLE frame reads the same background predicate at the granularity this fixture needs.

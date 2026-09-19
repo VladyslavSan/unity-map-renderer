@@ -476,7 +476,7 @@ namespace MapRenderer.Tests.Text
 
             // TestGlyphSource resolves via UniTask.FromResult, so the whole tail runs synchronously to
             // completion inside this one call — a vacuity trap in its own right
-            // (parity-oracle-vacuous-when-fixture-lacks-filter-keys / commits-inside-PumpBuilds-is-green-today),
+            // (a fixture lacking the keys an oracle reads makes it vacuous),
             // which is why the evidence below is captured DURING execution (the fetches list), not inferred
             // from "PumpBuilds returned", and why the two layers use DIFFERENT font names.
             _subsystem.PumpBuilds();

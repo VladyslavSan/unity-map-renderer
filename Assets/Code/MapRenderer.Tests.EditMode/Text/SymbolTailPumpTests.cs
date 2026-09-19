@@ -113,7 +113,7 @@ namespace MapRenderer.Tests.Text
         /// <summary>T4 structural half: <c>RunTailAsync</c> now awaits exactly ONCE — the build-wide glyph-
         /// range ensure step — and that ONE await comes BEFORE the per-layer shape loop starts. Complements
         /// <c>GlyphPrepareBeforeShapeTests.TheMainTailHasNoSuspensionPoint</c>'s reflection half (a different
-        /// instrument reading a different thing — <c>blind-spots-dont-transfer-between-instruments</c>).
+        /// instrument reading a different thing, whose blind spot does not transfer).
         /// <para><b>RED injection:</b> add a second <c>await UniTask.Yield();</c> anywhere inside
         /// <c>RunTailAsync</c>'s shape loop — the count assertion reddens.</para></summary>
         [Test]

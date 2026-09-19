@@ -3,7 +3,7 @@
 // Unity.Collections dependency, so this runs in the fast dotnet project. It stays out of EditMode on purpose:
 // GC.GetAllocatedBytesForCurrentThread AND GC.GetTotalMemory are both dead/coarse in the Unity Mono EditMode
 // runner (a 400 KB calibration alloc read 16 KB via GetTotalMemory there), so this byte-delta tooth can only
-// discriminate in the CoreCLR dotnet runner (see allocgcmemory-constraint-false-positives). The EditMode
+// discriminate in the CoreCLR dotnet runner. The EditMode
 // zero-alloc coverage for this subsystem uses the Recorder-based Is.Not.AllocatingGCMemory() instead.
 
 using System;
@@ -63,8 +63,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         /// <summary>Proves GC.GetTotalMemory is a LIVE meter in this run before the warm-reuse tooth below
-        /// trusts it — a silently-dead meter would make that assertion vacuous
-        /// (allocgcmemory-constraint-false-positives).</summary>
+        /// trusts it — a silently-dead meter would make that assertion vacuous.</summary>
         [Test]
         public void GetTotalMemory_IsALiveMeterInThisRun()
         {

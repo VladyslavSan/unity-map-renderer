@@ -29,8 +29,7 @@
 // WHY 45° AND 90° ARE SWEPT AND 0° ALONE WOULD BE VACUOUS FOR THE SIGN. A road at 0° is horizontal on
 // screen, and the 'F' cell's displacement about its anchor is then symmetric under the mirror the sign
 // controls — P3b measured a FALSE AGREEMENT at 0° and 22.56 px of disagreement at 45°/90° against a 1.0 px
-// bound. `sign-constants-render-at-a-discriminating-value`: a sign constant must be read where the code is
-// not inert.
+// bound. A sign constant must be read where the code is not inert.
 //
 // WHY THE CENTROID IS LEGITIMATE HERE, AND ONLY HERE. At tilt 0 the projection RESTRICTED TO THE GROUND
 // PLANE is affine, so it commutes with the centroid and an ink centroid is a faithful position reading. It
@@ -157,7 +156,7 @@ namespace MapRenderer.Tests.Visual
         /// <para><b>The 45° and 90° cells are the discriminating ones; 0° cannot see a mirror across the road
         /// axis.</b> At 0° the road is screen-horizontal and the flip the sign controls maps the cell onto a
         /// near-symmetric image of itself. P3b read a false agreement at 0° and 22.56 px at 45°/90° against
-        /// this same 1.0 px bound (<c>sign-constants-render-at-a-discriminating-value</c>). 0° is retained as
+        /// this same 1.0 px bound — a sign constant must be read where the code is not inert. 0° is retained as
         /// the control, labelled as such — it is what says the pair agrees at all before the sign is asked
         /// about.</para>
         ///

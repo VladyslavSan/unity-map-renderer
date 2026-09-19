@@ -132,6 +132,23 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     thread-local byte delta works only in `Tools/core-tests`.
   - **Out of scope:** cold paths (parse, static init, throw-path `$"…"`).
 
+- **A `using`-declared native container rejects an index write (CS1654).** Reads, `.Add()`, `.Resize()`,
+  and pass-by-value still compile; `x[i] = v` does not, because neither container is a `readonly struct`.
+  Fix: take a plain, non-`using` writable view over the same allocation and write through that —
+  `.GetSubArray(0, x.Length)` for a `NativeArray<T>`, `.AsArray()` for a `NativeList<T>` — re-fetching a
+  `NativeList` view after every `Resize`.
+
+- **A per-frame `ValueTuple` comparison key tops out at 7 elements.** At the 8th, the generic shape
+  changes — the tail becomes a nested `ValueTuple<T8>` (`TRest`) — and constructing or comparing that
+  shape allocates under Unity's Mono; comparing field-by-field instead of `==` does not fix it. Past 7
+  fields, replace the tuple with a `readonly struct` implementing `IEquatable<T>`, compared via
+  `key.Equals(prev)` (prior art: `MapView.SelectorInputs`).
+
+- **`Allocator.Temp` containers cannot be scheduled with `.Run()`.** The Collections safety system
+  rejects a `Temp`-allocated container passed to a `.Run()` job — `.Run()` counts as scheduling even
+  though it executes inline. Use `Allocator.TempJob` for per-call scratch, or a persistent field allocated
+  once and reused for once-per-tick scratch.
+
 - **`if (x.IsCreated) x.Dispose();` — redundant almost everywhere, LOAD-BEARING where the same
   already-disposed instance can be disposed again. The discriminator is "can this release site run twice
   on the SAME, already-disposed instance?" — not "might the value be absent?".**
@@ -182,7 +199,28 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     trivial. Full contract (exit paths, cancellation, teeth) in
     **`docs/async-architecture.md` §"Disposal & cancellation contract"**.
 
+- **Every loop is bounded (`always-bound-loops`). A count derived from runtime data gets a named ceiling.**
+  - Any `for`/`while` whose iteration count comes from projection, geometry, arc length, distance or
+    style/user data takes a named `MaxX` constant. A real value is a handful; the cap only guards the
+    pathological case, so pick it high — the requirement is *finite*, not tight.
+  - **Clamp in float and `math.min(..., cap)` BEFORE any `(int)` cast** — a huge float overflows the int
+    to garbage or a negative.
+  - Guard the source too: reject non-physical projected coordinates and non-finite lengths. Write the
+    test as `!(x < Max)` so it also catches NaN.
+  - *What it prevents:* a line vertex at the camera near plane projects to a near-infinite screen
+    coordinate, so `projectedLineLength / symbol-spacing` produced millions of anchors and hung the scene.
+  - Prior art: `SymbolStagingMath.MaxAnchorsPerLine`, `SymbolScreenProjection.MaxProjectedPx`,
+    `LayerInput.MaxOutputVertices`.
+
 ## Naming
+
+- **Symbol / Text / Icon is the partition for the symbol subsystem. "Label" is not a name.**
+  - A symbol is a placed text AND/OR icon, so `symbol` is the umbrella term. Touches only text → `Text*`.
+    Only icon → `Icon*`. Touches both, either, or the placed unit as such → `Symbol*`. A total partition.
+  - **"Label" is eliminated**: colloquially it means "text label", so it wrongly narrows a type that acts
+    on the whole text+icon box. "marker" is a point-icon subset, never the umbrella.
+  - Applied in full 2026-08-24 — the rule new code is held to, not a migration to run. Legitimate
+    survivors are not violations: Unity's own `GUI.Label`, style-layer data strings, `LiteralLabel`.
 
 - **Names carry meaning; filler words do not.**
   - `Scratch`, `Data`, `Info`, `Manager`, `Helper`, `Util`, `Temp`, `Stuff` may never be the part of a name
@@ -200,6 +238,26 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     rule without this line made it read as already true — which is how `EarcutScratch` survived one
     rename (the type was fixed, the field it was held in stayed `Scratch`) and how `FlatScratchVx`
     outlived the doc that uses it as the example of what to fix.
+
+- **Descriptive names, not positional or abbreviated.**
+  - Name a variable, parameter, or out-param for its role, not its position — `topLeft/topRight/…`, not
+    `v0/v1/v2/v3` (`BillboardMath.BuildWorldQuad`). Use known-position names (corner, edge) when several
+    things map to fixed positions.
+  - A `using X = Namespace.Type;` alias must be spelled out too — `using SymbolStyle = …Symbol;`, never
+    an abbreviation. Add an alias only to break a real collision, and keep it descriptive.
+
+- **Test file/class/method names must not carry a stage identifier.**
+  - `ThrottleTests`, never `S55ThrottleTests` — a stage id is ephemeral bookkeeping a later reader cannot
+    decode, and it turns the suite into a changelog. Same principle as the commit-scope rule. Fine as
+    provenance inside a doc comment; the ban is on identifiers that show up in test output.
+
+- **A namespace segment must not equal a bare `UnityEngine` type name.**
+  - Inside `namespace …Foo.Material`, bare `Material` resolves to the *namespace*, forcing
+    `UnityEngine.Material` everywhere inside it (`CS0118`). Pluralize or use an `-ing` form —
+    `Materials`, `Meshing`, `GameObjects` — and audit a proposed segment with
+    `grep -rE 'UnityEngine\.<Name>\b'` first. Same failure on an unqualified `using` that imports a name
+    (e.g. `CameraProperties`) this repo also defines (`CS0104`) — qualify the new import, don't alias the
+    incumbent.
 
 ## Documentation & tests
 
@@ -233,6 +291,26 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     "Clean-room: no MapLibre source read." names nothing, is unverifiable, and **implies the files without
     it are not clean-room** — the opposite of what it intends. The claim is already authoritative in
     `ARCHITECTURE.md` § "Clean-room hygiene" and `THIRD-PARTY-NOTICES.txt`; one home is enough.
+
+- **A code comment must not bake in a profiling number.**
+  - A specific ms figure or "X IS the cost" goes stale the moment the regime shifts, and a stale number
+    reads as durable fact to the next reader. A comment may state a *structural* fact that stays true
+    (camera-independent vs per-frame); a measurement belongs in a dated design doc instead.
+
+- **A prose mention or `<see cref>` must be earned by real code coupling.**
+  - A file that only names `Foo` in a comment and never uses the `Foo` symbol should cut the mention — an
+    IDE already navigates the real symbol, and the mention rots into a stale reference the moment `Foo` is
+    renamed.
+  - The same boundary runs the other way: a wording/naming convention governs prose we author, never a
+    citation of a real file, type, or section title — rewriting a citation's words only breaks the
+    reference, it renames nothing.
+
+- **Image/golden test fixtures go in a `~`-suffixed folder.**
+  - Every fixture here loads by file path, so Unity importing it as an asset is a pure side effect. For an
+    image fixture that side effect is harmful — a plain `.png` under `Assets/` imports as a pixel-mutated
+    `Texture2D` plus an unread `.meta`. Put it under a folder ending in `~`
+    (`Assets/Fixtures/visual-references~/`) — Unity's importer ignores it entirely, while
+    `File.ReadAllBytes` and a file browser still see the original bytes.
 
 - **Test code must not bloat the production codebase.** A member that exists solely for a test does not belong
   on the production class.

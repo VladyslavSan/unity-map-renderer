@@ -208,6 +208,27 @@ that is the projection *math*, not a naming choice — do the swap at the projec
 
 *(Established S64.)*
 
+### Prefer a plain auto-property over a field plus forwarding accessor
+
+When a member is only get/set, declare it once as an auto-property with the visibility it needs:
+
+```csharp
+internal SymbolStringTable StringTable { get; }
+```
+
+not a private backing field plus a property that just forwards to it. The compiler already gives an
+auto-property a backing field; a hand-written one adds a second name for the same storage and a line of
+noise at every read. Raising a `private` field to `internal` for a test is the moment this rule is
+usually broken — reach for the auto-property form, not a field-plus-accessor pair.
+
+**An explicit backing field is earned only when the accessor does work a plain auto-property cannot** —
+laziness (`_x ??= …`), change notification, a computed value, or validation a caller can actually
+trigger. A defensive guard no caller can reach is not work: drop it and put the default in a property
+initializer instead (`{ get; set; } = new X();`). A set-only property with an unread getter needs no
+field either — `{ get; set; }` is fine on its own.
+
+*(prior art: `StyledSymbolTileBuilder.StringTable`.)*
+
 ---
 
 ## Geometry & meshing
@@ -380,6 +401,47 @@ to the next when the one above is genuinely impossible.
 `$"…"` on an exception path run once (or only on failure). Pooling them trades readability for nothing; the
 ladder is for the recurring loops only.
 
+### A `using`-declared native container rejects an index write (CS1654)
+
+A `using var`/`using (...)`-declared `NativeArray<T>` or `NativeList<T>` still compiles for a read
+(`x[i]` on the right side), `.Add()`, `.Resize()`, and passing it by value — but an index *assignment*
+(`x[i] = v`) fails with `CS1654`. Neither container is a `readonly struct` with a `readonly`-annotated
+indexer setter, so the compiler cannot prove the write leaves the disposal target alone.
+
+**Fix: take a plain, non-`using` writable view over the same allocation and write through that** —
+`.GetSubArray(0, x.Length)` for a `NativeArray<T>`, `.AsArray()` for a `NativeList<T>` — rather than
+dropping `using` for a manual `try`/`finally`:
+
+```csharp
+using var rankByOrdinal = new NativeArray<int>(count, Allocator.Persistent); // owns + disposes
+NativeArray<int> rankByOrdinalWritable = rankByOrdinal.GetSubArray(0, rankByOrdinal.Length);
+rankByOrdinalWritable[i] = rank;   // reads may use either local; writes use the view
+```
+
+The view is non-copying (same underlying allocation), so a write through it lands on the owned
+container. Re-fetch a `NativeList` view after every `Resize` — its length must track the list.
+
+*(prior art: `StyledFillTileBuilder.cs`'s `rankByOrdinalWritable`.)*
+
+### A per-frame `ValueTuple` comparison key tops out at 7 elements
+
+A `ValueTuple` used as a per-frame comparison key is allocation-free at 7 elements. At the 8th, the
+generic shape changes: elements 1–7 stay in place and the 8th becomes a nested `ValueTuple<T8>`
+(`TRest`), and constructing or comparing that nested shape allocates under Unity's Mono — comparing it
+field-by-field instead of with `==` does not avoid this, because the cost is in holding the shape, not in
+the comparison operator.
+
+Past 7 fields, remove `ValueTuple` from the path entirely: a `readonly struct` implementing
+`IEquatable<T>`, compared with `key.Equals(prev)`, with a plain `bool` held beside it rather than a
+`Nullable<T>`. `MapView.SelectorInputs` is the shipped example.
+
+### `Allocator.Temp` containers cannot be scheduled with `.Run()`
+
+A container allocated with `Allocator.Temp` cannot be passed as a job field to a job dispatched with
+`.Run()` — the Collections safety system rejects it, because `.Run()` counts as scheduling even though it
+executes inline on the main thread. Use `Allocator.TempJob` for a per-call container, or a persistent
+field allocated once (in the constructor) and reused, for scratch that runs once per tick.
+
 ### `if (x.IsCreated) x.Dispose();` — know whether it is redundant or load-bearing
 
 Both exist in this codebase, and the difference is not cosmetic. **The discriminator is "can this release
@@ -491,6 +553,32 @@ one-screen summary.
 
 ---
 
+
+### Every loop is bounded
+
+Code comments cite this rule as `always-bound-loops`.
+
+Any `for`/`while` whose iteration count comes from projection, geometry, arc length, distance, or
+style/user data takes a named `MaxX` ceiling. A real value is a handful of iterations; the cap exists only
+for the pathological case, so pick it high — the requirement is that the count is *finite*, not that the
+bound is tight.
+
+The failure this prevents is not hypothetical. A line vertex sitting on the camera near plane projects to
+a near-infinite screen coordinate, so `projectedLineLength / symbol-spacing` evaluated to millions of
+anchors and the demo scene hung. It reproduced only when the camera sat where a road crossed the near
+plane, which is why no ordinary run found it.
+
+Two rules make the ceiling actually hold:
+
+- **Clamp in float, then `math.min(..., cap)`, BEFORE any `(int)` cast.** A float larger than `int.MaxValue`
+  casts to garbage or to a negative, so a cast that happens first defeats the clamp.
+- **Guard the source as well as the loop.** Reject non-physical projected coordinates and non-finite
+  lengths, and write the test as `!(x < Max)` rather than `x >= Max` so that NaN is also rejected.
+
+Prior art: `SymbolStagingMath.MaxAnchorsPerLine`, `SymbolScreenProjection.MaxProjectedPx`,
+`LayerInput.MaxOutputVertices`.
+
+
 ## Names carry meaning; filler words do not
 
 A type or field name should tell a reader what the thing **holds or does**. A word that would fit equally
@@ -527,6 +615,64 @@ outlived by months the very passage that uses it as the specimen of what to fix.
 
 See also *Type-explicit builder naming* and *Descriptive names, not positional* — the same principle at the
 type and parameter level.
+
+### Descriptive names, not positional or abbreviated
+
+Name a variable, parameter, or out-parameter for its role, never its position or a shortened form.
+`BillboardMath.BuildWorldQuad`'s four `out WorldBillboardVertex` parameters are `topLeft`, `topRight`,
+`bottomRight`, `bottomLeft` — not `v0`/`v1`/`v2`/`v3`. When several things map to known positions (quad
+corners, box edges), use those names; a positional name hides which corner or edge a reader is looking at.
+
+**A `using X = Namespace.Type;` alias must be spelled out too.** A disambiguating alias is fine —
+`using SymbolStyle = MapRenderer.Core.Style.Symbol;` avoids a real collision with the base style
+hierarchy — but the alias itself must read as a name, never an abbreviation. Add an alias only to break an
+actual collision, and keep it descriptive when you do.
+
+See also *Spell names out* under Data carriers, which states the same principle for type members.
+
+### Test names must not carry a stage identifier
+
+A test file, class, or method name must describe its subject and behaviour — `ThrottleTests`, not
+`S55ThrottleTests`. A stage identifier is ephemeral build bookkeeping; a reader with no stage log has no
+way to decode it, and it makes the suite read like a changelog instead of a spec. The same principle
+already governs a commit's scope (`docs/commit-conventions.md`): legible without looking anything up.
+
+A stage identifier is still fine as provenance inside a doc comment or a design doc — the rule is only
+about identifiers that appear in test output.
+
+### Namespace segments must not collide with a bare UnityEngine type name
+
+A namespace segment that equals a bare `UnityEngine` type name breaks every file inside it that also uses
+that type: inside `namespace …Rendering.Material`, a bare `Material` resolves to the *namespace*, not the
+type (the enclosing namespace wins over `using UnityEngine;`), and every use of `UnityEngine.Material`
+inside that namespace then needs full qualification (`CS0118`). Pluralize the segment, or use an `-ing`
+form, instead — `Materials`, `Meshing`, `GameObjects` are the collision-free forms already in use here.
+Audit a proposed segment with `grep -rE 'UnityEngine\.<Name>\b'` before committing to it.
+
+The same failure hits an unqualified `using`: `UnityEngine.Rendering` and `MapRenderer.Core.View.Camera`
+both define a `CameraProperties`, so adding `using UnityEngine.Rendering;` to a file that already uses
+this repo's own `CameraProperties` is a `CS0104` ambiguous reference. Qualify the newly-imported name (or
+alias it) rather than touching the incumbent.
+
+
+### Symbol, Text, Icon — and never Label
+
+A symbol is a placed text AND/OR icon, matching the style spec's own `symbol` layer. That makes `symbol`
+the umbrella term, and the naming follows it as a total partition:
+
+- Touches only text → `Text*`.
+- Touches only icon → `Icon*`.
+- Touches both, either, or the placed unit as such (placement, collision, pairing, projection, the
+  per-tile containers, the subsystem, the store, the render layers) → `Symbol*`.
+
+**"Label" is eliminated.** Colloquially "label" means "text label", so using it for a type that acts on the
+whole text+icon box wrongly narrows what the type does. "marker" is a point-icon subset of symbol, never
+the umbrella.
+
+Applied in full on 2026-08-24; this is the rule new code is held to, not a migration still to run. Some
+occurrences are legitimate and are not violations: Unity's own `GUI.Label`, style-layer data strings, and
+`LiteralLabel`.
+
 
 ## Documentation & tests
 
@@ -572,8 +718,8 @@ genuine invariant is still wrong if 16 of those lines are exposition.
 **It is normally also the ceiling.** Past the summary and the params, add prose only for something the body
 *cannot* say. Three things qualify, and they are the only three:
 
-- **A non-local invariant** — a protocol, lifetime or ordering fact no single body reveals. `DecodedTileLease`
-  cannot know who holds it, so "the creator's reference is released by `TileManager.RenderTeardownRecord`" is
+- **A non-local invariant** — a protocol, lifetime or ordering fact no single body reveals. A
+  `SharedDisposable<IDecodedTile>` cannot know who holds it, so "the creator's reference is released by `TileManager.RenderTeardownRecord`" is
   load-bearing. Four ownership bugs in one stage are the evidence this category is not obvious.
 - **A non-obvious *why*** — a contested decision, a constant that looks arbitrary, a branch that exists for a
   defect someone would otherwise "fix" back in.
@@ -597,6 +743,45 @@ which of the three reasons applies. If you cannot name one, cut it back to the f
 *(Established 2026-08-10, after the decode-model epic. The over-documentation is a reflex with a real cause —
 this repo has been burned by stale and false docs, and `e133181a` exists solely to correct four of them. The
 cure is each fact in the right place once, not more prose in every place.)*
+
+### No profiling numbers in code comments
+
+A `//` comment must not bake in a profiling snapshot — a specific millisecond figure, "X IS the cost", a
+ranked hot-spot verdict. A measurement is transient: the regime shifts, the code changes, an optimization
+lands, and a stale number left in source reads as a durable fact to the next reader, steering their
+reasoning the wrong way once it no longer holds.
+
+A comment may still state a *structural* fact that stays true regardless of regime — "this path is
+camera-independent; that one runs every frame" is an invariant, not a measurement, and belongs in the
+code. A number, or a claim about which path costs more, belongs in a dated design document instead, next
+to the capture regime (zoom, camera state, load) that produced it.
+
+### A prose mention earns its place through real code coupling
+
+Do not name-drop a type in a comment, `<summary>`, or `<see cref>` inside a file that has no code
+coupling to it. A mention that exists only in prose earns nothing — an IDE already navigates the real
+symbol — and it is worse than nothing: renaming the type is a symbol operation that never touches a
+comment, so the mention rots into a stale reference to a dead name and inflates the apparent blast radius
+of a future rename.
+
+The same boundary runs the other way: a wording or naming convention governs prose we author, and never a
+citation of a real file, type, or section title. Retiring a word from our own prose is one edit; applying
+that edit to a citation only breaks the reference, because the thing being cited does not get renamed
+along with it. Strengthen a citation instead of trimming it — cite the full path (`docs/some-design.md
+§4`) rather than a bare, ambiguous section number.
+
+### Image and golden test fixtures live in a `~`-suffixed folder
+
+Every fixture in this codebase loads by file path (`File.ReadAllBytes` against `Application.dataPath`),
+never through `Resources.Load` or the AssetDatabase — so importing one as a Unity asset is a pure side
+effect of living under `Assets/`. For an image fixture (a golden PNG, any pixel reference) that side
+effect is actively harmful: a plain `.png` imports as a `Texture2D` whose imported copy is pixel-mutated
+(sRGB, compression, mipmaps) and mints a committed `.meta` file nothing reads.
+
+Put a read-by-path image fixture in a folder whose name ends in `~` (`Assets/Fixtures/visual-references~/`
+is the established one) — Unity's importer ignores a `~`-suffixed folder entirely, so there is no import,
+no `.meta`, and no lossy copy, while `File.ReadAllBytes` and a plain file browser still see the original
+bytes.
 
 ### Test code must not bloat the production codebase
 

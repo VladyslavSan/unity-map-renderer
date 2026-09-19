@@ -118,7 +118,7 @@ means every platform ran green.
 > grep -oE '<test-run [^>]*result="[^"]*"[^>]*' "$ROOT/Logs/test-results.xml" | head -1
 # Capture `fullname`, NOT `name`: sed is greedy, so `.*name="` runs forward to the LAST attribute
 ># ending in `name=` before `result=` — which is `classname`. Using `name` prints FIXTURE names and
-># silently hides which TEST failed (see `red-verify-counts-must-reconcile-with-names`).
+># silently hides which TEST failed — a failure COUNT can reconcile while the failing NAMES do not.
 > grep -oE '<test-case [^>]*' "$ROOT/Logs/test-results.xml" \
 >   | sed -E 's/.*fullname="([^"]*)".*result="([^"]*)".*/\2  \1/' | grep -iE 'Passed|Failed'
 > ```
@@ -219,8 +219,8 @@ these were learned the expensive way:
   not.
 - **Escalation beats invention. If a decision genuinely needs the maintainer, STOP, say so, and write down
   the options with their consequences.** A role has no channel to the human, so "decide it or leave it
-  open" is a false choice — and a brief that forbids leaving it open (rightly, per
-  `refine-lock-core-design-questions`) has removed the only safe exit unless it supplies this one. Halting
+  open" is a false choice — and a brief that forbids leaving it open (rightly: a spec must not be committed
+  while core design questions are open) has removed the only safe exit unless it supplies this one. Halting
   with a stated fork is a successful outcome, not a failure to deliver.
 
 ### Commit conventions — read `docs/commit-conventions.md`

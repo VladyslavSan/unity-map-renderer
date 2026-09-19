@@ -71,97 +71,32 @@ main thread), and hold it on the tile's `SymbolTileStore` entry with the same li
 `SoA.Hash` + `SoA.Copy` work — ~8.98 ms — out of the per-frame path to once-per-tile. Every option below is
 a different answer to *what remains per-frame* after the bake.
 
-## 5. Design options
+## 5. Design options — superseded by §9/§10
 
-| | Approach | Kills the per-frame residual via | Risk | Byte-identical |
-|---|---|---|---|---|
-| **A** | build-time bake (managed) | — leaves concat + re-dedup per frame | low | yes |
-| **B** | bake **native** + Burst gather | native memcpy into the job NativeLists; also collapses the `GatherIntoMirror` double-copy | low | yes |
-| **D** | persist batch, patch **O(delta)** on tile changes | concat/dedup only on a tile-set delta | med | testable |
-| **E** | **per-tile persistent draws** | draw never aggregates; only collision inputs stay per-frame | high | point/icon yes; curved carved out |
-| **C** | reduce label **volume** (LOD/budgets) | fewer labels enter at all | — | **no** — visual change |
+Five options were weighed for what stays per-frame after the build-time bake (§4): **A** managed build-time
+bake, leaving concat + re-dedup per frame; **B** bake **native** + Burst gather, which also collapses the
+`GatherIntoMirror` double-copy — the option later realized as Phase 1 (§10.9); **D** a persistent batch
+patched incrementally, only on a tile-set delta; **E** per-tile persistent draws, so the draw half never
+re-aggregates and only collision inputs stay per-frame, for point/icon only (curved carved out — it is a
+camera-dependent arc-walk and cannot be static); and **C**, reducing label volume by LOD/budgets — the only
+option that is **not** byte-identical.
 
-### A — build-time bake (the seed)
-Bake the blittable SoA block per tile; per-frame `BatchBuild` concatenates the active blocks (memcpy) + runs
-the cross-tile dedup over **precomputed** key parts (per-frame only re-quantizes the anchor by zoom). SoA →
-~0/frame; Collect shrinks to the dedup resolve. Open question A leaves: is the per-frame concatenation cheap
-enough, or should downstream iterate per-tile blocks in place?
+## 6. Recommended architecture & phased path — superseded by §9/§10
 
-### B — native bake + Burst gather (the low-risk realization of A)
-Bake the block into **native** buffers (`NativeArray<PointStageInput>/<CurvedStageInput>` + flat
-quad/glyph/anchor/worldpoint/fade-id pools — all already-blittable types). Per frame, a Burst `.Run()` gather
-takes the collected winners `(blockId, localIndex)` and compacts them straight into the job-input NativeLists
-— replacing **both** `Build` **and** `GatherIntoMirror`. Keep the managed `CollectInto` dedup + collected
-order (parity-safe → byte-identical by construction; it only records `(blockId, localIndex)`, does no SoA
-work). Bake the dedup key components (anchor, layer, 64-bit text+icon hash) so per-frame stops re-hashing
-strings. **SoA → ~0; the second mirror copy is gone; Collect shrinks.** Stretch (gated on the snapshot +
-collision-differential tests): `SymbolCollision.ComparePlacementOrder` is a strict total order, so the
-survivor mesh depends on the candidate *set* not collected order — which unlocks moving the dedup itself into
-a Burst hashmap job later.
+Phase 1 was **B** (native bake + Burst gather), expected to remove ~9 ms of SoA plus the `GatherIntoMirror`
+double-copy, with a re-profile to gate Phase 2. Phase 2 was **D** or **E**, chosen by what that re-profile
+showed dominated; **C** (LOD) stayed a separate track needing explicit maintainer sign-off. §9's re-profile
+after Phase 1 landed **falsified the plan's founding premise** — the real per-frame cost was the cross-tile
+dedup, not the SoA copy these options targeted — before Phase 2 was ever reached. §10 records what was built
+instead.
 
-### D — persistent, incrementally-maintained batch (O(delta))
-Keep **one persistent batch** (SoA + dedup index) and patch it only when the active tile set changes (commit
-inserts a block, release removes, rebuild replaces) at the `SymbolTileStore` mutation points
-(`CompleteBuild` / `BeginBuild` / `Release` / `Restore`). Between deltas the structure — and the native
-mirror — are untouched, so a large visible set held steady while panning pays **~0** aggregation. Escapes
-constraint #2 honestly: cost is O(structural delta) *every* frame, always applied, not a stillness predicate
-(a slow pan crossing one boundary pays for that one tile whether "still" or moving). Cross-tile dedup deltas
-stay local (a per-cell multiset promotes the runner-up on removal; cells are singleton/pair in a single
-band) and zoom-stable between deltas. **The real risk is not the cache objection but byte-identical order
-preservation** — point order today is `_dedup` hash-enumeration order and collision assigns by creation
-ordinal, so an incremental structure needs a canonical order (e.g. TileKey, feature index) that the
-GPU-snapshot suite proves equivalent (green ⇒ done; a flip ⇒ that scene has an order-dependent collision).
-Plus tombstone/compaction to keep the buffer contiguous. **Biggest win where A is weakest** (steady set,
-long pan). Sequential with A: A bakes the block, D persists + patches it.
+## 7. Risks & open questions — superseded by §9/§10
 
-### E — per-tile persistent draws (decouple collision from draw)
-The world-anchored migration already made point/icon quads camera-independent geometry, yet
-`WorldSymbolRenderer` rebuilds each slot's mesh from survivors every frame. Instead, build each tile's label
-quad geometry as a **persistent per-tile static mesh at tile-build time** and draw it directly like fill/line;
-the per-frame collision pass produces only a small per-label **visibility + opacity** result that masks/fades
-the static mesh (static vertex buffer + per-frame dynamic **index** buffer in collision-sorted order +
-dynamic opacity stream → byte-identical overdraw). The draw half never re-aggregates; only the small
-collision-input metadata is iterated per frame. This **refutes the code's "Copy is intrinsic per frame"
-assumption** — true only when there is one aggregated draw. **Honest carve-out:** curved (along-line) labels
-are a projected screen-space arc-walk → camera-dependent → *not* static; the win applies to **point/icon**
-(the bulk), curved keeps a per-frame path. Also needs `text-rotation-alignment:map` moved to a shader bearing
-uniform to stay static under a rotating map (north-up + panning unaffected). Highest ambition/risk.
-
-### C — algorithmic do-less (orthogonal, visual)
-Reduce the label **volume** — per-tile / per-region budgets or stricter zoom-LOD, prune by importance before
-materialisation — so far fewer labels ever enter the pipeline. Distinct from A/B/D/E because it changes
-**what renders** (not byte-identical) → needs explicit maintainer sign-off. A constant-factor lever that can
-stack on any of the above. (Left as an open lever — the assigned proposer did not return a worked design.)
-
-## 6. Recommended architecture & phased path
-
-1. **Phase 1 — A realized as B** (native per-tile bake + Burst gather). The low-risk, high-confidence first
-   move: removes ~9 ms of SoA **and** the `GatherIntoMirror` double-copy from the per-frame path, stays
-   byte-identical (managed dedup + collected order preserved), and is the enabling refactor every other
-   option sits on. **Re-profile after it lands.**
-2. **Phase 2 — only if the residual concat/dedup is still heavy on a large panning set:** escalate to **D**
-   (incremental O(delta) — best for a steady set + long pan, at the cost of order-preservation + compaction
-   machinery) **or** **E** (per-tile persistent draws for point/icon, accepting the curved carve-out + the
-   bearing-uniform shader work). Choose by what Phase-1 re-profiling shows dominates.
-3. **C (LOD)** — separate track, only if the maintainer wants fewer labels drawn (a visual decision).
-
-Rationale: everyone converges on the build-time bake; **B is the safest way to bank the guaranteed ~9 ms +
-the double-copy without touching dedup semantics or draw architecture.** D and E are larger, riskier bets to
-attack the residual, and should be driven by a fresh profile rather than taken on speculatively.
-
-## 7. Risks & open questions
-
-- **Native lifetime on the store** (B/D): deterministic `Dispose` of per-tile native blocks across
-  active/cached/departing + the async build-race generation guard — maps onto the repo's mesh-lifetime
-  contract (value-data disposed at a boundary, single owner).
-- **Byte-identical order** (D, and B's dedup stretch): current point order is `_dedup` hash-enumeration;
-  a canonical order must be proven equivalent by the GPU-snapshot suite (never a re-bake to go green).
-- **Baked text/icon key = 64-bit hash** (B): astronomically-low dedup collision risk; note as a parity caveat.
-- **Curved labels** (E): camera-dependent arc-walk can't be static — sizing the point/icon vs curved split on
-  the live scene is the key unknown for E's payoff.
-- **Compaction** (D): tombstone/compact (or a block-indexed `StageJob`) must keep the Burst mirror valid.
-- **Coverage pre-cull + departing/fade interplay** (all): a culled tile skips the gather but keeps its baked
-  block; departing/coverage-fade flags must ride the baked/persistent representation.
+The risks recorded against B/D/E — native lifetime of per-tile native blocks (B/D), byte-identical order
+preservation against the GPU-snapshot suite (D, and B's dedup stretch), a baked text/icon key as a 64-bit
+hash (B, an astronomically-low collision risk), the curved-label carve-out (E), compaction (D), and
+coverage-pre-cull/departing-fade interplay (all) — are moot: none of B, D or E was built as sketched here: see
+§10 for the design that shipped.
 
 ## 8. Target
 
@@ -264,12 +199,10 @@ camera stillness. Cost is O(set delta), always applied, identical whether the ca
 same honesty the async reconcile is built on (`labels-async-reconcile-design.md` §2). There is no motion-keyed
 cliff and no "skip when nothing changed" predicate over camera state.
 
-**Verified preconditions** (checked against source before committing to this):
-- The mirror `_m*` pools are written **only** in `GatherIntoMirror`; downstream (`StageJob`, the collision
-  schedule/harvest pair) reads them and writes the separate `_sj*` pools, and the in-place candidate
-  sort touches `_stageCandidates`, not the mirror. So a retained mirror cannot be corrupted between frames.
-- `_orderedBlocks` is copied wholesale from the reconcile result, and blocks are **pinned** while a snapshot is in
-  service — so a block's contents cannot change under a retained mirror without a front swap.
+**Invariant that makes the memo safe:** the mirror `_m*` pools are written only in `GatherIntoMirror` —
+downstream (`StageJob`, the collision schedule/harvest pair) reads them into separate `_sj*` pools, and the
+in-place candidate sort touches `_stageCandidates`, not the mirror — and `_orderedBlocks` is pinned while a
+snapshot is in service, so a retained mirror cannot be corrupted between frames without a front swap.
 
 **Design notes (as landed):**
 - The key is `SymbolSubsystem._frontSetVersion` — a monotonic `int` bumped on every change to `_frontResult`'s
@@ -292,21 +225,10 @@ cliff and no "skip when nothing changed" predicate over camera state.
 - A same-version frame is three `NativeArray<byte>.Copy` memcpys (the masks) + a subtraction (`DroppedCount`),
   not a per-record loop — the record count that mattered for the ~0.1 ms target.
 
-**Acceptance teeth (all landed, `SymbolGatherMemoTests` + two integration tests in `SymbolReconcileAsyncTests`):**
-- N ticks with no tile event ⇒ mirror byte-identical to a fresh `GatherIntoMirror` over the same plan
-  (`CopyMirrorInto` is the sanctioned seam), with `MirrorRebuildCount` proving the memo actually engaged.
-- A version change invalidates (unit); a REAL front swap through the production subsystem invalidates
-  (integration — the stage's only end-to-end guard); a demo `Tick(batch)` between two production gathers
-  invalidates (the reverse cross-overload direction); a restyle invalidates against a now-empty front.
-- Masks (`Departing`/`CoverageFading`/`Dropped`) track per-frame classification while the pools are held —
-  including Dropped, asserted behaviourally via a real `Tick` + `WorldMeshReadback` mesh comparison (Dropped
-  isn't visible through `CopyMirrorInto`).
-- RED-verified against every listed defect (dropped version term, missing swap/restyle bump, skipped mask write,
-  removed early-out) — a memo test that never engages is trivially green.
-- GPU snapshots green, no re-bake — but they are **blind to the memo** (every snapshot fixture drives the demo
-  `Tick(batch)` overload, never the production plan path — `grep -c SymbolGatherPlan` is 0 in all of them). Perf
-  itself is **not** headless-gateable: the verdict is a maintainer Play-mode re-profile, covering both a still
-  camera and an active pan (see the hit-rate note above).
+GPU snapshots are green, but blind to the memo — every snapshot fixture drives the demo `Tick(batch)`
+overload, never the production plan path. Perf itself is **not** headless-gateable: the verdict is a
+maintainer Play-mode re-profile, covering both a still camera and an active pan (see the hit-rate note
+above).
 
 ### 10.3 R2–R4 (candidates, unplanned — ordered by the post-R1 re-profile)
 
@@ -452,41 +374,15 @@ frame, so a scheduled job reading it would race. `AsReadOnly()` is constructed p
 site and never cached — the `ReadOnly` captures a raw pointer + safety handle at construction, so a stored copy
 would dangle the first time `Add()` grows the set.
 
-**Coverage this stage had to create.** Nothing tested the `_placedLastFrame` → `WasPlacedLastFrame` path
-end-to-end (`SymbolCandidateCollisionTests` sets the flag by hand; `SymbolStageJobTests` fed it as a raw input;
-`SymbolProjectionJobTests` deliberately arranges distinct sort keys so incumbency is a no-op), and **every**
-existing differential case passed `wasPlaced = {0,0}` — so the curved arm's incumbency term had never been
-exercised at all. Both were added and RED-verified against an injected defect (both `Placed.Contains` calls
-replaced by constants): the point-arm test failed `Expected: 2, But was: 3`, and 8 of 14
-`BurstStage_MatchesManaged_CurvedBends(…,True)` cases failed on `candidate WasPlacedLastFrame`.
-
 **Gate:** EditMode 1708/1708, `Tools/core-tests` 1076/1076 (the latter proving `Core` was not dragged into
 `Unity.Collections` — the fork's load-bearing constraint).
 
-**Open findings (recorded, not fixed in-stage):**
-
-- **The perf verdict is still owed, and one scenario is not evidence.** `_placedLastFrame.Add` in the `Emit`
-  loop is now a safety-checked native call from managed code. The trade is quantitatively favourable — tens of
-  thousands of per-record lookups leave the main thread, at most survivor-count adds get marginally dearer — but
-  only a maintainer re-profile covering a **still camera AND an active pan** can confirm `Symbol.Project` fell by
-  more than `Symbol.Emit` rose. That is §10.4's lesson applied to this stage: R1 looked good on one scenario and
-  was worthless on the other.
-- **Differential coverage gap (F2).** `BurstStage_MatchesManaged_CurvedBends` can never stage the **centred
-  fallback** — its centre coincides with the sole anchor's, so both fail the same max-angle gate — which is also
-  why 6 of the 14 `(…,True)` cases cannot go red under injection (total arc is 120 for every bend, so the gate
-  drops the anchor exactly when `bendDeg > maxAngleDeg`, leaving `Staged == 0`). This leaves
-  `AnchorWasPlaced[fadeStart + anchorCount]` unasserted for incumbency. Not a hole in R2 — an off-by-one would
-  still go red via `AnchorWasPlaced[0]` — but a case with an asymmetric polyline, or an anchor near an end so
-  only the fallback can stage, would close it.
-- **Two-site sizing coupling (F4).** `AnchorWasPlaced.Length == AnchorFadeIds.Length` is now maintained by two
-  independent sites (`PreSizeStageOutputs` sizes from `_mirrorFadeCount`; `RunStageJob` passes `_mirrorFadeIds.AsArray()`).
-  Both are correct today, and safe only because `Mirror` truncates to `count` while the batch's own arrays are
-  `Grow`-doubled — an asymmetry invisible unless you read both. A debug-only assert in `RunStageJob` would make a
-  future mirror change fail loudly instead of silently under-filling (or reading out of bounds in a player with
-  safety checks off) — same spirit as `AssertMemoPlanMatchesMirror`.
-- **Nits deferred:** the `Allocator.Temp` set round-trip in `SymbolStageJobTests`' case body (removable in favour
-  of a byte literal), and the A-5/R2 rationale appearing three times in `StageJob` (class summary + two
-  field comments).
+**Open finding (recorded, not fixed in-stage): the perf verdict is still owed.** `_placedLastFrame.Add` in the
+`Emit` loop is now a safety-checked native call from managed code — quantitatively favourable (tens of
+thousands of per-record lookups leave the main thread, at most survivor-count adds get marginally dearer) —
+but only a maintainer re-profile covering a **still camera AND an active pan** can confirm `Symbol.Project`
+fell by more than `Symbol.Emit` rose. That is §10.4's lesson applied to this stage: R1 looked good on one
+scenario and was worthless on the other.
 
 ### 10.7 Measured: carrying incumbency forward does NOT change the winners (2026-07-25)
 
@@ -561,9 +457,6 @@ two already known — which is why §2.5 of the plan was rewritten to call the s
 assert as the real mechanism. Its scope limit is real and recorded: it sees one frame's candidates, so
 sequential id reuse across frames is invisible to it, and no cross-frame check is proposed because stable
 cross-frame ids are the *designed* behaviour — there is no well-formed invariant to assert.
-
-**Gate:** EditMode 1712/1712, `Tools/core-tests` 1076/1076. RED-verified against the null implementation
-(schedule before emit + positional survivors) — 55 tests red with the predicted `AtomicSafetyHandle` throw.
 
 **What the headless suite CANNOT prove, and why the perf verdict is a required gate step.** No EditMode
 assertion can distinguish "genuinely deferred" from "structurally deferred but eagerly completed": the harvest
@@ -677,62 +570,14 @@ those helpers would produce matching wrong values on both sides and this test ca
 stage introduces (the job never touches those helpers); recorded so a future reader doesn't cite the test as
 covering more than it does.
 
-**§6.2 widened fixture — landed, and it took TWO rounds to stop being vacuous.** The original 4-tile fixture is
-one winner per block, so no winner's own quad/glyph/anchor/fade source offset within its block is ever
-non-zero — a Burst-only running-offset regression in that dimension is invisible to it. The final
-`Gather_MatchesBuildOracle_FieldByField_MultiWinnerInterleavedBlocks` test (hand-built via `SymbolGatherPlan.Build`
-directly — no store/`FilterActive`, full control over winner order and which raw slot is null) covers: block A
-with 6 real winners (a null slot between the first two; two quad-bearing points; two glyph-AND-anchor-bearing
-curved labels with a zero-glyph curved label sandwiched between them) plus block B's 2 winners (a zero-anchor
-curved label + a point), 8 winners total, interleaved A,B,A,B,A,A,A,A.
-
-Two vacuity rounds, both caught empirically rather than by inspection (`[[red-verify-against-injected-defect]]`):
-1. **Round 1 (dev pass):** every point record's true source quad offset happened to be `0`, so D3's
-   hardcoded-`0` defect was undetectable — fixed by adding a second quad-bearing point to block A (asserted:
-   `blockA.PointQuadStart[blockA.Detail[…]] != 0`, a block-level precondition, not an oracle-derived UV proxy —
-   the first fix used a UV-inequality proxy on the ORACLE's mirrored quads, which review flagged as indirect:
-   deleting the first point would still pass while the real property went untested; replaced with the direct
-   block-field assertion).
-2. **Round 2 (review pass, R1 — the one BLOCKing finding):** every fixture in the repo, including round 1's
-   widening, has AT MOST ONE curved label per block, so all three curved source-offset remaps
-   (`CurvedGlyphStart`/`CurvedAnchorStart`/`CurvedAnchorFadeStart`) were always `0` and a hardcoded `0` for any
-   of them was undetectable — the exact D3 class, just unaddressed for the curved arm. Fixed by giving block A
-   TWO glyph-and-anchor-bearing curved winners with a zero-glyph one sandwiched between them, so the second
-   real curved winner's three source starts are all genuinely non-zero (pinned as block-level preconditions,
-   same shape as the point-arm fix).
-
-**RED-verify — seven named defects across both rounds, actual failure text, quoted:**
-
-| # | injected defect | predicted RED | actual result |
-|---|---|---|---|
-| D1 | `worldStart = 0` instead of `worldStart = mWorld` | plan claimed: needs the widened fixture | **REFUTED** — RED on the EXISTING (un-widened) fixture too: `Gather_MatchesBuildOracle_FieldByField` → `"WorldStart[1] 3 vs 0"`. `worldStart` is a mirror-wide cursor accumulated across ALL winners, not reset per block, so it diverges from the second record on already. Widened fixture also caught it (`"WorldStart[1] 1 vs 0"`). Two unrelated tests (`SymbolGatherPlanDropMaskTests.MaskedDrop_{Curved,Point}Only_…`) failed as collateral — corrupted world points cascade into fade-decay opacity reads (`"Expected: greater than 0.99000001f But was: 0.0f"`) — a missed remap is silent corruption, not a crash, confirmed live. |
-| D2 | `fades += ac` instead of `fades += ac + 1` | fails on `AnchorFadeCount`/`CurvedAnchorFadeStart[i]`, and/or an out-of-range write | **Confirmed, as an out-of-range write**: `"System.IndexOutOfRangeException: Index 1 is out of range of '1' Length. This Exception was thrown from a job compiled with Burst"` — pass 1 undersizes `MFadeIds` by the trailing fallback slot; pass 2's unguarded fade copy then writes past it. 5 tests failed total, including collateral `IndexOutOfRangeException`s in `SymbolGatherPlanDropMaskTests`. |
-| D3 | copy quads from source offset `0` instead of `block.PointQuadStart[detail]` | needs the widened fixture (a running offset within one block's own pool only differs from zero once ≥2 quad-bearing points share a block) | **Confirmed, widened-fixture-only**: `Gather_MatchesBuildOracle_FieldByField_MultiWinnerInterleavedBlocks` → `"Quads[2]"`; the original fixture stayed green (as predicted — it has no case where a point's true source offset is non-zero). |
-| D4 | curved arm: `maxBoxes += glyphCount` instead of `+= placements * glyphCount` | fails on `MaxBoxes` | **Confirmed**: `Gather_MatchesBuildOracle_FieldByField` → `"MaxBoxes 7 vs 5"`. The widened fixture's curved records all happen to have `placements == 1` (zero-anchor curved labels), so `placements * glyphCount == glyphCount` there — indistinguishable; the ORIGINAL fixture's one curved label (`anchorCount = 1` ⇒ `placements = 2`) is what catches this one. |
-| R1-glyph | curved arm: `glyphStartSrc = 0` instead of `block.CurvedGlyphStart[detail]` | fails on `Glyphs[i]`, widened-fixture-only (needs a block with 2 glyph-bearing curveds) | **Confirmed**: `Gather_MatchesBuildOracle_FieldByField_MultiWinnerInterleavedBlocks` → `"Glyphs[3]"`. Went undetected until round 2's fixture rewrite (see above) — every fixture before it had ≤1 curved label per block. |
-| R1-anchor | curved arm: `anchorStartSrc = 0` instead of `block.CurvedAnchorStart[detail]` | fails on `Anchors[i]`, widened-fixture-only | **Confirmed**: same test → `"Anchors[1]"`. |
-| R1-fade | curved arm: `fadeStartSrc = 0` instead of `block.CurvedAnchorFadeStart[detail]` | fails on `AnchorFadeIds[i]`, widened-fixture-only | **Confirmed**: same test → `"AnchorFadeIds[3]"`. |
-
-Every defect reverted and the gate re-confirmed green (1713/1713) before landing.
-
-**Gate:** EditMode **1713/1713** (1712 baseline + the new widened parity test), fresh XML confirmed by
-start-time. `Tools/core-tests` **1076/1076**, unchanged (Core untouched — the fence held). CP2's Burst-compiled
-check: `grep -iE 'Burst|BC[0-9]{4}|error' Logs/test-run.log` shows zero lines naming `SymbolGatherJob` —
-`.Run()` did not silently fall back to managed. `MapRenderer.Jobs.asmdef`'s `"allowUnsafeCode": false` did NOT
-need flipping — `UnsafeList<T>`'s public API (the `this[int]` indexer, the `(T*, int)` view constructor) is
-callable from safe code; only `BuildBlockViews`'s pointer-taking (`Unity.Collections.LowLevel.Unsafe`, guarded
-by `MapRenderer.Unity.asmdef`'s existing `"allowUnsafeCode": true`) is genuinely unsafe.
-
-**§6.4 strengthening, applied:** `GatherIntoMirror_Warm_AllocatesNoGCMemory` now asserts a `MirrorRebuildCount`
-delta of exactly 1 around the measured call, so it can never silently degrade into measuring a memo hit (its
-own message's claim was previously unenforced).
-
-**Review nits, applied:** `CopyView`'s `UnsafeList<T>` parameter dropped its `in` (the type isn't a readonly
-struct, so `in` forced a per-element defensive copy in the hottest loop of the stage — the repo's
-`in ⟺ readonly struct` gate); `BuildBlockViews` moved to below `GatherIntoMirror` so its own doc comment isn't
-stranded reading as `GatherIntoMirror`'s; the "its caller's pass 1" wording (`StageJob.cs` and this
-section) corrected to "its own pass 1" — pass 1 is inside `SymbolGatherJob.Execute`, the caller computes
-nothing.
+**Fixture and RED-verify.** A widened parity fixture (`Gather_MatchesBuildOracle_FieldByField_MultiWinnerInterleavedBlocks`,
+8 winners across 2 blocks) and seven injected defects confirmed the byte-identical claim above at the
+running-offset level the original 4-tile fixture could not reach (it had at most one winner per block, so a
+hardcoded-zero offset defect was invisible to it). `MapRenderer.Jobs.asmdef`'s `"allowUnsafeCode": false` did
+**not** need flipping — `UnsafeList<T>`'s public API (the `this[int]` indexer, the `(T*, int)` view
+constructor) is callable from safe code; only `BuildBlockViews`'s pointer-taking
+(`Unity.Collections.LowLevel.Unsafe`, guarded by `MapRenderer.Unity.asmdef`'s existing `"allowUnsafeCode":
+true`) is genuinely unsafe, and `.Run()` did not silently fall back to managed.
 
 **Perf verdict owed — NOT measured here (headless-gateable claim ends at "compiled and correct").** Per §10.4's
 lesson, the verdict is a maintainer Play-mode profile covering BOTH a still camera and an active pan:
@@ -842,13 +687,6 @@ itself; it had simply never reached the hot path.
   place — and the tempting follow-up, moving it below the `opacity <= FadeEpsilon` continue, *re-breaks the
   guard* by leaving a guarded sub-epsilon fade-in unmarked, so the sweep decays it straight back. The invariant
   that makes both correct is **seen ⟺ stored**, which is only enforceable where the store happens.
-
-**Teeth.** `SymbolFadeTests.Tick_StableCollisionLoser_LeavesNoFadeRecordBehind`, sited on the existing stable-loser
-fixture because that fixture already establishes the precondition this needs — a candidate staged every frame
-and placed by none. A bare count assertion would be the epic's sixth vacuous tooth, so it also asserts the
-precondition (`LastCandidateCount == 2` while `LastQuadCount == 1`, i.e. the loser really is still staged) and
-**stability across further ticks**, which rejects a periodic-clear implementation that a single sample accepts.
-RED-verified against the real defect (unconditional store).
 
 **Telemetry.** `SymbolLiveFade` (`SymbolPlacementTelemetrySnapshot.LiveFadeSymbolCount` → `MapTelemetryPanel`) —
 genuine production instrumentation, not a test seam: it is the exact number whose absence hid this, and it sits

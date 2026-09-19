@@ -118,6 +118,50 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   `Shader.globalRenderPipeline = "UniversalPipeline"` for the duration of the fixture, restored in a
   `finally`. *(2026-09-08, during the fill boundary band's pass-level probes.)*
 
+- **Declare a GPU capability with `#pragma require <cap>`, not `#pragma target N`** (cited in code as `shader-require-over-target`)**.** `#pragma target 3.5`
+  raises the whole shader model — it maps to OpenGL ES 3.2+, needlessly excluding ES 3.0/3.1 Android
+  devices — when the actual capability needed (e.g. `Texture2DArray` / `SAMPLE_TEXTURE2D_ARRAY`) is an ES
+  3.0 feature. `#pragma require 2darray` (or `cubearray`, `samplelod`, …) keeps the floor at ES 3.0 while
+  still compiling the variant that uses it. **The headless EditMode gate cannot catch a wrong choice
+  here:** the Metal Editor backend tolerates a too-low target, so a mistake only shows up in a player
+  build on the excluded API level, as the fallback error shader.
+
+- **A new `Map/*` shader that mirrors URP Lit needs a matching editor `ShaderGUI`** (cited in code as
+  `map-lit-shader-needs-shadergui`) **(`CustomEditor` in the
+  `.shader`), or its `shader_feature`s never sync from the material's Inspector values.** That GUI's
+  `ValidateMaterial` derives keywords like `_EMISSION`/`_NORMALMAP`/`_SURFACE_TYPE_TRANSPARENT` from the
+  property values the artist sets; without it those keywords silently stay whatever they were compiled
+  with, and a player build can strip a variant nobody ever enabled. This is a feature-completeness gap,
+  not a rendering bug — a review that reads only the render path can approve a shader missing it.
+
+- **`Material.HasProperty(id)` proves a property is declared in the shader's `Properties {}` block — it
+  proves NOTHING about whether it is a live `UnityPerMaterial` CBUFFER member.** A property can be
+  declared (`HasProperty` → true) and still be `#define`-shadowed or dropped from the CBUFFER in the
+  `_Input.hlsl`, so a style-system bind of it compiles, runs, and changes no pixel. Shipped once: an
+  internal `#define _Opacity 1.0` pinned opacity to 1 forever while `HasProperty("_Opacity")` kept reading
+  true. A binding-guard test needs both checks — the Properties-block declaration AND the CBUFFER's real
+  member list — not just the first.
+
+- **A billboard/world-space vertex offset must respect the projection's Y sign, or it renders as an exact
+  vertical mirror.** A clip-space displacement (`clip.xy += off / screenParams * 2 * clip.w`, applied
+  after the projection) is immune to the projection's Y sign. A world-space displacement (offset the
+  anchor, then re-project) passes the offset THROUGH the projection matrix, whose Y row is negated
+  whenever `_ProjectionParams.x == -1` — true both in a headless camera→RenderTexture readback and the
+  shipping on-screen path. Multiply the world-space offset's Y component by `_ProjectionParams.x` to
+  match. **The tell in a pixel readback:** a mirror keeps the same ink count and height with
+  `delta.x == 0`, and the two centroids' screen-y values sum to `SizePx − 1`; a pure scale error looks
+  completely different (the count ratio would be `k²`).
+
+- **A winding/orientation test over geometry whose real shape is produced in the VERTEX SHADER (deferred
+  extrusion — floor and roof share one stored position, height added as `extrudeUp · t` in the VS) must
+  reconstruct the post-shader position before taking a cross product.** Reading raw mesh vertices measures a
+  degenerate, flat quad: every triangle's cross product is near zero and gets skipped, so the test reports
+  zero triangles checked rather than failing — vacuous, not passing. Second trap: if the reference "outward"
+  direction is itself derived from the same geometry, the sign check is relative wearing absolute, and
+  passes with both the geometry and the reference inverted together. Ground the reference on an independent
+  fixture invariant instead — for a convex footprint, the direction from the shape's centroid to an edge
+  midpoint.
+
 ## Rendering loop & camera
 
 - **Under camera-relative rendering a pure PAN never moves the camera — so tile/label frame-coherence is a
@@ -276,6 +320,29 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   helper methods — the pattern `RibbonJob`/`RibbonJob` follow. Only INPUT/OUTPUT containers
   (assigned before scheduling) belong as job fields.
 
+- **Batched geometry (Entities Graphics AND hand-packed BRG) does NOT automatically receive the scene's
+  ambient light probe the way a `MeshRenderer` does.** A Lit shader that samples SH (`SAMPLE_GI`) still
+  compiles and draws, but with nothing feeding the batch's `unity_SH*` constants it always reads back 0 —
+  so any surface lit only by ambient (a shadowed face, or a wall the sun never hits) renders pure black.
+  This stayed invisible as long as geometry was flat and top-lit by the sun; the first vertical geometry
+  (building extrusions) was the first surface to expose it. Fix by binding `RenderSettings.ambientProbe`
+  into the batch's SH once, globally — don't chase this as a shadow or AO bug first.
+
+- **`sizeof(NativeArray<T>)` is 48 bytes in the Editor, not 16 — the `AtomicSafetyHandle` rides inside the
+  struct under `ENABLE_UNITY_COLLECTIONS_CHECKS`.** A managed array of `NativeArray<T>` handles
+  (`new NativeArray<T>[count]`) therefore costs 48 B/slot in an Editor GC measurement, not the 8 a bare
+  reference would suggest — a sizing estimate at pointer size can be several times low. For contrast, none
+  of these cause a managed allocation on their own: `new NativeArray<T>(n, Persistent|TempJob)` + `Dispose`,
+  `IJob.Run()` (Burst or not), and `Mesh.AllocateWritableMeshData` + `Dispose`. So when a Burst-job
+  pipeline shows GC, look at the managed container holding the handles, not the handles or the dispatch.
+
+- **A `Persistent`-allocated native container's finalizer CAN safely dispose it from the GC finalizer
+  thread, but `GC.Collect(); GC.WaitForPendingFinalizers();` does NOT reliably trigger that finalizer.**
+  The identical code and command finalized cleanly on one run and never ran the finalizer at all on the
+  next — Mono's conservative stack scanning can keep the object rooted. A finalizer-backed leak detector
+  is a real diagnostic (it fires whenever the GC eventually gets to it) but cannot back a deterministic
+  pass/fail test.
+
 ### A RED injection that removes an edge may also remove the node — then it proves reachability, not the dependency
 
 When RED-verifying a job graph by deleting a dependency edge, check whether that edge was the node's **only**
@@ -323,8 +390,8 @@ recorded, and the difference was only that someone looked.
 **How to apply:** when an assertion sits inside a guard, assert the **guard is satisfiable** as a
 precondition — `Assert.Greater(chunks.Length, 1)`, `Assert.IsTrue(anySplitFired)` — which converts a silently
 skipped branch into a loud one. And when RED-verifying, confirm the *specific* assertion fired, not merely
-that the test failed: read the failure message and check it is the one you aimed at. Related:
-[[red-verify-counts-must-reconcile-with-names]].
+that the test failed: read the failure message and check it is the one you aimed at. See "RED-verify: inject
+the real defect, not a model of one" below for the matching rule on failure counts.
 
 ### A process-wide dispose-balance counter makes RED results order-dependent
 
@@ -371,7 +438,8 @@ tooth that reached the dispatch only through the branch production never takes.
 
 **How to apply:** a comment of the form "the tests do X, therefore the code must do Y" is a defect report,
 not a design note. Fix the tests and delete the sentence, or state plainly that the branch exists for a
-production case and name it. Related: [[tooth-vacuous-or-overclaiming]].
+production case and name it. See "A green tooth can lie in two ways — check which one before trusting it"
+below.
 
 ### A job's container fields are validated whether or not `Execute()` reads them — nested structs included
 
@@ -439,8 +507,8 @@ value and the config default is `0.0` — was correct, which is why the table as
 `SphericalProjection`; planar passes `null`"), never just "production". If a field's production value depends
 on a launch-time or per-scene switch, the audit row has as many entries as the switch has values. And a
 default encoded in two places — here `?? DefaultProjection` in one arm and `case null` in another — is worth
-collapsing to one, because it is exactly what lets two arms disagree without any test noticing. Related:
-[[unset-field-drives-the-wrong-arm]], [[test-quality-audit-catalogued]].
+collapsing to one, because it is exactly what lets two arms disagree without any test noticing. See "An
+oracle or fixture can make a tooth blind without ever going red" below for the general shape of this gap.
 
 ### Four of the fill shader's six passes never rasterise a fill fragment in the shipped configuration
 
@@ -466,8 +534,8 @@ passes cannot be RED-verified against a frame — the instrument has to be struc
 and a rendered tooth for it is only buildable once a fill becomes opaque-mode or casts shadows, at which
 point whoever lands that owns the tooth. Second: **every row here is a configuration, not a construction.**
 Flip `CastShadows`, move a fill into the opaque queue, or switch the renderer to deferred, and the pass goes
-live with whatever was written under the assumption nobody would run it. Related:
-[[recorded-limitation-needs-an-observing-tooth]].
+live with whatever was written under the assumption nobody would run it. See "A recorded limitation needs a
+test that would fail if it stopped being true" below.
 
 ### A source-text fence must match the IDENTIFIER, not the syntax around it
 
@@ -486,7 +554,7 @@ attribute, however it is qualified. It is simpler than the bracketed pattern *an
 Two further rules for any file-scanning test: **enumerate the directory** rather than hand-listing files, or
 the fence covers whatever existed the day it was written and silently misses the next addition; and **assert
 it found files to scan**, or a moved or renamed directory satisfies every "zero occurrences" claim
-vacuously. Related: [[tooth-vacuous-or-overclaiming]].
+vacuously. See "A green tooth can lie in two ways — check which one before trusting it" below.
 
 ### A tool that matches nothing usually exits 0 — success and no-op are indistinguishable
 
@@ -539,8 +607,9 @@ in the middle of it.
 name — or write it as an obligation ("stage N must add…"), never as a report. When a decision is retracted,
 grep the whole doc for what depended on it in the same edit; the banner is not the sweep. And when a tooth's
 subject is deleted, delete the tooth in that commit — a tooth whose target no longer exists is
-indistinguishable from coverage until someone tries to run it. Related:
-[[recorded-limitation-needs-an-observing-tooth]], [[tooth-vacuous-or-overclaiming]].
+indistinguishable from coverage until someone tries to run it. See "A recorded limitation needs a test that
+would fail if it stopped being true" and "A green tooth can lie in two ways — check which one before
+trusting it" below.
 
 ### `AllTilesSettled()` is TRUE before the first tick — a settle loop that checks first never runs
 
@@ -563,6 +632,46 @@ whose body pumps first), and assert a **drive precondition** before any outcome 
 loaded, or a kick observed. `TileManagerBackgroundRegistrationTests`' step-progression tooth has the right
 shape: `Assert.GreaterOrEqual(kickTick, 0, "drive precondition: …")`. A test's drive is a guard like any
 other, and the rule for guards applies: assert it was satisfiable.
+
+## Performance measurement
+
+- **A sudden, large per-frame cost in a `.Run()` Burst job with no matching code change is usually the
+  Editor's Jobs ▸ Burst ▸ Enable Compilation toggle switched OFF, not a regression.** `.Run()` still
+  executes with Burst off — silently, as plain managed IL — so nothing errors, it just gets ~10-15× slower,
+  and the profiler marker name (`ExecuteJobFunction.Invoke()`) is identical either way. Check
+  `Unity.Burst.BurstCompiler.Options.EnableBurstCompilation` before diagnosing the code. This is an Editor
+  session setting, not committed code, so it never affects a player/WebGL build (Burst AOT-compiles there
+  regardless).
+
+- **A lambda that captures only method-scoped (loop-stable) locals is cached by the compiler to ONE
+  delegate per method call, not one per iteration — only a capture of a loop-local variable allocates per
+  iteration.** `Array.Sort(arr, (a,b) => f(x,a,b))` inside a `for`-loop, with `x` declared outside the loop,
+  allocates its delegate once, reused every pass. Before treating a closure as a per-iteration GC cost, ask
+  which kind of local it captures, and RED-verify the claim (inject the closure form, confirm the meter
+  goes red) — a `new T[]`/`new List<>` sitting next to the lambda is far more often the real per-iteration
+  allocation.
+
+- **An Editor/dev-build profiler delta on managed code that touches native containers overstates the
+  release-build win — it is an upper bound, not the number.** `ENABLE_UNITY_COLLECTIONS_CHECKS` (the
+  safety-handle bookkeeping on every `NativeList.Add`/`NativeArray[i]`) is on in the Editor and dev builds,
+  stripped in release players. When picking a perf target from an Editor capture, prefer a marker whose
+  cost is real work (math, hashing, an algorithm) over one dominated by per-element container access or
+  dictionary churn — the latter's release-build prize is mostly gone already.
+
+- **State a performance cost in absolute ms/frame, not only as a ratio — a true multiplicative factor can
+  still be a rounding error.** An "8×" scan cost turned out to be ~50 µs/frame against a 7.67 ms budget (a
+  once-per-frame linear pass), because the ratio was real but the baseline was tiny. Compute the absolute
+  number before calling anything a regression.
+
+- **Before architecting around a hot spot (moving it off-main, deferring a frame, making it incremental),
+  ask whether the cost is real WORK or accidental OVERHEAD.** Architecture relocates work and buys latency
+  to do so; removing overhead deletes the cost and costs nothing. Two costs that looked like they needed a
+  whole async redesign turned out to be a synchronous Burst job (the actual cost was per-element
+  safety-check overhead in a managed loop, not the work itself) and a one-line fix (a decay map retaining
+  zero-value entries, inflating a lookup from hundreds of keys to tens of thousands). Overhead tells:
+  per-element managed container calls, an unboundedly growing collection, or work over a set that should
+  have been pruned first. When a cost-attribution guess is wrong twice, stop guessing — delete the
+  candidate cost and re-measure rather than building a third model.
 
 ## Test workflow
 
@@ -602,6 +711,24 @@ other, and the rule for guards applies: assert it was satisfiable.
     many frames or you will under-report. (Beware the `Is` name collision: alias
     `using Is = UnityEngine.TestTools.Constraints.Is;` + `using NIs = NUnit.Framework.Is;`, or instantiate
     `new AllocatingGCMemoryConstraint()` and wrap in `NUnit.Framework.Constraints.NotConstraint`.)
+  - **Two further calibration points, for figures below what the constraint above can size.**
+    `GC.GetTotalMemory(false)` deltas ARE trustworthy, but only for large per-op allocations (roughly
+    ≥100 KB): warm the body once, divide by N, confirm `GC.CollectionCount(0)` is unchanged across the
+    window, and calibrate a known allocation in the same test. It measures *retained* heap, so it
+    quantises to the runtime's heap-expansion granularity — it can read byte-identical across
+    configurations that genuinely differ, or exactly 0 when an allocation fits existing free space; never
+    use it to rank components against each other. For counting or ranking, read the same recorder
+    `Is.Not.AllocatingGCMemory()` uses, for a count instead of a verdict:
+    `Recorder.Get("GC.Alloc")`, filtered to the current thread, `sampleBlockCount` after N calls. It
+    counts allocation *events*, is exactly proportional, and has no noise floor — but a window that
+    collects zero samples reports the PREVIOUS window's value, not a fresh zero, so never rest a
+    conclusion on one zero reading; corroborate by additivity across configurations. Separately, an
+    ablation-differencing measurement over a WHOLE pipeline run has its own, much higher resolution floor
+    — one such harness could not resolve components below ~50 KB/tile (readings quantised to a fixed
+    step, or landed on exactly 0, for anything smaller). To size a smaller component, write a dedicated
+    probe that repeats just that allocation until the total window clears a few MB, and expect the probe
+    to read 20-50% under a structural `sizeof` estimate — bracket the true size between the two rather
+    than trusting either alone.
 
 - **A headless camera→RenderTexture readback is vertically MIRRORED vs the on-screen render.** The shipping
   on-screen path renders through URP's intermediate RT and blits to the backbuffer (that blit flips Y); a
@@ -702,6 +829,93 @@ other, and the rule for guards applies: assert it was satisfiable.
   (each is preceded by an unconditional pump or an assertion forcing a non-empty cover); the bare shape
   is a latent trap for *new* drives, not an existing bug. (2026-09-04.)
 
+- **Never run `./Tools/run-tests.sh` through a pipe (`| tail`, `| grep`).** Bash without `pipefail` reports
+  the LAST command's exit code, so a piped invocation reports `tail`'s or `grep`'s status, discarding the
+  one code the script goes out of its way to make trustworthy. Redirect to a file and read the file
+  (`./Tools/run-tests.sh > Logs/out.txt 2>&1; echo $?`), or use `${PIPESTATUS[0]}` if a pipe is unavoidable.
+
+- **Landing a test with `[Ignore]` (or `[Explicit]`) turns the gate red even with zero real failures.**
+  NUnit sets the run-level `result` to `Skipped:Ignored`, and the gate treats any `result != Passed` as
+  failure regardless of `failed=`. The "land it ignored now, un-ignore it later" pattern does not work
+  here — land the tooth in the stage that makes it pass instead.
+
+- **`./Tools/run-tests.sh` can exit 133 (SIGTRAP) even when every test passed — a flaky Unity Editor
+  teardown crash on macOS, not a real failure.** Confirm it's benign before treating it as one: the
+  results XML must be THIS run's (a fresh `end-time`, `result="Passed"`), and the crash stack in
+  `Logs/test-run.log` must be pure Editor shutdown (`SceneTracker::Update`, the AppKit/CFRunLoop event
+  loop) with no job, dispose, or thread-teardown code from the change under test in it. It is
+  non-deterministic — the same tree can exit 0 on one run and 133 on the next.
+
+- **A gate whose wall clock is wildly longer than usual is probably the machine sleeping, not the run
+  hanging.** On battery, macOS suspends and resumes between test items; the run finishes correctly but the
+  elapsed time between launch and results is unbounded. Read the NUnit `duration=` attribute in the
+  results XML (test time, not wall time) and compare log size against a known-good run before diagnosing a
+  hang or a runaway loop. Wrap a long unattended run in `caffeinate -dimsu ./Tools/run-tests.sh` to avoid
+  it.
+
+- **A batch run stuck retrying `Failed to handshake to channel: LicenseClient-…`, or one that dies after
+  ~75s on a licensing failure and writes no results, is usually an orphaned `UnityLicensingClient`
+  process — not an expired license.** An interrupted batch run or a force-quit interactive Editor can
+  leave its licensing helper reparented to `init`, still holding the named pipe the next run's client
+  needs. Its executable path looks legitimate (it's still under the Editor's or Hub's own install) — the
+  discriminator is the process's parent PID and start time, not its path. Kill it; Unity/Hub relaunches a
+  fresh one on demand.
+
+- **A headless run that dies partway with `fatal error in the mono runtime`, under a Burst
+  `CreateTargetMachine` stack right after a `[Licensing::Module]` handshake failure, is an expired or
+  unavailable batch Burst AOT license — not a code defect.** Scripts still compile clean in this case;
+  Burst dies before the tests run. Fix: open the Unity Editor interactively once (refreshes the cached
+  license), quit, then re-run the batch gate.
+
+- **`ProfilerRecorder` is a fixed-capacity ring buffer (commonly 64) — once more samples accrue than the
+  capacity, `Count` is no longer a safe index bound for `GetSample(i)`.** A read loop bounded by
+  `recorder.Count` throws `IndexOutOfRangeException` once the ring wraps, and because one throw takes down
+  every assertion after it in the same test, the failure presents as several unrelated-looking reds rather
+  than one. It fires only once enough frames have been sampled to wrap the ring, which is why it reads as
+  random. Clamp with `math.min(Count, Capacity)` against the recorder's actual capacity, not a duplicated
+  literal.
+
+- **Off-main work that completes on wall-clock time (a `ThreadPool` mesh/symbol build) cannot be settled by
+  a bare `yield return null` in EditMode — the yield is instantaneous there, so the ThreadPool never gets
+  real wall-clock and the wait starves.** Two settle strategies actually work: an inline synchronous drain
+  helper that blocks on the in-flight work and consumes it (deterministic, but it consumes — it can't test
+  an unconsumed backlog, and if it's silent for one kind of work by construction it can't exercise that
+  path either); or move the test to PlayMode and `yield return null` across real frames, which gives the
+  ThreadPool genuine wall-clock. `Thread.Sleep` as an EditMode settle-poll is banned outside the couple of
+  cases structurally forced into it — it is slow and still flaky.
+
+- **A test that releases a parked worker without awaiting it can leave that worker running past the test's
+  own return — mutating a process-wide counter during the NEXT test and producing a failure in an
+  unrelated file.** EditMode tests share one process and one static-counter space. Before returning from a
+  test that unblocks a background worker, wait for it to finish (or don't dispose the gate it's waiting
+  on) — the eye-catching hazard in that shape (disposing a gate with a concurrent waiter) is usually not
+  the one that actually causes the contamination; the missing wait is.
+
+- **PlayerPrefs is a single per-project store shared between batch test runs, Play mode, and the
+  interactive Editor.** A test that writes or clears PlayerPrefs under a production key namespace destroys
+  the user's real settings every time the gate runs. Any test touching PlayerPrefs must inject or
+  namespace-isolate its own key prefix — never write directly under a production key.
+
+- **A visual/coverage test helper that samples the "background" color from a FIXED pixel location can be
+  sampling actual geometry instead, silently.** If a fixture's content happens to reach that pixel, every
+  coverage value computed against that background is wrong, with no visible symptom in the rendered
+  image — and because it depends on camera pose, a fixture clean at one heading/tilt can go corrupt at
+  another. Any coverage-based visual test needs an explicit background-purity precondition, not a glance
+  at the render.
+
+- **Renaming, moving, or deleting a `docs/*.md` file that a source comment cites can fail the build.** A
+  structure test resolves every such citation against the tracked file list, so "docs-only" is not
+  automatically gate-exempt — only a prose-only edit is. A rename/move/delete of a cited doc needs the
+  gate, and the resulting failure will look unrelated to the rename until you read the message (it names
+  the orphaned citation). Grep the code for a doc's basename before renaming or splitting it.
+
+- **A gate check of the form "zero `CS1574`/`CS0419` warnings" can be vacuous by construction.** Those
+  diagnostics (a dangling `<see cref>`) only fire when `GenerateDocumentationFile`/`/doc` is enabled; a
+  project with no `csc.rsp` never turns it on, so Roslyn never parses `<see cref>` targets at all, and the
+  count reads zero whether or not any reference is broken. A whole-codebase `<see cref>` token grep is a
+  floor, not a guarantee, either — it only proves the named symbol exists somewhere, never that a specific
+  cref resolves to the member it names.
+
 ### `ShadowReceiveBisectTests` only measures correctly in a FULL run — a filtered run reds 16 of 19
 
 Measured 2026-09-17 at `025b4309`, twice, identically.
@@ -733,3 +947,267 @@ batch mode" explanation is ruled out, and reaching for it will send you the wron
 
 The precise missing precondition has not been isolated; what is established is the discriminator above
 (full run green, filtered run red, stock-URP rung among the casualties).
+
+- **An intermittent multi-second tile-load stall in the Editor that clears for the rest of the session, with
+  framerate unaffected, is a Burst SYNCHRONOUS compile on a background worker, not the network.**
+  `[BurstCompile(CompileSynchronously = true)]` blocks the calling thread until Burst finishes compiling that
+  job type, on its first schedule. Mesh/decode jobs run on a `ThreadPool` worker rather than the main thread,
+  so the Editor keeps rendering while tiles simply stop arriving — it reads as "loading is slow", never as a
+  freeze. A generic job compiles per type argument, so a projection/comparer combination first reached at a
+  new zoom can trigger a fresh blocking compile mid-session: an abrupt zoom change reveals several at once
+  and stacks them, while a slow pan hides the same cost one job at a time. Confirm by clearing
+  `Library/BurstCache` (or touching a file in the jobs assembly) and re-entering play: the stall returns
+  once, then disappears for the rest of the session. Editor-only — a player build is AOT-compiled, so none
+  of this ships.
+
+## Verification and test design
+
+A test can pass and still protect nothing: it can be blind to the defect it claims to catch, or measure a
+different thing than its name says. None of this is caught by running the gate, because the code and the
+test agree while both are wrong. The entries below are ways that happens, found the expensive way, kept here
+so the next test does not repeat one.
+
+### RED-verify: inject the real defect, not a model of one
+
+**RED-verifying** a regression test means injecting the actual bug it exists to catch and confirming the
+test fails in the exact predicted way, then reverting — not simulating the defect analytically and trusting
+the model. A green test does not prove it guards what its name or comment claims; only an injected defect
+does. Aim the injection at the arm you are actually unsure of, not at the whole suite — a global inversion
+trips the well-covered path and proves nothing about the one in doubt.
+
+- **Prove the injection landed before reading its result.** A `for f in $FILES` loop in `zsh` does not
+  word-split an unquoted variable the way `bash` does — it can run once over the whole list as a single
+  filename, change nothing, and still report success. A green run under an injection you believe you made
+  looks identical to an injection that never applied. Check `git diff --stat`, or grep for the token you
+  introduced, before trusting the run — and be most suspicious exactly when the result confirms a pattern
+  you already expect.
+- **In a RED-verification table, the failure COUNT and the NAMED failures must reconcile exactly.** A row
+  reporting "6 failed" that names five tests has one unaccounted failure, and the gap silently weakens
+  whatever the row is used to support. Capture failed test names from the results file, not just the count;
+  when the conclusion is going into a permanent comment, re-run the injection to close the gap rather than
+  writing it off as a likely flake.
+- **A tooth with several assertions goes RED on the FIRST one that throws — that verifies only that
+  assertion, not the tooth.** Read the failure message and name the clause that actually fired; every later
+  clause got no evidence. A later clause can even be structurally unreachable — if an earlier guard always
+  throws first on any input that would trip the later one, no injection can ever verify it, and recognizing
+  that is a finding, not a chore.
+- **A tooth added to close a coverage gap must be RED-verified by an injection that reds ONLY the new
+  coverage.** Flipping a shared final result (negating the whole comparison, say) reds the old corpus too,
+  so it proves the tooth fires, not that the extension closed anything. Ask: would this injection still red
+  if the extension were reverted? If yes, it is testing the mechanism, not the extension — find a narrower
+  one.
+- **A flag tested in two places that gate each other cannot be RED-verified by removing just one.** Deleting
+  it from a skip/continue check alone, or from the write alone, can be observably identical, because the
+  other site still masks it — only removing both reds. Before calling a guard's injection inert, grep every
+  site that tests the flag.
+- **RED-verifying that a field is part of a composite dictionary key must drop it from BOTH `Equals` and
+  `GetHashCode`.** `Dictionary<K,V>` only calls `Equals` between keys that already hash to the same bucket —
+  removing the field from `Equals` alone leaves two keys differing only in it in different buckets, so
+  `Equals` is never reached and the test stays green for the wrong reason.
+- **A zero-alloc test's RED-verify injection must make the extra allocation ESCAPE, or the JIT dead-store-
+  eliminates it.** Boxing into an unused local (`object _ = value;`) before the real call has no observable
+  effect and is legally elided — the test stays green, and that reads as "this test is vacuous" when it is
+  the injection recipe that is a no-op. Force it to escape (`GC.KeepAlive(box)`, a return, a field write)
+  before trusting the result.
+- **When one change both fixes a defect at several sites and adds the regression test that would have caught
+  it, write the test FIRST.** Fixing the sites first consumes the population the test needs to observe — by
+  the time the test is due, there is nothing left for it to catch, and the only ways back are destructive
+  (revert the fixes) or dishonest (claim a RED that never ran). Land the test, watch it report every site,
+  then fix them down to zero.
+
+### A green tooth can lie in two ways — check which one before trusting it
+
+A test can pass for two unrelated reasons that both defeat its purpose: it cannot DISCRIMINATE at the values
+it happens to use, or it claims a guarantee its assertions do not actually check.
+
+- **Vacuous at the chosen values.** A test built to catch `v * (1/d)` written where `v / d` was meant used
+  device-pixel-ratio values where the two are bit-identical (1, 2 — a power-of-two reciprocal is exact) and
+  common resolutions that also happened to agree. It would have passed against the exact bug it existed to
+  reject. When a test's justification is a numeric property, compute the discrimination before trusting it —
+  name witness values and confirm they actually differ.
+- **Over-claiming what it pins.** A test can build the object it asserts on AFTER the operation it claims to
+  pin has already returned, so reordering steps INSIDE that operation leaves it green. Ask where the
+  observation is taken relative to the thing claimed to be pinned.
+- **Presence, count and compilability are invariant under relocation — only a hash catches it.** Restoring a
+  deleted block with a plain string replace can prepend instead of restoring the original site, if the
+  search string used to mark "deleted" was empty. The file then contains every expected token, exactly once,
+  and compiles — to the wrong behavior. Hash a file before an injection and compare hashes after restoring;
+  never rely on a `grep` alone to confirm a restore.
+- **Membership without one-to-one matching lets every actual collapse onto one expected value.** "For each
+  actual, assert it matches SOME expected" is satisfied by four vertices that are all the same point. Add an
+  independent shape invariant the positions alone cannot fake (non-zero area, a bounding box, a winding
+  sign), or consume matches one-to-one.
+- **Right value, wrong element survives RED-verification.** Injecting the value defect a test checks for
+  still reds it even when the fix (or the bug) landed on the wrong one of several similar elements — the
+  test answers "is the arithmetic right", never "is this the element it belongs on". Add a test pinning
+  identity or region membership, not just magnitude, whenever a change targets one of several similar parts.
+- **A RED row is evidence only for the assertion that fired.** Everything after it, in the same run, got no
+  evidence — the run stopped before reaching it. After a RED, ask of every assertion with no row naming it:
+  what defect would reach THIS one specifically, past every earlier assertion?
+
+### A recorded limitation needs a test that would fail if it stopped being true
+
+A limitation written into a design doc is not thereby verified — recording it more than once, or having more
+than one reviewer sign off on it, adds confidence but no evidence. Ask of any recorded limitation: **which
+test would go RED if this stopped being deliberate?** If the answer is none, the limitation is
+indistinguishable from an undiscovered defect, and the wording should say so rather than imply it is
+checked. Suspect a limitation whose justification is only an analogy to another subsystem's rule — the
+discriminator that made the rule right there may not hold here — and treat "no test can see this" as a
+finding to write down, not a footnote to skip past.
+
+### Other ways a tooth can pass without protecting anything
+
+- **A sequencing change can disarm a test without weakening any assertion.** Extra ticks, reordered phases
+  or new setup can destroy a test's PRECONDITION while every expected value stays correct — a version
+  counter that increments per call can reach the same number through an extra tick as through the bug it was
+  meant to catch, and a "first frame" assertion can pass only because nothing was built yet. Reviewing "was
+  any assertion weakened" is not enough; check that each touched test's precondition still holds.
+- **A test repointed to follow moved code can keep its name, its assertions and its pass, and still stop
+  covering the thing it existed to cover.** A source-scraping test anchored inside the type it tests, then
+  re-anchored after an extraction to a callee, can turn "X calls Y" into "Y contains Y's own body" — a
+  tautology that never reds again. Checking that the test still runs and still passes proves the run is
+  fresh, not that it still observes anything; ask of every relocated test "what edit made this RED before,
+  and does that edit still make it RED?"
+- **A structure fence that grows a "scope note" explaining why some code is legitimately outside its reach
+  has usually just been defeated.** Code moved to a location the fence's extraction anchor cannot see, with
+  a comment claiming the split was structurally necessary, is a common way to satisfy a forbidden-pattern
+  check while still doing the forbidden thing. Read the fence's assertion MESSAGE (the invariant it
+  protects), not just its predicate (its reach) — ask what edit would pass today that would have failed
+  before the note was added. A fence naming a FILE fails the same way when the type spans files (a partial
+  class): fence on the identifier's total production footprint, not one file's contents.
+- **A structure test matching source as plain text needs different matchers for what it forbids and what it
+  requires.** A substring match on a FORBIDDEN token fails loud on an innocent false positive — annoying,
+  safe. The same match on a REQUIRED token fails OPEN: a rename that makes the token a substring of an
+  unrelated identifier can satisfy the precondition from the signature line alone, silently voiding the
+  whole test. Anchor required tokens with word boundaries; forbidden tokens can stay permissive.
+- **"Measure the port's divergence and record it as the test's bound" produces a test no bad port can
+  fail** — whatever the port emits becomes the accepted figure. Pre-commit the ceiling you would refuse
+  before measuring, not after. Real Burst-vs-managed rounding on ported transcendental math sits at a few
+  ULP; a genuine transcription error sits several orders of magnitude higher, so a ceiling anywhere in
+  between is safe and never fires spuriously. Name the ULP domain too — the stored float stream and the
+  double intermediates give very different numbers for "the same" divergence.
+- **Pick a fix site DOWNSTREAM of where the RED test injects its input, never upstream of it.** A fix placed
+  above where the failing test constructs its data is invisible to that test — the only way to make it green
+  is to edit the test, which re-bakes it into asserting the very convention it was written to falsify. Trace
+  which code sits between the test's construction and its observable, and choose the fix site from those; if
+  the only single site is upstream, use a shared helper called from every path instead.
+- **When a design doc claims a property the code does not hold, assert the DEFECT, not the property.** The
+  property would be red on arrival, and `[Ignore]`/`[Explicit]` reds this gate too (see "Landing a test with
+  `[Ignore]`" above). Assert the measured wrong value instead, with a failure message that says what to do
+  when it goes red:
+  ```csharp
+  Assert.Greater(countAtTilt60, 2 * countAtTilt0,
+      "KNOWN DEFECT: tile count should stay roughly constant under tilt; today it is far higher. " +
+      "When this assertion FAILS, replace it with Assert.LessOrEqual and delete this message.");
+  ```
+  Green today, red the moment someone fixes it — and the fix instruction lives where the next developer
+  actually reads it. Calibrate the threshold from a measured half-fix, not a round number, so a partial fix
+  cannot report the property restored.
+
+### An oracle or fixture can make a tooth blind without ever going red
+
+- **A parity oracle proves two paths agree — it proves nothing about code both paths execute.** If the
+  change under test lives in code shared by both arms, they move together, agree, and pass structurally
+  rather than by measurement. Before naming an oracle as a change's test, name the code the change touches
+  and ask what the oracle's reference side executes — if the reference runs the changed code too, it is
+  blind. Rank candidate references by whether they are a genuinely different implementation, untouched by
+  the diff, and able to say which quantity diverged.
+- **A corpus-sweep oracle only tests the code paths the fixture's DATA actually drives into.** A filter or
+  branch keyed on a property the fixture never populates (a present-key vs. absent-key case, a first vs.
+  last scan slot) can sit unreachable through thousands of comparisons, and a broken branch still sweeps
+  green. Add a synthetic-fixture test that constructs the exact shape the branch needs, and RED-verify it
+  against the real defect rather than an incidental one.
+- **Check whether the fixture builds the object a derivation actually describes — not whether the maths is
+  right.** A formula derived against an idealized geometry (a circle, a linear projection, a symmetric
+  bracket) can be tested against a fixture that builds something else (a low-facet polygon, a perspective
+  projection, a one-sided bracket), and the two disagree exactly where they differ. Check the fixture's
+  builder defaults (an unpassed parameter silently changes the shape), the space every constant lives in,
+  and whether the test is posed where the candidate formulae would actually disagree — not at a value where
+  they happen to produce the same number.
+- **A snapshot golden that moves is not by itself proof of a regression — check how the fixture manufactures
+  its input first.** A test can build its own fixture by borrowing an unrelated production API as a
+  quad/data factory, so a change to that API's defaults moves the golden even though the path the test
+  claims to guard is untouched. Before re-baking or reverting: predict the delta from first principles
+  before measuring, check whether every dimension (not just position) moved as a pure translation would,
+  read the whole result rather than the first component a framework happens to report first, and re-run the
+  OLD formula against the rest of the diff to confirm it reproduces the old numbers exactly.
+- **A test building a production input struct with an object initializer that omits a field silently drives
+  whichever arm `default` selects.** If production always supplies something else and the field selects a
+  branch, the test exercises an arm production never takes, and nothing reports it — not a failing test, not
+  a compile error, not a line-coverage gap (the lines still run, just the wrong ones). The structural fix is
+  a positional constructor on a behavior-selecting struct, so omitting a field is a compile error; failing
+  that, grep the struct's test construction sites whenever a field is added. When recording what "production"
+  passes, name the configuration — a launch-time switch means production has as many values as the switch
+  has settings, and a test exercising the other one is a real but differently-shaped gap, not a phantom arm.
+- **Once you have measured that a correctly-configured path diverges by a known amount, bit-for-bit
+  agreement becomes evidence the path did not run.** A managed-vs-Burst comparison whose transcendental
+  fields are known to differ by a few ULP under relaxed float mode turns an unexpectedly EXACT match into
+  the more useful signal — better evidence of a silent fallback to managed code than an enabled-flag check
+  that a fallback can defeat invisibly.
+- **"A large divergence implies a transcription error" only holds for a CONTINUOUS output.** Where a
+  continuous quantity is quantised — an `int` cast, `ceil`/`floor`, a step count, a threshold comparison — a
+  sub-ULP input difference can legitimately flip a whole quantum and shift every value downstream of it,
+  which can look like an error many orders larger than real rounding noise. Compare the quantised values
+  themselves first (a difference of exactly one quantum on a small number of elements is a boundary flip,
+  not a bug); only once those match element-for-element does a continuous-stream ULP ceiling mean anything.
+- **A constant or conversion is often untested not because it cannot be tested, but because every test runs
+  at the one value where it is a no-op** — 0°, 180° (self-inverse), an axis-aligned case, or a device pixel
+  ratio of 1.0 where a `÷ dpr` is the identity. Render or compute at a discriminating value instead (45° is
+  usually enough), derive the expected value before measuring, and if the result disagrees, stop — treat it
+  as a finding, not a reason to flip the expectation or the constant.
+- **A test asserting WHICH item a per-tick budget picks must make every candidate eligible within the SAME
+  tick, or it measures readiness order instead of priority order.** If eligibility depends on an async hop
+  (a decode, a fetch) that can land across an unpredictable number of ticks, a scan that "pumps until
+  something happens" accepts a partial ready-set as a valid start and silently tests whichever candidate
+  became ready first. Use a synchronous scheduler for the async hop under test, a fixed tick count, and
+  assert the full ready-set as a precondition before asserting the pick.
+
+### Run a new instrument against an unmodified tree before trusting what it reports
+
+Before shipping a stop rule, precondition count, fence or RED recipe, run it against the current, unmodified
+tree and check its output is what it should be there — not the code it measures, the instrument itself. The
+gate cannot catch a miscalibrated instrument, because the instrument and the code agree while both are
+wrong.
+
+- A fence scoped to a folder when its predicate names two specific files can trip on a clean tree.
+- `Is.Not.AllocatingGCMemory()` reads green on a `new NativeArray<T>(…, Allocator.Persistent)` — it measures
+  MANAGED allocation only, so it is vacuous by construction against anything native (see "Measuring
+  per-frame GC allocation" above). Any test using it to police a native allocation needs a different
+  instrument.
+- A `grep -c` precondition count can be right for the wrong reason — counting LINES when the intent was to
+  count logical entries that happen to be one per line. A correct number is not evidence the command counts
+  the right population; ask what it actually enumerates.
+- A reflection member-count test ("assert exactly N properties") can red on today's unmodified tree if
+  `GetProperties()`'s default `BindingFlags` include statics the author did not count — pass
+  `Public | Instance` explicitly, and cover `GetFields` too, since a future knob added as a public field
+  walks straight past a properties-only test.
+
+- **A gate's total test count is a fact about ONE branch — comparing it against a baseline from a different
+  branch turns a correct result into a false alarm, or hides a real regression.** A branch cut from a
+  different base than the one an expected total was measured on will legitimately read a different number.
+  Before predicting a total, name the base commit the current branch is cut from and the total measured
+  there: `expected = baseline(that commit) + cases added by this diff`.
+
+- **A test that enumerates repository files by tracked-files-only is blind to the commit that adds it, and to
+  every new file — exactly when it is most needed.** A file-citation or naming fence that scans only tracked
+  files never sees its own untracked self, so it can go green on a tree that already violates it; the
+  violation surfaces only once the file is committed. Scan tracked and untracked-but-not-ignored sources;
+  resolve citations only against tracked targets, or an uncommitted local file could satisfy a reference that
+  exists on no one else's checkout.
+
+- **When a stage replaces an independent implementation with a new one, capture the OLD implementation's
+  output as a committed golden BEFORE deleting it — not after.** A capture taken from the new code compares
+  the new implementation against itself: green forever, pinning nothing, and indistinguishable from a real
+  regression test until someone checks when it was captured. Capture is step zero, before the first
+  production edit, with the source commit named in the test's own comment; use per-stream hashes rather than
+  one whole-object hash, so a later failure can localize to which part changed.
+
+### A dead-code sweep needs more than a caller count
+
+**"Zero production callers, only a test caller" is not a sound predicate for a dead-code sweep.** It
+conflates an ad-hoc accessor that exists only for a test to look inside (a real target) with one member of a
+uniform family that happens to be the one a test touches (not a defect) — nine identical `*Kind` properties
+on `LinePaintProperties`, with only one holding a production caller, are eight false positives waiting to be
+"cleaned up" into an inconsistent family. Look at the declaring type before acting on a flagged member: keep
+it if it is one of several uniform siblings, or if a shader or other non-C#-call-site consumer reaches it by
+name.

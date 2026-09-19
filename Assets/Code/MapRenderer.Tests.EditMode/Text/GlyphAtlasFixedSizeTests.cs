@@ -11,7 +11,7 @@ namespace MapRenderer.Tests.Text
     /// S105 Slice 3b — the FIXED-size glyph atlas (a big pre-allocated atlas whose <c>Size</c> never
     /// changes as glyphs append). This is what keeps per-tile incremental layout correct: a constant
     /// <c>Size</c> means an early tile's baked UVs (<c>origin / Size</c>) stay valid when a later tile adds
-    /// glyphs (glyph-atlas-uv-growth-staleness). Overflow degrades gracefully (no throw, counted).
+    /// glyphs. Overflow degrades gracefully (no throw, counted).
     /// </summary>
     [TestFixture]
     public class GlyphAtlasFixedSizeTests

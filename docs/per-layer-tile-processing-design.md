@@ -108,7 +108,8 @@ The uniform-processor model is vector/MVT-centric. Generalize the layer→data r
   world-quad and becomes a **source-less `TileMesh` processor.**
 - **Generic data source:** abstract the source so MVT / GeoJSON / raster are peers. `IDataSource` was a per-tile
   *byte* fetcher (HTTP tile pyramids); GeoJSON is a whole dataset loaded once and sliced client-side (geojson-vt).
-  The target seam is `ITileFeatureSource.GetTile(TileId) → IDecodedTileHandle` (a lazy decode-once handle):
+  The target seam is `ITileFeatureSource.GetTile(TileId) → SharedDisposable<IDecodedTile>` (a decode-once
+  handle; it shipped reference-counted rather than lazy):
   MVT = fetch-bytes + decode-protobuf; GeoJSON = load-once + slice; raster = fetch-bytes + a texture artifact.
   Source output is polymorphic by kind (vector→features, raster→texture).
 
@@ -377,7 +378,7 @@ arm A does.
 ## D1 recorded limitations — two things no tooth can observe
 
 Both surfaced in D1's review and were decided deliberately. They are here because
-`recorded-limitation-needs-an-observing-tooth` asks "which test goes RED if this stops being deliberate?" —
+A recorded limitation needs a tooth that observes it — "which test goes RED if this stops being deliberate?" —
 and for these two the honest answer is **none can**, which is exactly why prose has to carry it.
 
 **1. A throwing `Release()` during teardown aborts the loop, leaving later records untorn.**

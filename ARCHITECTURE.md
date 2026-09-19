@@ -103,6 +103,11 @@ Camera/ViewState ─► TileManager  (Rendering/Tile/TileManager.cs) — cover �
                                                                 (SDF, camera-facing)
 ```
 
+**Consume must stay a lean record, not a rebuild.** A tile-layer mesh is built off-thread; the main-thread
+step registers it as a draw item and does no per-tile-layer work heavier than that (no ECS structural
+change, no synchronous rebuild) — an `ITileRenderBackend` that does more than the GPU upload plus the
+registration has moved the build cost back onto the frame it was taken off.
+
 ### Module boundaries — what belongs where
 
 **The product is `MapRenderer.Unity` + `MapRenderer.Jobs`.** That is the production target, and its
@@ -182,6 +187,10 @@ This does not license nativizing the control plane. Native containers there buy 
 legibility, debuggability and disposal risk — see the allocation ladder in `docs/conventions.md`, whose top
 rung is still *allocate nothing*, not *allocate native*.
 
+When a nativization retires a managed type, delete it outright rather than keeping it as a test-only
+remnant — a type modeling a state the native producer can no longer emit is a liability future readers must
+account for, not a safety net.
+
 ### Two geometry classes, two paths
 | Class | Built | Lifetime | Rendered as |
 |---|---|---|---|
@@ -250,6 +259,13 @@ disables the SRP Batcher). Style properties (`_Color`, `_Width`, `_Opacity`, …
 names work under SRP Batcher AND BatchRendererGroup (BRG) without any call-site changes.
 Submitted via BatchRendererGroup / `Graphics.RenderPrimitives` (instanced, GC-free).
 
+A per-layer material has three owners, split by what each is free to change without touching the others:
+the base `.mat` asset sets the **look** (smoothness, surface feel — live-editable); `MaterialFactory` clones
+the base and re-asserts the renderer's **contract** (`ZWrite` off for the painter's algorithm, the color
+identity the vertex bake or the applier expects); `ZoomStyleApplier` drives the per-layer **style** values
+(color/opacity/width from the MapLibre style) frame to frame. Each base `.mat` lives in a `MapMaterialSet`
+asset, so editing one base live-tunes every layer that clones it.
+
 ### Layer ordering & draw submission
 The style is an **ordered list of layers**, composited in order (painter's algorithm). Most layers are
 **coplanar** (the ground plane), so Unity's default sort — render queue → camera distance → depth buffer —
@@ -275,16 +291,39 @@ Step 2+ concern (first multi-layer render); Step 0 (single layer) doesn't hit it
   via **BatchRendererGroup** / `Graphics.RenderPrimitives` / `GraphicsBuffer`, instead of fat CPU meshes
   and a GameObject per feature (the old Mapbox-Unity-SDK mistake). This is where your URP/HDRP tricks pay off.
 - **`Unity.Mathematics`** for SIMD-friendly vectorized math in jobs.
+- **Off the main thread by default** (cited in code as `off-main-thread-principle`)**.** Only work the Unity API forces onto main — creating, destroying, or
+  uploading a `UnityEngine.Object` (`Mesh`, `Texture2D`, `GameObject`, `Material`) — runs there. The
+  destination for everything else (decode, geometry, projection math) is a **Burst job**, not a managed
+  background thread: a managed closure can never reach a Burst worker, and on a WebGL build it has nowhere
+  to run at all (`docs/web-target.md`). Where a body is still managed at the type level, a scheduler seam
+  may dispatch it off-main as an interim step, but that seam is deleted at each site once the site's data
+  is native — see `docs/job-scheduling-design.md` §4–5.
 
 ### Coordinate precision / floating origin (non-negotiable)
 Unity transforms are 32-bit float; world-scale Mercator coordinates jitter badly. The core computes in
 **Web Mercator doubles**; each tile carries a `double` origin and the render layer rebases to a 32-bit
-local origin near the camera (recenter the map root as the camera moves). Designed in from Step 3.
+local origin near the camera (recenter the map root as the camera moves). Designed in from Step 3. The
+per-frame frame (origin, rebase rotation, camera-relative position) has one owner, rebuilt fresh each
+frame — never read the camera's position back off a Unity `Transform` to recover it.
+
+### Projection: spherical is the default, and the camera stays projection-agnostic
+The shipped demo scene runs the **spherical (globe)** projection, not Web Mercator — Mercator is the
+planar/legacy path. This is easy to get backwards from the code alone: the projection-dependent tile
+builders default their standalone `IProjection` to `WebMercatorProjection`, and a scene's projection choice
+is a serialized bool that only the `.unity` file carries, not a C# default. Check the scene, not a field
+initializer, when reasoning about which projection is live.
+
+Camera interaction (pan/zoom/tilt) holds no projection constants of its own — no tile pixel size, no
+Mercator latitude clamp, no earth circumference. Pixel-to-ground conversion and world-edge clamping are a
+service the active `IProjection` provides, so the same interaction code drives both the planar and the
+spherical projection without a branch.
 
 ### BYO data-source abstraction
 A small C# interface — `fetch(tileCoord) -> bytes` + declared encoding (MVT now, MLT later, raster
 later). HTTP, local files, PMTiles, a proprietary backend, or in-memory generated tiles all look
-identical to the pipeline. This is a first-class product surface.
+identical to the pipeline. This is a first-class product surface. Fetching itself goes through
+`UnityWebRequest`, never `System.Net.Http.HttpClient` — `HttpClient` allocates heavily per request, and
+WebGL cannot use it at all.
 
 ---
 
@@ -334,6 +373,9 @@ not a current target.
   open-sourcing, no in-UI attribution required.
 - **Avoid copyleft in the core** (GPL/AGPL viral; LGPL link-level; MPL file-level). GEOS = LGPL → use
   Clipper2 instead. (Not legal advice; a short IP-lawyer pass before commercial launch is cheap insurance.)
+- **`Unity.Mathematics`** (used throughout, not a vendored dependency) ships under the **Unity Companion
+  License**, not MIT — permitted use is scoped to Unity-dependent projects. That is no restriction here (this
+  is one), but it does mean the math types/functions can't be lifted into a non-Unity codebase under open terms.
 
 ## 5. Risks
 | Risk | Mitigation |

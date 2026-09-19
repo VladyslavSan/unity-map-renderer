@@ -29,8 +29,8 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void ShapedSymbol_LivesInANativeArray()
         {
-            // Not `using var` — CS1654 forbids an indexed WRITE through a using-variable (see the repo's
-            // using-var-native-index-write-cs1654 lesson); Dispose explicitly instead.
+            // Not `using var` — CS1654 forbids an indexed WRITE through a using-variable;
+            // Dispose explicitly instead.
             var array = new NativeArray<ShapedSymbol>(1, Allocator.Temp);
             try
             {

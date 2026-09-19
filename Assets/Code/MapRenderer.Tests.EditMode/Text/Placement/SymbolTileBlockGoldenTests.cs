@@ -378,7 +378,8 @@ namespace MapRenderer.Tests.Text.Placement
         /// failure message. Paste that dump here (replacing the sentinel) to make this a real, committed,
         /// fixed-oracle golden. Once pasted, DO NOT re-bake a snapshot to go green on a later divergence —
         /// a moved digest means behaviour changed; find and fix the cause instead
-        /// (`snapshot-moved-suspect-the-fixture` / `never re-bake a snapshot to go green`).
+        /// — and suspect the FIXTURE first, since a snapshot can move because its fixture borrowed a
+        /// production API as a data factory rather than because production behaviour changed.
         ///
         /// <para><b>Moved once since capture</b>, when <c>PointStageInput</c> gained the three
         /// <c>text-halo-*</c> fields: <c>Points</c> 1107115275 → -1357632509. That it was purely additive was

@@ -18,9 +18,9 @@ namespace MapRenderer.App
     /// a frame-time stress test, and <c>Debug.Log</c> allocates + can micro-stall, perturbing the very
     /// measurement. Put a <see cref="MapTelemetryPanel"/> on the same object (the stress scene does) — it
     /// surfaces the live S85 snapshot (cover / pending / <c>ConsumeBacklog</c> / in-flight) in the Inspector
-    /// every frame with no string alloc and no console. That is the "measure first" instrument for
-    /// <c>[[s95-residual-tile-load-frame-stall]]</c>: watch whether <c>ConsumeBacklog</c> spikes and the
-    /// frame time with it.</para>
+    /// every frame with no string alloc and no console. That is the "measure first" instrument for a
+    /// residual tile-load frame stall: watch whether <c>ConsumeBacklog</c> spikes and the frame time
+    /// with it.</para>
     ///
     /// <para><b>Thin shell</b> (mirrors <see cref="CameraControlPanel"/> / <see cref="MapTelemetryPanel"/>):
     /// the motion is two pure, deterministic static functions — <see cref="ZoomAt"/> (triangle-wave zoom)

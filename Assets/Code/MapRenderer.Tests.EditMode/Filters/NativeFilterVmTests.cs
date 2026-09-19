@@ -144,7 +144,7 @@ namespace MapRenderer.Tests.Filters
         /// <c>_croatiaTile</c> pass is what closes that gap, and the two per-KEY counts below are what
         /// proves it closed rather than merely widening an already-vacuous aggregate: an aggregate floor is
         /// satisfied by <c>class</c> alone (dense on every layer) and would stay green with <c>brunnel</c>
-        /// at zero — see <c>parity-oracle-vacuous-when-fixture-lacks-filter-keys</c>.
+        /// at zero — an oracle is vacuous when the fixture lacks the keys its filters read.
         ///
         /// <para><b><c>ramp</c> is deliberately excluded</b> — not an uncovered gap, an out-of-remit key.
         /// All 18 liberty filters reading it are numeric equality (<c>==</c>/<c>!=</c> against the literal

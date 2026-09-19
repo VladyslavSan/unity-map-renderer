@@ -28,7 +28,7 @@ namespace MapRenderer.Tests.Text
     /// behavioural half needs the subsystem harness in <c>SymbolSubsystemWorkSchedulerTests</c>).
     ///
     /// <para><b>Every tooth here needs ≥ 2 distinct <c>(fontName, rangeStart)</c> keys</b>
-    /// (<c>parity-oracle-vacuous-when-fixture-lacks-filter-keys</c>): every OTHER symbol fixture in this repo
+    /// — a fixture that lacks the keys an oracle reads makes it vacuous. Every OTHER symbol fixture in this repo
     /// is single-font/single-range, so it cannot observe either the interleave this stage removes or a
     /// collect-order shuffle. T1/T2 below deliberately use two font names (T1) or two distinct ranges (T2)
     /// so the tooth is falsifiable, not just green-by-construction.</para>
@@ -200,7 +200,7 @@ namespace MapRenderer.Tests.Text
         /// <c>async</c> method — including <c>async void</c> — so this catches a form a bare <c>void</c>
         /// return type does not. Complements <c>SymbolTailPumpTests.RunTailAsync_AwaitsOnlyTheGlyphPrepare_BeforeTheShapeLoop</c>'s
         /// structural half — a different instrument reading a different thing
-        /// (<c>blind-spots-dont-transfer-between-instruments</c>).
+        /// — one instrument's blind spot does not transfer to another.
         /// <para><b>RED injection:</b> mark <c>StyledSymbolTileBuilder.Shape</c> <c>async void</c> with any
         /// <c>await</c> in it.</para></summary>
         [Test]

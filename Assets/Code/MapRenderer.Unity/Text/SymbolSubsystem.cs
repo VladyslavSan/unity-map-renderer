@@ -34,7 +34,7 @@ namespace MapRenderer.Unity.Text
     ///
     /// <para>The glyph atlas is allocated big and FIXED (<c>AtlasDimension</c>) so its <c>Size</c> never changes
     /// as tiles append glyphs — a growing atlas would invalidate earlier tiles' baked UVs
-    /// (glyph-atlas-uv-growth-staleness).</para></summary>
+    /// against the old size.</para></summary>
     internal sealed class SymbolSubsystem : VerifiedDisposable, ISymbolTileWorkerFactory
     {
 

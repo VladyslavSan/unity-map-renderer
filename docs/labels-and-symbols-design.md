@@ -467,6 +467,13 @@ render-space tangent is only correct at bearing-0/no-tilt. So placement — proj
 place+rotate each glyph — happens **per frame** in `SymbolPlacementSystem`, exactly like point-label projection.
 Build time only extracts the line geometry and shapes the text.
 
+**This is the `viewport`-aligned case.** Under `*-pitch-alignment: map`, `text-size` is a WORLD size, not a
+device-pixel one — the same settled model as `line-width` (`docs/line-rendering-design.md` §1): the style
+value fixes a world quantity once, and the perspective divide does the rest, so a receding map-pitched label
+shrinks with distance instead of holding a constant screen size. A map-pitched curved label therefore walks
+its arc length in WORLD metres (`SymbolStagingMath.StageCurved`'s `worldArc`), not screen pixels — see §6.3's
+pitch-alignment consumption for the corner-unit mechanism (`CandidateEmit.CornerMetresPerLogicalPixel`).
+
 ```
 BUILD (Core, per tile, once)                    PER FRAME (SymbolPlacementSystem, screen-space)
 ─────────────────────────                       ────────────────────────────────────────────
@@ -791,9 +798,14 @@ gets `.json`/`.png` (and `@2x` for hi-DPI) appended. Index shape (clean-room, fr
 { "airport-11": { "x": 0, "y": 0, "width": 22, "height": 22, "pixelRatio": 2, "sdf": false }, … }
 ```
 
-Contrast with `GlyphAtlas` (§1): the glyph atlas is **dynamically packed** at runtime as codepoints arrive and
-**grows** (the UV-staleness hazard, `glyph-atlas-uv-growth-staleness`). The sprite sheet is **fixed and
-pre-baked** — decoded once, never grows, UVs are stable. So the icon atlas is far simpler: a parsed
+Contrast with `GlyphAtlas` (§1): the glyph atlas is **dynamically packed** at runtime as codepoints arrive.
+A layout site bakes a glyph's UV as `texel / Size` at layout time, so if `Size` changed later — an atlas
+that keeps growing to fit new glyphs — every UV baked before the growth would silently point at the wrong
+texel: a tile built early would sample low and its text would read as garbled. `GlyphAtlas` is therefore
+allocated **big and FIXED** (`SymbolSubsystem.AtlasDimension`) so `Size` never changes; once a page fills, a
+glyph that no longer fits opens a NEW page (its own buffer, same fixed size) instead of growing the current
+one, so an already-baked UV is never invalidated. The sprite sheet is **fixed and pre-baked** — decoded
+once, never grows, UVs are stable. So the icon atlas is far simpler: a parsed
 `SpriteIndex` (name → rect) over an immutable texture. `pixelRatio` is the sheet's DPI scale: the sprite's
 **logical** size is `width/pixelRatio` × `height/pixelRatio`, and `icon-size` scales *that*.
 
