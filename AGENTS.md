@@ -17,8 +17,17 @@ workflow) — check it before debugging a shader/material/test-harness surprise.
 it partly supersedes `docs/tile-pipeline-design.md` §4 — read its §3.6 for which parts.
 Proprietary / all rights reserved.
 
-`docs/*-design.md` describe *why the code is the way it is* (decisions, history — the code leads, the doc
-explains). `specs/*.md` are **normative**: they state the *contract* a mechanism must hold, and are
+`docs/*-design.md` state **the design and the principles that govern it** — the invariants a mechanism
+must hold, the contracts between parts, and the reasoning that makes the current shape the right one
+(including why a rejected alternative is wrong, where that still constrains the design). They are
+**not** implementation histories. A stage sequence, a symptom report, a measured acceptance bar, a
+changelog of resolved items, or a record of what landed when does **not** belong here: order and status
+live in Jira, the acceptance detail lives with the work item or at the test's own site, and git holds
+the history. The test is whether a sentence would still be worth reading by someone who has never heard
+of the ticket that produced it. Write in the present tense about what *is*, not the past tense about
+what happened. `docs/smooth-transitions-design.md` and `docs/depth-and-render-regimes-design.md` are the
+model. A **limitation no test can observe** is design and stays.
+`specs/*.md` are **normative**: they state the *contract* a mechanism must hold, and are
 **authoritative** — where the code and a spec disagree, the code has a bug. Cite requirements by number in
 reviews (e.g. *"violates SPEC-DPR R-9"*). See `specs/README.md` for the doc type and index.
 
