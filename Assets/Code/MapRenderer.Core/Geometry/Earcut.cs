@@ -255,6 +255,10 @@ namespace MapRenderer.Core.Geometry
             var isEar   = new bool[total];
             int forceClipCount = 0;
 
+            // Bounding-box index over the merged ring — answer-preserving per
+            // docs/mesh-triangulation-robustness-design.md §2.1/§6.1 (Stage 1's invariant).
+            var grid = BuildEarGrid(vx, vy, total);
+
             // capacity currently == total (set by the bridging phase above); EnsureCapacity grows
             // every parallel array together (grow-on-demand, Edit 3) the rare times SplitPolygon
             // needs a fresh slot. Splits are a failure-path escape only — bounded below.
@@ -291,6 +295,10 @@ namespace MapRenderer.Core.Geometry
                 isBridgeCopy[b2] = false;
                 removed[a2] = false;
                 removed[b2] = false;
+                // Split-added vertices postdate the grid build; they go to its overflow list instead
+                // (ponytail: O(splits) per call — a CSR rebuild is the upgrade path; see EarGrid's doc).
+                grid.Overflow.Add(a2);
+                grid.Overflow.Add(b2);
 
                 int an = next[a];
                 int bp = prev[b];
@@ -337,8 +345,8 @@ namespace MapRenderer.Core.Geometry
                         remaining -= 2;
                         curedAny = true;
 
-                        isEar[a] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, a);
-                        isEar[b] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, b);
+                        isEar[a] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, a);
+                        isEar[b] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, b);
 
                         start = b;
                         p = b;
@@ -432,11 +440,11 @@ namespace MapRenderer.Core.Geometry
                                 splitsUsed++;
                                 int c = SplitPolygon(a, b);
 
-                                isEar[a] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, a);
-                                isEar[b] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, b);
-                                isEar[c] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, c);
+                                isEar[a] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, a);
+                                isEar[b] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, b);
+                                isEar[c] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, c);
                                 int a2 = prev[c];
-                                isEar[a2] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, a2);
+                                isEar[a2] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, a2);
 
                                 int remA = CountRing(a, remaining + 8);
                                 int remC = CountRing(c, remaining + 8);
@@ -486,7 +494,7 @@ namespace MapRenderer.Core.Geometry
                     int p = start, guard = 0, bound = remaining + 8;
                     do
                     {
-                        if (!removed[p]) isEar[p] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, p);
+                        if (!removed[p]) isEar[p] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, p);
                         p = next[p];
                         guard++;
                     } while (p != start && guard < bound);
@@ -526,8 +534,8 @@ namespace MapRenderer.Core.Geometry
                             stallIter = 0;
                             didFullRefresh = false;
 
-                            isEar[p] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, p);
-                            isEar[n] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, n);
+                            isEar[p] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, p);
+                            isEar[n] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, n);
 
                             if (start == v) start = n;
                             v = n;
@@ -547,7 +555,7 @@ namespace MapRenderer.Core.Geometry
                                     do
                                     {
                                         if (!removed[p2])
-                                            isEar[p2] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, p2);
+                                            isEar[p2] = IsEar(vx, vy, prev, next, removed, isBridgeCopy, total, grid, p2);
                                         p2 = next[p2];
                                         guard2++;
                                     } while (p2 != v && guard2 < bound2);
@@ -926,16 +934,93 @@ namespace MapRenderer.Core.Geometry
         }
 
         /// <summary>
-        /// Tests if vertex v is an ear.
-        /// v is an ear if: (1) it is a convex vertex in the merged ring, AND
-        ///                 (2) no other live vertex lies inside or on the triangle (prev[v], v, next[v]).
-        /// Bridge-copy vertices (isBridgeCopy[i] = true) are skipped in the point-in-triangle test:
-        /// they are position-duplicates of real ring vertices introduced by hole bridging, and their
-        /// spatial presence is already captured by the original vertex. Allowing bridge copies to
-        /// block ear detection causes false-stalls in complex multi-hole polygons.
+        /// Running count of ear-test candidate visits in <see cref="IsEar"/> since last reset.
+        /// Test-only tooth for <c>EarcutEarTestScanBoundTests</c> — counts visits, not
+        /// <see cref="PointInTriangle"/> calls, so a prune-only implementation that still visits
+        /// every candidate cannot pass by skipping just the predicate.
+        /// </summary>
+        internal static long CandidateVisitCount;
+
+        /// <summary>Test-only override: forces every <see cref="IsEar"/> call onto the full linear
+        /// scan, bypassing <see cref="EarGrid"/> — the RED/parity arm for
+        /// <c>EarcutEarTestScanBoundTests</c>.</summary>
+        internal static bool ForceLinearEarScan;
+
+        /// <summary>
+        /// Uniform bucket grid (CSR layout) over the merged ring, built once so <see cref="IsEar"/>
+        /// visits only nearby vertices. CellStart/CellItems hold the base merged-ring vertices (cell
+        /// c = CellItems[CellStart[c]..CellStart[c+1])). Overflow holds vertices <c>SplitPolygon</c>
+        /// adds after the grid is built — a failure-path escape only, normally empty.
+        /// </summary>
+        private readonly struct EarGrid
+        {
+            public readonly int Dim;
+            public readonly double MinX, MinY, InvCellW, InvCellH;
+            public readonly int[] CellStart;
+            public readonly int[] CellItems;
+            public readonly List<int> Overflow;
+
+            public EarGrid(int dim, double minX, double minY, double invCellW, double invCellH,
+                int[] cellStart, int[] cellItems, List<int> overflow)
+            {
+                Dim = dim; MinX = minX; MinY = minY; InvCellW = invCellW; InvCellH = invCellH;
+                CellStart = cellStart; CellItems = cellItems; Overflow = overflow;
+            }
+
+            public int CellX(double x) => math.clamp((int)((x - MinX) * InvCellW), 0, Dim - 1);
+            public int CellY(double y) => math.clamp((int)((y - MinY) * InvCellH), 0, Dim - 1);
+        }
+
+        /// <summary>Builds <see cref="EarGrid"/> over vx/vy[0..total) by counting sort: one pass to
+        /// count per-cell occupancy, one to place items — no per-insert allocation.</summary>
+        private static EarGrid BuildEarGrid(double[] vx, double[] vy, int total)
+        {
+            int dim = math.clamp((int)math.ceil(math.sqrt(total)), 1, 256);
+
+            double minX = double.MaxValue, minY = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue;
+            for (int i = 0; i < total; i++)
+            {
+                if (vx[i] < minX) minX = vx[i];
+                if (vx[i] > maxX) maxX = vx[i];
+                if (vy[i] < minY) minY = vy[i];
+                if (vy[i] > maxY) maxY = vy[i];
+            }
+            double invCellW = dim / math.max(maxX - minX, 1e-9);
+            double invCellH = dim / math.max(maxY - minY, 1e-9);
+            var grid = new EarGrid(dim, minX, minY, invCellW, invCellH,
+                new int[dim * dim + 1], new int[total], new List<int>());
+
+            for (int i = 0; i < total; i++)
+                grid.CellStart[grid.CellY(vy[i]) * dim + grid.CellX(vx[i]) + 1]++;
+            for (int c = 0; c < dim * dim; c++)
+                grid.CellStart[c + 1] += grid.CellStart[c];
+
+            // Place items using CellStart itself as the write cursor — no second dim²-sized array.
+            // Afterwards CellStart[c] holds the ORIGINAL CellStart[c+1], so shifting right by one
+            // cell restores the correct start-of-cell boundaries.
+            for (int i = 0; i < total; i++)
+            {
+                int cell = grid.CellY(vy[i]) * dim + grid.CellX(vx[i]);
+                grid.CellItems[grid.CellStart[cell]++] = i;
+            }
+            for (int c = dim * dim; c > 0; c--)
+                grid.CellStart[c] = grid.CellStart[c - 1];
+            grid.CellStart[0] = 0;
+
+            return grid;
+        }
+
+        /// <summary>
+        /// True iff vertex v is an ear: convex, and no other live vertex lies inside or on triangle
+        /// (prev[v], v, next[v]). Bridge-copy vertices are skipped (position-duplicates of a live
+        /// vertex already tested). Scans only <paramref name="grid"/>'s AABB-overlapping cells
+        /// (fallback: a full scan, on a wide AABB or when <see cref="ForceLinearEarScan"/> is set) —
+        /// answer-preserving; proof in docs/mesh-triangulation-robustness-design.md §2.1.
         /// </summary>
         private static bool IsEar(
-            double[] vx, double[] vy, int[] prev, int[] next, bool[] removed, bool[] isBridgeCopy, int total, int v)
+            double[] vx, double[] vy, int[] prev, int[] next, bool[] removed, bool[] isBridgeCopy, int total,
+            in EarGrid grid, int v)
         {
             if (removed[v]) return false;
             int p = prev[v], n = next[v];
@@ -951,24 +1036,55 @@ namespace MapRenderer.Core.Geometry
             double triArea2 = (bx - ax) * (cy - ay) - (cx - ax) * (by - ay);
             if (triArea2 > 1e-10) return false; // reflex vertex
 
-            // Check no other live vertex lies inside the triangle.
-            // Skip bridge-copy vertices (isBridgeCopy[i]) — they are position-duplicates of real
-            // ring vertices and must not block ear detection: their spatial coverage is already
-            // tested through the original vertex they duplicate.
-            // Also skip vertices at the exact same position as the triangle's own corners
-            // (catches any remaining duplicate positions not covered by isBridgeCopy).
-            for (int i = 0; i < total; i++)
+            // True if live vertex i blocks the ear: not the triangle's own corners, not a bridge-
+            // seam duplicate (spatial coverage already tested through the vertex it duplicates), not
+            // a position duplicate of a corner, and inside or on the candidate triangle.
+            bool TestCandidate(int i)
             {
-                if (removed[i] || i == p || i == v || i == n) continue;
-                if (isBridgeCopy[i]) continue; // skip bridge-seam duplicates
-                // Skip exact position duplicates of triangle corners (additional safety net).
+                if (removed[i] || i == p || i == v || i == n) return false;
+                if (isBridgeCopy[i]) return false;
                 double vxi = vx[i], vyi = vy[i];
-                if ((vxi == ax && vyi == ay) ||
-                    (vxi == bx && vyi == by) ||
-                    (vxi == cx && vyi == cy))
-                    continue;
-                if (PointInTriangle(ax, ay, bx, by, cx, cy, vxi, vyi))
+                if ((vxi == ax && vyi == ay) || (vxi == bx && vyi == by) || (vxi == cx && vyi == cy))
                     return false;
+                return PointInTriangle(ax, ay, bx, by, cx, cy, vxi, vyi);
+            }
+
+            double triMinX = math.min(ax, math.min(bx, cx)), triMaxX = math.max(ax, math.max(bx, cx));
+            double triMinY = math.min(ay, math.min(by, cy)), triMaxY = math.max(ay, math.max(by, cy));
+            int cx0 = grid.CellX(triMinX), cx1 = grid.CellX(triMaxX);
+            int cy0 = grid.CellY(triMinY), cy1 = grid.CellY(triMaxY);
+            long overlappedCells = (long)(cx1 - cx0 + 1) * (cy1 - cy0 + 1);
+
+            // Wide-AABB guard: fall back to the linear scan rather than walk more cells than a
+            // linear pass would cost anyway. Same answer either way — this only bounds the worst case.
+            if (ForceLinearEarScan || overlappedCells > (long)grid.Dim * grid.Dim / 4)
+            {
+                for (int i = 0; i < total; i++)
+                {
+                    CandidateVisitCount++;
+                    if (TestCandidate(i)) return false;
+                }
+                return true;
+            }
+
+            for (int gy = cy0; gy <= cy1; gy++)
+            {
+                int rowBase = gy * grid.Dim;
+                for (int gx = cx0; gx <= cx1; gx++)
+                {
+                    int cell = rowBase + gx;
+                    int start = grid.CellStart[cell], end = grid.CellStart[cell + 1];
+                    for (int k = start; k < end; k++)
+                    {
+                        CandidateVisitCount++;
+                        if (TestCandidate(grid.CellItems[k])) return false;
+                    }
+                }
+            }
+            for (int oi = 0; oi < grid.Overflow.Count; oi++)
+            {
+                CandidateVisitCount++;
+                if (TestCandidate(grid.Overflow[oi])) return false;
             }
             return true;
         }

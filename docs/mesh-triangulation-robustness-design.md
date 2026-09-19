@@ -69,13 +69,26 @@ output"**: on a degenerate candidate triangle, `IsEar`'s linear scan is load-bea
 vertex is visited by the scan and, under the old predicate, wrongly reported as contained; that wrong
 answer is what today's output depends on (§6.1's `water-6-32-20` re-pin). Post-fix, the same vertex is
 correctly reported as not contained. So spatial acceleration is answer-preserving only once Stage 1's
-explicit degenerate-AABB test replaces the bare cross-product sign check (§6.1). This doc scopes
-**robustness first**; perf is deferred (§6).
+explicit degenerate-AABB test replaces the bare cross-product sign check (§6.1). **UMR-106 Stage 2 landed
+that acceleration** — a bounding-box index over `IsEar`'s scan (§6.1) — on the answer-preservation this
+precondition establishes.
 
 The degenerate-AABB test is safe at any coordinate precision, not just on the integer tile-space input this
 corpus happens to carry (production clips introduce fractional coordinates — `RingClipJob.Intersect`). A
 triangle's point set is always a subset of its own bounding box, so the branch can only turn a spurious
 `true` into a correct `false`; it can never discard a genuine containment.
+
+**Why the grid index cannot change the answer (the proof, not just the claim).** `PointInTriangle(A,B,C,P)
+== true ⇒ P ∈ AABB{A,B,C}` on both branches: the degenerate branch *is* the AABB test, and the non-
+degenerate (cross-product) branch can only accept a P inside the triangle's convex hull, which is always a
+subset of that same box (previous paragraph). So any vertex that could block an ear lies in the candidate
+triangle's own AABB. `EarGrid.CellX`/`CellY` are one monotone function, used identically at build time and
+at query time, so a vertex at x ∈ [triMinX, triMaxX] always maps to a cell in [CellX(triMinX), CellX(triMaxX)]
+— the exact range `IsEar` walks — and likewise for y. The cell walk therefore visits every base vertex the
+AABB could contain; nothing is skipped by construction, not by tuning. Split-added vertices (added after the
+grid is built) are covered separately by the unconditional `Overflow` scan, and the wide-AABB fallback (or
+the test-only `ForceLinearEarScan`) only widens the visited set to everything. The index changes which
+vertices `IsEar` visits, never which ones it is allowed to skip.
 
 ## 3. Invariants the fix must hold
 
@@ -254,6 +267,17 @@ Concretely, measured on the committed corpus + a fetched panel of coastline-dens
 - **No folds anywhere.** 60 000 adversarial synthetic star polygons: **WindingFlips=0 across all** (no
   inversions). Only 0.45% exceed 1% exact-area error (bounded overlaps, invisible for opaque fill; max
   12.82% on 2 spiky stars). `ForceClips` surfaces genuine clean drops.
+- **UMR-106 Stage 2 — the bounding-box index landed, answer-preserving.** A uniform bucket grid (CSR
+  layout, counting sort, built once per polygon over the merged ring — `Earcut.EarGrid`/`BuildEarGrid`,
+  mirrored in `EarcutJob`) replaces `IsEar`'s full linear scan with a walk of only the cells overlapping
+  the candidate triangle's own AABB, falling back to the linear scan when the AABB spans too many cells.
+  Split-added vertices (rare, failure-path only) go to a linear overflow list instead of the grid.
+  Measured on Stockholm (the densest fixture, 25 482 live vertices): the ear-test scan's candidate-visit
+  count fell from **1 201 497 972** (linear) to **756 893** (indexed) — a ~1587× reduction, holding the
+  6.6× headroom `EarcutEarTestScanBoundTests` bounds it against (< 5 000 000). Byte-identical to the
+  linear-fallback arm on all eight water fixtures plus `sample-tile` (index construction and the
+  wide-AABB fallback change only which vertices are visited, never the verdict — §2.1's precondition).
+  No golden re-captured; this is a pure performance change.
 
 **Hardening backlog (NOT blocking Stage 2 — quantified, deferred):**
 - **Synthetic-star overlap tail** — 0.45% of adversarial clean stars overlap >1% (max 12.82%), all
@@ -286,8 +310,9 @@ Concretely, measured on the committed corpus + a fetched panel of coastline-dens
 - **Globe fill T-junction seams** between adjacently-subdivided tiles (`GlobeFillSubdivideJob` refines each
   tile's boundary edges independently) — a *separate* globe-fill watertightness issue; skirts or conforming
   boundary tessellation. Tracked separately, not here.
-- **Triangulator performance** (O(n³) → spatial ear search) — §2.1; deferred to UMR-106 Stage 2, which
-  Stage 1's degenerate-AABB fix is the answer-preserving precondition for (§2.1, §6.1).
+- ~~**Triangulator performance** (O(n³) → spatial ear search)~~ — **landed, UMR-106 Stage 2** (§2.1, §6.1):
+  a bounding-box index over `IsEar`'s scan, built on Stage 1's degenerate-AABB fix as its
+  answer-preserving precondition.
 - **Curved-line / symbol tile-bounds clipping** — unrelated prior work.
 - **Input sanitization** for genuinely self-intersecting source rings — not needed for these tiles (check A
   clean); if a future corpus tile has dirty input, the correct-degradation path (§3.1) must still not fold.

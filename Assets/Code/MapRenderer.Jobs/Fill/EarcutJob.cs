@@ -117,6 +117,74 @@ namespace MapRenderer.Jobs.Fill
             public int Remaining;
         }
 
+        /// <summary>Uniform bucket grid (CSR layout) over the merged ring's own vertices — mirror of
+        /// managed <c>Earcut.EarGrid</c>; see its doc for the CSR layout and <see cref="Overflow"/>'s
+        /// role. <see cref="Allocator.Temp"/> scratch, built and disposed once per <see cref="Execute"/>.</summary>
+        private readonly struct EarGrid
+        {
+            public readonly int Dim;
+            public readonly double MinX, MinY, InvCellW, InvCellH;
+            public readonly NativeArray<int> CellStart;
+            public readonly NativeArray<int> CellItems;
+            public readonly NativeList<int> Overflow;
+
+            public EarGrid(int dim, double minX, double minY, double invCellW, double invCellH,
+                NativeArray<int> cellStart, NativeArray<int> cellItems, NativeList<int> overflow)
+            {
+                Dim = dim; MinX = minX; MinY = minY; InvCellW = invCellW; InvCellH = invCellH;
+                CellStart = cellStart; CellItems = cellItems; Overflow = overflow;
+            }
+
+            public int CellX(double x) => math.clamp((int)((x - MinX) * InvCellW), 0, Dim - 1);
+            public int CellY(double y) => math.clamp((int)((y - MinY) * InvCellH), 0, Dim - 1);
+        }
+
+        /// <summary>Builds <see cref="EarGrid"/> over Verts[0..total) by counting sort: one pass to
+        /// count per-cell occupancy, one to place items — no per-insert allocation.</summary>
+        private EarGrid BuildEarGrid(int total)
+        {
+            int dim = math.clamp((int)math.ceil(math.sqrt(total)), 1, 256);
+
+            double minX = double.MaxValue, minY = double.MaxValue;
+            double maxX = double.MinValue, maxY = double.MinValue;
+            for (int i = 0; i < total; i++)
+            {
+                double2 vi = Verts[i];
+                if (vi.x < minX) minX = vi.x;
+                if (vi.x > maxX) maxX = vi.x;
+                if (vi.y < minY) minY = vi.y;
+                if (vi.y > maxY) maxY = vi.y;
+            }
+            double invCellW = dim / math.max(maxX - minX, 1e-9);
+            double invCellH = dim / math.max(maxY - minY, 1e-9);
+
+            var cellStart = new NativeArray<int>(dim * dim + 1, Allocator.Temp, NativeArrayOptions.ClearMemory);
+            var cellItems = new NativeArray<int>(total, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            var overflow  = new NativeList<int>(0, Allocator.Temp);
+            var grid = new EarGrid(dim, minX, minY, invCellW, invCellH, cellStart, cellItems, overflow);
+
+            for (int i = 0; i < total; i++)
+            {
+                double2 vi = Verts[i];
+                cellStart[grid.CellY(vi.y) * dim + grid.CellX(vi.x) + 1]++;
+            }
+            for (int c = 0; c < dim * dim; c++)
+                cellStart[c + 1] += cellStart[c];
+
+            var cursor = new NativeArray<int>(dim * dim + 1, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+            cursor.CopyFrom(cellStart);
+            for (int i = 0; i < total; i++)
+            {
+                double2 vi = Verts[i];
+                int cell = grid.CellY(vi.y) * dim + grid.CellX(vi.x);
+                cellItems[cursor[cell]] = i;
+                cursor[cell]++;
+            }
+            cursor.Dispose();
+
+            return grid;
+        }
+
         public void Execute()
         {
             int outerCount = OuterCount;
@@ -235,8 +303,13 @@ namespace MapRenderer.Jobs.Fill
             // ── Ear-clipping loop, with a cure → split → clean-drop failure cascade on stall. ──
             // Mirrors managed Earcut.Triangulate's EarClipRing exactly, except the SplitAndRetry
             // recursion is replaced by an explicit worklist stack (see class doc).
+            //
+            // Bounding-box index over the merged ring — mirrors managed Earcut.BuildEarGrid (see its
+            // doc for the answer-preservation argument). Allocator.Temp scratch, disposed before Execute returns.
+            var grid = BuildEarGrid(total);
+
             for (int i = 0; i < total; i++)
-                IsEar[i] = ComputeIsEar(total, i);
+                IsEar[i] = ComputeIsEar(total, grid, i);
 
             int forceClipCount = 0; // clean-drop count (rename-in-place, matches managed)
             int splitsUsed     = 0;
@@ -252,9 +325,12 @@ namespace MapRenderer.Jobs.Fill
                 stack.RemoveAtSwapBack(stack.Length - 1); // LIFO pop — see class doc for the DFS-order proof
 
                 ProcessRing(job.Start, job.Remaining, ref total, ref splitsUsed, ref outCount, outBase,
-                            ref forceClipCount, stack);
+                            ref forceClipCount, stack, grid);
             }
             stack.Dispose();
+            grid.CellStart.Dispose();
+            grid.CellItems.Dispose();
+            grid.Overflow.Dispose();
 
             OutIndexCount[0]        = outCount;
             OutForceClipCount[0]    = forceClipCount;
@@ -274,7 +350,7 @@ namespace MapRenderer.Jobs.Fill
         private void ProcessRing(
             int start, int remaining,
             ref int total, ref int splitsUsed, ref int outCount, int outBase,
-            ref int forceClipCount, NativeList<RingJob> stack)
+            ref int forceClipCount, NativeList<RingJob> stack, in EarGrid grid)
         {
             if (remaining < 3) return;
 
@@ -283,7 +359,7 @@ namespace MapRenderer.Jobs.Fill
                 int p = start, guard = 0, bound = remaining + 8;
                 do
                 {
-                    if (!Removed[p]) IsEar[p] = ComputeIsEar(total, p);
+                    if (!Removed[p]) IsEar[p] = ComputeIsEar(total, grid, p);
                     p = Next[p];
                     guard++;
                 } while (p != start && guard < bound);
@@ -323,8 +399,8 @@ namespace MapRenderer.Jobs.Fill
                         stallIter      = 0;
                         didFullRefresh = false;
 
-                        IsEar[p] = ComputeIsEar(total, p);
-                        IsEar[n] = ComputeIsEar(total, n);
+                        IsEar[p] = ComputeIsEar(total, grid, p);
+                        IsEar[n] = ComputeIsEar(total, grid, n);
 
                         if (start == v) start = n;
                         v = n;
@@ -341,7 +417,7 @@ namespace MapRenderer.Jobs.Fill
                                 int p2 = v, guard2 = 0, bound2 = remaining + 8;
                                 do
                                 {
-                                    if (!Removed[p2]) IsEar[p2] = ComputeIsEar(total, p2);
+                                    if (!Removed[p2]) IsEar[p2] = ComputeIsEar(total, grid, p2);
                                     p2 = Next[p2];
                                     guard2++;
                                 } while (p2 != v && guard2 < bound2);
@@ -351,7 +427,7 @@ namespace MapRenderer.Jobs.Fill
                             {
                                 // Second stall: cascade. Never fold.
                                 int cureStart = v;
-                                if (CureLocalIntersections(ref cureStart, ref remaining, total, ref outCount, outBase))
+                                if (CureLocalIntersections(ref cureStart, ref remaining, total, ref outCount, outBase, grid))
                                 {
                                     start = cureStart;
                                     v = cureStart;
@@ -362,7 +438,7 @@ namespace MapRenderer.Jobs.Fill
                                     continue;
                                 }
 
-                                if (TrySplit(v, remaining, ref total, ref splitsUsed, stack))
+                                if (TrySplit(v, remaining, ref total, ref splitsUsed, stack, grid))
                                 {
                                     remaining = 0; // handed off to the two pushed ring-jobs
                                     clippedAny = true;
@@ -428,7 +504,7 @@ namespace MapRenderer.Jobs.Fill
         /// and continue. Bounded by the ring's own live-vertex count; never emits a crossing triangle.
         /// </summary>
         private bool CureLocalIntersections(
-            ref int start, ref int remaining, int total, ref int outCount, int outBase)
+            ref int start, ref int remaining, int total, ref int outCount, int outBase, in EarGrid grid)
         {
             bool curedAny = false;
             int p = start;
@@ -459,8 +535,8 @@ namespace MapRenderer.Jobs.Fill
                     remaining -= 2;
                     curedAny = true;
 
-                    IsEar[a] = ComputeIsEar(total, a);
-                    IsEar[b] = ComputeIsEar(total, b);
+                    IsEar[a] = ComputeIsEar(total, grid, a);
+                    IsEar[b] = ComputeIsEar(total, grid, b);
 
                     start = b;
                     p = b;
@@ -483,7 +559,7 @@ namespace MapRenderer.Jobs.Fill
         /// managed's <see cref="MaxSplits"/> cap — see class doc).
         /// </summary>
         private bool TrySplit(
-            int start, int remaining, ref int total, ref int splitsUsed, NativeList<RingJob> stack)
+            int start, int remaining, ref int total, ref int splitsUsed, NativeList<RingJob> stack, in EarGrid grid)
         {
             if (splitsUsed >= MaxSplits) return false;
             int ringGuardBound = remaining + 8;
@@ -505,13 +581,13 @@ namespace MapRenderer.Jobs.Fill
                             if (total + 2 > Verts.Length) return false;
 
                             splitsUsed++;
-                            int c = SplitPolygon(a, b, ref total);
+                            int c = SplitPolygon(a, b, ref total, grid);
 
-                            IsEar[a] = ComputeIsEar(total, a);
-                            IsEar[b] = ComputeIsEar(total, b);
-                            IsEar[c] = ComputeIsEar(total, c);
+                            IsEar[a] = ComputeIsEar(total, grid, a);
+                            IsEar[b] = ComputeIsEar(total, grid, b);
+                            IsEar[c] = ComputeIsEar(total, grid, c);
                             int a2 = Prev[c];
-                            IsEar[a2] = ComputeIsEar(total, a2);
+                            IsEar[a2] = ComputeIsEar(total, grid, a2);
 
                             int remA = CountRing(a, remaining + 8);
                             int remC = CountRing(c, remaining + 8);
@@ -538,7 +614,7 @@ namespace MapRenderer.Jobs.Fill
         /// copies, so they participate fully in point-in-triangle tests. Caller MUST have already verified
         /// <c>total + 2 &lt;= Verts.Length</c> (see <see cref="TrySplit"/>) — this never bounds-checks itself.
         /// </summary>
-        private int SplitPolygon(int a, int b, ref int total)
+        private int SplitPolygon(int a, int b, ref int total, in EarGrid grid)
         {
             int a2 = total++;
             int b2 = total++;
@@ -549,6 +625,10 @@ namespace MapRenderer.Jobs.Fill
             IsBridgeCopy[b2] = false;
             Removed[a2] = false;
             Removed[b2] = false;
+            // Split-added vertices postdate the grid build; they go to its overflow list instead
+            // (mirror of managed Earcut.SplitPolygon — see EarGrid's doc for the O(splits) note).
+            grid.Overflow.Add(a2);
+            grid.Overflow.Add(b2);
 
             int an = Next[a];
             int bp = Prev[b];
@@ -783,7 +863,24 @@ namespace MapRenderer.Jobs.Fill
                && !BridgeCrossesRing(holeLM, cand, mergedRingStart, mergedRingCount)
                && !BridgeCrossesRing(holeLM, cand, holeStart, holeCount);
 
-        private bool ComputeIsEar(int total, int v)
+        /// <summary>True if live vertex i blocks the ear (p, v, n) — not a triangle corner, not a
+        /// bridge-seam duplicate (spatial coverage already tested through the vertex it duplicates),
+        /// not a position duplicate of a corner, and inside or on the triangle. Shared by
+        /// <see cref="ComputeIsEar"/>'s cell-walk, wide-AABB-fallback and overflow scans.</summary>
+        private bool BlocksEar(int i, int p, int v, int n, double2 a, double2 b, double2 c)
+        {
+            if (Removed[i] || i == p || i == v || i == n) return false;
+            if (IsBridgeCopy[i]) return false;
+            double vxi = Verts[i].x, vyi = Verts[i].y;
+            if ((vxi == a.x && vyi == a.y) || (vxi == b.x && vyi == b.y) || (vxi == c.x && vyi == c.y))
+                return false;
+            return PointInTriangle(a.x, a.y, b.x, b.y, c.x, c.y, vxi, vyi);
+        }
+
+        /// <summary>Mirror of managed <c>Earcut.IsEar</c> — see its doc for the ear predicate and for
+        /// why scanning only <paramref name="grid"/>'s AABB-overlapping cells (falling back to the
+        /// full linear scan on a wide AABB) is answer-preserving.</summary>
+        private bool ComputeIsEar(int total, in EarGrid grid, int v)
         {
             if (Removed[v]) return false;
             int p = Prev[v], n = Next[v];
@@ -794,18 +891,34 @@ namespace MapRenderer.Jobs.Fill
             double triArea2 = Area2(a, b, c);
             if (triArea2 > 1e-10) return false; // reflex vertex
 
-            for (int i = 0; i < total; i++)
+            double triMinX = math.min(a.x, math.min(b.x, c.x)), triMaxX = math.max(a.x, math.max(b.x, c.x));
+            double triMinY = math.min(a.y, math.min(b.y, c.y)), triMaxY = math.max(a.y, math.max(b.y, c.y));
+            int cx0 = grid.CellX(triMinX), cx1 = grid.CellX(triMaxX);
+            int cy0 = grid.CellY(triMinY), cy1 = grid.CellY(triMaxY);
+            long overlappedCells = (long)(cx1 - cx0 + 1) * (cy1 - cy0 + 1);
+
+            // Wide-AABB guard: fall back to the linear scan rather than walk more cells than a
+            // linear pass would cost anyway. Same answer either way — this only bounds the worst case.
+            if (overlappedCells > (long)grid.Dim * grid.Dim / 4)
             {
-                if (Removed[i] || i == p || i == v || i == n) continue;
-                if (IsBridgeCopy[i]) continue;
-                double vxi = Verts[i].x, vyi = Verts[i].y;
-                if ((vxi == a.x && vyi == a.y) ||
-                    (vxi == b.x && vyi == b.y) ||
-                    (vxi == c.x && vyi == c.y))
-                    continue;
-                if (PointInTriangle(a.x, a.y, b.x, b.y, c.x, c.y, vxi, vyi))
-                    return false;
+                for (int i = 0; i < total; i++)
+                    if (BlocksEar(i, p, v, n, a, b, c)) return false;
+                return true;
             }
+
+            for (int gy = cy0; gy <= cy1; gy++)
+            {
+                int rowBase = gy * grid.Dim;
+                for (int gx = cx0; gx <= cx1; gx++)
+                {
+                    int cell = rowBase + gx;
+                    int start = grid.CellStart[cell], end = grid.CellStart[cell + 1];
+                    for (int k = start; k < end; k++)
+                        if (BlocksEar(grid.CellItems[k], p, v, n, a, b, c)) return false;
+                }
+            }
+            for (int oi = 0; oi < grid.Overflow.Length; oi++)
+                if (BlocksEar(grid.Overflow[oi], p, v, n, a, b, c)) return false;
             return true;
         }
 
