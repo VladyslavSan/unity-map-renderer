@@ -109,7 +109,8 @@ A durable, reusable mesh-validation harness — the "identify weird holes made m
 geometry (tile-space `double2`), engine-free, runs in the ~1 s fast `Tools/core-tests` loop.
 
 **Validator** (proposed `MeshCoverageValidator`, Core `Imaging`/`Geometry`, alongside the existing
-`SnapshotCoverage`): given assembled `Polygon`s and an `Earcut.Result`, reports and asserts invariants §3:
+`SnapshotCoverage`): given assembled `Polygon`s and a triangulation result (triangles + force-clip
+count), reports and asserts invariants §3:
 - area expected vs actual + relative error;
 - rasterized coverage diff (even-odd over outer+holes = ground truth, nesting-agnostic) → **missing cells
   (phantom holes)**, **extra cells (spill)**;
@@ -268,8 +269,8 @@ Concretely, measured on the committed corpus + a fetched panel of coastline-dens
   inversions). Only 0.45% exceed 1% exact-area error (bounded overlaps, invisible for opaque fill; max
   12.82% on 2 spiky stars). `ForceClips` surfaces genuine clean drops.
 - **UMR-106 Stage 2 — the bounding-box index landed, answer-preserving.** A uniform bucket grid (CSR
-  layout, counting sort, built once per polygon over the merged ring — `Earcut.EarGrid`/`BuildEarGrid`,
-  mirrored in `EarcutJob`) replaces `IsEar`'s full linear scan with a walk of only the cells overlapping
+  layout, counting sort, built once per polygon over the merged ring — `EarcutJob.EarGrid`/
+  `BuildEarGrid`) replaces `ComputeIsEar`'s full linear scan with a walk of only the cells overlapping
   the candidate triangle's own AABB, falling back to the linear scan when the AABB spans too many cells.
   Split-added vertices (rare, failure-path only) go to a linear overflow list instead of the grid.
   Measured on Stockholm (the densest fixture, 25 482 live vertices): the ear-test scan's candidate-visit
@@ -315,8 +316,8 @@ replacement; property coverage is independent of the triangulator under test but
 bit-identity check would be.
 
 **Permanent loss to the `Tools/core-tests` fast loop.** `EarcutTests.cs`, `EarcutDegenerateTriangleTests.cs`
-and `EarcutEarTestScanBoundTests.cs` (~14 test cases total: `Earcut.Triangulate`'s degenerate-input
-handling, synthetic hole triangulation, `PointInTriangle`'s degenerate branch, and the whole UMR-106
+and `EarcutEarTestScanBoundTests.cs` (~14 test cases total: degenerate-input handling, synthetic hole
+triangulation, `PointInTriangle`'s degenerate branch, and the whole UMR-106
 Stage 2 scan-bound corpus sweep) moved off `core-tests.csproj`. They now drive `MapRenderer.Jobs.Fill.EarcutJob`
 — `NativeArray`, Burst, `Unity.Collections` — which `core-tests` cannot compile (no shim may bridge this;
 see that project's own doc for the silent-no-op `AsArray()` dispose hazard a shim would reintroduce). This

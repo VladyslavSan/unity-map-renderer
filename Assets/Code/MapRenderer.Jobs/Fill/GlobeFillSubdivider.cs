@@ -104,7 +104,7 @@ namespace MapRenderer.Jobs.Fill
     /// representation-only change, the split path and every emitted vertex's bytes are unaffected.</para>
     ///
     /// <para>OUTPUT WINDING: each refined triangle preserves its parent's vertex order, so the output stays CCW —
-    /// the pipeline's single canonical winding (inherited from <c>Earcut</c>), reversed once to Unity-front at the
+    /// the pipeline's single canonical winding (inherited from <c>EarcutJob</c>), reversed once to Unity-front at the
     /// mesh-write boundary (<c>StyledFillTileBuilder</c>) for stock Cull Back; see <c>docs §7.1</c>.</para>
     ///
     /// <para><b>Burst.</b> The projection is the generic struct <typeparamref name="TProj"/> (the

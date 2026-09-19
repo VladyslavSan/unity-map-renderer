@@ -22,12 +22,11 @@ namespace MapRenderer.Tests.Meshing
     /// <summary>
     /// mesh-triangulation-robustness Stage 3 acceptance tooth (plan Edit 4): drives the REAL jobified
     /// fill path — <see cref="FillMeshGraph.Schedule"/>, the Burst <see cref="EarcutJob"/> — over the
-    /// committed corpus water tile, and validates the output has no folds and conserves area. This is the
-    /// jobified analogue of <c>WaterTriangulationTests</c> (which only exercises the managed twin via
-    /// <c>Earcut.Triangulate</c>); it is the tooth that actually proves the VISIBLE render
-    /// path is fixed, since production fill meshes are built exclusively through
-    /// <c>StyledFillTileBuilder</c> → <c>FillMeshGraph</c> → <see cref="EarcutBatchJob"/> (the managed
-    /// <c>Earcut</c> is a differential oracle only, never in the render path).
+    /// committed corpus water tile, and validates the output has no folds and conserves area. This is
+    /// the tooth that actually proves the VISIBLE render path is fixed, since production fill meshes
+    /// are built exclusively through <c>StyledFillTileBuilder</c> → <c>FillMeshGraph</c> →
+    /// <see cref="EarcutBatchJob"/>. Covers water-8-135-80 only; <c>WaterTriangulationTests</c> covers
+    /// the remaining 7 corpus tiles on the same Burst arm, not duplicated here.
     /// </summary>
     public class JobifiedWaterTriangulationTests
     {

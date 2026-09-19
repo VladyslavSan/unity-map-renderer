@@ -250,7 +250,7 @@ targets.)*
 
 ### Geometry producers declare their output winding; boundaries convert
 
-A type that **produces triangle geometry** (`Earcut`, `LineTessellator`, `RibbonJob`, `GlobeFillSubdivideJob`)
+A type that **produces triangle geometry** (`EarcutJob`, `LineTessellator`, `RibbonJob`, `GlobeFillSubdivideJob`)
 must **state its output winding (CW/CCW) and coordinate space at the API surface** — in the XML summary of the
 method or result type, not left for a consumer to reverse-engineer. There is **one canonical winding** for the
 whole pipeline (**CCW in tile space**), every producer conforms to it, and the render-facing conversion happens

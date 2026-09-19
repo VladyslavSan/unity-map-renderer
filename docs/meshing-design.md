@@ -25,7 +25,7 @@ The only survivor is `LineTessellator`, where "tessellate" now means strictly **
 |----------------------|-----------|----------|
 | the whole decode→mesh chain | **the mesh pipeline** | `FillMeshPipeline`, the `StyledFill/LineTileBuilder`s |
 | inserting curvature points (globe) | **Subdivide** | `SubdivideJob` (line), `GlobeFillSubdivideJob` (fill) — job-scheduling-design.md §8 stage 5 Group B retired the managed `SubdivideCenterline` this row used to name |
-| earcut / ribbon-offset | **Triangulate** (the only surviving "tessellate") | `Earcut`, `LineTessellator` (oracle), `RibbonJob` |
+| earcut / ribbon-offset | **Triangulate** (the only surviving "tessellate") | `EarcutJob`, `LineTessellator` (oracle), `RibbonJob` |
 | "build one whole tile's mesh" (async scheduling) | **mesh build** (worker) + **consume** (main thread) | `TileManager` (`KickMeshBuild`, `MeshBuildTask`, `MaxMeshBuildsPerTick` / `ConsumeMeshBuild`, `MaxConsumesPerTick`) |
 
 That last row is the tile-build loop — two verbs, no "phases":
@@ -43,7 +43,7 @@ That last row is the tile-build loop — two verbs, no "phases":
 - **Subdivide** — insert extra points so a straight edge in tile space follows a *curved* projected surface.
   Driven entirely by `IProjection.MaxRefineAngleRad` (∞ for Mercator ⇒ no split; a small angle for the globe).
   No projection constants leak in — the flat case is the degenerate value of one formula, not a branch.
-- **Triangulate** — rings/centerline → triangle vertices + indices. Fills use ear-clipping (`Earcut`/`EarcutJob`);
+- **Triangulate** — rings/centerline → triangle vertices + indices. Fills use ear-clipping (`EarcutJob`);
   lines extrude a ribbon (`RibbonJob`, with `LineTessellator` as its planar differential oracle).
 - **Project** — tile-space → geodetic surface (`TileToGeoJob`, projection-independent) → render-space `double3` +
   per-vertex `up`, through the chosen `IProjection` (`ProjectPointsJob<TProj>`).

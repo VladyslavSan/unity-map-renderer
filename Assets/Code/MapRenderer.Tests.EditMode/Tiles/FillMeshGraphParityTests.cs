@@ -62,7 +62,7 @@ namespace MapRenderer.Tests.Tiles
 
         // ── Frozen goldens (R6) — captured from FillMeshPipeline.Schedule on commit f5e13c19, before Group B
         // deleted it. See this file's header comment for the capture methodology and provenance.
-        // Re-captured for UMR-106 Stage 1: the degenerate-candidate ear-predicate fix (Earcut.PointInTriangle)
+        // Re-captured for UMR-106 Stage 1: the degenerate-candidate ear-predicate fix (EarcutJob.PointInTriangle)
         // moves the corpus's triangulated output, so these digests were recomputed against the fixed predicate.
         internal const string FrozenGoldensMercator =
             "Vertex=abw1RVTEKTX0q2SAH1frMmR5klneemBfwyLltWhcC9Q= World=ix/06MAQIOpWn5DSnMXHtCoVJJOMR5ZlDZ1RPmZ4jos= " +

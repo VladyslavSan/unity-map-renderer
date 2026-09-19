@@ -46,7 +46,7 @@ namespace MapRenderer.Tests.Tiles
         // Frozen golden (R6-shaped): captured from GlobeFillSubdivideDispatch.Run over
         // FillMeshPipeline.Schedule's output — exactly WriteGlobeSubdivided's own call — before Group B
         // deleted both. Commit f5e13c19; see docs/stage4-groupb-goldens-capture-f5e13c19.txt's SITE2 lines.
-        // Re-captured for UMR-106 Stage 1: the degenerate-candidate ear-predicate fix (Earcut.PointInTriangle)
+        // Re-captured for UMR-106 Stage 1: the degenerate-candidate ear-predicate fix (EarcutJob.PointInTriangle)
         // moves the corpus's triangulated output, so this digest was recomputed against the fixed predicate.
         private const string FrozenGoldens =
             "TriangleStream=rGzWbOAGcl9bEQyzuS336mSlkYFucl2qqTZO2cO5zdk=";

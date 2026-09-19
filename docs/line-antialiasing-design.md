@@ -797,10 +797,10 @@ different things, and a future reader must not re-derive the wrong conclusion fr
 **Second, independent reason — verified.** Earcut emits **internal** edges throughout the polygon interior,
 so a naive per-triangle edge-distance fade would antialias the triangulation itself, cross-hatching seams
 through the middle of every filled polygon. Two distinct kinds of internal edge exist and both would show:
-ordinary ear-cut diagonals, and **hole-bridge edges** — `Earcut.Result` returns "the flattened vertex array
-(which includes bridge-duplicate verts) and the triangle indices into that array"
-(`Core/Geometry/Earcut.cs:15, 41-47`), so every hole is joined to its outer ring by a duplicated-vertex
-bridge. A per-triangle fade would draw a visible slit from each hole to the polygon exterior.
+ordinary ear-cut diagonals, and **hole-bridge edges** — the triangulator's working vertex array carries a
+duplicated-vertex bridge per hole, flagged `IsBridgeCopy` (`EarcutJob.cs:116, 297-298`), so every hole is
+joined to its outer ring by that duplicated-vertex seam. A per-triangle fade would draw a visible slit
+from each hole to the polygon exterior.
 
 So a fill solution must first **distinguish true polygon-boundary edges from triangulation artifacts** —
 which is a build-pipeline problem, not a shader one. That is a genuinely different design with its own reach,
@@ -820,7 +820,7 @@ Two candidate mechanisms, recorded so the epic starts from something rather than
 designed here and neither is endorsed:**
 
 - **Flag boundary edges at build time** and carry a distance-to-boundary varying, giving fills the field
-  lines already have. Reach: `Earcut`/`PolygonAssembler` must mark which edges are real boundary, plus a new
+  lines already have. Reach: `EarcutJob`/`PolygonAssembler` must mark which edges are real boundary, plus a new
   fill vertex stream.
 - **Some other mechanism entirely** — the maintainer's framing was that fills have no "SDF-like" rendering,
   so the answer may not be a distance ramp at all.

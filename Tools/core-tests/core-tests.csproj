@@ -51,7 +51,6 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/SignedArea.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/Polygon.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/PolygonAssembler.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/Earcut.cs" />
     <!-- S4: shared projection-subdivision policy (Core, engine-free) + its tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/LineCurvatureSubdivision.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Geometry/LineCurvatureSubdivisionTests.cs" />

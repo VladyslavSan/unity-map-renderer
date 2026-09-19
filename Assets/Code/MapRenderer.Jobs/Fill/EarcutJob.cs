@@ -22,29 +22,25 @@ namespace MapRenderer.Jobs.Fill
     ///
     /// Does NOT reference MapRenderer.Core — keeps System.Math off the Burst path.
     ///
-    /// Parity tie-break: hole sort (leftmost-x, then min-y, then ring index) must match the
-    /// managed <c>validHoles.Sort</c> tie-break. The managed sort uses only leftmost-x (and
-    /// List.Sort is unstable — the managed code re-sorts using the same comparator used here,
-    /// extended with y + index for total order, to guarantee determinism on both sides).
+    /// Hole sort key: (leftmost-x, then min-y, then ring index) — a total order. Leftmost-x alone
+    /// would leave equal-leftmost-x holes to an unstable sort, breaking determinism.
     ///
-    /// <b>No real recursion.</b> Burst does not reliably support recursion, so the managed
-    /// <c>EarClipRing → SplitAndRetry → EarClipRing</c> recursion becomes an EXPLICIT stack of
-    /// pending (start, remaining) ring-jobs (the <see cref="GlobeFillSubdivideJob{TProj}"/> pattern):
-    /// <see cref="TrySplit"/>, instead of calling the ear-clip loop recursively on the two split
-    /// halves, pushes both onto the stack. To reproduce the managed call order
-    /// (<c>EarClipRing(a, remA); EarClipRing(c, remC);</c> — <c>a</c> fully processed, including any
-    /// of its OWN nested splits, before <c>c</c> starts) via a LIFO stack, the halves are pushed
-    /// <c>c</c> then <c>a</c>, so <c>a</c> pops next.
+    /// <b>No real recursion.</b> Burst does not reliably support recursion, so the natural recursive
+    /// formulation of ear-clipping-with-split — <see cref="ProcessRing"/> calling itself (via
+    /// <see cref="TrySplit"/>) on each half — becomes an EXPLICIT stack of pending (start, remaining)
+    /// ring-jobs (the <see cref="GlobeFillSubdivideJob{TProj}"/> pattern): <see cref="TrySplit"/>,
+    /// instead of recursing directly, pushes both halves onto the stack. To preserve the natural call
+    /// order (<c>a</c> fully processed, including any of its OWN nested splits, before <c>c</c>
+    /// starts) via a LIFO stack, the halves are pushed <c>c</c> then <c>a</c>, so <c>a</c> pops next.
     ///
     /// <b>Working-buffer capacity (mesh-triangulation-robustness Stage 3).</b> <see cref="Verts"/>/
     /// <see cref="Prev"/>/<see cref="Next"/>/<see cref="Removed"/>/<see cref="IsBridgeCopy"/>/<see cref="IsEar"/>
     /// are fixed-size <c>NativeArray</c>s pre-sized by <c>FillMeshPipeline</c> to the deterministic
-    /// merged-ring size PLUS a bounded split headroom (<see cref="MaxSplits"/> mirrors managed's cap
-    /// exactly, but the Burst pre-sizing is a smaller, tile-appropriate bound — see
-    /// <c>FillMeshPipeline</c>'s workCap sizing doc). <see cref="TrySplit"/> checks remaining
-    /// capacity before writing a split's two new vertices; if the headroom is exhausted it refuses the
-    /// split (never writes past the array) and the caller falls through to the clean-drop path — same
-    /// as managed running out of <see cref="MaxSplits"/>, just a tighter bound in the rare case it binds.
+    /// merged-ring size PLUS a bounded split headroom, capped by <see cref="MaxSplits"/> — a
+    /// tile-appropriate bound, not a worst-case one (see <c>FillMeshPipeline</c>'s workCap sizing
+    /// doc). <see cref="TrySplit"/> checks remaining capacity before writing a split's two new
+    /// vertices; if the headroom is exhausted it refuses the split (never writes past the array) and
+    /// the caller falls through to the clean-drop path.
     /// <see cref="OutMergedVertexCount"/> reports the ACTUAL final vertex count used (base merged count
     /// plus any split-added vertices) — this can be less than the pre-sized capacity when headroom goes
     /// unused (the common case), so the coordinator must read it (not assume capacity) when aggregating.
@@ -56,22 +52,22 @@ namespace MapRenderer.Jobs.Fill
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct EarcutJob : IJob
     {
-        /// <summary>Finite ceiling on split attempts per polygon — mirrors managed Earcut.MaxSplits
-        /// EXACTLY (both the constant value and the decision-to-stop it gates) so the two paths agree
-        /// on the split cap wherever the Burst pre-sized headroom (a Burst-only, tighter bound) doesn't
-        /// bind first. A failure-path-only bound (lessons: never an unbounded data-derived loop).</summary>
+        /// <summary>Finite ceiling on split attempts per polygon — the failure-path-only bound below
+        /// which the pre-sized headroom (a Burst-only, tighter bound) normally binds first (lessons:
+        /// never an unbounded data-derived loop).</summary>
         public const int MaxSplits = 512;
 
         // ── Per-polygon input ─────────────────────────────────────────────────────────────────
-        /// <summary>Flat vertex array for this polygon's outer ring + holes (Earcut internal order).</summary>
+        /// <summary>Flat vertex array for this polygon's outer ring + holes (this job's internal, bridge-merged order).</summary>
         [ReadOnly] public NativeArray<double2> PolyVertices;
 
         /// <summary>Number of vertices in the outer ring.</summary>
         [ReadOnly] public int OuterCount;
 
         /// <summary>
-        /// Hole vertex counts, sorted by (leftmost-x, min-y, ring-index) — same order as the
-        /// managed Earcut.validHoles after the total-order sort. Length = HoleCount.
+        /// Hole vertex counts, sorted by (leftmost-x, min-y, ring-index) — a total order (List.Sort
+        /// is unstable, so leftmost-x alone would leave equal-x holes non-deterministic). Length =
+        /// HoleCount.
         /// </summary>
         [ReadOnly] public NativeArray<int> SortedHoleCounts;
 
@@ -94,8 +90,7 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>[0] = clean-drop count (was "force-clip" — the old force-clip-fold stall guard is
         /// replaced by the cure → split → clean-drop cascade; this now counts loci the cascade could
-        /// not resolve and dropped cleanly, never a folded/overlapping triangle). Same rename-in-place
-        /// as managed <c>Earcut.Result.ForceClips</c>.</summary>
+        /// not resolve and dropped cleanly, never a folded/overlapping triangle).</summary>
         public NativeArray<int> OutForceClipCount;
 
         /// <summary>[0] = the ACTUAL final merged-ring vertex count this polygon used (base bridged
@@ -130,9 +125,11 @@ namespace MapRenderer.Jobs.Fill
             public int Remaining;
         }
 
-        /// <summary>Uniform bucket grid (CSR layout) over the merged ring's own vertices — mirror of
-        /// managed <c>Earcut.EarGrid</c>; see its doc for the CSR layout and <see cref="Overflow"/>'s
-        /// role. <see cref="Allocator.Temp"/> scratch, built and disposed once per <see cref="Execute"/>.</summary>
+        /// <summary>Uniform bucket grid (CSR layout) over the merged ring's own vertices, so ear tests
+        /// scan only nearby vertices. CellStart/CellItems hold the base merged-ring vertices (cell c =
+        /// CellItems[CellStart[c]..CellStart[c+1])); <see cref="Overflow"/> holds vertices
+        /// <see cref="SplitPolygon"/> adds after the grid is built. <see cref="Allocator.Temp"/>
+        /// scratch, built and disposed once per <see cref="Execute"/>.</summary>
         private readonly struct EarGrid
         {
             public readonly int Dim;
@@ -211,7 +208,6 @@ namespace MapRenderer.Jobs.Fill
             }
 
             // ── Sort holes by (leftmost-x, min-y, original-index) for deterministic bridging.
-            // ── This MUST match the managed Earcut.validHoles.Sort tie-break.
             // We sort the SortedHoleCounts array indices. Since caller already provides them sorted,
             // we just use them in order. The coordinator sorts before scheduling this job.
 
@@ -267,10 +263,10 @@ namespace MapRenderer.Jobs.Fill
                 int holeLM      = HoleLeftmostIndex(holeStart, holeCount);
                 int outerBridge = FindBridgeVertex(holeLM, mergedRingStart, mergedRingCount);
 
-                // Provably-non-crossing guarantee (mesh-triangulation-robustness Stage 2/3, mirrors
-                // managed Earcut.Triangulate's hole loop 1:1). The heuristic above picks a good bridge on
-                // the common case but is NOT guaranteed non-crossing for a concave outer. VALIDATE the
-                // chosen bridge against BOTH the merged ring AND this hole's own ring; if it crosses
+                // Provably-non-crossing guarantee (mesh-triangulation-robustness Stage 2/3). The
+                // heuristic above picks a good bridge on the common case but is NOT guaranteed
+                // non-crossing for a concave outer. VALIDATE the chosen bridge against BOTH the
+                // merged ring AND this hole's own ring; if it crosses
                 // either (or isn't locally inside), REPLACE it with the nearest vertex whose bridge is
                 // provably clear. Kept whenever the heuristic result is already valid ⇒ clean cases stay
                 // byte-identical to the pre-fix output; only genuinely-crossing bridges change.
@@ -315,11 +311,12 @@ namespace MapRenderer.Jobs.Fill
             }
 
             // ── Ear-clipping loop, with a cure → split → clean-drop failure cascade on stall. ──
-            // Mirrors managed Earcut.Triangulate's EarClipRing exactly, except the SplitAndRetry
-            // recursion is replaced by an explicit worklist stack (see class doc).
+            // See ProcessRing below; the split path hands work off through an explicit worklist stack
+            // instead of recursing (see class doc).
             //
-            // Bounding-box index over the merged ring — mirrors managed Earcut.BuildEarGrid (see its
-            // doc for the answer-preservation argument). Allocator.Temp scratch, disposed before Execute returns.
+            // Bounding-box index over the merged ring, built once so ear tests scan only nearby
+            // vertices — answer-preserving per docs/mesh-triangulation-robustness-design.md §2.1/§6.1.
+            // Allocator.Temp scratch, disposed before Execute returns.
             var grid = BuildEarGrid(total);
 
             for (int i = 0; i < total; i++)
@@ -641,7 +638,7 @@ namespace MapRenderer.Jobs.Fill
             Removed[a2] = false;
             Removed[b2] = false;
             // Split-added vertices postdate the grid build; they go to its overflow list instead
-            // (mirror of managed Earcut.SplitPolygon — see EarGrid's doc for the O(splits) note).
+            // (ponytail: O(splits) per call — a CSR rebuild is the upgrade path; see EarGrid's doc).
             grid.Overflow.Add(a2);
             grid.Overflow.Add(b2);
 
@@ -892,9 +889,10 @@ namespace MapRenderer.Jobs.Fill
             return PointInTriangle(a.x, a.y, b.x, b.y, c.x, c.y, vxi, vyi);
         }
 
-        /// <summary>Mirror of managed <c>Earcut.IsEar</c> — see its doc for the ear predicate and for
-        /// why scanning only <paramref name="grid"/>'s AABB-overlapping cells (falling back to the
-        /// full linear scan on a wide AABB) is answer-preserving.</summary>
+        /// <summary>True iff vertex v is an ear: convex, and no other live vertex lies inside or on
+        /// triangle (Prev[v], v, Next[v]). Scans only <paramref name="grid"/>'s AABB-overlapping cells
+        /// (falling back to the full linear scan on a wide AABB) — answer-preserving; proof in
+        /// docs/mesh-triangulation-robustness-design.md §2.1.</summary>
         private bool ComputeIsEar(int total, in EarGrid grid, int v)
         {
             if (Removed[v]) return false;
@@ -948,13 +946,17 @@ namespace MapRenderer.Jobs.Fill
 
         // ── Geometry primitives ──────────────────────────────────────────────────────────────────
 
-        /// <summary>Twice the signed area of triangle (p, q, r). See managed Earcut.Area2 doc for the
-        /// sign-convention note (this is also mapbox earcut's `area(p, q, r)`).</summary>
+        /// <summary>Twice the signed area of triangle (p, q, r): cross((q−p), (r−p)). Matches the
+        /// sign convention <see cref="ComputeIsEar"/> uses (convex ⟺ ≤ 0 for a ring normalised
+        /// CCW-on-screen in Y-down space); this is also mapbox earcut's `area(p, q, r)`.</summary>
         private static double Area2(double2 p, double2 q, double2 r)
             => (q.x - p.x) * (r.y - p.y) - (r.x - p.x) * (q.y - p.y);
 
-        /// <summary>mapbox earcut's `locallyInside(a, b)` — see managed Earcut.LocallyInside doc for the
-        /// derivation and the y-down sign-convention note.</summary>
+        /// <summary>mapbox earcut's `locallyInside(a, b)`: for a convex a the interior is the
+        /// intersection of the two edges' half-planes (AND); for a reflex a it is their union (OR) —
+        /// the non-crossing guard the bridge selection needs. Mapbox's y-up `area` equals −Area2 in
+        /// this y-down convention, so the branch signs invert; the form below is derived directly from
+        /// geometry in this convention, for both convex and reflex a.</summary>
         private bool LocallyInside(int a, int b)
         {
             int ap = Prev[a], an = Next[a];

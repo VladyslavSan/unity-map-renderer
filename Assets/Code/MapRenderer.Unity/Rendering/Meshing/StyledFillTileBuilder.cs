@@ -27,8 +27,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
     ///
     /// Pipeline (S89 D2): managed color eval → Burst geometry via <c>FillMeshPipeline</c>
     ///   (decode → assemble → earcut → project, run on this worker via <c>.Run()</c> into NativeArrays) →
-    ///   managed alloc-free stream write into a <c>Mesh.MeshData</c>. The managed Core geometry
-    ///   (<c>Earcut</c>/<c>PolygonAssembler</c>) is retired from this path (differential oracle only).
+    ///   managed alloc-free stream write into a <c>Mesh.MeshData</c>. The managed Core triangulator
+    ///   (Earcut) is deleted; <c>PolygonAssembler</c> remains, never on this production path — it is
+    ///   the ground truth the differential-oracle tests assemble against.
     ///
     /// S89 Stage B — <see cref="ScheduleWrite"/> builds the mesh AND writes directly into a caller-allocated
     /// <see cref="Mesh.MeshData"/> (the writable-mesh advanced API), off the main thread. The bespoke
