@@ -604,7 +604,7 @@ namespace MapRenderer.Tests.Text
                     AddPointSymbol(replacementBuffer, new double3(9000 + i * 10, 0, 9000), "replacement" + i, 900 + i, Tk(tile), 0.9f);
                 int gen = _subsystem.Store().BeginBuild(StoreKey(tile));
                 SymbolTileBlock newBlock = SymbolTileBlockBaker.Bake(
-                    replacementBuffer, slotCount: 1, TileRenderOrigin.Project(tile, P), new SymbolStringTable());
+                    replacementBuffer, slotCount: 1, TileRenderOrigin.Project(tile, P));
                 Assert.IsTrue(_subsystem.Store().CompleteBuild(StoreKey(tile), gen, newBlock), "sanity: replacement block committed");
 
                 // (a) EVENT-keying check: the frame right after the store event (before any reconcile has had a
@@ -762,7 +762,7 @@ namespace MapRenderer.Tests.Text
             AddPointSymbol(buffer, new double3(100, 0, 200), "a", 1, Tk(tile), 0.1f);
             int gen = store.BeginBuild(StoreKey(tile));
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 1, TileRenderOrigin.Project(tile, P), new SymbolStringTable());
+                buffer, slotCount: 1, TileRenderOrigin.Project(tile, P));
             Assert.IsTrue(store.CompleteBuild(StoreKey(tile), gen, block), "sanity: block committed");
             long live0 = SymbolTileBlock.DebugLiveAllocCount;
 

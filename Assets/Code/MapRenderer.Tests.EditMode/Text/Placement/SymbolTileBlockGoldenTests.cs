@@ -99,7 +99,7 @@ namespace MapRenderer.Tests.Text.Placement
         // MakePoint/MakeCurved used to carry on a hand-built per-symbol managed carrier, now appended straight into
         // a SymbolTileBuffer via TestSymbolTileBuffer — see that type's default-value contract doc for why every
         // omitted parameter below is byte-identical to the carrier it replaces.
-        private static void AddPointSlot(SymbolTileBuffer buffer,
+        private static void AddPointSlot(SymbolTileBuffer buffer, SymbolStringTable stringTable,
             int featureIndex, int materialIndex, string text, string icon, int quadCount,
             SymbolPairRole pairRole = SymbolPairRole.None, int pairId = 0)
         {
@@ -110,10 +110,11 @@ namespace MapRenderer.Tests.Text.Placement
                 text: text, up: UpRenderConst, iconImage: icon,
                 materialIndex: materialIndex, textSizePx: 16f, paddingPx: 2f, sortKey: featureIndex,
                 featureIndex: featureIndex, tileKey: TileKeyValue,
-                pairRole: pairRole, pairId: pairId, paint: SymbolPaint.Default);
+                pairRole: pairRole, pairId: pairId, paint: SymbolPaint.Default, stringTable: stringTable);
         }
 
-        private static void AddCurvedSlot(SymbolTileBuffer buffer, int featureIndex, int materialIndex, string text)
+        private static void AddCurvedSlot(SymbolTileBuffer buffer, SymbolStringTable stringTable,
+            int featureIndex, int materialIndex, string text)
         {
             TestSymbolTileBuffer.AddCurved(buffer,
                 glyphs: new List<CurvedGlyph>
@@ -127,20 +128,24 @@ namespace MapRenderer.Tests.Text.Placement
                 anchorRender: new double3(1000.0, 0.0, 2000.0),
                 text: text, materialIndex: materialIndex, textSizePx: 16f, paddingPx: 2f, sortKey: 1f,
                 maxAngleDeg: 45f, keepUpright: true,
-                featureIndex: featureIndex, tileKey: TileKeyValue, paint: SymbolPaint.Default);
+                featureIndex: featureIndex, tileKey: TileKeyValue, paint: SymbolPaint.Default, stringTable: stringTable);
         }
 
-        private static SymbolTileBuffer BuildHazardFixture()
+        // UMR-87: `stringTable` is now REQUIRED (not a fresh-per-call default) — the golden below asserts
+        // TextIds/IconImageIds' LITERAL values, which only hold for an isolated table interning in this exact
+        // call order; the shared/default table `TestSymbolTileBuffer` otherwise falls back to accumulates ids
+        // from every OTHER test in the run.
+        private static SymbolTileBuffer BuildHazardFixture(SymbolStringTable stringTable)
         {
             var buffer = new SymbolTileBuffer();
-            AddPointSlot(buffer, 0, 0, "Alpha", null, 1);                                  // i0
-            AddPointSlot(buffer, 1, 0, "Beta", null, 2);                                   // i1 last of layer 0
-            AddCurvedSlot(buffer, 0, 1, "Curved");                                         // i2 curved, first of layer 1
-            AddPointSlot(buffer, 1, 1, "Empty", null, 0);                                  // i3 zero quads
-            AddPointSlot(buffer, 2, 1, "DanglingOwner", null, 1, SymbolPairRole.Owner, 7);   // i4 dangling owner
-            AddPointSlot(buffer, 0, 2, "PlainF", null, 1);                                  // i5 layer 2 first; wrong-role "rider"
-            AddPointSlot(buffer, 1, 2, "PairOwner", "shield", 1, SymbolPairRole.Owner, 42);  // i6 resolved pair owner
-            AddPointSlot(buffer, 2, 2, "PairRider", null, 1, SymbolPairRole.Rider, 42);      // i7 resolved pair rider, LAST
+            AddPointSlot(buffer, stringTable, 0, 0, "Alpha", null, 1);                                  // i0
+            AddPointSlot(buffer, stringTable, 1, 0, "Beta", null, 2);                                   // i1 last of layer 0
+            AddCurvedSlot(buffer, stringTable, 0, 1, "Curved");                                         // i2 curved, first of layer 1
+            AddPointSlot(buffer, stringTable, 1, 1, "Empty", null, 0);                                  // i3 zero quads
+            AddPointSlot(buffer, stringTable, 2, 1, "DanglingOwner", null, 1, SymbolPairRole.Owner, 7);   // i4 dangling owner
+            AddPointSlot(buffer, stringTable, 0, 2, "PlainF", null, 1);                                  // i5 layer 2 first; wrong-role "rider"
+            AddPointSlot(buffer, stringTable, 1, 2, "PairOwner", "shield", 1, SymbolPairRole.Owner, 42);  // i6 resolved pair owner
+            AddPointSlot(buffer, stringTable, 2, 2, "PairRider", null, 1, SymbolPairRole.Rider, 42);      // i7 resolved pair rider, LAST
             return buffer;
         }
 
@@ -150,9 +155,9 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Bake_HandBuiltHazardFixture_MatchesExplicitGolden()
         {
-            SymbolTileBuffer buffer = BuildHazardFixture();
             var stringTable = new SymbolStringTable();
-            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, 4, in TileOrigin, stringTable);
+            SymbolTileBuffer buffer = BuildHazardFixture(stringTable);
+            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, 4, in TileOrigin);
             try
             {
                 // ── raw-order columns (Length == 9, including the null slot) ──
@@ -179,7 +184,8 @@ namespace MapRenderer.Tests.Text.Placement
                 };
                 CollectionAssert.AreEqual(expectedRepAnchor, ToArray(block.RepAnchor), "RepAnchor (curved: path[pathLen/2] = path[1])");
 
-                // Bake order: Text before IconImage, per symbol, raw index order (SymbolStringTable.cs's own contract).
+                // Intern order: Text before IconImage, per symbol, in BuildHazardFixture's call order (UMR-87:
+                // interning now happens at symbol-construction time, not at Bake — the ORDER is unchanged).
                 CollectionAssert.AreEqual(new[] { 1, 2, 3, 4, 5, 6, 7, 9 }, ToArray(block.TextIds), "TextIds");
                 CollectionAssert.AreEqual(new[] { 0, 0, 0, 0, 0, 0, 8, 0 }, ToArray(block.IconImageIds), "IconImageIds ('shield' on i6 takes id 8, between i6's Text=7 and i7's Text=9)");
 
@@ -269,9 +275,9 @@ namespace MapRenderer.Tests.Text.Placement
         public void Bake_SameHazardFixtureTwice_ProducesColumnEqualBlocks()
         {
             SymbolTileBlock blockA = SymbolTileBlockBaker.Bake(
-                BuildHazardFixture(), 4, in TileOrigin, new SymbolStringTable());
+                BuildHazardFixture(new SymbolStringTable()), 4, in TileOrigin);
             SymbolTileBlock blockB = SymbolTileBlockBaker.Bake(
-                BuildHazardFixture(), 4, in TileOrigin, new SymbolStringTable());
+                BuildHazardFixture(new SymbolStringTable()), 4, in TileOrigin);
             try
             {
                 BlockColumnHash.AssertColumnsEqual(blockA, blockB);
@@ -374,14 +380,35 @@ namespace MapRenderer.Tests.Text.Placement
         /// a moved digest means behaviour changed; find and fix the cause instead
         /// (`snapshot-moved-suspect-the-fixture` / `never re-bake a snapshot to go green`).
         ///
-        /// <para><b>Moved ONCE since capture</b>, when <c>PointStageInput</c> gained the three
+        /// <para><b>Moved once since capture</b>, when <c>PointStageInput</c> gained the three
         /// <c>text-halo-*</c> fields: <c>Points</c> 1107115275 → -1357632509. That it was purely additive was
         /// PROVED, not assumed — excluding just those three lines from
         /// <c>BlockColumnHash.HashPointStageInput</c> reproduced the old digest exactly, and no other column
-        /// moved. Hold any future move to that same standard.</para></summary>
+        /// moved. Hold any future move to that same standard.</para>
+        ///
+        /// <para><b>Moved a second time, UMR-87:</b> <c>Points</c> -1357632509 → -1461293497 — every other
+        /// column is byte-identical (confirmed by diffing the failure output; the two strings first differ
+        /// inside the <c>Points</c> field). Cause: <c>PointStageInput.FadeId</c> is folded by
+        /// <c>SymbolPlacementSystem.PointFadeId</c>, which used to hash <c>string.GetHashCode()</c> on the
+        /// symbol's raw <c>Text</c>/<c>IconImage</c> — RANDOMIZED PER PROCESS on .NET Core (the same literal
+        /// string hashed to three different values across three separate net10.0 process runs during this
+        /// change's review). It now folds
+        /// <see cref="MapRenderer.Core.Text.Placement.ShapedSymbol.TextId"/>/<c>IconImageId</c>, ids a
+        /// <see cref="MapRenderer.Core.Text.Placement.SymbolStringTable"/> assigns deterministically in
+        /// assignment order — so this move REMOVES a latent randomized-hash dependency rather than introducing
+        /// one. This new value is still a genuine constant, not a flake: the table computing it is local to the
+        /// ONE <c>StyledSymbolTileBuilder</c> this test's <c>BuildProducedFixture</c> constructs (no
+        /// <c>stringTable</c> arg passed → a fresh, private table), so the ids — and the digest — are a
+        /// deterministic function of this fixture's decode plus <c>Shape</c>'s single-threaded walk, never of
+        /// what any other test interned first. The relation this digest only ever pinned BY PROXY (same
+        /// identity ⇒ same fade id, different ⇒ different) is independently covered by
+        /// <c>SymbolFadeTests.PointFadeId_FixedGrid_CollapsesNearby_SeparatesFar</c>/
+        /// <c>_IconIdentity_...</c>/<c>_AgreesWithDedupCell</c> — the last of which cross-checks the int-keyed
+        /// fold against the untouched string-keyed <see cref="MapRenderer.Core.Text.Placement.CrossTileSymbolKey"/>
+        /// as an independent reference.</para></summary>
         private const string CapturedGoldenHash =
             "Kinds=-13491713 Detail=1233695479 WorldStart=1233695479 WorldCount=-1252581121 RepAnchor=515797947 " +
-            "MaterialIndexes=-2021596801 PairRoles=-13491713 Points=-1357632509 " +
+            "MaterialIndexes=-2021596801 PairRoles=-13491713 Points=-1461293497 " +
             "PointQuadStart=-1852567463 PointQuadCount=648814877 Curveds=527 CurvedGlyphStart=527 " +
             "CurvedGlyphCount=527 CurvedAnchorStart=527 CurvedAnchorCount=527 CurvedAnchorFadeStart=527 " +
             "Quads=-1354314655 Glyphs=527 Anchors=527 WorldPoints=515797947 WorldUps=2133991935 " +
@@ -393,7 +420,7 @@ namespace MapRenderer.Tests.Text.Placement
             SymbolTileBuffer oracle = BuildProducedFixture();
             Assert.Greater(oracle.Symbols.Count, 0, "sanity: the fixture + style must yield labels at all");
 
-            SymbolTileBlock block = SymbolTileBlockBaker.Bake(oracle, 2, in double3.zero, new SymbolStringTable());
+            SymbolTileBlock block = SymbolTileBlockBaker.Bake(oracle, 2, in double3.zero);
             try
             {
                 BlockColumnHash.ColumnHashes actual = BlockColumnHash.Hash(block);

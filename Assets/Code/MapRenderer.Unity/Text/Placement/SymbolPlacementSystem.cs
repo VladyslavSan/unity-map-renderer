@@ -16,6 +16,7 @@ using UnityEngine;
 using MapRenderer.Unity.Common;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Unity.Text;
 using MapRenderer.Jobs.Symbols;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
@@ -1163,11 +1164,16 @@ namespace MapRenderer.Unity.Text.Placement
         /// <summary>Point fade identity — hashed from the cross-tile key on the shared canonical grid, the same
         /// grid the store dedup uses, so a symbol's fade cell and dedup cell are one identity. Fixed and
         /// zoom-independent, so the same symbol from a swapped tile keeps a stable id and doesn't pop.</summary>
-        /// <param name="iconImage">The icon's resolved sprite name; folded in via a guard-skip so a text symbol's id is unchanged.</param>
-        internal static long PointFadeId(in double3 anchorRender, int layerId, string text, string iconImage = null)
-            => Hash64(CrossTileSymbolKey.For(anchorRender, layerId, text, iconImage, CrossTileSymbolKey.CanonicalGridMeters));
+        /// <param name="textId">Interned <c>ShapedSymbol.TextId</c> (0 for an icon-only symbol).</param>
+        /// <param name="iconImageId">Interned <c>ShapedSymbol.IconImageId</c>; folded in via a
+        /// guard-skip so a text symbol's id is unchanged.</param>
+        internal static long PointFadeId(in double3 anchorRender, int layerId, int textId, int iconImageId = 0)
+            => Hash64(DedupKey.For(anchorRender, layerId, textId, iconImageId, CrossTileSymbolKey.CanonicalGridMeters));
 
-        private static long Hash64(in CrossTileSymbolKey k)
+        // folds DedupKey's ints directly (was CrossTileSymbolKey's Text/IconImage string hashcodes) —
+        // ShapedSymbol no longer carries the raw strings, so this reuses the SAME all-integer identity the
+        // reconciler's DedupKey already establishes rather than re-deriving one.
+        private static long Hash64(in DedupKey k)
         {
             unchecked
             {
@@ -1178,10 +1184,11 @@ namespace MapRenderer.Unity.Text.Placement
                 // snapshot-safe since the fade id is only an equality key, and multiply-by-the-odd-prime is a bijection.
                 h = (h ^ (ulong)k.GridY) * 1099511628211UL;
                 h = (h ^ (ulong)(uint)k.LayerId) * 1099511628211UL;
-                h = (h ^ (ulong)(uint)(k.Text?.GetHashCode() ?? 0)) * 1099511628211UL;
-                // Guard-skip fold: mixes IconImage only when non-null, so a text symbol's fade id is unchanged from before this field existed.
-                if (k.IconImage != null)
-                    h = (h ^ (ulong)(uint)k.IconImage.GetHashCode()) * 1099511628211UL;
+                h = (h ^ (ulong)(uint)k.TextId) * 1099511628211UL;
+                // Guard-skip fold: mixes IconImageId only when non-zero (0 == no icon), so a text symbol's fade
+                // id is unchanged from before this field existed.
+                if (k.IconImageId != 0)
+                    h = (h ^ (ulong)(uint)k.IconImageId) * 1099511628211UL;
                 return (long)h;
             }
         }

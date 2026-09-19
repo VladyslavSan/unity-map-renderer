@@ -96,9 +96,9 @@ namespace MapRenderer.Tests.Text
             var t2Buffer = new SymbolTileBuffer();
             AddPoint(t2Buffer, coAnchor, "Co", 4, t2); // the co-located twin in the OTHER tile
             SymbolTileBlock block1 = SymbolTileBlockBaker.Bake(
-                t1Buffer, slotCount: 1, double3.zero, store.StringTable);
+                t1Buffer, slotCount: 1, double3.zero);
             SymbolTileBlock block2 = SymbolTileBlockBaker.Bake(
-                t2Buffer, slotCount: 1, double3.zero, store.StringTable);
+                t2Buffer, slotCount: 1, double3.zero);
             store.CompleteBuild(k1, store.BeginBuild(k1), block1);
             store.CompleteBuild(k2, store.BeginBuild(k2), block2);
 

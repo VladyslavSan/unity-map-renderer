@@ -552,7 +552,7 @@ namespace MapRenderer.Tests.Text.Placement
             // Reader cutover: CaptureSnapshot only collects a tile with a baked block — bake+commit a real one
             // (rather than the symbol-only commit this test used pre-cutover) so CollectInto still sees all 20.
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 1, double3.zero, store.StringTable);
+                buffer, slotCount: 1, double3.zero);
             store.CompleteBuild(key, store.BeginBuild(key), block); // interns once here (off the per-frame path)
 
             var blockId = new List<int>(64); var localIndex = new List<int>(64); var isDeparting = new List<byte>(64);

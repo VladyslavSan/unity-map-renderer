@@ -406,14 +406,17 @@ namespace MapRenderer.Tests.Text.Placement
         public void PointFadeId_FixedGrid_CollapsesNearby_SeparatesFar()
         {
             double3 a = new double3(5_000_000.0, 0, 3_000_000.0);
-            Assert.AreEqual(SymbolPlacementSystem.PointFadeId(a, 0, "T"),
-                            SymbolPlacementSystem.PointFadeId(a + new double3(2, 0, -2), 0, "T"),
+            var table = new SymbolStringTable(); // UMR-87: PointFadeId takes interned ids, not raw strings
+            int t = table.Intern("T");
+            int u = table.Intern("U");
+            Assert.AreEqual(SymbolPlacementSystem.PointFadeId(a, 0, t),
+                            SymbolPlacementSystem.PointFadeId(a + new double3(2, 0, -2), 0, t),
                             "anchors within the fixed fade grid share one identity (the cross-tile no-op)");
-            Assert.AreNotEqual(SymbolPlacementSystem.PointFadeId(a, 0, "T"),
-                               SymbolPlacementSystem.PointFadeId(a + new double3(50, 0, 0), 0, "T"),
+            Assert.AreNotEqual(SymbolPlacementSystem.PointFadeId(a, 0, t),
+                               SymbolPlacementSystem.PointFadeId(a + new double3(50, 0, 0), 0, t),
                                "anchors many metres apart are distinct labels");
-            Assert.AreNotEqual(SymbolPlacementSystem.PointFadeId(a, 0, "T"),
-                               SymbolPlacementSystem.PointFadeId(a, 0, "U"),
+            Assert.AreNotEqual(SymbolPlacementSystem.PointFadeId(a, 0, t),
+                               SymbolPlacementSystem.PointFadeId(a, 0, u),
                                "different text is a different label even at the same anchor");
         }
 
@@ -425,18 +428,22 @@ namespace MapRenderer.Tests.Text.Placement
         public void PointFadeId_IconIdentity_DistinctIconsSeparate_SameIconShares_TextUnaffected()
         {
             double3 a = new double3(5_000_000.0, 0, 3_000_000.0);
+            var table = new SymbolStringTable(); // UMR-87: PointFadeId takes interned ids, not raw strings
+            int iconA = table.Intern("a");
+            int iconB = table.Intern("b");
+            int paris = table.Intern("Paris");
 
-            Assert.AreNotEqual(SymbolPlacementSystem.PointFadeId(a, 0, null, "a"),
-                                SymbolPlacementSystem.PointFadeId(a, 0, null, "b"),
+            Assert.AreNotEqual(SymbolPlacementSystem.PointFadeId(a, 0, 0, iconA),
+                                SymbolPlacementSystem.PointFadeId(a, 0, 0, iconB),
                                 "same cell/layer, text=null, different icon-image → distinct fade ids");
 
-            Assert.AreEqual(SymbolPlacementSystem.PointFadeId(a, 0, null, "a"),
-                             SymbolPlacementSystem.PointFadeId(a, 0, null, "a"),
+            Assert.AreEqual(SymbolPlacementSystem.PointFadeId(a, 0, 0, iconA),
+                             SymbolPlacementSystem.PointFadeId(a, 0, 0, iconA),
                              "the same icon-image at the same anchor shares one fade id");
 
-            Assert.AreEqual(SymbolPlacementSystem.PointFadeId(a, 0, "Paris"),
-                             SymbolPlacementSystem.PointFadeId(a, 0, "Paris", null),
-                             "a text label's fade id is unchanged whether iconImage is omitted or explicitly null");
+            Assert.AreEqual(SymbolPlacementSystem.PointFadeId(a, 0, paris),
+                             SymbolPlacementSystem.PointFadeId(a, 0, paris, 0),
+                             "a text label's fade id is unchanged whether iconImageId is omitted or explicitly 0");
         }
 
         // ── Stage 3b (ONE canonical identity): the point fade id partitions symbols IDENTICALLY to the store's
@@ -452,13 +459,15 @@ namespace MapRenderer.Tests.Text.Placement
             double3 a = new double3(5_000_000.0, 0, 3_000_000.0);
             double3 near = a + new double3(grid * 0.25, 0, -grid * 0.25);   // same canonical cell
             double3 far = a + new double3(grid * 4.0, 0, 0);                // clearly a different cell
+            var table = new SymbolStringTable(); // UMR-87: PointFadeId takes interned ids, not raw strings
+            int t = table.Intern("T");
 
             // The dedup cell for a point symbol (same layer/text/icon over these anchors) — the canonical identity
             // the store compares. Equality here IS the dedup grouping.
             static bool SameDedupCell(double3 p, double3 q)
                 => CrossTileSymbolKey.For(p, 0, "T", null, grid).Equals(CrossTileSymbolKey.For(q, 0, "T", null, grid));
-            static bool SameFadeId(double3 p, double3 q)
-                => SymbolPlacementSystem.PointFadeId(p, 0, "T") == SymbolPlacementSystem.PointFadeId(q, 0, "T");
+            bool SameFadeId(double3 p, double3 q)
+                => SymbolPlacementSystem.PointFadeId(p, 0, t) == SymbolPlacementSystem.PointFadeId(q, 0, t);
 
             // Co-located pair: shares BOTH — one canonical identity.
             Assert.IsTrue(SameDedupCell(a, near), "sanity: the near pair is one dedup cell");
@@ -481,7 +490,7 @@ namespace MapRenderer.Tests.Text.Placement
         // EQUAL SortKey, so SymbolCollision.ComparePlacementOrder falls to its incumbency term (SymbolCollision.cs:144)
         // strictly BEFORE the FeatureIndex term (:145) — if a future change reorders those two lines this test
         // breaks loudly, which is correct. Distinct Text ⇒ distinct PointFadeId even at a shared anchor
-        // (SymbolPlacementSystem.cs:1273-1303 folds Text.GetHashCode() into the FNV hash). NQuads(n) discriminates
+        // (SymbolPlacementSystem.cs's PointFadeId folds the interned TextId into the FNV hash). NQuads(n) discriminates
         // the winner via LastQuadCount — a faded-to-0 loser is `continue`d before it can emit (SymbolPlacementSystem.cs:608)
         // and contributes 0 quads to the total (WorldSymbolRenderer.Emit's returned QuadCount, accumulated at :615/626).
         [Test]

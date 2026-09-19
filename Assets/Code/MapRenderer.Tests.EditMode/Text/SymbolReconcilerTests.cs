@@ -69,42 +69,59 @@ namespace MapRenderer.Tests.Text
 
         // Bakes a REAL block for `buffer` and commits it — the reconciler cutover means every commit a test wants
         // CaptureSnapshot/Run to see needs a real SymbolTileBlock (a block-less entry is no longer collected;
-        // see the type doc). One shared SymbolStringTable per store (store.StringTable) so cross-tile ids match, as
-        // production does (SymbolTileBlockBaker.Bake interns into the SAME table CompleteBuild would).
+        // see the type doc). UMR-87: Bake no longer interns (it copies the ids ShapedSymbol already carries),
+        // so there is no table to share here any more.
         private static bool Commit(SymbolTileStore store, SymbolTileStore.Key key, int gen, SymbolTileBuffer buffer)
-            => store.CompleteBuild(key, gen, SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero, store.StringTable));
+            => store.CompleteBuild(key, gen, SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero));
+
+        // UMR-87: ShapedSymbol carries only the INTERNED TextId/IconImageId, not the raw string — but Oracle()
+        // below must stay a genuinely STRING-keyed computation (independent of SymbolStringTable.Intern, which
+        // is itself exactly what the RED-verification here targets — see Oracle's doc). So Point/Curved record
+        // each returned symbol's raw text/icon in this side table, keyed by the (structurally-comparable)
+        // ShapedSymbol value itself, for Oracle to read back instead of a now-nonexistent symbol.Text.
+        private readonly Dictionary<ShapedSymbol, string> _rawText = new Dictionary<ShapedSymbol, string>();
+        private readonly Dictionary<ShapedSymbol, string> _rawIcon = new Dictionary<ShapedSymbol, string>();
 
         // Appends one point (or icon, via `icon`) symbol into `buffer` and returns the resulting record — so a
         // caller can both group it into its tile's buffer AND hold it for a later assertion, mirroring the
         // pre-migration per-symbol managed carrier local var it replaces. §10 D8/D9: pairRole/pairId default to None/0 —
         // every existing call site (unpaired symbols) is unaffected.
-        private static ShapedSymbol Point(SymbolTileBuffer buffer, double3 anchor, int layer, string text, string icon,
+        private ShapedSymbol Point(SymbolTileBuffer buffer, double3 anchor, int layer, string text, string icon,
             int feature, TileId tile, SymbolPairRole pairRole = SymbolPairRole.None, int pairId = 0)
         {
             TestSymbolTileBuffer.AddPoint(buffer, anchor, null, float2.zero, float2.zero,
                 text: text, iconImage: icon, materialIndex: layer, featureIndex: feature, tileKey: SymbolTileKey.Pack(tile),
                 pairRole: pairRole, pairId: pairId);
-            return buffer.Symbols[buffer.Symbols.Count - 1];
+            ShapedSymbol symbol = buffer.Symbols[buffer.Symbols.Count - 1];
+            _rawText[symbol] = text; _rawIcon[symbol] = icon;
+            return symbol;
         }
 
-        private static ShapedSymbol Curved(SymbolTileBuffer buffer, string text, int feature, TileId tile)
+        private ShapedSymbol Curved(SymbolTileBuffer buffer, string text, int feature, TileId tile)
         {
             TestSymbolTileBuffer.AddCurved(buffer, null, null, null,
                 placement: SymbolPlacement.LineCenter, text: text, materialIndex: 0, featureIndex: feature, tileKey: SymbolTileKey.Pack(tile));
-            return buffer.Symbols[buffer.Symbols.Count - 1];
+            ShapedSymbol symbol = buffer.Symbols[buffer.Symbols.Count - 1];
+            _rawText[symbol] = text; _rawIcon[symbol] = null;
+            return symbol;
         }
 
         // Independent STRING-keyed oracle — the SAME scan order + finest-zoom rule + per-tile blockId assignment
         // as the reconciler, but keyed on the string CrossTileSymbolKey (NOT the code under test), and walking the
         // fixture's OWN ShapedSymbol lists (NOT the block the reconciler reads) — a genuinely separate
         // computation. activeTiles / departingTiles are in the store's _active / _departing enumeration order.
+        // UMR-87: ShapedSymbol itself no longer carries the raw string (only the interned TextId/IconImageId,
+        // the SAME ints the reconciler's DedupKey reads) — reading those here would make this oracle blind to
+        // exactly the bug class it RED-verifies (a broken SymbolStringTable.Intern, see the T1 note). So this
+        // reads the raw text/icon back from `_rawText`/`_rawIcon` (populated by Point/Curved), never from
+        // symbol.TextId/IconImageId.
         private struct OracleOut
         {
             public List<ShapedSymbol> Output; public int ActiveCount;
             public List<int> BlockId; public List<int> LocalIndex; public List<byte> IsDeparting;
         }
 
-        private static OracleOut Oracle(List<List<ShapedSymbol>> activeTiles, List<List<ShapedSymbol>> departingTiles)
+        private OracleOut Oracle(List<List<ShapedSymbol>> activeTiles, List<List<ShapedSymbol>> departingTiles)
         {
             var output = new List<ShapedSymbol>(); var blockIds = new List<int>();
             var localIndices = new List<int>(); var isDeparting = new List<byte>();
@@ -123,7 +140,7 @@ namespace MapRenderer.Tests.Text
                         output.Add(symbol); blockIds.Add(myBlock); localIndices.Add(i); isDeparting.Add(0);
                         continue;
                     }
-                    var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, symbol.Text, symbol.IconImage, CrossTileSymbolKey.CanonicalGridMeters);
+                    var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, _rawText[symbol], _rawIcon[symbol], CrossTileSymbolKey.CanonicalGridMeters);
                     int z = (int)(symbol.TileKey >> 44);
                     if (!dedup.TryGetValue(key, out var cur) || z > cur.z || (z == cur.z && symbol.TileKey < cur.tileKey))
                         dedup[key] = (symbol, z, symbol.TileKey, myBlock, i);
@@ -144,7 +161,7 @@ namespace MapRenderer.Tests.Text
                     ShapedSymbol symbol = tile[i];
                     if (symbol.Placement == SymbolPlacement.Point)
                     {
-                        var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, symbol.Text, symbol.IconImage, CrossTileSymbolKey.CanonicalGridMeters);
+                        var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, _rawText[symbol], _rawIcon[symbol], CrossTileSymbolKey.CanonicalGridMeters);
                         if (dedup.ContainsKey(key)) continue;
                         dedup[key] = (symbol, 0, symbol.TileKey, myBlock, i);
                     }

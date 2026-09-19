@@ -54,7 +54,7 @@ namespace MapRenderer.Tests.Text.Placement
                     AnchorRender = new double3(i, 0, i),
                     QuadStart = quadStart,
                     QuadCount = quadCount,
-                    Text = "L",
+                    TextId = 1,
                     TextSizePx = 16f,
                     FeatureIndex = i,
                     TileKey = 7L,

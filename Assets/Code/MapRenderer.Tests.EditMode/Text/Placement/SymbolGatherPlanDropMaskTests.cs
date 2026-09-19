@@ -118,7 +118,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             int gen = store.BeginBuild(Key(tile));
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 1, TileRenderOrigin.Project(tile, P), new SymbolStringTable());
+                buffer, slotCount: 1, TileRenderOrigin.Project(tile, P));
             Assert.IsTrue(store.CompleteBuild(Key(tile), gen, block), "sanity: block committed");
         }
 

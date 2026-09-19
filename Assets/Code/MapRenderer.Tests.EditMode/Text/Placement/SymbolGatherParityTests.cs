@@ -117,7 +117,7 @@ namespace MapRenderer.Tests.Text.Placement
             var buffer = new SymbolTileBuffer();
             build(buffer);
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 1, TileRenderOrigin.Project(tile, P), new SymbolStringTable());
+                buffer, slotCount: 1, TileRenderOrigin.Project(tile, P));
             Assert.IsTrue(store.CompleteBuild(Key(tile), gen, block), "sanity: block committed");
         }
 
@@ -500,8 +500,8 @@ namespace MapRenderer.Tests.Text.Placement
                 anchors: Array.Empty<LineAnchor>());
             AddPointSymbol(bufferB, new double3(60, 0, 60), "b1", 15, tkB, 0.7f);
 
-            SymbolTileBlock blockA = SymbolTileBlockBaker.Bake(bufferA, slotCount: 1, originA, new SymbolStringTable());
-            SymbolTileBlock blockB = SymbolTileBlockBaker.Bake(bufferB, slotCount: 1, originB, new SymbolStringTable());
+            SymbolTileBlock blockA = SymbolTileBlockBaker.Bake(bufferA, slotCount: 1, originA);
+            SymbolTileBlock blockB = SymbolTileBlockBaker.Bake(bufferB, slotCount: 1, originB);
 
             var harness = new LpsHarness();
             var plan = new SymbolGatherPlan();
@@ -579,7 +579,7 @@ namespace MapRenderer.Tests.Text.Placement
                 text: "42", paint: SymbolPaint.Default, textSizePx: 20f, paddingPx: 2f, sortKey: 0f,
                 featureIndex: 21, tileKey: tkA, pairRole: SymbolPairRole.Rider, pairId: 20);
 
-            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, originA, new SymbolStringTable());
+            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, originA);
 
             var harness = new LpsHarness();
             var plan = new SymbolGatherPlan();

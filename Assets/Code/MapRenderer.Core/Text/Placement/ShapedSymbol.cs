@@ -26,11 +26,12 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>S105 F1: the owning symbol style layer's index (per-layer material routing).</summary>
         public int MaterialIndex { get; init; }
 
-        /// <summary>The resolved symbol text (point/curved text only; null for an icon). A-3 cross-tile identity.</summary>
-        public string Text { get; init; }
+        /// <summary>The resolved symbol text, INTERNED (point/curved text only; <c>0</c> for an icon).
+        /// A-3 cross-tile identity. <see cref="MapRenderer.Core.Text.Placement.SymbolStringTable"/> assigns the id.</summary>
+        public int TextId { get; init; }
 
-        /// <summary>I6: the icon identity (null for text).</summary>
-        public string IconImage { get; init; }
+        /// <summary>I6's icon identity, INTERNED (<c>0</c> for text). Same table as <see cref="TextId"/>.</summary>
+        public int IconImageId { get; init; }
 
         /// <summary>Point placement only — the projected (pre-RTC) feature anchor.</summary>
         public double3 AnchorRender { get; init; }

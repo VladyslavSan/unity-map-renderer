@@ -226,8 +226,8 @@ namespace MapRenderer.Tests.Text.Placement
 
             // The whole tile is NOT aborted: the two LTR symbols build; only the mixed one is skipped.
             Assert.AreEqual(2, output.Symbols.Count, "the two LTR labels survive; the mixed label is skipped");
-            Assert.AreEqual("Aruba", output.Symbols[0].Text);
-            Assert.AreEqual("Angola", output.Symbols[1].Text);
+            Assert.AreEqual(builder.StringTable.Intern("Aruba"), output.Symbols[0].TextId);
+            Assert.AreEqual(builder.StringTable.Intern("Angola"), output.Symbols[1].TextId);
             Assert.AreEqual(1, builder.SkippedSymbolCount, "exactly one label skipped");
             Assert.IsNotNull(builder.LastSkipReason, "skip reason recorded for the throttled diagnostic");
             StringAssert.Contains("NotSupportedException", builder.LastSkipReason);
@@ -309,7 +309,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(SymbolKind.Icon, symbol.Kind);
             Assert.AreEqual(1, symbol.QuadCount, "a sprite is exactly one quad");
             Assert.AreEqual(TextQuadLayout.OneEm, symbol.TextSizePx, 1e-6, "icon scale must be 1 (OneEm/OneEm)");
-            Assert.IsNull(symbol.Text, "an icon label carries no text");
+            Assert.AreEqual(0, symbol.TextId, "an icon label carries no text id");
         }
 
         [Test]
@@ -332,9 +332,9 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.AreEqual(3, output.Symbols.Count, "text + icon + text, all three survive");
             Assert.AreEqual(0, builder.SkippedSymbolCount);
-            Assert.AreEqual(SymbolKind.Text, output.Symbols[0].Kind); Assert.AreEqual("Aruba", output.Symbols[0].Text);
-            Assert.AreEqual(SymbolKind.Icon, output.Symbols[1].Kind); Assert.IsNull(output.Symbols[1].Text);
-            Assert.AreEqual(SymbolKind.Text, output.Symbols[2].Kind); Assert.AreEqual("Angola", output.Symbols[2].Text);
+            Assert.AreEqual(SymbolKind.Text, output.Symbols[0].Kind); Assert.AreEqual(builder.StringTable.Intern("Aruba"), output.Symbols[0].TextId);
+            Assert.AreEqual(SymbolKind.Icon, output.Symbols[1].Kind); Assert.AreEqual(0, output.Symbols[1].TextId);
+            Assert.AreEqual(SymbolKind.Text, output.Symbols[2].Kind); Assert.AreEqual(builder.StringTable.Intern("Angola"), output.Symbols[2].TextId);
         }
 
         // ── A3 (P-B): a MAP-aligned LINE icon must build as a ONE-GLYPH CURVED instance, not a point one.
@@ -398,7 +398,7 @@ namespace MapRenderer.Tests.Text.Placement
             CollectionAssert.AreEqual(anchors, output.Anchors.GetRange(built.AnchorStart, built.AnchorCount),
                 "the build-time anchors are carried, not recomputed");
             Assert.IsFalse(built.KeepUpright, "icon-keep-upright's spec default is false");
-            Assert.AreEqual("arrow", built.IconImage);
+            Assert.AreEqual(builder.StringTable.Intern("arrow"), built.IconImageId);
             Assert.AreEqual(math.PI, built.IconRotateRadians, 1e-6f, "icon-rotate is carried onto the curved instance");
             Assert.AreEqual(7, built.FeatureIndex);
             Assert.AreEqual(42L, built.TileKey);
@@ -446,7 +446,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.AreEqual(2, buffer.Symbols.Count, "both calls must land in the SAME buffer");
 
-            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero, new SymbolStringTable());
+            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero);
             try
             {
                 Assert.AreEqual(SymbolPairRole.Owner, block.PairRoles[0], "cross-call adjacency: owner resolves");

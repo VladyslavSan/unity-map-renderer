@@ -27,6 +27,38 @@ namespace MapRenderer.Core.Text.Placement
         /// </summary>
         public const int MaxAnchors = 256;
 
+        // per-thread free-lists of whole scratch arrays — the EvalArgBuffers Rent/Return shape
+        // (MapRenderer.Core.Expressions.EvalArgBuffers), reused here because Compute runs on whatever worker
+        // thread builds a tile (SymbolFeatureExtractor is worker-safe), so a single shared buffer would race,
+        // and a per-call `new` was the prior cost: a fresh `cumulative` array plus a growing `List<LineAnchor>`
+        // and its final `ToArray()`, once per curved along-line symbol. A Stack (not a single field) survives
+        // reentrancy if Compute is ever called from within another Compute on the same thread. Every Rent is
+        // paired with a Return in a `finally`.
+        [ThreadStatic] private static Stack<double[]> _cumulativeFree;
+        [ThreadStatic] private static Stack<LineAnchor[]> _anchorFree;
+
+        private static double[] RentCumulative(int length)
+        {
+            Stack<double[]> free = _cumulativeFree ??= new Stack<double[]>();
+            while (free.Count > 0)
+            {
+                double[] buffer = free.Pop();
+                if (buffer.Length >= length) return buffer;
+            }
+            return new double[length];
+        }
+
+        private static void ReturnCumulative(double[] buffer) => (_cumulativeFree ??= new Stack<double[]>()).Push(buffer);
+
+        // Always exactly MaxAnchors — the loop below never fills past it — so no size check is needed.
+        private static LineAnchor[] RentAnchors()
+        {
+            Stack<LineAnchor[]> free = _anchorFree ??= new Stack<LineAnchor[]>();
+            return free.Count > 0 ? free.Pop() : new LineAnchor[MaxAnchors];
+        }
+
+        private static void ReturnAnchors(LineAnchor[] buffer) => (_anchorFree ??= new Stack<LineAnchor[]>()).Push(buffer);
+
         /// <summary>
         /// Anchors along <paramref name="tilePath"/> (tile-local units), spaced by
         /// <paramref name="spacingTileUnits"/> (<c>symbol-spacing px · extent / TilePixelSize</c> at the tile's
@@ -43,33 +75,48 @@ namespace MapRenderer.Core.Text.Placement
             if (tilePath == null || tilePath.Count < 2) return Array.Empty<LineAnchor>();
 
             int n = tilePath.Count;
-            // Cumulative tile-space arc length at each vertex (index 0 == 0).
-            var cumulative = new double[n];
-            cumulative[0] = 0.0;
-            for (int i = 1; i < n; i++)
-                cumulative[i] = cumulative[i - 1] + math.length(tilePath[i] - tilePath[i - 1]);
-            double total = cumulative[n - 1];
-            if (!(total > 0.0)) return Array.Empty<LineAnchor>(); // degenerate (coincident points)
-
-            if (placement == SymbolPlacement.LineCenter)
-                return new[] { AnchorAtArc(cumulative, total * 0.5) };
-
-            double spacing = spacingTileUnits > 0.0 ? spacingTileUnits : 1.0;
-            var anchors = new List<LineAnchor>();
-            for (int k = 0; k < MaxAnchors; k++)
+            // Cumulative tile-space arc length at each vertex (index 0 == 0). Rented — may be OVERSIZED, so
+            // every read below is bound by `n`, never `cumulative.Length`.
+            double[] cumulative = RentCumulative(n);
+            try
             {
-                double arc = spacing * (k + 0.5);
-                if (arc > total) break; // past the line end — stop (bounded by MaxAnchors regardless)
-                anchors.Add(AnchorAtArc(cumulative, arc));
+                cumulative[0] = 0.0;
+                for (int i = 1; i < n; i++)
+                    cumulative[i] = cumulative[i - 1] + math.length(tilePath[i] - tilePath[i - 1]);
+                double total = cumulative[n - 1];
+                if (!(total > 0.0)) return Array.Empty<LineAnchor>(); // degenerate (coincident points)
+
+                if (placement == SymbolPlacement.LineCenter)
+                    return new[] { AnchorAtArc(cumulative, n, total * 0.5) };
+
+                double spacing = spacingTileUnits > 0.0 ? spacingTileUnits : 1.0;
+                LineAnchor[] scratch = RentAnchors();
+                try
+                {
+                    int count = 0;
+                    for (int k = 0; k < MaxAnchors; k++)
+                    {
+                        double arc = spacing * (k + 0.5);
+                        if (arc > total) break; // past the line end — stop (bounded by MaxAnchors regardless)
+                        scratch[count++] = AnchorAtArc(cumulative, n, arc);
+                    }
+                    if (count == 0) scratch[count++] = AnchorAtArc(cumulative, n, total * 0.5); // short line → one centred
+                    // The caller keeps this beyond Compute's return, so it must be an independent copy — the
+                    // one allocation this method cannot avoid.
+                    var result = new LineAnchor[count];
+                    Array.Copy(scratch, result, count);
+                    return result;
+                }
+                finally { ReturnAnchors(scratch); }
             }
-            if (anchors.Count == 0) anchors.Add(AnchorAtArc(cumulative, total * 0.5)); // short line → one centred
-            return anchors.ToArray();
+            finally { ReturnCumulative(cumulative); }
         }
 
         // The (segment, t) topology of the point at tile-space arc distance `arc` (clamped to [0, total]).
-        private static LineAnchor AnchorAtArc(double[] cumulative, double arc)
+        // `n` is the path's vertex count — passed explicitly, not read off `cumulative.Length`, since a rented
+        // `cumulative` may be oversized.
+        private static LineAnchor AnchorAtArc(double[] cumulative, int n, double arc)
         {
-            int n = cumulative.Length;
             double total = cumulative[n - 1];
             if (arc <= 0.0) return new LineAnchor(0, 0f);
             if (arc >= total) return new LineAnchor(n - 2, 1f);

@@ -18,12 +18,13 @@ namespace MapRenderer.Core.Text.Placement
     /// property the dedup partition-preservation rests on (different string ⇒ different id).</para>
     ///
     /// <para><b>Lifetime &amp; threading.</b> Owned (lifetime + <see cref="Reset"/> at the store's <c>Clear</c>,
-    /// the SetStyle boundary) by the store, populated on the MAIN thread only — by the build-time bake
-    /// (<c>SymbolTileBlockBaker.Bake</c>, writing the block's id columns) and by <c>CompleteBuild</c>
-    /// (writing the entry's parallel id arrays), which run back-to-back per tile so both see the same ids.
-    /// Ids are stable for a style's whole life and never reused within it; a restyle renumbers (harmless — ids
-    /// feed only equality/hashing, never a snapshot). The per-frame <c>CollectInto</c> reads only the frozen
-    /// per-entry id arrays, never this table, so it needs no locking.</para>
+    /// the SetStyle boundary) by the store, populated on the MAIN thread only — by
+    /// <c>StyledSymbolTileBuilder.Shape</c>'s per-symbol emit (the SHAPE-time tail), which stamps
+    /// <see cref="MapRenderer.Core.Text.Placement.ShapedSymbol.TextId"/>/<c>IconImageId</c> before the symbol
+    /// ever reaches <c>SymbolTileBlockBaker.Bake</c> (which now only copies those ids into the block's
+    /// columns). Ids are stable for a style's whole life and never reused within it; a restyle renumbers
+    /// (harmless — ids feed only equality/hashing, never a snapshot). The per-frame <c>CollectInto</c> reads
+    /// only the frozen per-entry id arrays, never this table, so it needs no locking.</para>
     /// </summary>
     public sealed class SymbolStringTable
     {

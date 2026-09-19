@@ -246,7 +246,7 @@ namespace MapRenderer.Tests.Text
             var key = new SymbolTileStore.Key(SourceId, Tile0);
             int gen = _subsystem.Store().BeginBuild(key);
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 1, TileRenderOrigin.Project(Tile0, Projection), new SymbolStringTable());
+                buffer, slotCount: 1, TileRenderOrigin.Project(Tile0, Projection));
             Assert.IsTrue(_subsystem.Store().CompleteBuild(key, gen, block), "sanity: the block committed");
 
             var loaded = new List<LoadedTileKey> { new LoadedTileKey(SourceId, Tile0) };

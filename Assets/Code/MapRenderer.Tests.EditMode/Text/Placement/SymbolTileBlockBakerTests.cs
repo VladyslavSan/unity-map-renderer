@@ -58,7 +58,7 @@ namespace MapRenderer.Tests.Text.Placement
             AddCurvedSymbol(buffer, 2, tileKey);
 
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 1, tileOriginRender: double3.zero, new SymbolStringTable());
+                buffer, slotCount: 1, tileOriginRender: double3.zero);
             try
             {
                 Assert.AreEqual(2, block.Kinds.Length, "raw list length");
@@ -143,7 +143,7 @@ namespace MapRenderer.Tests.Text.Placement
                 featureIndex: 2, tileKey: 9L, materialIndex: 5, paint: SymbolPaint.Default);
 
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 8, tileOriginRender: double3.zero, new SymbolStringTable());
+                buffer, slotCount: 8, tileOriginRender: double3.zero);
             try
             {
                 Assert.AreEqual(2, block.MaterialIndexes.Length, "raw list length");
@@ -174,7 +174,7 @@ namespace MapRenderer.Tests.Text.Placement
             AddCurvedSymbol(buffer, 4, 9L); // curved is never a pair half
 
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 8, tileOriginRender: double3.zero, new SymbolStringTable());
+                buffer, slotCount: 8, tileOriginRender: double3.zero);
             try
             {
                 Assert.AreEqual(SymbolPairRole.Owner, block.PairRoles[0], "resolved owner");
@@ -186,27 +186,28 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── Native-representation migration (additive): TextIds/IconImageIds are per-symbol raw-order columns of the
-        //    INTERNED text/icon ids (via the store's SymbolStringTable) — the block-side mirror of the entry's parallel
-        //    int[] arrays, so the off-main dedup can later key on the block's int columns. Pins: (1) distinct strings
-        //    take distinct ids in bake order (Text before IconImage, per symbol, raw index order); (2) a null field
-        //    bakes id 0; (3) a shared string (symbol a's icon reused by b) resolves to the SAME id. ──
+        //    INTERNED text/icon ids — UMR-87: interned at symbol-construction time (mirroring
+        //    StyledSymbolTileBuilder.Shape's emit sites), Bake now just copies them onto the block. Pins:
+        //    (1) distinct strings take distinct ids in construction order (Text before IconImage, per symbol,
+        //    call order); (2) a null field bakes id 0; (3) a shared string (symbol a's icon reused by b)
+        //    resolves to the SAME id. ──
         [Test]
         public void Bake_TextIdColumns_MirrorInternedIds_SharedAndNullResolveCorrectly()
         {
             var buffer = new SymbolTileBuffer();
+            var stringTable = new SymbolStringTable();
             void AddPointWith(string text, string icon, int feature) =>
                 TestSymbolTileBuffer.AddPoint(buffer,
                     anchorRender: new double3(feature, 0, feature), quads: new List<SymbolQuad> { Quad },
                     boundsMin: new float2(-8f, -8f), boundsMax: new float2(8f, 8f),
                     text: text, iconImage: icon, textSizePx: 16f, paddingPx: 2f,
-                    featureIndex: feature, tileKey: 9L, paint: SymbolPaint.Default);
+                    featureIndex: feature, tileKey: 9L, paint: SymbolPaint.Default, stringTable: stringTable);
             // a: Text "Alpha"/icon "star"; b: Text "Beta"/icon "star" (shares a's icon).
             AddPointWith("Alpha", "star", 0);
             AddPointWith("Beta", "star", 2);
 
-            var stringTable = new SymbolStringTable();
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 8, tileOriginRender: double3.zero, stringTable);
+                buffer, slotCount: 8, tileOriginRender: double3.zero);
             try
             {
                 Assert.AreEqual(2, block.TextIds.Length, "raw list length");
@@ -231,7 +232,7 @@ namespace MapRenderer.Tests.Text.Placement
             var buffer = new SymbolTileBuffer();
             AddPointSymbol(buffer, 0, 5L);
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                buffer, slotCount: 1, tileOriginRender: double3.zero, new SymbolStringTable());
+                buffer, slotCount: 1, tileOriginRender: double3.zero);
 
             Assert.Greater(SymbolTileBlock.DebugLiveAllocCount, before,
                 "a freshly-baked, not-yet-disposed block must show as a live allocation");
@@ -263,13 +264,13 @@ namespace MapRenderer.Tests.Text.Placement
             buffer.AddSymbol(new ShapedSymbol
             {
                 AnchorRender = new double3(100.0, 0.0, 200.0), Placement = SymbolPlacement.Point,
-                Paint = SymbolPaint.Default, Text = "Boom",
+                Paint = SymbolPaint.Default, TextId = 1, // an arbitrary non-zero id — irrelevant to the throw
                 TextSizePx = 16f, PaddingPx = 2f, SortKey = 0f, FeatureIndex = 0, TileKey = 5L,
                 QuadStart = 0, QuadCount = 2, // claims TWO — Fill's second read overruns the pool
             });
 
             Assert.Throws<ArgumentOutOfRangeException>(
-                () => SymbolTileBlockBaker.Bake(buffer, slotCount: 1, tileOriginRender: double3.zero, new SymbolStringTable()));
+                () => SymbolTileBlockBaker.Bake(buffer, slotCount: 1, tileOriginRender: double3.zero));
 
             Assert.AreEqual(before, SymbolTileBlock.DebugLiveAllocCount,
                 "a throwing bake must dispose its partially-allocated block — no leaked live block, no leaked NativeArray");

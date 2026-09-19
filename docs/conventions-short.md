@@ -37,6 +37,18 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
 
 ## Types & data modeling
 
+- **A member that is just get/set is ONE auto-property, never a field plus a forwarding accessor.**
+  - `internal SymbolStringTable StringTable { get; }`, not `private readonly _stringTable` plus
+    `internal StringTable => _stringTable`. The compiler already gives an auto-property a backing field;
+    the explicit one adds a second name for the same thing and a line of noise at every rename.
+  - Defaults go in a property **initializer** (`{ get; set; } = new X();`), not a field initializer.
+  - *An explicit backing field is EARNED only when the accessor does work a plain auto-property cannot:*
+    laziness (`_x ??= …`), change-notification, a computed value, or validation a caller can actually
+    trigger. A **defensive** guard no caller can reach is not work — drop it and use an initializer.
+    Set-only is not a reason either: `{ get; set; }` with an unread getter is fine.
+  - *Raising visibility for a test* (`private` → `internal` + `InternalsVisibleTo`) is the moment this
+    rule is usually broken — raise the property itself rather than wrapping the field in a new accessor.
+
 - **Pass large read-only structs by `in`.**
   - A method that only *reads* a struct param bigger than ~16 bytes (camera state, eval contexts, descriptors)
     takes it `in` — a read-only reference, no per-call copy, intent explicit. Prior art: `in EvaluationContext`.

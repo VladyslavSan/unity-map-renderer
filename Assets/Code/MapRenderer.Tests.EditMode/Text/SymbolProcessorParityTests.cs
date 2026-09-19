@@ -251,7 +251,7 @@ namespace MapRenderer.Tests.Text
 
             int slotCount = _allStyleSymbolLayers.Count; // mirrors production SymbolSubsystem.SlotCount
             double3 origin = TileRenderOrigin.Project(Tile, _mapCamera.Projection); // mirrors RunTailAsync's tail.TileOriginRender
-            SymbolTileBlock oracle = SymbolTileBlockBaker.Bake(oracleSymbols, slotCount, in origin, new SymbolStringTable());
+            SymbolTileBlock oracle = SymbolTileBlockBaker.Bake(oracleSymbols, slotCount, in origin);
             try { BlockColumnHash.AssertColumnsEqual(oracle, production); }
             finally { oracle.Dispose(); }
         }

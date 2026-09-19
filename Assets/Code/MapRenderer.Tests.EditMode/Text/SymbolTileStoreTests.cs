@@ -76,11 +76,11 @@ namespace MapRenderer.Tests.Text
 
         // Bakes a REAL block for `buffer` and commits it — the reconciler cutover means every commit a test wants
         // CaptureSnapshot/CollectInto to see needs a real SymbolTileBlock (a block-less entry is no longer
-        // collected — SymbolTileStore.CaptureSnapshot's `Block == null` guard). One shared SymbolStringTable per
-        // store (store.StringTable) so cross-tile ids match, as production does.
+        // collected — SymbolTileStore.CaptureSnapshot's `Block == null` guard). UMR-87: Bake no longer interns
+        // (it copies the ids ShapedSymbol already carries), so there is no table to share here any more.
         private bool Commit(SymbolTileStore store, SymbolTileStore.Key key, int gen, SymbolTileBuffer buffer)
         {
-            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero, store.StringTable);
+            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero);
             bool committed = store.CompleteBuild(key, gen, block);
             _blockSources[block] = buffer;
             return committed;
@@ -767,19 +767,30 @@ namespace MapRenderer.Tests.Text
 
         private const double ParityQ = 50.0;
 
+        // UMR-87: ShapedSymbol carries only the INTERNED TextId/IconImageId now — the oracle below must stay
+        // string-keyed (independent of SymbolStringTable.Intern, which is exactly what its RED-verification
+        // targets), so ParityPoint/ParityCurved stash each symbol's raw text/icon here for Oracle() to read
+        // back, instead of a now-nonexistent symbol.Text/.IconImage.
+        private readonly Dictionary<ShapedSymbol, string> _parityText = new Dictionary<ShapedSymbol, string>();
+        private readonly Dictionary<ShapedSymbol, string> _parityIcon = new Dictionary<ShapedSymbol, string>();
+
         // Appends one point (or icon, via `icon`) symbol into `buffer` and returns the resulting record.
-        private static ShapedSymbol ParityPoint(SymbolTileBuffer buffer, double3 anchor, int layer, string text, string icon, int feature, TileId tile)
+        private ShapedSymbol ParityPoint(SymbolTileBuffer buffer, double3 anchor, int layer, string text, string icon, int feature, TileId tile)
         {
             TestSymbolTileBuffer.AddPoint(buffer, anchor, null, float2.zero, float2.zero,
                 text: text, iconImage: icon, materialIndex: layer, featureIndex: feature, tileKey: SymbolTileKey.Pack(tile));
-            return buffer.Symbols[buffer.Symbols.Count - 1];
+            ShapedSymbol symbol = buffer.Symbols[buffer.Symbols.Count - 1];
+            _parityText[symbol] = text; _parityIcon[symbol] = icon;
+            return symbol;
         }
 
-        private static ShapedSymbol ParityCurved(SymbolTileBuffer buffer, string text, int feature, TileId tile)
+        private ShapedSymbol ParityCurved(SymbolTileBuffer buffer, string text, int feature, TileId tile)
         {
             TestSymbolTileBuffer.AddCurved(buffer, null, null, null,
                 placement: SymbolPlacement.LineCenter, text: text, materialIndex: 0, featureIndex: feature, tileKey: SymbolTileKey.Pack(tile));
-            return buffer.Symbols[buffer.Symbols.Count - 1];
+            ShapedSymbol symbol = buffer.Symbols[buffer.Symbols.Count - 1];
+            _parityText[symbol] = text; _parityIcon[symbol] = null;
+            return symbol;
         }
 
         private struct OracleResult
@@ -797,8 +808,9 @@ namespace MapRenderer.Tests.Text
         // Stage 3: the oracle grids on the fixed CrossTileSymbolKey.CanonicalGridMeters (mirroring the store, which
         // no longer takes a caller grid) — so parity holds by construction, still proving interned-key ==
         // string-key under the SAME grid. `q` is passed through unchanged as the store's dedup GATE (magnitude
-        // irrelevant now); it is not the oracle grid.
-        private static OracleResult Oracle(
+        // irrelevant now); it is not the oracle grid. UMR-87: reads `_parityText`/`_parityIcon` (ParityPoint/
+        // ParityCurved's side table), never symbol.TextId/IconImageId — see the field doc above.
+        private OracleResult Oracle(
             List<List<ShapedSymbol>> activeTiles, List<List<ShapedSymbol>> departingTiles, double q)
         {
             var output = new List<ShapedSymbol>();
@@ -820,7 +832,7 @@ namespace MapRenderer.Tests.Text
                         output.Add(symbol); blockIds.Add(myBlock); localIndices.Add(i); isDeparting.Add(0);
                         continue;
                     }
-                    var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, symbol.Text, symbol.IconImage, CrossTileSymbolKey.CanonicalGridMeters);
+                    var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, _parityText[symbol], _parityIcon[symbol], CrossTileSymbolKey.CanonicalGridMeters);
                     int z = (int)(symbol.TileKey >> 44);
                     if (!dedup.TryGetValue(key, out var cur) || z > cur.z || (z == cur.z && symbol.TileKey < cur.tileKey))
                         dedup[key] = (symbol, z, symbol.TileKey, myBlock, i);
@@ -841,7 +853,7 @@ namespace MapRenderer.Tests.Text
                     ShapedSymbol symbol = tile[i];
                     if (symbol.Placement == SymbolPlacement.Point)
                     {
-                        var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, symbol.Text, symbol.IconImage, CrossTileSymbolKey.CanonicalGridMeters);
+                        var key = CrossTileSymbolKey.For(symbol.AnchorRender, symbol.MaterialIndex, _parityText[symbol], _parityIcon[symbol], CrossTileSymbolKey.CanonicalGridMeters);
                         if (dedup.ContainsKey(key)) continue;
                         dedup[key] = (symbol, 0, symbol.TileKey, myBlock, i);
                     }

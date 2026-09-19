@@ -28,7 +28,8 @@ namespace MapRenderer.Tests.Text.Placement
     /// <c>anchorRender</c>/<c>quads</c>/<c>boundsMin</c>/<c>boundsMax</c> for a point, <c>glyphs</c>/<c>anchors</c>/
     /// <c>path</c> for a curved symbol — or has no scalar counterpart (the pooled span starts/counts)):</para>
     /// <list type="table">
-    /// <item><term><c>text</c>/<c>iconImage</c></term><description><c>null</c></description></item>
+    /// <item><term><c>text</c>/<c>iconImage</c></term><description><c>null</c>, which <see cref="SymbolStringTable.Intern"/>
+    /// resolves to <c>TextId</c>/<c>IconImageId</c> = <c>0</c> — still <c>default(int)</c></description></item>
     /// <item><term><c>up</c></term><description><c>double3.zero</c></description></item>
     /// <item><term><c>kind</c></term><description><see cref="SymbolKind.Text"/> (the zero value)</description></item>
     /// <item><term><c>materialIndex</c>/<c>featureIndex</c>/<c>pairId</c></term><description><c>0</c></description></item>
@@ -44,6 +45,14 @@ namespace MapRenderer.Tests.Text.Placement
     /// </summary>
     internal static class TestSymbolTileBuffer
     {
+        // UMR-87: ShapedSymbol carries interned TextId/IconImageId ints, not raw strings — every AddPoint/
+        // AddCurved call below still takes the plain string and interns it. A caller that cares about ids
+        // matching ACROSS buffers/calls (e.g. a cross-tile dedup fixture) passes its own SymbolStringTable
+        // explicitly; a caller that does not (the overwhelming majority of hand-built single-buffer fixtures)
+        // falls back to this ONE shared, never-reset table — never a fresh table per call, which would let two
+        // DIFFERENT strings collide onto the same id (both getting 1) across separate Add* calls.
+        private static readonly SymbolStringTable DefaultStringTable = new SymbolStringTable();
+
         /// <summary>Appends one POINT (or icon — see <paramref name="kind"/>) symbol. Every scalar parameter
         /// past <paramref name="boundsMax"/> defaults to <c>default(T)</c> — see the type doc's table.</summary>
         /// <param name="buffer">Build buffer this record's quads and the record itself are appended into.</param>
@@ -51,6 +60,9 @@ namespace MapRenderer.Tests.Text.Placement
         /// <param name="quads">This symbol's baked-px glyph/icon quads (may be null/empty).</param>
         /// <param name="boundsMin">The laid-out block's anchor-relative bounding box min corner.</param>
         /// <param name="boundsMax">The laid-out block's anchor-relative bounding box max corner.</param>
+        /// <param name="stringTable">Interns <paramref name="text"/>/<paramref name="iconImage"/>; null (the
+        /// default) uses the shared <see cref="DefaultStringTable"/> — pass an explicit table when the test
+        /// needs literal id values or cross-buffer id parity.</param>
         internal static void AddPoint(SymbolTileBuffer buffer, double3 anchorRender, IReadOnlyList<SymbolQuad> quads,
             float2 boundsMin, float2 boundsMax,
             string text = default, double3 up = default, string iconImage = default, SymbolKind kind = default,
@@ -59,13 +71,14 @@ namespace MapRenderer.Tests.Text.Placement
             float2 translatePx = default, TextTranslateAnchor translateAnchor = default,
             AlignmentMode rotationAlignment = default, float iconRotateRadians = default,
             SymbolPairRole pairRole = default, int pairId = default, bool pairOptional = default,
-            SymbolPaint paint = default)
+            SymbolPaint paint = default, SymbolStringTable stringTable = null)
         {
+            SymbolStringTable table = stringTable ?? DefaultStringTable;
             int quadStart = buffer.AppendQuads(quads, out int quadCount);
             buffer.AddSymbol(new ShapedSymbol
             {
                 Placement = SymbolPlacement.Point,
-                Kind = kind, MaterialIndex = materialIndex, Text = text, IconImage = iconImage,
+                Kind = kind, MaterialIndex = materialIndex, TextId = table.Intern(text), IconImageId = table.Intern(iconImage),
                 AnchorRender = anchorRender, UpRender = up,
                 BoundsMin = boundsMin, BoundsMax = boundsMax,
                 QuadStart = quadStart, QuadCount = quadCount,
@@ -96,8 +109,9 @@ namespace MapRenderer.Tests.Text.Placement
             int featureIndex = default, long tileKey = default, bool allowOverlap = default, bool ignorePlacement = default,
             float2 translatePx = default, TextTranslateAnchor translateAnchor = default,
             AlignmentMode pitchAlignment = default, float iconRotateRadians = default,
-            SymbolPaint paint = default)
+            SymbolPaint paint = default, SymbolStringTable stringTable = null)
         {
+            SymbolStringTable table = stringTable ?? DefaultStringTable;
             int glyphStart = buffer.AppendGlyphs(glyphs, out int glyphCount);
             int anchorStart = buffer.AppendAnchors(anchors, out int anchorCount);
             int pathStart = buffer.AppendPath(path, pathUp, out int pathCount);
@@ -105,7 +119,7 @@ namespace MapRenderer.Tests.Text.Placement
             buffer.AddSymbol(new ShapedSymbol
             {
                 Placement = placement,
-                Kind = kind, MaterialIndex = materialIndex, Text = text, IconImage = iconImage,
+                Kind = kind, MaterialIndex = materialIndex, TextId = table.Intern(text), IconImageId = table.Intern(iconImage),
                 AnchorRender = anchorRender, UpRender = up,
                 GlyphStart = glyphStart, GlyphCount = glyphCount,
                 AnchorStart = anchorStart, AnchorCount = anchorCount,
@@ -129,12 +143,12 @@ namespace MapRenderer.Tests.Text.Placement
             float2 translatePx = default, TextTranslateAnchor translateAnchor = default,
             AlignmentMode rotationAlignment = default, float iconRotateRadians = default,
             SymbolPairRole pairRole = default, int pairId = default, bool pairOptional = default,
-            SymbolPaint paint = default)
+            SymbolPaint paint = default, SymbolStringTable stringTable = null)
         {
             var buffer = new SymbolTileBuffer();
             AddPoint(buffer, anchorRender, quads, boundsMin, boundsMax, text, up, iconImage, kind, materialIndex,
                 textSizePx, paddingPx, sortKey, featureIndex, tileKey, allowOverlap, ignorePlacement, translatePx,
-                translateAnchor, rotationAlignment, iconRotateRadians, pairRole, pairId, pairOptional, paint);
+                translateAnchor, rotationAlignment, iconRotateRadians, pairRole, pairId, pairOptional, paint, stringTable);
             return buffer;
         }
 
@@ -149,12 +163,13 @@ namespace MapRenderer.Tests.Text.Placement
             int featureIndex = default, long tileKey = default, bool allowOverlap = default, bool ignorePlacement = default,
             float2 translatePx = default, TextTranslateAnchor translateAnchor = default,
             AlignmentMode pitchAlignment = default, float iconRotateRadians = default,
-            SymbolPaint paint = default)
+            SymbolPaint paint = default, SymbolStringTable stringTable = null)
         {
             var buffer = new SymbolTileBuffer();
             AddCurved(buffer, glyphs, anchors, path, pathUp, anchorRender, placement, text, up, iconImage, kind,
                 materialIndex, textSizePx, paddingPx, sortKey, maxAngleDeg, keepUpright, featureIndex, tileKey,
-                allowOverlap, ignorePlacement, translatePx, translateAnchor, pitchAlignment, iconRotateRadians, paint);
+                allowOverlap, ignorePlacement, translatePx, translateAnchor, pitchAlignment, iconRotateRadians, paint,
+                stringTable);
             return buffer;
         }
 
@@ -182,7 +197,7 @@ namespace MapRenderer.Tests.Text.Placement
             dest.AddSymbol(new ShapedSymbol
             {
                 Placement = r.Placement, Kind = r.Kind, MaterialIndex = r.MaterialIndex,
-                Text = r.Text, IconImage = r.IconImage, AnchorRender = r.AnchorRender, UpRender = r.UpRender,
+                TextId = r.TextId, IconImageId = r.IconImageId, AnchorRender = r.AnchorRender, UpRender = r.UpRender,
                 BoundsMin = r.BoundsMin, BoundsMax = r.BoundsMax,
                 QuadStart = quadStart, QuadCount = r.QuadCount, GlyphStart = glyphStart, GlyphCount = r.GlyphCount,
                 AnchorStart = anchorStart, AnchorCount = r.AnchorCount, PathStart = pathStart, PathCount = r.PathCount,

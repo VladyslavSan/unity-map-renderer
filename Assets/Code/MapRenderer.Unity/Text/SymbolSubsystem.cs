@@ -451,7 +451,7 @@ namespace MapRenderer.Unity.Text
             IGlyphSource glyphSource = (GlyphSourceFactoryOverride ?? GlyphSourceFactory.Create)(style);
             _glyphManager = new GlyphManager(glyphSource, new GlyphAtlas(dim, dim));
             _atlasTexture = new GlyphAtlasTexture();
-            _builder = new StyledSymbolTileBuilder(_glyphManager);
+            _builder = new StyledSymbolTileBuilder(_glyphManager, _store.StringTable); // shared table so cross-tile ids match
         }
 
         /// <summary><see cref="Processing.ISymbolTileWorkerFactory"/> entry — MAIN THREAD, from TileManager's
@@ -806,7 +806,7 @@ namespace MapRenderer.Unity.Text
 
                     // Bake this tile's native SoA block HERE, on the main thread — glyph quads / curved glyphs
                     // are only materialized by the layer shape above, so nothing is left to bake off-main.
-                    var block = SymbolTileBlockBaker.Bake(tail.Buffer, SlotCount, tail.TileOriginRender, _store.StringTable);
+                    var block = SymbolTileBlockBaker.Bake(tail.Buffer, SlotCount, tail.TileOriginRender);
 
                     // Commit — unless superseded or dropped mid-build (released-to-cache still commits, to the
                     // cached side). CompleteBuild disposes `block` on a superseded/dropped commit, so no leak.

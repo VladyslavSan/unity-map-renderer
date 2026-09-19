@@ -39,6 +39,11 @@ namespace MapRenderer.Unity.Text
     {
         private readonly GlyphManager _glyphManager;
         private readonly CodepointTextShaper _shaper = new CodepointTextShaper();
+        /// <summary>The table <see cref="Shape"/> interns Text/IconImage into at SHAPE time. Production passes
+        /// the store's own, so ids stay stable across tiles for the style's life; a caller that omits one
+        /// (tests, the demo path) gets a private table. <c>internal</c> for the fixture that recomputes an
+        /// emitted symbol's ids, mirroring <see cref="Text.SymbolTileStore.StringTable"/>.</summary>
+        internal SymbolStringTable StringTable { get; }
 
         /// <summary>Monotonic count of symbols skipped because their build threw a non-cancellation exception
         /// (e.g. S18's deferred mixed-direction bidi). Surfaced as SymbolSubsystem telemetry. Main-thread
@@ -50,9 +55,13 @@ namespace MapRenderer.Unity.Text
         internal string LastSkipReason { get; private set; }
 
         /// <param name="glyphManager">The shared production glyph manager (one atlas across all symbol layers).</param>
-        public StyledSymbolTileBuilder(GlyphManager glyphManager)
+        /// <param name="stringTable">The table <see cref="Shape"/> interns Text/IconImage into. Null
+        /// (the default) mints a private table — fine for a caller with no cross-tile identity to preserve;
+        /// production passes the owning <c>SymbolTileStore</c>'s table instead.</param>
+        public StyledSymbolTileBuilder(GlyphManager glyphManager, SymbolStringTable stringTable = null)
         {
             _glyphManager = glyphManager ?? throw new System.ArgumentNullException(nameof(glyphManager));
+            StringTable = stringTable ?? new SymbolStringTable();
         }
 
         /// <summary>One symbol layer's extracted symbols + the shaping inputs carried to <see cref="Shape"/>.
@@ -287,7 +296,7 @@ namespace MapRenderer.Unity.Text
                                 BoundsMax = iconBoundsMax,
                                 QuadStart = iconQuadStart,
                                 QuadCount = 1,
-                                IconImage = s.IconImage, // I6: cross-tile icon identity
+                                IconImageId = StringTable.Intern(s.IconImage), // I6: cross-tile icon identity, interned
                                 Paint = s.Paint,
                                 TextSizePx = TextQuadLayout.OneEm, // scale 1 — IconQuadLayout already baked icon-size in
                                 PaddingPx = s.PaddingPx,
@@ -329,7 +338,7 @@ namespace MapRenderer.Unity.Text
                                 GlyphStart = iconGlyphStart, GlyphCount = 1,
                                 AnchorStart = iconAnchorStart, AnchorCount = iconAnchorCount,
                                 PathStart = iconPathStart, PathCount = iconPathCount,
-                                IconImage = s.IconImage, // I6: cross-tile icon identity
+                                IconImageId = StringTable.Intern(s.IconImage), // I6: cross-tile icon identity, interned
                                 Paint = s.Paint,
                                 TextSizePx = TextQuadLayout.OneEm,
                                 PaddingPx = s.PaddingPx,
@@ -380,7 +389,7 @@ namespace MapRenderer.Unity.Text
                                 BoundsMax = bounds.Max,
                                 QuadStart = textQuadStart,
                                 QuadCount = quadCorners.Count,
-                                Text = s.Text, // A-3: cross-tile identity
+                                TextId = StringTable.Intern(s.Text), // A-3: cross-tile identity, interned
                                 Paint = s.Paint,
                                 TextSizePx = s.TextSizePx,
                                 PaddingPx = s.PaddingPx,
@@ -415,7 +424,7 @@ namespace MapRenderer.Unity.Text
                                 GlyphStart = textGlyphStart, GlyphCount = curvedPlacements.Count,
                                 AnchorStart = textAnchorStart, AnchorCount = textAnchorCount, // A-2: build-time zoom-invariant anchors
                                 PathStart = textPathStart, PathCount = textPathCount,
-                                Text = s.Text, // A-3: carried for parity (line symbols are excluded from dedup in v1)
+                                TextId = StringTable.Intern(s.Text), // A-3: carried for parity (line symbols are excluded from dedup in v1)
                                 Paint = s.Paint,
                                 TextSizePx = s.TextSizePx,
                                 PaddingPx = s.PaddingPx,

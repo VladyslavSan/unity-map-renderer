@@ -48,12 +48,12 @@ namespace MapRenderer.Unity.Text.Placement
         {
             float4 color  = SymbolPlacementSystem.LinearColor(symbol.Paint);
             float4 halo   = SymbolPlacementSystem.LinearHaloColor(symbol.Paint);
-            // I6: icon FadeId identity now rides symbol.IconImage (null for text, so a text symbol's FadeId
-            // is unchanged — PointFadeId's guard-skip fold). §10 D9: UNCONDITIONAL on pairRole — a pair's
+            // I6: icon FadeId identity now rides symbol.IconImageId (interned, 0 for text — a text
+            // symbol's FadeId is unchanged, PointFadeId's guard-skip fold). §10 D9: UNCONDITIONAL on pairRole — a pair's
             // identity IS the owner's existing icon identity; a rider's FadeId is never read by a candidate
             // (StageJob skips staging a Rider symbol entirely) but is left correctly resolved so
             // the gather Compact pass's per-symbol fade-alive probe stays well-defined.
-            long   fadeId = SymbolPlacementSystem.PointFadeId(symbol.AnchorRender, symbol.MaterialIndex, symbol.Text, symbol.IconImage);
+            long   fadeId = SymbolPlacementSystem.PointFadeId(symbol.AnchorRender, symbol.MaterialIndex, symbol.TextId, symbol.IconImageId);
 
             // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
             // FloatingOrigin.TileToSceneRebased's identical narrowing).
@@ -117,8 +117,7 @@ namespace MapRenderer.Unity.Text.Placement
                 // StageJob, not a stable baked field.
                 PitchAlignment = symbol.PitchAlignment,
             };
-        internal static SymbolTileBlock Bake(SymbolTileBuffer buffer, int slotCount, in double3 tileOriginRender,
-            SymbolStringTable stringTable)
+        internal static SymbolTileBlock Bake(SymbolTileBuffer buffer, int slotCount, in double3 tileOriginRender)
         {
             var block = new SymbolTileBlock();
             try
@@ -155,7 +154,7 @@ namespace MapRenderer.Unity.Text.Placement
                 block.WorldUps = new NativeArray<float3>(worldPointCount, Allocator.Persistent);
                 block.AnchorFadeIds = new NativeArray<long>(anchorFadeCount, Allocator.Persistent);
 
-                Fill(block, buffer, rawCount, slotCount, tileOriginRender, stringTable);
+                Fill(block, buffer, rawCount, slotCount, tileOriginRender);
                 block.TileKey = ResolveTileKey(buffer, rawCount);
                 return block;
             }
@@ -199,7 +198,7 @@ namespace MapRenderer.Unity.Text.Placement
         // BuildPointInput/BuildCurvedInput (the same helpers the golden test states its expectations through)
         // plus the Max*/symbol bookkeeping, writing into pre-sized NativeArrays instead of growable arrays.
         private static void Fill(SymbolTileBlock block, SymbolTileBuffer buffer, int rawCount, int slotCount,
-            in double3 tileOriginRender, SymbolStringTable stringTable)
+            in double3 tileOriginRender)
         {
             int pointIdx = 0, curvedIdx = 0, quadIdx = 0, glyphIdx = 0, anchorIdx = 0, anchorFadeIdx = 0, worldPointIdx = 0;
 
@@ -209,11 +208,10 @@ namespace MapRenderer.Unity.Text.Placement
                 // Native columns set for EVERY slot in the common prologue. MaterialIndexes mirrors the field;
                 // PairRoles is written per-branch below (it needs the resolved role).
                 block.MaterialIndexes[i] = symbol.MaterialIndex;
-                // Intern INTO the store's own table (main thread — same as CompleteBuild) so the block's ids are
-                // byte-identical to the entry's parallel arrays: Intern is idempotent, so a later CompleteBuild
-                // pass over the same symbols reuses these exact ids. Intern(null) == 0 handles a null text.
-                block.TextIds[i] = stringTable.Intern(symbol.Text);
-                block.IconImageIds[i] = stringTable.Intern(symbol.IconImage);
+                // a straight copy — StyledSymbolTileBuilder.Shape already interned Text/IconImage into
+                // TextId/IconImageId when it emitted this symbol, so the block's columns just mirror the raw slot.
+                block.TextIds[i] = symbol.TextId;
+                block.IconImageIds[i] = symbol.IconImageId;
 
                 if (symbol.Placement == SymbolPlacement.Point)
                 {

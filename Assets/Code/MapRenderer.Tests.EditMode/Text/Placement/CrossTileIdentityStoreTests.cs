@@ -59,7 +59,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         private bool Commit(SymbolTileStore store, SymbolTileStore.Key key, int gen, SymbolTileBuffer buffer)
         {
-            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero, store.StringTable);
+            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero);
             bool committed = store.CompleteBuild(key, gen, block);
             _blockSources[block] = buffer;
             return committed;
@@ -141,6 +141,28 @@ namespace MapRenderer.Tests.Text.Placement
             Commit(store, key, store.BeginBuild(key), buffer);
             Assert.AreEqual(2, Collect(store, q).Count, "line labels pass through undeduped (per-anchor identity is a follow-up)");
             store.Clear();
+        }
+
+        // ── UMR-87: CrossTileSymbolKey.cs's own claim, observed directly (not just via the reconciler's
+        //    winner-selection parity above, which proves it only indirectly). CrossTileSymbolKey.For (string-
+        //    keyed) and DedupKey.For (int-keyed, UMR-87's PointFadeId/reconciler identity) MUST grid to the
+        //    IDENTICAL (GridX, GridZ, GridY) for the same anchor — both call the ONE shared
+        //    CrossTileSymbolKey.QuantizeAnchor. This is a STRUCTURAL guarantee today (one code path), but a
+        //    future edit could silently fork the two `For` implementations; this pins the field values so that
+        //    would fail loudly here instead of only surfacing as a mysterious dedup/fade-id mismatch elsewhere. ──
+        [Test]
+        public void QuantizeAnchor_GridsIdenticallyForStringAndIntKeyedIdentity()
+        {
+            double3 anchor = new double3(123_456.789, 0.0, -98_765.4321);
+            const int layerId = 3;
+            const double grid = CrossTileSymbolKey.CanonicalGridMeters;
+
+            var stringKey = CrossTileSymbolKey.For(anchor, layerId, "T", "icon", grid);
+            var intKey = DedupKey.For(anchor, layerId, 1, 2, grid); // textId=1, iconImageId=2 — arbitrary, irrelevant to grid math
+
+            Assert.AreEqual(stringKey.GridX, intKey.GridX, "GridX");
+            Assert.AreEqual(stringKey.GridZ, intKey.GridZ, "GridZ");
+            Assert.AreEqual(stringKey.GridY, intKey.GridY, "GridY");
         }
     }
 }

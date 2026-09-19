@@ -96,7 +96,7 @@ namespace MapRenderer.Tests
                 foreach (int index in byTile[tileKey]) TestSymbolTileBuffer.CopySymbolInto(sub, buffer, index);
 
                 SymbolTileBlock block = SymbolTileBlockBaker.Bake(
-                    sub, slotCount, TileRenderOrigin.Project(tile, _projection), _store.StringTable);
+                    sub, slotCount, TileRenderOrigin.Project(tile, _projection));
                 if (!_store.CompleteBuild(key, gen, block))
                     throw new InvalidOperationException($"store rejected the build for tile {tile.Z}/{tile.X}/{tile.Y}");
             }
