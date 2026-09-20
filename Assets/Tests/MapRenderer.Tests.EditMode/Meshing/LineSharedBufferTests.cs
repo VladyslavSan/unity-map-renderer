@@ -276,8 +276,8 @@ namespace MapRenderer.Tests.Meshing
             Id          = "p2-line",
             LayerType   = StyleLayerType.Line,
             SourceLayer = "p2",
-            Paint       = Line.PaintProperties.Parse(JsonParser.Parse(PaintJson)),
-            Layout      = Line.LayoutProperties.Parse(null),
+            Paint       = TestStyle.LinePaint(PaintJson),
+            Layout      = TestStyle.LineLayout(),
             Filter      = JsonParser.Parse(FilterJson),
         };
 

@@ -6,7 +6,6 @@ using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Jobs.Tiles;
@@ -78,8 +77,8 @@ namespace MapRenderer.Tests.Style
                 Id          = "test-fill",
                 LayerType   = StyleLayerType.Fill,
                 SourceLayer = sourceLayer,
-                Paint       = Fill.PaintProperties.Parse(paintJson != null ? JsonParser.Parse(paintJson) : null),
-                Layout      = Fill.LayoutProperties.Parse(null),
+                Paint       = TestStyle.FillPaint(paintJson),
+                Layout      = TestStyle.FillLayout(),
             };
         }
 

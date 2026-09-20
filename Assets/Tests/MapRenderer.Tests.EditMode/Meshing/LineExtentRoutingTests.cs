@@ -5,7 +5,6 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
@@ -55,8 +54,8 @@ namespace MapRenderer.Tests.Meshing
         private static Line.StyleLayer StyleLayer() => new Line.StyleLayer
         {
             Id = "extent-probe", LayerType = StyleLayerType.Line, SourceLayer = "probe",
-            Paint = Line.PaintProperties.Parse(JsonParser.Parse("{\"line-color\":\"#ffffff\",\"line-width\":2}")),
-            Layout = Line.LayoutProperties.Parse(null),
+            Paint = TestStyle.LinePaint("{\"line-color\":\"#ffffff\",\"line-width\":2}"),
+            Layout = TestStyle.LineLayout(),
         };
 
         /// <summary>One three-point polyline, well inside the tile at BOTH extents (max coord 900 &lt; 2048).</summary>

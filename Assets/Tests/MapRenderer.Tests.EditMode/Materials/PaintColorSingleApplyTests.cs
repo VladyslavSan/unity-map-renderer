@@ -24,14 +24,12 @@ using Unity.Mathematics;
 using System.Collections.Generic;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Style;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using Color = UnityEngine.Color;
 using Line = MapRenderer.Core.Style.Line;
-using Fill = MapRenderer.Core.Style.Fill;
 using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
 
 namespace MapRenderer.Tests.Materials
@@ -168,13 +166,8 @@ namespace MapRenderer.Tests.Materials
             return mat;
         }
 
-        private static Line.PaintProperties LinePaint(string json)      => Line.PaintProperties.Parse(JsonParser.Parse(json));
-        private static Line.LayoutProperties LineLayout()               => Line.LayoutProperties.Parse(JsonParser.Parse("{}"));
-        private static FillExtrusion.PaintProperties ExtrusionPaint(string json)
-            => FillExtrusion.PaintProperties.Parse(JsonParser.Parse(json));
-
         private static Mesh BuildLineMesh(Line.PaintProperties paint)
-            => TestTileMeshBuilder.BuildLine(new[] { LineFeature() }, paint, LineLayout(), Zoom, Extent, Tile, LocalOrigin);
+            => TestTileMeshBuilder.BuildLine(new[] { LineFeature() }, paint, TestStyle.LineLayout("{}"), Zoom, Extent, Tile, LocalOrigin);
 
         private static Mesh BuildExtrusionMesh(FillExtrusion.PaintProperties paint)
             => TestTileMeshBuilder.BuildFillExtrusion(new[] { SquareFeature(1000) }, paint, Zoom, Extent, Tile);
@@ -189,7 +182,7 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void ConstantLineColor_EffectiveColor_MatchesAuthored()
         {
-            var paint = LinePaint($"{{\"line-color\":\"{AuthoredHex}\",\"line-width\":8}}");
+            var paint = TestStyle.LinePaint($"{{\"line-color\":\"{AuthoredHex}\",\"line-width\":8}}");
             Assert.IsFalse(paint.Color.DependsOnFeature,
                 "precondition: the fixture's line-color must parse as constant, or this row tests the " +
                 "data-driven branch that DataDrivenLineColor_StillVariesPerFeature already covers.");
@@ -213,7 +206,7 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void ConstantFillExtrusionColor_EffectiveColor_MatchesAuthored()
         {
-            var paint = ExtrusionPaint($"{{\"fill-extrusion-color\":\"{AuthoredHex}\",\"fill-extrusion-height\":30}}");
+            var paint = TestStyle.FillExtrusionPaint($"{{\"fill-extrusion-color\":\"{AuthoredHex}\",\"fill-extrusion-height\":30}}");
             Assert.IsFalse(paint.Color.DependsOnFeature, "precondition: constant fill-extrusion-color.");
 
             Material mat  = BoundFillExtrusionMaterial(paint);
@@ -240,7 +233,7 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void ConstantFillExtrusionColorAlpha_IsNotAppliedTwice()
         {
-            var paint = ExtrusionPaint(
+            var paint = TestStyle.FillExtrusionPaint(
                 $"{{\"fill-extrusion-color\":{AuthoredRgbaHalfAlpha},\"fill-extrusion-height\":30}}");
             Assert.That((float)paint.Color.Evaluate(Zoom).A, Is.EqualTo(HalfAlpha).Within(Tol),
                 "precondition: the fixture colour must carry the authored alpha 0.5 — a constant colour is " +
@@ -280,7 +273,7 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void ConstantLineColorAlpha_SurvivesTheUniformPath()
         {
-            var paint = LinePaint($"{{\"line-color\":{AuthoredRgbaHalfAlpha},\"line-width\":8}}");
+            var paint = TestStyle.LinePaint($"{{\"line-color\":{AuthoredRgbaHalfAlpha},\"line-width\":8}}");
             Assert.That((float)paint.Color.Evaluate(Zoom).A, Is.EqualTo(HalfAlpha).Within(Tol),
                 "precondition: the fixture colour must carry the authored alpha 0.5.");
 
@@ -313,13 +306,13 @@ namespace MapRenderer.Tests.Materials
         public void DataDrivenLineColor_StillVariesPerFeature()
         {
             const string ddColor = "[\"match\",[\"get\",\"cat\"],\"a\",\"#6699CC\",\"b\",\"#CC9966\",\"#000000\"]";
-            var paint = LinePaint($"{{\"line-color\":{ddColor},\"line-width\":8}}");
+            var paint = TestStyle.LinePaint($"{{\"line-color\":{ddColor},\"line-width\":8}}");
             Assert.IsTrue(paint.Color.DependsOnFeature, "precondition: the fixture's line-color must be data-driven.");
 
             Material mat = BoundLineMaterial(paint);
             Mesh mesh = TestTileMeshBuilder.BuildLine(
                 new[] { LineFeature(Cat("a")), LineFeature(Cat("b")) },
-                paint, LineLayout(), Zoom, Extent, Tile, LocalOrigin);
+                paint, TestStyle.LineLayout("{}"), Zoom, Extent, Tile, LocalOrigin);
             try
             {
                 Assert.GreaterOrEqual(DistinctStreamColors(mesh, "data-driven line-color").Count, 2,
@@ -339,7 +332,7 @@ namespace MapRenderer.Tests.Materials
         public void DataDrivenFillExtrusionColor_StillVariesPerFeature()
         {
             const string ddColor = "[\"match\",[\"get\",\"cat\"],\"a\",\"#6699CC\",\"b\",\"#CC9966\",\"#000000\"]";
-            var paint = ExtrusionPaint($"{{\"fill-extrusion-color\":{ddColor},\"fill-extrusion-height\":30}}");
+            var paint = TestStyle.FillExtrusionPaint($"{{\"fill-extrusion-color\":{ddColor},\"fill-extrusion-height\":30}}");
             Assert.IsTrue(paint.Color.DependsOnFeature, "precondition: data-driven fill-extrusion-color.");
 
             Material mat = BoundFillExtrusionMaterial(paint);
@@ -366,7 +359,7 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void ConstantFillColor_EffectiveColor_MatchesAuthored()
         {
-            var paint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":\"{AuthoredHex}\"}}"));
+            var paint = TestStyle.FillPaint($"{{\"fill-color\":\"{AuthoredHex}\"}}");
             Assert.IsFalse(paint.Color.DependsOnFeature,
                 "precondition: the fixture's fill-color must parse as constant, or this row tests the " +
                 "data-driven branch that DataDrivenFillColor_StillVariesPerFeature already covers.");
@@ -396,7 +389,7 @@ namespace MapRenderer.Tests.Materials
         public void DataDrivenFillColor_StillVariesPerFeature()
         {
             const string ddColor = "[\"match\",[\"get\",\"cat\"],\"a\",\"#6699CC\",\"b\",\"#CC9966\",\"#000000\"]";
-            var paint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":{ddColor}}}"));
+            var paint = TestStyle.FillPaint($"{{\"fill-color\":{ddColor}}}");
             Assert.IsTrue(paint.Color.DependsOnFeature, "precondition: the fixture's fill-color must be data-driven.");
 
             Material mat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
@@ -430,8 +423,7 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void ConstantFillColorAlpha_IsNotAppliedTwice()
         {
-            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(
-                $"{{\"fill-color\":{AuthoredRgbaHalfAlpha},\"fill-opacity\":[\"get\",\"op\"]}}"));
+            var paint = TestStyle.FillPaint($"{{\"fill-color\":{AuthoredRgbaHalfAlpha},\"fill-opacity\":[\"get\",\"op\"]}}");
             Assert.That((float)paint.Color.Evaluate(Zoom).A, Is.EqualTo(HalfAlpha).Within(Tol),
                 "precondition: the fixture colour must carry the authored alpha 0.5.");
             Assert.IsTrue(paint.Opacity.DependsOnFeature, "precondition: fill-opacity must be data-driven.");

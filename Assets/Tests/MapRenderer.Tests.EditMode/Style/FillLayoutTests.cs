@@ -3,7 +3,6 @@
 
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Json;
 using Fill = MapRenderer.Core.Style.Fill;
 
 namespace MapRenderer.Tests.Style
@@ -23,7 +22,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SortKey_Absent_DefaultsToZeroAndFlagsDefault()
         {
-            var layout = Fill.LayoutProperties.Parse((JsonValue)null);
+            var layout = TestStyle.FillLayout();
 
             Assert.IsTrue(layout.SortKeyIsDefault,
                 "an absent fill-sort-key must be flagged so the builder can skip the sort entirely — that " +
@@ -34,14 +33,14 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SortKey_EmptyLayoutObject_IsStillDefault()
         {
-            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse("{}"));
+            var layout = TestStyle.FillLayout("{}");
             Assert.IsTrue(layout.SortKeyIsDefault, "a layout object without the key is the same as no layout");
         }
 
         [Test]
         public void SortKey_Constant_IsParsedAndNotFlaggedDefault()
         {
-            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(@"{""fill-sort-key"": 7}"));
+            var layout = TestStyle.FillLayout(@"{""fill-sort-key"": 7}");
 
             Assert.IsFalse(layout.SortKeyIsDefault, "an explicit key must NOT be treated as absent");
             Assert.AreEqual(7f, layout.SortKey.Evaluate(0.0), 1e-9);
@@ -51,8 +50,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SortKey_ZoomExpression_IsZoomDependent()
         {
-            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(
-                @"{""fill-sort-key"": [""interpolate"", [""linear""], [""zoom""], 0, 0, 10, 100]}"));
+            var layout = TestStyle.FillLayout(@"{""fill-sort-key"": [""interpolate"", [""linear""], [""zoom""], 0, 0, 10, 100]}");
 
             Assert.IsFalse(layout.SortKeyIsDefault);
             Assert.IsTrue(layout.SortKey.IsZoomDependent, "a zoom expression must classify as zoom-dependent");
@@ -63,8 +61,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void SortKey_FeatureExpression_DependsOnFeature()
         {
-            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(
-                @"{""fill-sort-key"": [""get"", ""rank""]}"));
+            var layout = TestStyle.FillLayout(@"{""fill-sort-key"": [""get"", ""rank""]}");
 
             Assert.IsTrue(layout.SortKey.DependsOnFeature,
                 "a data-driven sort key must be evaluated per FEATURE — the builder relies on this to sort " +

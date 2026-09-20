@@ -26,9 +26,6 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Json;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
-
 namespace MapRenderer.Tests.Meshing
 {
     [TestFixture]
@@ -57,9 +54,6 @@ namespace MapRenderer.Tests.Meshing
             => new DictionaryFeature(properties: props, geometryType: TileGeometryType.Polygon,
                 geometry: SquareRing(x0, y0, size));
 
-        private static FillExtrusion.PaintProperties Paint(string paintJson)
-            => FillExtrusion.PaintProperties.Parse(JsonParser.Parse(paintJson));
-
         private const double Extent = 4096.0;
         private static readonly TileId ModerateTile = new TileId { Z = 10, X = 300, Y = 380 }; // mid-latitude, arbitrary
 
@@ -69,7 +63,7 @@ namespace MapRenderer.Tests.Meshing
         public void Wall_FloorAndRoof_CoincideInFootprintPosition()
         {
             var feature = SquareFeature(1000, 1000, 500);
-            var paint   = Paint("{\"fill-extrusion-height\":50}"); // constant — no bake
+            var paint   = TestStyle.FillExtrusionPaint("{\"fill-extrusion-height\":50}"); // constant — no bake
 
             Mesh mesh = TestTileMeshBuilder.BuildFillExtrusion(new[] { feature }, paint, 0.0, Extent, ModerateTile);
             Assert.IsNotNull(mesh, "a single square footprint must produce geometry.");
@@ -122,8 +116,8 @@ namespace MapRenderer.Tests.Meshing
         {
             var feature = SquareFeature(1000, 1000, 500);
 
-            Mesh meshLow  = TestTileMeshBuilder.BuildFillExtrusion(new[] { feature }, Paint("{\"fill-extrusion-height\":1}"),  0.0, Extent, ModerateTile);
-            Mesh meshHigh = TestTileMeshBuilder.BuildFillExtrusion(new[] { feature }, Paint("{\"fill-extrusion-height\":999}"), 0.0, Extent, ModerateTile);
+            Mesh meshLow  = TestTileMeshBuilder.BuildFillExtrusion(new[] { feature }, TestStyle.FillExtrusionPaint("{\"fill-extrusion-height\":1}"),  0.0, Extent, ModerateTile);
+            Mesh meshHigh = TestTileMeshBuilder.BuildFillExtrusion(new[] { feature }, TestStyle.FillExtrusionPaint("{\"fill-extrusion-height\":999}"), 0.0, Extent, ModerateTile);
             Assert.IsNotNull(meshLow); Assert.IsNotNull(meshHigh);
 
             Assert.AreEqual(meshLow.vertexCount, meshHigh.vertexCount,
@@ -141,7 +135,7 @@ namespace MapRenderer.Tests.Meshing
         public void ConstantHeight_BakeStreamStaysZero()
         {
             var feature = SquareFeature(1000, 1000, 500);
-            var paint   = Paint("{\"fill-extrusion-height\":50,\"fill-extrusion-base\":5}");
+            var paint   = TestStyle.FillExtrusionPaint("{\"fill-extrusion-height\":50,\"fill-extrusion-base\":5}");
 
             Mesh mesh = TestTileMeshBuilder.BuildFillExtrusion(new[] { feature }, paint, 0.0, Extent, ModerateTile);
             Assert.IsNotNull(mesh);
@@ -161,7 +155,7 @@ namespace MapRenderer.Tests.Meshing
         {
             var props  = new Dictionary<string, Value> { ["h"] = Value.Number(42.0) };
             var feature = SquareFeature(1000, 1000, 500, props);
-            var paint   = Paint("{\"fill-extrusion-height\":[\"get\",\"h\"]}");
+            var paint   = TestStyle.FillExtrusionPaint("{\"fill-extrusion-height\":[\"get\",\"h\"]}");
             Assert.IsTrue(paint.Height.DependsOnFeature, "fixture sanity: [\"get\",\"h\"] must classify as Feature-kind.");
 
             Mesh mesh = TestTileMeshBuilder.BuildFillExtrusion(new[] { feature }, paint, 0.0, Extent, ModerateTile);
@@ -188,7 +182,7 @@ namespace MapRenderer.Tests.Meshing
         public void ExtrudeUpMagnitude_TracksPerVertexLatitude_NotPerTileConstant()
         {
             var z0 = new TileId { Z = 0, X = 0, Y = 0 };
-            var paint = Paint("{\"fill-extrusion-height\":10}");
+            var paint = TestStyle.FillExtrusionPaint("{\"fill-extrusion-height\":10}");
 
             // High-latitude footprint (~φ=80°, sec≈5.76) — see TileToGeoJob.GeoAt: v≈0.1146 ⇒ y≈469 at extent 4096.
             var highLatFeature = SquareFeature(1800, 400, 100);
@@ -345,7 +339,7 @@ namespace MapRenderer.Tests.Meshing
         public void Winding_FrontFacesPointOut_Mercator()
         {
             var feature = SquareFeature(1000, 1000, 500);
-            var paint   = Paint("{\"fill-extrusion-height\":50}");
+            var paint   = TestStyle.FillExtrusionPaint("{\"fill-extrusion-height\":50}");
             Mesh mesh = TestTileMeshBuilder.BuildFillExtrusion(new[] { feature }, paint, 0.0, Extent, ModerateTile);
             Assert.IsNotNull(mesh);
             Assert.AreEqual(20, mesh.vertexCount, "fixture-shape assumption: roof(4)+walls(16)=20 for a hole-less square.");
@@ -359,7 +353,7 @@ namespace MapRenderer.Tests.Meshing
         public void Winding_FrontFacesPointOut_Globe()
         {
             var feature = SquareFeature(1000, 1000, 500);
-            var paint   = Paint("{\"fill-extrusion-height\":50}");
+            var paint   = TestStyle.FillExtrusionPaint("{\"fill-extrusion-height\":50}");
             Mesh mesh = TestTileMeshBuilder.BuildFillExtrusion(
                 new[] { feature }, paint, 0.0, Extent, ModerateTile, new SphericalProjection());
             Assert.IsNotNull(mesh);

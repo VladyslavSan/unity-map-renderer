@@ -67,8 +67,8 @@ namespace MapRenderer.Tests.Style
                 Id          = "labels",
                 LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
-                Paint       = SymbolStyle.PaintProperties.Parse(JsonParser.Parse(paintJson)),
-                Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"" + textField + "\"}")),
+                Paint       = TestStyle.SymbolPaint(paintJson),
+                Layout      = TestStyle.SymbolLayout("{\"text-field\":\"" + textField + "\"}"),
             };
 
         private static List<SymbolStyle.SymbolFeature> Extract(SymbolStyle.StyleLayer layer)

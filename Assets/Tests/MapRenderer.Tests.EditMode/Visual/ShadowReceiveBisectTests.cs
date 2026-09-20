@@ -49,14 +49,12 @@ using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Materials;
 // Aliased, not imported: MapRenderer.Core.Expressions carries its own Color, which would make every
 // UnityEngine.Color in this fixture ambiguous.
 using Value = MapRenderer.Core.Expressions.Value;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 
 namespace MapRenderer.Tests.Visual
@@ -1098,7 +1096,7 @@ namespace MapRenderer.Tests.Visual
             string paintJson = dataDriven
                 ? $"{{\"fill-extrusion-height\":[\"get\",\"{CasterHeightProperty}\"]}}"
                 : $"{{\"fill-extrusion-height\":{roofHeight}}}";
-            var paint = FillExtrusion.PaintProperties.Parse(JsonParser.Parse(paintJson));
+            var paint = TestStyle.FillExtrusionPaint(paintJson);
             Assert.AreEqual(dataDriven, paint.Height.DependsOnFeature,
                 "fixture sanity: this variant must classify as the height path it claims to exercise.");
 

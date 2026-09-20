@@ -10,7 +10,6 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
@@ -106,7 +105,7 @@ namespace MapRenderer.Tests.Tiles
             var fakeDecoder = new FakeTileDecoder(fixtureTile);
 
             var styleLayer = new StyleLayer { Id = "fixture-fill", SourceLayer = FixtureSourceLayerName };
-            var paint = Fill.PaintProperties.Parse(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
+            var paint = TestStyle.FillPaint("{\"fill-color\":\"#ffffff\"}");
             var fillLayer = new FakeFillTileMeshRenderLayer(styleLayer, paint);
 
             var projection = new WebMercatorProjection();

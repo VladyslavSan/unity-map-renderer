@@ -61,8 +61,8 @@ namespace MapRenderer.Tests.Style
                 Id = "labels",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"" + textField + "\"}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"" + textField + "\"}"),
                 Filter = filterJson != null ? JsonParser.Parse(filterJson) : null,
             };
 
@@ -148,8 +148,8 @@ namespace MapRenderer.Tests.Style
             var layer = new SymbolStyle.StyleLayer
             {
                 Id = "labels", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "centroids",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"{NAME}\"}")), MinZoom = 15.0, // MapLibre-hidden at z14
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\"}"), MinZoom = 15.0, // MapLibre-hidden at z14
             };
             var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 14.0, projection, symbols);
@@ -169,9 +169,8 @@ namespace MapRenderer.Tests.Style
                 Id = "labels",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
-                    "{\"text-field\":\"{NAME}\",\"text-transform\":\"" + transform + "\"}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\",\"text-transform\":\"" + transform + "\"}"),
             };
 
             var upper = new List<SymbolStyle.SymbolFeature>();
@@ -200,9 +199,9 @@ namespace MapRenderer.Tests.Style
                 Id = "lines",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "geolines",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
+                Paint = TestStyle.SymbolPaint(),
                 // Literal text-field so every line feature resolves a symbol regardless of its properties.
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"" + placement + "\"}")),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"" + placement + "\"}"),
             };
 
             var lineSymbols = new List<SymbolStyle.SymbolFeature>();
@@ -253,8 +252,8 @@ namespace MapRenderer.Tests.Style
                 Id = "lines",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "geolines",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}"),
             };
 
             var lineSymbols = new List<SymbolStyle.SymbolFeature>();
@@ -308,8 +307,8 @@ namespace MapRenderer.Tests.Style
                 Id = "lines",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "lines",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"line-center\"}"),
             };
 
             var symbols = new List<SymbolStyle.SymbolFeature>();
@@ -410,11 +409,11 @@ namespace MapRenderer.Tests.Style
                 Id = "points",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "points",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
+                Paint = TestStyle.SymbolPaint(),
                 // Literal text-field (no {} interpolation) so resolution doesn't depend on feature properties
                 // — InMemoryTileFeature.TryGetProperty always returns false (mirrors the LineLayer literal-
                 // text pattern used elsewhere in this file).
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"L\"}")),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\"}"),
             };
 
             var symbols = new List<SymbolStyle.SymbolFeature>();

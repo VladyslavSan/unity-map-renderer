@@ -20,13 +20,11 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Style;
 using Unity.Mathematics;
 using Color = UnityEngine.Color;
-using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
 
 namespace MapRenderer.Tests.Visual
@@ -84,9 +82,8 @@ namespace MapRenderer.Tests.Visual
         /// <param name="drawn">False to gate the layer's slot out before rendering.</param>
         private static float3? RenderGatedExtrusionLayer(bool drawn, string tag)
         {
-            var paint = FillExtrusion.PaintProperties.Parse(JsonParser.Parse(
-                $"{{\"fill-extrusion-color\":\"{BuildingHex}\",\"fill-extrusion-height\":40," +
-                "\"fill-extrusion-opacity\":1}"));
+            var paint = TestStyle.FillExtrusionPaint($"{{\"fill-extrusion-color\":\"{BuildingHex}\",\"fill-extrusion-height\":40," +
+                "\"fill-extrusion-opacity\":1}");
 
             Mesh mesh = TestTileMeshBuilder.BuildFillExtrusion(
                 new[] { BuildingFootprint() }, paint, Zoom, Extent, Tile);

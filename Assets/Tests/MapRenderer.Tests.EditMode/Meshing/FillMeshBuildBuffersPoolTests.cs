@@ -19,7 +19,6 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Tiles;
@@ -69,10 +68,9 @@ namespace MapRenderer.Tests.Meshing
         // fill-color's vertices white, which would make the pooled-vs-reference colour comparison below
         // vacuous — both arms would carry the same white regardless of a pooling desync.
         private static readonly Fill.PaintProperties Paint =
-            Fill.PaintProperties.Parse(JsonParser.Parse(
-                @"{""fill-color"": [""interpolate"",[""linear""],[""get"",""sk""],1,[""rgb"",255,0,0],8,[""rgb"",0,0,255]]}"));
+            TestStyle.FillPaint(@"{""fill-color"": [""interpolate"",[""linear""],[""get"",""sk""],1,[""rgb"",255,0,0],8,[""rgb"",0,0,255]]}");
         private static readonly Fill.LayoutProperties SortKeyLayout =
-            Fill.LayoutProperties.Parse(JsonParser.Parse(@"{""fill-sort-key"": [""get"", ""sk""]}"));
+            TestStyle.FillLayout(@"{""fill-sort-key"": [""get"", ""sk""]}");
 
         /// <summary>
         /// Reuse-by-identity tooth (meter-independent — <c>GC.GetAllocatedBytesForCurrentThread()</c> is dead in

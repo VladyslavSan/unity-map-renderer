@@ -8,7 +8,6 @@ using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Geometry;
 using MapRenderer.Tests.Jobs;
@@ -115,8 +114,8 @@ namespace MapRenderer.Tests.Meshing
             };
             int[] selectedOrdinals = { 1, 2, 4, 5 };
 
-            var paint  = Fill.PaintProperties.Parse(JsonParser.Parse(ColourByName));
-            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(SortKeyBySk));
+            var paint  = TestStyle.FillPaint(ColourByName);
+            var layout = TestStyle.FillLayout(SortKeyBySk);
 
             Mesh control = null, mixed = null;
             try
@@ -188,8 +187,8 @@ namespace MapRenderer.Tests.Meshing
                 Square(0, 0, "middle", sortKey:  5.0),
                 Square(0, 0, "bottom", sortKey:  1.0),
             };
-            var paint  = Fill.PaintProperties.Parse(JsonParser.Parse(ColourByName));
-            var layout = Fill.LayoutProperties.Parse(JsonParser.Parse(SortKeyBySk));
+            var paint  = TestStyle.FillPaint(ColourByName);
+            var layout = TestStyle.FillLayout(SortKeyBySk);
 
             Mesh flat = null, globe = null;
             try
@@ -287,7 +286,7 @@ namespace MapRenderer.Tests.Meshing
                     geometry: MvtCommandStream.Feature(outerRing)),
             };
 
-            var paint = Fill.PaintProperties.Parse(JsonParser.Parse(@"{""fill-color"":""#ffffff""}"));
+            var paint = TestStyle.FillPaint(@"{""fill-color"":""#ffffff""}");
 
             Mesh holed = null, full = null, holedOnTheClipBranch = null;
             try

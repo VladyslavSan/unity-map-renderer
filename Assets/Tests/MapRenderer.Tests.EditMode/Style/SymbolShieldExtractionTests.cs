@@ -289,9 +289,8 @@ namespace MapRenderer.Tests.Style
                 LayerType = StyleLayerType.Symbol,
                 Source = "s",
                 SourceLayer = "points",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\",\"text-offset\":[0,0.6]}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\",\"text-offset\":[0,0.6]}"),
             };
             var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
@@ -320,9 +319,8 @@ namespace MapRenderer.Tests.Style
                 SourceLayer = "transportation_name",
                 Filter = MapRenderer.Core.Json.JsonParser.Parse(
                     "[\"all\",[\"<=\",[\"get\",\"ref_length\"],6],[\"match\",[\"geometry-type\"],[\"LineString\",\"MultiLineString\"],true,false]]"),
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    "{\"text-field\":[\"to-string\",[\"get\",\"ref\"]],\"text-rotation-alignment\":\"map\",\"symbol-placement\":\"line\"}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":[\"to-string\",[\"get\",\"ref\"]],\"text-rotation-alignment\":\"map\",\"symbol-placement\":\"line\"}"),
             };
             var atlas = SyntheticShieldAtlas();
             var projection = new WebMercatorProjection();
@@ -405,9 +403,8 @@ namespace MapRenderer.Tests.Style
                 SourceLayer = "transportation_name",
                 Filter = MapRenderer.Core.Json.JsonParser.Parse(
                     "[\"all\",[\"<=\",[\"get\",\"ref_length\"],6],[\"match\",[\"geometry-type\"],[\"LineString\",\"MultiLineString\"],true,false]]"),
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    "{\"icon-image\":\"road_3\",\"symbol-placement\":\"line\"" + extraLayoutJson + "}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"icon-image\":\"road_3\",\"symbol-placement\":\"line\"" + extraLayoutJson + "}"),
             };
 
         /// <summary>Decoded paths of <paramref name="layer"/>'s selected features that can carry a symbol
@@ -582,8 +579,8 @@ namespace MapRenderer.Tests.Style
                 LayerType = StyleLayerType.Symbol,
                 Source = "s",
                 SourceLayer = "points",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(layoutJson)),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout(layoutJson),
             };
             var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
@@ -647,10 +644,9 @@ namespace MapRenderer.Tests.Style
                 LayerType = StyleLayerType.Symbol,
                 Source = "s",
                 SourceLayer = "points",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    "{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\"" // symbol-placement default = point
-                    + (extraLayout == null ? "" : "," + extraLayout) + "}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"{ref}\",\"icon-image\":\"road_5\"" // symbol-placement default = point
+                    + (extraLayout == null ? "" : "," + extraLayout) + "}"),
             };
             var symbols = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0,
@@ -1045,8 +1041,8 @@ namespace MapRenderer.Tests.Style
                 var styleLayer = new SymbolStyle.StyleLayer
                 {
                     Id = "clip-a", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
-                    Paint = SymbolStyle.PaintProperties.Parse(null),
-                    Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"point\"}")),
+                    Paint = TestStyle.SymbolPaint(),
+                    Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"point\"}"),
                 };
                 var symbols = new List<SymbolStyle.SymbolFeature>();
                 SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, symbols);
@@ -1065,8 +1061,8 @@ namespace MapRenderer.Tests.Style
                 var styleLayer = new SymbolStyle.StyleLayer
                 {
                     Id = "clip-b", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
-                    Paint = SymbolStyle.PaintProperties.Parse(null),
-                    Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"text-field\":\"L\",\"symbol-placement\":\"point\"}")),
+                    Paint = TestStyle.SymbolPaint(),
+                    Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"point\"}"),
                 };
                 var symbols = new List<SymbolStyle.SymbolFeature>();
                 SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, symbols);
@@ -1092,9 +1088,8 @@ namespace MapRenderer.Tests.Style
                 var styleLayer = new SymbolStyle.StyleLayer
                 {
                     Id = "clip-c", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
-                    Paint = SymbolStyle.PaintProperties.Parse(null),
-                    Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                        "{\"text-field\":\"L\",\"symbol-placement\":\"line\",\"text-rotation-alignment\":\"viewport\",\"symbol-spacing\":100}")),
+                    Paint = TestStyle.SymbolPaint(),
+                    Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"line\",\"text-rotation-alignment\":\"viewport\",\"symbol-spacing\":100}"),
                 };
                 var symbols = new List<SymbolStyle.SymbolFeature>();
                 SymbolFeatureExtractor.Extract(styleLayer, tile, SyntheticTileId, 0.0, projection, symbols);
@@ -1134,9 +1129,8 @@ namespace MapRenderer.Tests.Style
             var styleLayer = new SymbolStyle.StyleLayer
             {
                 Id = "step-probe", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    "{\"text-field\":\"L\",\"symbol-placement\":[\"step\",[\"zoom\"],\"point\",11,\"line\"]}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":[\"step\",[\"zoom\"],\"point\",11,\"line\"]}"),
             };
             var projection = new WebMercatorProjection();
 
@@ -1240,12 +1234,11 @@ namespace MapRenderer.Tests.Style
             LayerType   = StyleLayerType.Symbol,
             Source      = "s",
             SourceLayer = "lines",
-            Paint = SymbolStyle.PaintProperties.Parse(null),
-            Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                arm == SeamArm.AlongLineIcon
+            Paint = TestStyle.SymbolPaint(),
+            Layout = TestStyle.SymbolLayout(arm == SeamArm.AlongLineIcon
                     ? "{\"icon-image\":\"road_3\",\"symbol-placement\":\"line\",\"symbol-spacing\":32}"
                     : "{\"text-field\":\"L\",\"symbol-placement\":\"line\",\"text-rotation-alignment\":\"map\"," +
-                      "\"symbol-spacing\":32}")),
+                      "\"symbol-spacing\":32}"),
         };
 
         private static IDecodedTile LineTile(params double2[][] paths)
@@ -1522,10 +1515,9 @@ namespace MapRenderer.Tests.Style
             var layer = new SymbolStyle.StyleLayer
             {
                 Id = "seam-at-anchors-probe", LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = "lines",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    "{\"text-field\":\"L\",\"symbol-placement\":\"line\",\"text-rotation-alignment\":\"viewport\"," +
-                    "\"symbol-spacing\":32}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"symbol-placement\":\"line\",\"text-rotation-alignment\":\"viewport\"," +
+                    "\"symbol-spacing\":32}"),
             };
 
             List<SymbolStyle.SymbolFeature> symbols = ExtractLines(layer, SeamTileA, SeamRoadVertices);

@@ -8,7 +8,6 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Geometry;
@@ -60,8 +59,8 @@ namespace MapRenderer.Tests.Text
             Id          = "labels",
             LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
             SourceLayer = "centroids",
-            Paint       = SymbolStyle.PaintProperties.Parse(null),
-            Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"{NAME}\"}")),
+            Paint       = TestStyle.SymbolPaint(),
+            Layout      = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\"}"),
         };
 
         private static List<SymbolStyle.SymbolFeature> Extract(
@@ -176,8 +175,8 @@ namespace MapRenderer.Tests.Text
                 Id          = "labels",
                 LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "pts",
-                Paint       = SymbolStyle.PaintProperties.Parse(null),
-                Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"X\"}")),
+                Paint       = TestStyle.SymbolPaint(),
+                Layout      = TestStyle.SymbolLayout("{\"text-field\":\"X\"}"),
             };
 
             List<SymbolStyle.SymbolFeature> honestSymbols = Extract(layer, real, DecodedAt);
@@ -251,8 +250,8 @@ namespace MapRenderer.Tests.Text
                 Id          = "labels",
                 LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "pts",
-                Paint       = SymbolStyle.PaintProperties.Parse(null),
-                Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"X\"}")),
+                Paint       = TestStyle.SymbolPaint(),
+                Layout      = TestStyle.SymbolLayout("{\"text-field\":\"X\"}"),
             };
 
             // Asserted, not merely observed by the runner catching a throw: the defect's manifestation IS an

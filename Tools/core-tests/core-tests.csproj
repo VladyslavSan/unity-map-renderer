@@ -274,6 +274,8 @@
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/StylePropertyTests.cs" />
     <!-- S60: StyleLayerEncapsulationTests — reflection asserts on internal fields -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/StyleLayerEncapsulationTests.cs" />
+    <!-- UMR-171: TestStyle — shared style-property construction facade, engine-free -->
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.Shared/TestStyle.cs" />
     <!-- UMR-108: StyleLayerEagerParseTests — eager Parse acceptance (permanent registration) -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/StyleLayerEagerParseTests.cs" />
 

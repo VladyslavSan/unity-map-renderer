@@ -9,7 +9,6 @@ using Unity.Collections;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Jobs.Mvt;
@@ -104,15 +103,15 @@ namespace MapRenderer.Tests.Meshing
         private static MapRenderer.Core.Style.Fill.StyleLayer Fill(string id, string sourceLayer) => new MapRenderer.Core.Style.Fill.StyleLayer
         {
             Id = id, LayerType = StyleLayerType.Fill, Source = "s", SourceLayer = sourceLayer,
-            Paint = MapRenderer.Core.Style.Fill.PaintProperties.Parse(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}")),
-            Layout = MapRenderer.Core.Style.Fill.LayoutProperties.Parse(null),
+            Paint = TestStyle.FillPaint("{\"fill-color\":\"#ffffff\"}"),
+            Layout = TestStyle.FillLayout(),
         };
 
         private static SymbolStyle.StyleLayer Symbol(string id, string sourceLayer) => new SymbolStyle.StyleLayer
         {
             Id = id, LayerType = StyleLayerType.Symbol, Source = "s", SourceLayer = sourceLayer,
-            Paint = SymbolStyle.PaintProperties.Parse(null),
-            Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"{NAME}\"}")),
+            Paint = TestStyle.SymbolPaint(),
+            Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\"}"),
         };
 
         [Test]

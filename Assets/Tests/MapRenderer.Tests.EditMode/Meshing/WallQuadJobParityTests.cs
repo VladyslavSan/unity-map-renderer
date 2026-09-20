@@ -95,10 +95,9 @@ namespace MapRenderer.Tests.Meshing
             => new DictionaryFeature(properties: null, geometryType: TileGeometryType.LineString, geometry: TwoPointLine(x0, y0, x1, y1));
 
         private static FillExtrusion.PaintProperties ConstantHeightPaint(double height)
-            => FillExtrusion.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-extrusion-height\":{height.ToString(CultureInfo.InvariantCulture)}}}"));
+            => TestStyle.FillExtrusionPaint($"{{\"fill-extrusion-height\":{height.ToString(CultureInfo.InvariantCulture)}}}");
         private static FillExtrusion.PaintProperties DataDrivenPaint()
-            => FillExtrusion.PaintProperties.Parse(JsonParser.Parse(
-                "{\"fill-extrusion-height\":[\"get\",\"h\"],\"fill-extrusion-base\":[\"get\",\"b\"],\"fill-extrusion-color\":[\"get\",\"c\"]}"));
+            => TestStyle.FillExtrusionPaint("{\"fill-extrusion-height\":[\"get\",\"h\"],\"fill-extrusion-base\":[\"get\",\"b\"],\"fill-extrusion-color\":[\"get\",\"c\"]}");
 
         private struct FixtureCase
         {

@@ -182,8 +182,8 @@ namespace MapRenderer.Tests.Text
             Id          = "p2-symbol",
             LayerType   = MapRenderer.Core.Style.StyleLayerType.Symbol,
             SourceLayer = "probe",
-            Paint       = SymbolStyle.PaintProperties.Parse(null),
-            Layout      = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(@"{""text-field"":""{cls}""}")),
+            Paint       = TestStyle.SymbolPaint(),
+            Layout      = TestStyle.SymbolLayout(@"{""text-field"":""{cls}""}"),
             Filter      = filterJson != null ? JsonParser.Parse(filterJson) : null,
         };
 

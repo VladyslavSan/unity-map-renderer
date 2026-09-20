@@ -12,7 +12,6 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
@@ -436,7 +435,7 @@ namespace MapRenderer.Tests.Visual
                 new InMemoryTileLayer(SeamSourceLayerName, id, new IFeature[] { feature }, (uint)TileExtent));
 
             var styleLayer = new StyleLayer { Id = "seam-fill", SourceLayer = SeamSourceLayerName };
-            var paint      = Fill.PaintProperties.Parse(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
+            var paint      = TestStyle.FillPaint("{\"fill-color\":\"#ffffff\"}");
             var fillLayer  = new SeamFillRenderLayer(styleLayer, paint);
 
             var context = new TileLayerProcessContext

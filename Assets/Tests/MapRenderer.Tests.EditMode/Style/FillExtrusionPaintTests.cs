@@ -5,7 +5,6 @@
 
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using FillExtrusion = MapRenderer.Core.Style.FillExtrusion;
 
@@ -26,7 +25,7 @@ namespace MapRenderer.Tests.Style
                 Id          = "test-fill-extrusion",
                 LayerType   = StyleLayerType.FillExtrusion,
                 SourceLayer = sourceLayer,
-                Paint       = FillExtrusion.PaintProperties.Parse(paintJson != null ? JsonParser.Parse(paintJson) : null),
+                Paint       = TestStyle.FillExtrusionPaint(paintJson),
             };
         }
 

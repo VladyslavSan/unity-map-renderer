@@ -122,9 +122,8 @@ namespace MapRenderer.Tests.Meshing
                 Id          = "test-geolines",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
-                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    $"{{\"line-color\":{matchExpr},\"line-width\":4}}")),
-                Layout      = Line.LayoutProperties.Parse(null),
+                Paint       = TestStyle.LinePaint($"{{\"line-color\":{matchExpr},\"line-width\":4}}"),
+                Layout      = TestStyle.LineLayout(),
             };
             var paint = paintLayer.Paint;
             var layout = paintLayer.Layout;
@@ -185,9 +184,8 @@ namespace MapRenderer.Tests.Meshing
                 Id          = "test-constant",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
-                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    $"{{\"line-color\":{constantExpr},\"line-width\":4}}")),
-                Layout      = Line.LayoutProperties.Parse(null),
+                Paint       = TestStyle.LinePaint($"{{\"line-color\":{constantExpr},\"line-width\":4}}"),
+                Layout      = TestStyle.LineLayout(),
             };
             var paint = paintLayer.Paint;
             var layout = paintLayer.Layout;
@@ -264,9 +262,8 @@ namespace MapRenderer.Tests.Meshing
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
                 // line-width is data-driven (Feature kind); line-color is constant.
-                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    $"{{\"line-width\":{widthExpr}}}")),
-                Layout      = Line.LayoutProperties.Parse(null),
+                Paint       = TestStyle.LinePaint($"{{\"line-width\":{widthExpr}}}"),
+                Layout      = TestStyle.LineLayout(),
             };
             var paint = paintLayer.Paint;
             var layout = paintLayer.Layout;
@@ -334,9 +331,8 @@ namespace MapRenderer.Tests.Meshing
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "geolines",
                 // line-opacity is data-driven (Feature kind); other properties at defaults.
-                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                    $"{{\"line-opacity\":{opacityExpr}}}")),
-                Layout      = Line.LayoutProperties.Parse(null),
+                Paint       = TestStyle.LinePaint($"{{\"line-opacity\":{opacityExpr}}}"),
+                Layout      = TestStyle.LineLayout(),
             };
             var paint = paintLayer.Paint;
             var layout = paintLayer.Layout;
@@ -408,8 +404,8 @@ namespace MapRenderer.Tests.Meshing
                 Id          = "test-miter-limit",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "test",
-                Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"line-width\":4}")),
-                Layout      = Line.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"line-miter-limit\":1.0}")),
+                Paint       = TestStyle.LinePaint("{\"line-width\":4}"),
+                Layout      = TestStyle.LineLayout("{\"line-miter-limit\":1.0}"),
             };
             var paint  = styleLayer.Paint;
             var layout = styleLayer.Layout;
@@ -456,9 +452,8 @@ namespace MapRenderer.Tests.Meshing
                     Id          = $"test-round-limit-{roundLimit}",
                     LayerType   = StyleLayerType.Line,
                     SourceLayer = "test",
-                    Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"line-width\":4}")),
-                    Layout      = Line.LayoutProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse(
-                        $"{{\"line-join\":\"round\",\"line-round-limit\":{roundLimit}}}")),
+                    Paint       = TestStyle.LinePaint("{\"line-width\":4}"),
+                    Layout      = TestStyle.LineLayout($"{{\"line-join\":\"round\",\"line-round-limit\":{roundLimit}}}"),
                 };
                 var paint  = styleLayer.Paint;
                 var layout = styleLayer.Layout;

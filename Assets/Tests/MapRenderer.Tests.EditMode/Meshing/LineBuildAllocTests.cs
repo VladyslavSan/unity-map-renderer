@@ -14,7 +14,6 @@ using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Jobs.Geometry;
@@ -56,8 +55,8 @@ namespace MapRenderer.Tests.Meshing
                 Id          = "alloc-line",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = "alloc",
-                Paint       = Line.PaintProperties.Parse(JsonParser.Parse(PaintJson)),
-                Layout      = Line.LayoutProperties.Parse(null),
+                Paint       = TestStyle.LinePaint(PaintJson),
+                Layout      = TestStyle.LineLayout(),
             };
             var paint  = styleLayer.Paint;
             var layout = styleLayer.Layout;

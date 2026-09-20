@@ -7,7 +7,6 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
@@ -188,8 +187,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Id = "points",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "points",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"icon-image\":\"marker\",\"icon-size\":2}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"icon-image\":\"marker\",\"icon-size\":2}"),
             };
 
         /// <summary>`symbol-placement: line` with `icon-rotation-alignment` unset ⇒ resolves `auto → map`,
@@ -200,9 +199,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Id = "roads",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "roads",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
-                    "{\"icon-image\":\"arrow\",\"icon-size\":2,\"symbol-placement\":\"line\"}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"icon-image\":\"arrow\",\"icon-size\":2,\"symbol-placement\":\"line\"}"),
             };
 
         private static uint ZigZagEncode(long n) => (uint)((n << 1) ^ (n >> 63));

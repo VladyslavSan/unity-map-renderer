@@ -4,7 +4,6 @@
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geometry;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using Line = MapRenderer.Core.Style.Line;
 
@@ -36,8 +35,8 @@ namespace MapRenderer.Tests.Style
                 Id          = "test-line",
                 LayerType   = StyleLayerType.Line,
                 SourceLayer = sourceLayer,
-                Paint       = Line.PaintProperties.Parse(paintJson != null ? JsonParser.Parse(paintJson) : null),
-                Layout      = Line.LayoutProperties.Parse(layoutJson != null ? JsonParser.Parse(layoutJson) : null),
+                Paint       = TestStyle.LinePaint(paintJson),
+                Layout      = TestStyle.LineLayout(layoutJson),
             };
         }
 

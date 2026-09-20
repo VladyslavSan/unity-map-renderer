@@ -3,7 +3,6 @@
 
 using NUnit.Framework;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using Background = MapRenderer.Core.Style.Background;
 
@@ -24,7 +23,7 @@ namespace MapRenderer.Tests.Style
             {
                 Id        = "test-background",
                 LayerType = StyleLayerType.Background,
-                Paint     = Background.PaintProperties.Parse(paintJson != null ? JsonParser.Parse(paintJson) : null),
+                Paint     = TestStyle.BackgroundPaint(paintJson),
             };
         }
 

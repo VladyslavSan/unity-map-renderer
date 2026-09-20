@@ -20,7 +20,6 @@ using MapRenderer.Unity.Rendering.Materials;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 using MapRenderer.Tests.Visual;
 using CoreColor = MapRenderer.Core.Expressions.Color;
-using Fill = MapRenderer.Core.Style.Fill;
 using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Tests.Style
@@ -284,8 +283,7 @@ namespace MapRenderer.Tests.Style
             Material fillMat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
             try
             {
-                var paint = Fill.PaintProperties.Parse(JsonParser.Parse(
-                    "{\"fill-color\":[\"interpolate\",[\"linear\"],[\"zoom\"],5,[\"rgb\",255,0,0],15,[\"rgb\",0,0,255]]}"));
+                var paint = TestStyle.FillPaint("{\"fill-color\":[\"interpolate\",[\"linear\"],[\"zoom\"],5,[\"rgb\",255,0,0],15,[\"rgb\",0,0,255]]}");
                 Assert.IsTrue(paint.Color.IsZoomDependent, "precondition: fill-color must be Zoom-kind.");
 
                 var applier = new ZoomStyleApplier(fillMat);
@@ -323,8 +321,7 @@ namespace MapRenderer.Tests.Style
             Material fillMat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
             try
             {
-                var paint = MapRenderer.Core.Style.Fill.PaintProperties.Parse(
-                    JsonParser.Parse(@"{""fill-opacity"": 0.5}"));
+                var paint = TestStyle.FillPaint(@"{""fill-opacity"": 0.5}");
                 var applier = new ZoomStyleApplier(fillMat);
                 MaterialFactory.BindFillPaintToApplier(paint, applier, fillMat);
                 applier.ApplyZoom(new StyleFrameInputs(0.0, 1.0, 0.0));
@@ -349,8 +346,7 @@ namespace MapRenderer.Tests.Style
             {
                 fillMat.SetFloat("_Opacity", 0.25f); // a stale/inherited value the bind must overwrite
 
-                var paint = MapRenderer.Core.Style.Fill.PaintProperties.Parse(
-                    JsonParser.Parse(@"{""fill-opacity"": [""get"", ""op""]}"));
+                var paint = TestStyle.FillPaint(@"{""fill-opacity"": [""get"", ""op""]}");
                 Assert.IsTrue(paint.Opacity.DependsOnFeature, "precondition: this expression is data-driven");
 
                 var applier = new ZoomStyleApplier(fillMat);

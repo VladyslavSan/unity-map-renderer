@@ -26,7 +26,6 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Expressions;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Tiles;
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Style;
@@ -62,10 +61,7 @@ namespace MapRenderer.Tests.Visual
         /// <param name="colorToken">The style value for <c>line-color</c>, verbatim JSON — a quoted hex
         /// string or an <c>["rgba", …]</c> literal, so an authored ALPHA can be driven too.</param>
         private static Line.PaintProperties Paint(string colorToken)
-            => Line.PaintProperties.Parse(JsonParser.Parse($"{{\"line-color\":{colorToken},\"line-width\":{LineWidthPx}}}"));
-
-        private static Line.LayoutProperties Layout()
-            => Line.LayoutProperties.Parse(JsonParser.Parse("{}"));
+            => TestStyle.LinePaint($"{{\"line-color\":{colorToken},\"line-width\":{LineWidthPx}}}");
 
         private static IFeature LineFeature()
         {
@@ -104,7 +100,7 @@ namespace MapRenderer.Tests.Visual
         {
             Line.PaintProperties paint = Paint(colorToken);
             Mesh mesh = TestTileMeshBuilder.BuildLine(
-                new[] { LineFeature() }, paint, Layout(), Zoom, Extent, Tile, double2.zero);
+                new[] { LineFeature() }, paint, TestStyle.LineLayout("{}"), Zoom, Extent, Tile, double2.zero);
             Assert.IsNotNull(mesh, "the fixture feature must produce line geometry.");
 
             Material mat = MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load());
@@ -294,7 +290,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>Renders one fill layer end-to-end, the fill counterpart of <see cref="RenderLayer"/>.</summary>
         private static double3? RenderFillLayer(string colorToken, string tag)
         {
-            Fill.PaintProperties paint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":{colorToken}}}"));
+            Fill.PaintProperties paint = TestStyle.FillPaint($"{{\"fill-color\":{colorToken}}}");
             Mesh mesh = TestTileMeshBuilder.BuildFill(new[] { FillSquareFeature() }, paint, Zoom, Extent, Tile);
             Assert.IsNotNull(mesh, "the fixture feature must produce fill geometry.");
 
@@ -412,8 +408,8 @@ namespace MapRenderer.Tests.Visual
         /// pins for the unanimated path.</summary>
         private static double3? RenderFillLayerEased(string oldColorToken, string newColorToken, double atSeconds, string tag)
         {
-            Fill.PaintProperties oldPaint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":{oldColorToken}}}"));
-            Fill.PaintProperties newPaint = Fill.PaintProperties.Parse(JsonParser.Parse($"{{\"fill-color\":{newColorToken}}}"));
+            Fill.PaintProperties oldPaint = TestStyle.FillPaint($"{{\"fill-color\":{oldColorToken}}}");
+            Fill.PaintProperties newPaint = TestStyle.FillPaint($"{{\"fill-color\":{newColorToken}}}");
             Mesh mesh = TestTileMeshBuilder.BuildFill(new[] { FillSquareFeature() }, oldPaint, Zoom, Extent, Tile);
             Assert.IsNotNull(mesh, "the fixture feature must produce fill geometry.");
 

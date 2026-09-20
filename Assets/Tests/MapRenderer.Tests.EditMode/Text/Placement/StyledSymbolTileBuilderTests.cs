@@ -11,7 +11,6 @@ using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Text;
@@ -70,9 +69,8 @@ namespace MapRenderer.Tests.Text.Placement
                 Id = "labels",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "centroids",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
-                    "{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + FontName + "\"]" + extraLayoutJson + "}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + FontName + "\"]" + extraLayoutJson + "}"),
             };
 
         [Test]

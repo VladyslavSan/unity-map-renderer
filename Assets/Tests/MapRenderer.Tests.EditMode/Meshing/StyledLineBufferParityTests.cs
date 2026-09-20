@@ -425,8 +425,8 @@ namespace MapRenderer.Tests.Meshing
             Id          = "b3-line",
             LayerType   = StyleLayerType.Line,
             SourceLayer = "b3",
-            Paint       = Line.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"line-color\":\"#ff0000\",\"line-width\":4}")),
-            Layout      = Line.LayoutProperties.Parse(null),
+            Paint       = TestStyle.LinePaint("{\"line-color\":\"#ff0000\",\"line-width\":4}"),
+            Layout      = TestStyle.LineLayout(),
         };
 
         private static double Shoelace2(NativeArray<double2> verts, int start, int len)
@@ -520,8 +520,8 @@ namespace MapRenderer.Tests.Meshing
                 Id          = "b3-fill",
                 LayerType   = StyleLayerType.Fill,
                 SourceLayer = "b3",
-                Paint       = Fill.PaintProperties.Parse(MapRenderer.Core.Json.JsonParser.Parse("{\"fill-color\":\"#00ff00\"}")),
-                Layout      = Fill.LayoutProperties.Parse(null),
+                Paint       = TestStyle.FillPaint("{\"fill-color\":\"#00ff00\"}"),
+                Layout      = TestStyle.FillLayout(),
             };
             return TestTileMeshBuilder.BuildFill(
                 features, styleLayer.Paint, 0.0, FixtureExtent, FixtureTile);

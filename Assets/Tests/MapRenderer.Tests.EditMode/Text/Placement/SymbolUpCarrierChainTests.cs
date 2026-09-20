@@ -8,7 +8,6 @@ using System.Threading.Tasks;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
@@ -145,8 +144,8 @@ namespace MapRenderer.Tests.Text.Placement
             var layer = new SymbolStyle.StyleLayer
             {
                 Id = "labels", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "points",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"text-field\":\"L\",\"text-font\":[\"" + FontName + "\"]}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"text-font\":[\"" + FontName + "\"]}"),
             };
 
             using GlyphManager manager = BuildGlyphManager();
@@ -168,9 +167,8 @@ namespace MapRenderer.Tests.Text.Placement
             var layer = new SymbolStyle.StyleLayer
             {
                 Id = "labels", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "points",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
-                    "{\"text-field\":\"L\",\"text-font\":[\"" + FontName + "\"],\"icon-image\":\"marker\"}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"text-font\":[\"" + FontName + "\"],\"icon-image\":\"marker\"}"),
             };
 
             using GlyphManager manager = BuildGlyphManager();
@@ -197,9 +195,8 @@ namespace MapRenderer.Tests.Text.Placement
             var layer = new SymbolStyle.StyleLayer
             {
                 Id = "lines", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "roads",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
-                    "{\"text-field\":\"L\",\"text-font\":[\"" + FontName + "\"],\"symbol-placement\":\"line-center\"}")),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"L\",\"text-font\":[\"" + FontName + "\"],\"symbol-placement\":\"line-center\"}"),
             };
 
             using GlyphManager manager = BuildGlyphManager();
@@ -231,10 +228,10 @@ namespace MapRenderer.Tests.Text.Placement
             var layer = new SymbolStyle.StyleLayer
             {
                 Id = "lines", LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol, SourceLayer = "roads",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
+                Paint = TestStyle.SymbolPaint(),
                 // icon-rotation-alignment unset -> resolves auto -> map for line placement -> the P-B
                 // one-glyph curved-icon emit shape (mirrors IconSkirtCarrierChainTests.AlongLineIconLayer).
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse("{\"icon-image\":\"arrow\",\"symbol-placement\":\"line\"}")),
+                Layout = TestStyle.SymbolLayout("{\"icon-image\":\"arrow\",\"symbol-placement\":\"line\"}"),
             };
 
             // An icon-only layer must never touch the glyph/shaper machinery (mirrors

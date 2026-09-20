@@ -459,8 +459,8 @@ namespace MapRenderer.Tests.Style
                 Id          = "test-dash",
                 LayerType   = MapRenderer.Core.Style.StyleLayerType.Line,
                 SourceLayer = "roads",
-                Paint       = Line.PaintProperties.Parse(paintJson != null ? JsonParser.Parse(paintJson) : null),
-                Layout      = Line.LayoutProperties.Parse(null),
+                Paint       = TestStyle.LinePaint(paintJson),
+                Layout      = TestStyle.LineLayout(),
             };
         }
 

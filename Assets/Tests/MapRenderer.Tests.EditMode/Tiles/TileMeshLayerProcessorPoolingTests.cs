@@ -18,7 +18,6 @@ using Is = UnityEngine.TestTools.Constraints.Is;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Rendering;
 using MapRenderer.Core.Style;
@@ -29,8 +28,6 @@ using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
-using Fill = MapRenderer.Core.Style.Fill;
-
 namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
@@ -199,7 +196,7 @@ namespace MapRenderer.Tests.Tiles
             using var fixtureTile = new InMemoryDecodedTile(layer);
             TileGeometryBuffers geometry = layer.Geometry;
 
-            var paint = Fill.PaintProperties.Parse(JsonParser.Parse("{\"fill-color\":\"#ffffff\"}"));
+            var paint = TestStyle.FillPaint("{\"fill-color\":\"#ffffff\"}");
             var projection = new WebMercatorProjection();
             double3 renderOrigin = TileRenderOrigin.Project(tileId, projection);
             var selected = new List<SelectedTileFeature> { new SelectedTileFeature { Feature = feature, Ordinal = 0 } };

@@ -11,7 +11,6 @@ using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Unity.Rendering.Tile.Processing;
@@ -59,9 +58,8 @@ namespace MapRenderer.Tests.Text
             Id = id,
             LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
             SourceLayer = "centroids",
-            Paint = SymbolStyle.PaintProperties.Parse(null),
-            Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(
-                "{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + fontName + "\"]}")),
+            Paint = TestStyle.SymbolPaint(),
+            Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + fontName + "\"]}"),
         };
 
         private static SymbolStyle.SymbolFeature PointSymbol(string text) => new SymbolStyle.SymbolFeature

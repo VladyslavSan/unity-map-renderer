@@ -8,7 +8,6 @@ using System.IO;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Json;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Tiles;
@@ -85,8 +84,8 @@ namespace MapRenderer.Tests.Style
                 Id = "points",
                 LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
                 SourceLayer = "points",
-                Paint = SymbolStyle.PaintProperties.Parse(null),
-                Layout = SymbolStyle.LayoutProperties.Parse(JsonParser.Parse(layoutJson)),
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout(layoutJson),
             };
 
         private static IDecodedTile OnePointTile(double2 point)
