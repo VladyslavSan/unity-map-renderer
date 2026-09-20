@@ -8,7 +8,7 @@ using Unity.Mathematics;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.Rendering.Tile;
 
 namespace MapRenderer.Tests.Tiles
@@ -32,13 +32,13 @@ namespace MapRenderer.Tests.Tiles
                 renderCentre = default; radius = 0.0; return false;
             }
             public double MaxRefineAngleRad => double.PositiveInfinity;
-            public GeoCoordinate3D ScreenToGround(double2 screenPx, double2 viewportPx, in MapRenderer.Core.View.Camera.CameraProperties camera)
+            public GeoCoordinate3D ScreenToGround(double2 screenPx, double2 viewportPx, in MapRenderer.Core.Geo.CameraProperties camera)
                 => throw new NotSupportedException("ZeroProjection is a priority-math-only test double.");
-            public double2 GroundToScreen(in GeoCoordinate3D ground, double2 viewportPx, in MapRenderer.Core.View.Camera.CameraProperties camera)
+            public double2 GroundToScreen(in GeoCoordinate3D ground, double2 viewportPx, in MapRenderer.Core.Geo.CameraProperties camera)
                 => throw new NotSupportedException("ZeroProjection is a priority-math-only test double.");
             public double ClampValidLatitude(double latitudeDegrees) => latitudeDegrees;
             public bool IsFinitePlanarWorld => true;
-            public GeoCoordinate3D ClampLookAtToWorld(double2 viewportPx, in MapRenderer.Core.View.Camera.CameraProperties camera)
+            public GeoCoordinate3D ClampLookAtToWorld(double2 viewportPx, in MapRenderer.Core.Geo.CameraProperties camera)
                 => throw new NotSupportedException("ZeroProjection is a priority-math-only test double.");
         }
 

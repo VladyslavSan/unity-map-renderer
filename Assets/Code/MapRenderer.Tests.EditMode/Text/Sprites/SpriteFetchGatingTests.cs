@@ -4,7 +4,6 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;

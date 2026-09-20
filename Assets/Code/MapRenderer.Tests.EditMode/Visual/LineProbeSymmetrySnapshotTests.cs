@@ -33,7 +33,6 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Style;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;

@@ -16,8 +16,13 @@ namespace MapRenderer.Tests.Style
     /// S44 — <see cref="LineOffset"/>: perpendicular band-center shift, sign/symmetry,
     /// zoom coupling, width independence, join cleanliness, and shader structure guard.
     ///
-    /// All decisive teeth are CPU-side via <see cref="LineOffset.Displace"/> and
-    /// <see cref="LineTessellator"/>. The HLSL mirror is guarded by the greppable assertion.
+    /// All decisive teeth are CPU-side via <see cref="LineOffset.Displace"/> over
+    /// <see cref="FlatRibbonStations"/> — hand-derived vertex stations, not a builder. The subject
+    /// under test is <c>LineOffset.Displace</c> itself (pure engine-free math), and both fixtures this
+    /// file needs (a straight segment, one 90° corner) are cheap to derive directly from the
+    /// join/cap definitions, so routing them through a Burst job for four vertices would only drop
+    /// these tests out of the 0.1s core-tests loop for no gain. The HLSL mirror is guarded by the
+    /// greppable assertion.
     ///
     /// Engine-free (no UnityEngine). Runs in BOTH dotnet core-tests AND Unity EditMode.
     /// </summary>
@@ -26,9 +31,50 @@ namespace MapRenderer.Tests.Style
     {
         // ── Helpers ──────────────────────────────────────────────────────────────────────────
 
+        /// <summary>One ribbon vertex station: position, extrusion normal, side, and arc-length distance —
+        /// the four fields <see cref="LineOffset.Displace"/> and this file's teeth need.</summary>
+        private readonly struct Station
+        {
+            public readonly double2 Position;
+            public readonly double2 Normal;
+            public readonly float Side;
+            public readonly double DistanceAlong;
+
+            public Station(double2 position, double2 normal, float side, double distanceAlong)
+            {
+                Position = position;
+                Normal = normal;
+                Side = side;
+                DistanceAlong = distanceAlong;
+            }
+        }
+
+        /// <summary>The two fixtures this file needs, built directly from the ribbon definition (unit
+        /// perpendiculars for a straight station; the miter-factor-scaled bisector at a corner) rather
+        /// than through a tessellator/job.</summary>
+        private static class FlatRibbonStations
+        {
+            /// <summary>Straight horizontal line (0,0)→(10,0): two stations, unit perpendicular
+            /// normals ±(0,1).</summary>
+            public static Station[] StraightLine() => new[]
+            {
+                new Station(new double2(0, 0),  new double2(0, 1),  +1f, 0.0),
+                new Station(new double2(0, 0),  new double2(0, -1), -1f, 0.0),
+                new Station(new double2(10, 0), new double2(0, 1),  +1f, 10.0),
+                new Station(new double2(10, 0), new double2(0, -1), -1f, 10.0),
+            };
+
+            /// <summary>Miter join station of a single 90° left corner (0,0)→(0,10)→(10,10). The corner's
+            /// normal is the bisector SCALED by the miter factor (1/cos45° = √2): (-1,1) left / (1,-1)
+            /// right — not a unit vector, matching the ribbon builder's miter contract.</summary>
+            public static (Station left, Station right) Join() => (
+                new Station(new double2(0, 10), new double2(-1, 1), +1f, 10.0),
+                new Station(new double2(0, 10), new double2(1, -1), -1f, 10.0));
+        }
+
         /// <summary>
-        /// Build a straight horizontal line (A→B) and return (originalCenter, displacedCenter)
-        /// pairs for every station (pair of left/right vertices at the same DistanceAlong).
+        /// Return (originalCenter, displacedCenter) pairs for every station (pair of left/right
+        /// vertices at the same DistanceAlong) of the straight-line fixture.
         ///
         /// originalCenter  = midpoint of the two undisplaced vertex positions (= the centerline point).
         /// displacedCenter = midpoint of the two displaced vertex positions after applying Displace.
@@ -38,44 +84,24 @@ namespace MapRenderer.Tests.Style
         /// </summary>
         private static List<(double2 original, double2 displaced)> BandCentersForStraightLine(double offsetM)
         {
-            // Simple horizontal segment A(0,0) → B(10,0).
-            var line = new List<double2>
+            var byDistance = new Dictionary<double, (Station left, Station right)>();
+            foreach (var s in FlatRibbonStations.StraightLine())
             {
-                new double2(0, 0),
-                new double2(10, 0)
-            };
-
-            var result = LineTessellator.Triangulate(line, JoinType.Miter, CapType.Butt);
-            var verts = result.Vertices;
-
-            // Find distinct DistanceAlong values (stations).
-            // Each station has exactly two vertices: left (Side=+1) and right (Side=-1).
-            var stations = new Dictionary<double, (LineVertex left, LineVertex right)>();
-            foreach (var v in verts)
-            {
-                double d = Math.Round(v.DistanceAlong, 10); // bucket by distance
-                if (!stations.TryGetValue(d, out var pair))
+                double d = Math.Round(s.DistanceAlong, 10); // bucket by distance
+                if (!byDistance.TryGetValue(d, out var pair))
                     pair = default;
-                if (v.Side > 0) pair.left  = v;
-                else            pair.right = v;
-                stations[d] = pair;
+                if (s.Side > 0) pair.left  = s;
+                else            pair.right = s;
+                byDistance[d] = pair;
             }
 
             var results = new List<(double2, double2)>();
-            foreach (var (_, pair) in stations)
+            foreach (var (_, pair) in byDistance)
             {
-                // Undisplaced positions: both vertices sit on the centerline (Position is shared).
-                // The center is the midpoint of the two positions (same point for straight segments,
-                // may differ slightly for miter-join stations where vertices are at the junction).
-                double2 origLeft  = pair.left.Position;
-                double2 origRight = pair.right.Position;
-                double2 origCenter = (origLeft + origRight) * 0.5;
+                double2 origCenter = (pair.left.Position + pair.right.Position) * 0.5;
 
-                // Displaced positions for left (side=+1) and right (side=-1).
                 double2 leftDisp  = pair.left.Position  + LineOffset.Displace(pair.left.Normal,  pair.left.Side,  offsetM);
                 double2 rightDisp = pair.right.Position + LineOffset.Displace(pair.right.Normal, pair.right.Side, offsetM);
-
-                // Displaced band center = midpoint of displaced edge vertices.
                 double2 displCenter = (leftDisp + rightDisp) * 0.5;
 
                 results.Add((origCenter, displCenter));
@@ -159,10 +185,7 @@ namespace MapRenderer.Tests.Style
         public void Tooth2_ZeroOffset_DisplacementIsExactlyZero()
         {
             // Tooth 2: offset=0 must produce zero displacement (byte-equal to no-offset control).
-            var line = new List<double2> { new double2(0, 0), new double2(10, 0) };
-            var result = LineTessellator.Triangulate(line, JoinType.Miter, CapType.Butt);
-
-            foreach (var v in result.Vertices)
+            foreach (var v in FlatRibbonStations.StraightLine())
             {
                 double2 disp = LineOffset.Displace(v.Normal, v.Side, 0.0);
                 Assert.That(disp.x, Is.EqualTo(0.0),
@@ -237,15 +260,11 @@ namespace MapRenderer.Tests.Style
             // (Width affects the extrusion magnitude, not the offset displacement.)
             double offsetM = 4.0;
 
-            var line = new List<double2> { new double2(0, 0), new double2(10, 0) };
-            var result = LineTessellator.Triangulate(line, JoinType.Miter, CapType.Butt);
-            var verts = result.Vertices;
-
             // Find a station (e.g., DistanceAlong == 0).
             // Both vertices at dist=0 contribute to band center.
-            LineVertex left  = default, right = default;
+            Station left  = default, right = default;
             bool foundLeft = false, foundRight = false;
-            foreach (var v in verts)
+            foreach (var v in FlatRibbonStations.StraightLine())
             {
                 if (Math.Abs(v.DistanceAlong) < 1e-9)
                 {
@@ -299,32 +318,10 @@ namespace MapRenderer.Tests.Style
             // Large-offset miter explosion on sharp corners is a documented limitation
             // (MapLibre parity). This test uses a 90° corner at moderate offset.
             double offsetM = 2.0;
-            var line = new List<double2>
-            {
-                new double2(0,  0),
-                new double2(0, 10),   // 90° left turn at (0,10)
-                new double2(10, 10)
-            };
 
-            var result = LineTessellator.Triangulate(line, JoinType.Miter, CapType.Butt);
-            var verts  = result.Vertices;
-
-            // Find the miter join station at (0, 10) — DistanceAlong ≈ 10.
-            // This is a left turn: the miter normal should be at 45° (bisecting the 90° corner).
-            LineVertex joinLeft  = default, joinRight = default;
-            bool foundJL = false, foundJR = false;
-            foreach (var v in verts)
-            {
-                if (Math.Abs(v.DistanceAlong - 10.0) < 0.1)
-                {
-                    if (v.Side > 0) { joinLeft  = v; foundJL = true; }
-                    else            { joinRight = v; foundJR = true; }
-                }
-            }
-
-            Assert.IsTrue(foundJL && foundJR,
-                "Expected a join station at DistanceAlong≈10 (the 90° corner). " +
-                "If the join was split (bevel/round), revise the expected distance.");
+            // The miter join station of a 90° left corner: the miter normal is at 45° (bisecting the
+            // corner), scaled by the miter factor — see FlatRibbonStations.Join.
+            var (joinLeft, joinRight) = FlatRibbonStations.Join();
 
             // Apply displacement.
             double2 leftDisp  = LineOffset.Displace(joinLeft.Normal,  joinLeft.Side,  offsetM);

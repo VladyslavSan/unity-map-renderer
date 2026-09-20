@@ -298,8 +298,8 @@ namespace MapRenderer.Core.GeoJson
     ///
     /// <para><b>Coordinate space and winding (producer declaration).</b> Output is tile-local
     /// <c>double2</c> at <see cref="GeoJsonSliceOptions.Extent"/>, origin top-left, Y down, quantized to
-    /// integers. Exterior rings are CW-on-screen (POSITIVE shoelace under
-    /// <c>Geometry.SignedArea</c>), holes CCW (negative) — the MVT convention
+    /// integers. Exterior rings are CW-on-screen (POSITIVE shoelace, standard cross-product sum),
+    /// holes CCW (negative) — the MVT convention
     /// <c>RingAssemblyJob</c> classifies against, so a GeoJSON tile is indistinguishable
     /// from an MVT one downstream. Rings are implicitly closed (the first vertex is not repeated). Both
     /// clippers are orientation-preserving, so output winding equals the winding

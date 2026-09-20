@@ -8,8 +8,7 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
@@ -227,7 +226,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── A stable collision loser eases fully to 0 and STAYS hidden (no re-pump, no partial-opacity hover). The
         //    total-order collision tiebreak makes the survivor set a fixed point, so a deterministic loser fades out
         //    cleanly with a plain ease — no sticky/cooldown machinery. (The earlier "stuck bright" oscillation is
-        //    fixed at the root in SymbolCandidateCollisionTests.SelectSurvivors_SameFeatureAnchors_*.) ──
+        //    fixed at the root in SymbolCandidateCollisionTests.Collision_SameFeatureAnchors_*.) ──
         [Test]
         public void Tick_StableCollisionLoser_FadesFullyOutAndStaysHidden()
         {

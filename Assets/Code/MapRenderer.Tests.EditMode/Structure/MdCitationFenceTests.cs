@@ -124,7 +124,10 @@ namespace MapRenderer.Tests.Structure
         {
             var files = Git(repoRoot, "ls-files");
             files.AddRange(Git(repoRoot, "ls-files --others --exclude-standard"));
-            return files;
+            // `ls-files` reports the INDEX, which still lists a path deleted in the working tree but not
+            // yet staged — reading it below would throw. A path missing from disk carries no citation to
+            // check, so dropping it here loses no coverage.
+            return files.Where(p => File.Exists(Path.Combine(repoRoot, p))).ToList();
         }
 
         private static List<string> Git(string repoRoot, string args)

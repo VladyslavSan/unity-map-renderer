@@ -10,7 +10,7 @@ using UnityEngine;
 using UnityEngine.TestTools;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 

@@ -12,8 +12,7 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.Rendering.Backend;
 using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.TileRenderer;
 

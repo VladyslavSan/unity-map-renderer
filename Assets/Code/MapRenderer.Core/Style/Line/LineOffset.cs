@@ -45,11 +45,11 @@ namespace MapRenderer.Core.Style.Line
         // Computes the perpendicular displacement for a single ribbon vertex.
         //
         // Parameters:
-        //   normal   — per-vertex extrusion normal (from LineVertex.Normal).
+        //   normal   — per-vertex extrusion normal (2D projection of RibbonJob's LineRibbonVertex.Across).
         //              For straight segments / miter joins / the bevel-or-round inner vertex:
         //              |normal| = miter factor (≥1, saturated at miterLimit for the inner vertex).
         //              For unit-normal vertices (bevel/round outer, segment ends): |normal| = 1.
-        //   side     — signed side value ∈{+1,−1} (from LineVertex.Side).
+        //   side     — signed side value ∈{+1,−1} (from LineRibbonVertex.Side).
         //   offsetM  — perpendicular shift in world meters (same space as the normal).
         //
         // Returns: displacement vector to be ADDED to the vertex's position in mesh build space.
@@ -58,7 +58,7 @@ namespace MapRenderer.Core.Style.Line
         // CPU equivalent: normal        * side               * offsetM
         //
         // The miter factor is already baked into |normal|, so this mirrors the HLSL exactly
-        // when the caller uses LineVertex.Normal (not the re-normalised unitDir_WS).
+        // when the caller uses LineRibbonVertex.Across (not the re-normalised unitDir_WS).
         // For unit-normal vertices the miter factor is 1 — also identical.
 
         /// <summary>

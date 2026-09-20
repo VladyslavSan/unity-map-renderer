@@ -9,7 +9,6 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.App;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;

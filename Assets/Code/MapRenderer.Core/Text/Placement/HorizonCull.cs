@@ -18,7 +18,7 @@ namespace MapRenderer.Core.Text.Placement
         /// of the horizon plane from the camera: <c>dot(P − centre, cam − centre) &lt; radius²</c>. A polar-plane
         /// test, EXACT for on-surface points (globe symbol anchors), not an occlusion volume (a point strictly
         /// inside the sphere on the near side reads visible). Mirrors the <c>rad = 0</c> case of
-        /// <see cref="MapRenderer.Core.View.FrustumTileSelector"/>'s tile occlusion algebra
+        /// <c>FrustumTileSelector</c>'s tile occlusion algebra
         /// (<c>FrustumTileSelector.cs:186-188</c>: <c>centreDot = dot(c - occCentre, camVec)</c>,
         /// <c>camVec = pos - occCentre</c>, cull iff <c>centreDot + rad·dc &lt; r²</c>).
         /// </summary>

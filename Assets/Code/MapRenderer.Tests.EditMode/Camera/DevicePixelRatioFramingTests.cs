@@ -183,14 +183,14 @@ namespace MapRenderer.Tests.Cameras
 
             // Positive leg FIRST: a predicate that matched nothing would otherwise pass vacuously.
             Assert.IsTrue(foundTheOneHome,
-                "Core/View/DeviceScaling.cs must carry the implausible-ratio fallback — if this fails the " +
+                "Unity/View/DeviceScaling.cs must carry the implausible-ratio fallback — if this fails the " +
                 "sweep predicate is broken, not the code, and the emptiness below proves nothing. The " +
                 "predicate needs the operator ADJACENT to the ratio's name, so three otherwise-natural " +
                 "rewrites of SafeRatio defeat it: a property pattern (`ratio is >= X and <= Y`), extra " +
                 "parens around the name, and reversed operands (`Min <= ratio`). Fix the guard's form, " +
                 "never loosen this sweep.");
             Assert.IsEmpty(offenders,
-                "the device-pixel-ratio fallback must exist in exactly one production file (Core/View/" +
+                "the device-pixel-ratio fallback must exist in exactly one production file (Unity/View/" +
                 "DeviceScaling.cs). Hand-written copies diverge: before S108 the camera's logical viewport " +
                 "and the selector's framing viewport carried none at all and went infinite. NOTE the sweep " +
                 "reads COMMENTS too — if a named file carries no such code, its prose spells the guard out " +

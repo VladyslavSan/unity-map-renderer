@@ -2,7 +2,6 @@
 // Burst (as a generic type parameter); the camera side runs managed (through the boxed interface).
 
 using Unity.Mathematics;
-using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Core.Geo
 {

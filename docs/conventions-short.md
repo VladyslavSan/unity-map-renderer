@@ -72,7 +72,7 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   - Generic names (`MeshBuilder`, `TileMeshFactory`) are reserved for genuinely type-agnostic dispatchers.
 
 - **Geometry producers declare their output winding; boundaries convert.**
-  - A triangle-producing type (`EarcutJob`, `LineTessellator`, `RibbonJob`, `GlobeFillSubdivideJob`) states
+  - A triangle-producing type (`EarcutJob`, `RibbonJob`, `GlobeFillSubdivideJob`) states
     its output winding + coordinate space in its XML summary.
   - There is **one canonical winding** (CCW in tile space); the producer never bakes the render convention.
   - The Unity-front reversal for stock Cull Back happens at **one** boundary per mesh kind

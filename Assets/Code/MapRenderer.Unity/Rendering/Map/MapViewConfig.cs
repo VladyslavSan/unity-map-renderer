@@ -1,6 +1,6 @@
 using System;
 using UnityEngine;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 
 namespace MapRenderer.Unity.Rendering.Map
 {

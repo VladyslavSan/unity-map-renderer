@@ -387,9 +387,9 @@ namespace MapRenderer.Tests.Meshing
         /// Before this stage, <see cref="SyncMeshWrite.Line"/>'s production predecessor hardcoded the ribbon job's
         /// miter limit to <c>2.0</c> regardless of style, so a style-authored <c>line-miter-limit</c> was
         /// silently ignored. A synthetic 90° corner (f = 1/cos(45°) = √2 ≈ 1.414) stays a sharp miter under
-        /// the default limit (2.0 — <c>LineTessellatorTests.RightAngle_MiterJoin_ExactVertexCount</c>: 6
+        /// the default limit (2.0 — <c>RibbonJobGeometryTests.RightAngle_MiterJoin_ExactVertexCount</c>: 6
         /// verts) but must BEVEL under a tight <c>"line-miter-limit": 1.0</c> (√2 &gt; 1.0 —
-        /// <c>LineTessellatorTests.SharpAngle_ExplicitBevel_VertexCountExactlyOneBevelExtra</c>: 7 verts).
+        /// <c>RibbonJobGeometryTests.SharpAngle_ExplicitBevel_VertexCountExactlyOneBevelExtra</c>: 7 verts).
         /// The vertex-count delta between those two shapes is exactly what pins the threading fix: reading 6
         /// here means the hardcoded 2.0 is still in effect.
         /// </summary>
@@ -434,10 +434,10 @@ namespace MapRenderer.Tests.Meshing
         /// reading <c>layout.RoundLimit</c>) passes the entire suite — the same latent-bug class T3 above
         /// exists to catch for <c>MiterLimit</c>. Reuses T3's 90° corner (f = 1/cos(45°) = √2 ≈ 1.414) with
         /// <c>line-join: round</c>: under <c>line-round-limit: 1.05</c> the corner is NOT shallow (√2 > 1.05)
-        /// so the fan is preserved (11 verts — <c>LineTessellatorTests.RightAngle_RoundJoin_ExactVertexCount</c>);
+        /// so the fan is preserved (11 verts — <c>RibbonJobGeometryTests.RightAngle_RoundJoin_ExactVertexCount</c>);
         /// under <c>line-round-limit: 2.0</c> the SAME corner IS shallow (√2 ≤ 2.0) and collapses to the
         /// (unclamped, since miterLimit stays default 2.0 ⇒ √2 ≤ 2.0 does not bevel) miter path (6 verts —
-        /// <c>LineTessellatorTests.RightAngle_MiterJoin_ExactVertexCount</c>). A build that hardcodes
+        /// <c>RibbonJobGeometryTests.RightAngle_MiterJoin_ExactVertexCount</c>). A build that hardcodes
         /// <c>RoundLimit</c> reads the SAME count for both styles.
         /// </summary>
         [Test]

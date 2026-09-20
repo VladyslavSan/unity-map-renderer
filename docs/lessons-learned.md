@@ -573,10 +573,21 @@ class:
 | BSD `sed`/`grep` with an unsupported escape | exit 0, no matches | `git diff` after the edit |
 | Burst failing to compile a job | falls back to managed IL, tests still pass | `Library/Bee` artifacts, or a log grep for compile errors |
 | the Unity test gate crashing | leaves the *previous* run's results XML in place, looking current | the results file's own timestamp, and new test names present by name |
+| a gate killed with the agent turn that launched it | no results XML and a log that simply stops — indistinguishable from a run still in progress, so you keep waiting | the process table (no Editor alive) together with the log's mtime |
 | a chunk/branch assertion inside `if (…)` | the test passes | a precondition asserting the guard is satisfiable |
+| `git commit -a` with a new file in the change | commits, and the gate that just passed was run on the working tree | `git status` after committing — `-a` stages modifications and deletions, never untracked files |
+| a shell function whose name shadows a real binary (`strip`, `test`, `time`) | the pipeline runs and the comparison reports IDENTICAL | a floor check on the input: a diff of two EMPTY files is also identical |
+| a tree-freeze fingerprint over a stage that adds a `.cs` | fires SOURCE DRIFT during your own gate, because Unity writes the `.meta` mid-run | hash source only; a `.meta` appearing is the gate, not an agent |
 
 **The rule:** for any step whose failure mode is "did nothing", the check must observe the change, not the
 command. `git diff` for edits, artifacts on disk for builds, named results for test runs.
+
+**The second rule, for measurements rather than actions:** a measurement that returns a plausible number
+is indistinguishable from a correct one. Every row above except the first is a *measurement* that answered
+confidently and wrongly. What separates them is never more care — it is a second reading that must agree.
+Run a control probe (one input you know is live, one you know is not) and report both; put a floor under
+any count that could come back empty for the wrong reason; and when two of your own measurements disagree,
+that contradiction IS the finding — reconcile it before reporting, never pick the one you prefer.
 
 ### A design doc that *names* its own tooth is the easiest place for a missing tooth to hide
 

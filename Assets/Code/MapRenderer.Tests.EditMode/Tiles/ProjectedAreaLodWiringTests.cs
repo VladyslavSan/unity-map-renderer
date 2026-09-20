@@ -8,8 +8,7 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using SelectorInputs = MapRenderer.Unity.Rendering.Map.MapView.SelectorInputs;
 

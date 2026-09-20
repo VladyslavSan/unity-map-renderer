@@ -34,6 +34,7 @@ using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Text.Placement
 {
@@ -980,8 +981,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static int Survivors(Pools p, string armName)
         {
             var survivor = new bool[2];
-            int n = SymbolCollision.SelectSurvivors(p.Candidates, 2, p.Boxes, p.BoxCount, survivor,
-                new SymbolCollisionGrid());
+            int n = NativeCollisionRunner.RunCollision(p.Candidates, 2, p.Boxes, p.BoxCount, survivor);
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
                 "W3-T4  {0,-16} boxA=[{1:F3}, {2:F3}]×[{3:F3}, {4:F3}]  boxB=[{5:F3}, {6:F3}]×[{7:F3}, " +
                 "{8:F3}]  survivors={9} ({10}, {11})",

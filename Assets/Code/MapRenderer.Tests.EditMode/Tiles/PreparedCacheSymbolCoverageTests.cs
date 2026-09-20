@@ -13,7 +13,7 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Text;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;

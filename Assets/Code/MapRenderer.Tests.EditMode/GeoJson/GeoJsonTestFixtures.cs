@@ -99,7 +99,7 @@ namespace MapRenderer.Tests
         // ── Ring measurements ──────────────────────────────────────────────────────────────────────
 
         /// <summary>Twice the signed area (shoelace) of a tile-space ring. Positive = CW on screen = the MVT
-        /// exterior convention; see <c>Geometry/SignedArea.cs</c> for the sign table.</summary>
+        /// exterior convention; see <c>TestSupport/SignedArea.cs</c> for the sign table.</summary>
         public static double Shoelace(IReadOnlyList<double2> ring)
         {
             double area = 0.0;

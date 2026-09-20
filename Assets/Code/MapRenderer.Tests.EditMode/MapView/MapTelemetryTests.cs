@@ -14,8 +14,7 @@ using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Geo;
 using MapRenderer.App;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 

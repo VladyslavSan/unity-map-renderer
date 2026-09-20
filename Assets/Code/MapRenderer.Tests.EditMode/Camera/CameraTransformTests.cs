@@ -11,7 +11,6 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View.Camera;
 using MapController = MapRenderer.App.Controller;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;

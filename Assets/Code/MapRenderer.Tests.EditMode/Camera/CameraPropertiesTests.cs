@@ -9,8 +9,8 @@ using System;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.App.View;
+using MapRenderer.Unity.View.Camera;
 
 namespace MapRenderer.Tests.Cameras
 {
@@ -304,7 +304,7 @@ namespace MapRenderer.Tests.Cameras
             // Cursor moves UP (+y): grabbed point needs to appear above centre → centre moves SOUTH.
             var cursorNow = centre + new double2(0.0, 30.0);
 
-            var patch = MapRenderer.Core.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
+            var patch = MapRenderer.App.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
 
             Assert.Less(patch.Latitude.Value, v.LookAt.Latitude,
                 "D6a (S63): cursor UP in +y-up convention must move the LookAt centre SOUTH " +
@@ -326,7 +326,7 @@ namespace MapRenderer.Tests.Cameras
             // Cursor moves DOWN (−y): grabbed point appears below centre → centre moves NORTH.
             var cursorNow = centre - new double2(0.0, 30.0);
 
-            var patch = MapRenderer.Core.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
+            var patch = MapRenderer.App.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
 
             Assert.Greater(patch.Latitude.Value, v.LookAt.Latitude,
                 "D6a (S63): cursor DOWN in +y-up convention must move the LookAt centre NORTH.");
@@ -342,7 +342,7 @@ namespace MapRenderer.Tests.Cameras
         /// <summary>
         /// D6 (S50/S73): pins the tilt-Y sign convention — drag-UP tilts the camera toward overhead
         /// (pitch DECREASES). The new Input System reports <c>delta.y &gt; 0</c> for an upward mouse
-        /// move; <c>MapController</c> negates it before building the <see cref="MapRenderer.Core.View.GestureIntent.TiltBy"/>
+        /// move; <c>MapController</c> negates it before building the <see cref="MapRenderer.App.View.GestureIntent.TiltBy"/>
         /// intent, and <c>ApplyTiltDelta</c> adds <c>dy·sensitivity</c> to the current tilt.
         ///
         /// <para>So: +Y drag (drag up) → negate → TiltBy(dy = -positive * sensitivity) → tilt DECREASES.
@@ -363,7 +363,7 @@ namespace MapRenderer.Tests.Cameras
             double newIsDeltaY = 20.0;
             double viewInputDy = -newIsDeltaY;
 
-            var patch = MapRenderer.Core.View.ViewInput.ApplyTiltDelta(
+            var patch = MapRenderer.App.View.ViewInput.ApplyTiltDelta(
                 v, tiltDeltaDeg: viewInputDy * 0.3, maxPitch: 60.0);
 
             Assert.Less(patch.Tilt.Value, v.Tilt.Degrees,
@@ -386,7 +386,7 @@ namespace MapRenderer.Tests.Cameras
             double newIsDeltaY = -20.0;
             double viewInputDy = -newIsDeltaY;
 
-            var patch = MapRenderer.Core.View.ViewInput.ApplyTiltDelta(
+            var patch = MapRenderer.App.View.ViewInput.ApplyTiltDelta(
                 v, tiltDeltaDeg: viewInputDy * 0.3, maxPitch: 60.0);
 
             Assert.Greater(patch.Tilt.Value, v.Tilt.Degrees,

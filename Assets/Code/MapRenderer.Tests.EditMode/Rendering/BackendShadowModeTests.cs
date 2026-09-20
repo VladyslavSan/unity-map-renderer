@@ -18,7 +18,7 @@ using UnityEngine.Rendering;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;

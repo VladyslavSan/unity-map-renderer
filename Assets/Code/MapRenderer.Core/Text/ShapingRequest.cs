@@ -4,7 +4,7 @@
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// One request to <see cref="ITextShaper.Shape"/>: a source string, the resolved font stack it
+    /// One request to <see cref="CodepointTextShaper.Shape(in ShapingRequest)"/>: a source string, the resolved font stack it
     /// should be shaped against (currently unused by <see cref="CodepointTextShaper"/> — carried
     /// through for Slice 4), and the glyph-advance source.
     /// </summary>

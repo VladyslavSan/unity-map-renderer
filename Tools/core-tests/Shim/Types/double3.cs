@@ -1,6 +1,6 @@
 namespace Unity.Mathematics
 {
-    // S06: double3 is needed by MapRenderer.Core.View.FloatingOrigin and Coordinates.
+    // S06: double3 is needed by MapRenderer.Unity.View.FloatingOrigin and Coordinates.
     public struct double3
     {
         public double x;

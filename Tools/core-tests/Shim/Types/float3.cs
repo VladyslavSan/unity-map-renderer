@@ -1,6 +1,6 @@
 namespace Unity.Mathematics
 {
-    // S06: float3 is needed by MapRenderer.Core.View.FloatingOrigin (render-space offsets).
+    // S06: float3 is needed by MapRenderer.Unity.View.FloatingOrigin (render-space offsets).
     public struct float3
     {
         public float x;

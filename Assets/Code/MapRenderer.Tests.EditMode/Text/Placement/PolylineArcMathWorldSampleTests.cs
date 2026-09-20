@@ -98,7 +98,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0.0, dir.x, DTol); Assert.AreEqual(10.0, dir.z, DTol);
         }
 
-        // The double3 analogue of PolylineArcWalkerTests.DegenerateSegment_DoesNotCollapseTangent: a
+        // The double3 analogue of PolylineArcMathScreenTests.DegenerateSegment_DoesNotCollapseTangent: a
         // duplicated world vertex (zero-length segment) must be skipped when deriving the fallback direction,
         // not collapse to a zero vector.
         [Test]

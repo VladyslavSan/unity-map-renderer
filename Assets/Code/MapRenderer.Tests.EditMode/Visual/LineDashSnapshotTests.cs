@@ -42,7 +42,6 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Style;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
@@ -567,7 +566,7 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para>THE MECHANISM, and why no other tooth in this stage can see it. The two ribbon vertices of
         /// a station share ONE centreline position and carry OPPOSITE <c>extrudeN</c>
-        /// (LineTessellator: <c>MakeVertex(p2, n1, …, +1)</c> / <c>MakeVertex(p2, Neg(n1), …, −1)</c>), and
+        /// (<c>RibbonJob</c>'s <c>MakeVertex(p2, n1, …, +1)</c> / <c>MakeVertex(p2, -n1, …, −1)</c>), and
         /// the shader handed that signed direction straight to <c>MapPixelsToWorld</c>, which probed
         /// ONE-SIDED and so returned two different rulers for one physical axis. <b>S111 divided the probe's
         /// own foreshortening back out, so the helper is direction-symmetric and this mechanism no longer

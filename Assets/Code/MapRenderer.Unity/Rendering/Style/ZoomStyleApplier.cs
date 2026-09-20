@@ -2,7 +2,7 @@ using System.Collections.Generic;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 using CoreColor = MapRenderer.Core.Expressions.Color;
 
 namespace MapRenderer.Unity.Rendering.Style

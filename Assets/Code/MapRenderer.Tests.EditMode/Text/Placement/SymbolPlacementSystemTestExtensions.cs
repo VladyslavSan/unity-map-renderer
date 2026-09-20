@@ -68,7 +68,7 @@ namespace MapRenderer.Tests
         /// from a production class (<c>LastBoxCount</c> itself stays — it is a real N+1 of the counter
         /// telemetry family, which is a different shape).
         /// <para><b>Box ORDER is staging order, and collision does not disturb it</b> —
-        /// <c>SymbolCollision.SelectSurvivors</c> sorts the CANDIDATES and its grid stores absolute box
+        /// <c>CollisionJob</c> sorts the CANDIDATES and its grid stores absolute box
         /// indices, so the box pool itself is never reordered. With a single curved symbol in the frame,
         /// <c>StageCurvedAnchor</c> appends box <c>g</c> and quad <c>g</c> in the same loop iteration, so
         /// <c>box[g]</c> pairs with that symbol's <c>vertices[4g … 4g+3]</c>. A caller relying on that pairing

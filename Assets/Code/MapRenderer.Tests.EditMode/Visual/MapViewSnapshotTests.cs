@@ -5,8 +5,6 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Visual
 {

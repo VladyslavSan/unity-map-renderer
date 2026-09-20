@@ -4,7 +4,6 @@
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Tile;
 
 namespace MapRenderer.Tests.Tiles

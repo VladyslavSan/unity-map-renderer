@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 
 namespace MapRenderer.Unity.Rendering.Tile
 {

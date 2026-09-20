@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
-using MapRenderer.Core.Geometry;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Meshing
 {

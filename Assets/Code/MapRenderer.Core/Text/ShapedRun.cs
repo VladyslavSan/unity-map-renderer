@@ -6,7 +6,7 @@ using System.Collections.Generic;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// The output of <see cref="ITextShaper.Shape"/>: an ordered run of positioned glyphs in VISUAL
+    /// The output of <see cref="CodepointTextShaper.Shape(in ShapingRequest)"/>: an ordered run of positioned glyphs in VISUAL
     /// order (the order S19 lays quads out in, left-to-right on screen) plus the run's resolved
     /// direction. Render-path-agnostic — no anchor/offset/quad assumptions (the SDF glyph-atlas →
     /// text-shaping handoff).

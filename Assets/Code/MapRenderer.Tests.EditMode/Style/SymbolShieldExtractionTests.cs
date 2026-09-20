@@ -728,8 +728,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(SymbolKind.Text, emit[pairCand.EmitStart + 1].AtlasKind);
 
             var survivor = new bool[2];
-            var grid = new SymbolCollisionGrid();
-            SymbolCollision.SelectSurvivors(candidates, 2, boxes, boxCount, survivor, grid);
+            NativeCollisionRunner.RunCollision(candidates, 2, boxes, boxCount, survivor);
 
             bool blockerPlaced = false, pairPlaced = false;
             for (int k = 0; k < 2; k++)
@@ -786,8 +785,7 @@ namespace MapRenderer.Tests.Style
             boxCount++;
 
             var survivor = new bool[2];
-            var grid = new SymbolCollisionGrid();
-            SymbolCollision.SelectSurvivors(candidates, 2, boxes, boxCount, survivor, grid);
+            NativeCollisionRunner.RunCollision(candidates, 2, boxes, boxCount, survivor);
 
             bool pairPlaced = false, laterPlaced = false;
             for (int k = 0; k < 2; k++)
@@ -860,7 +858,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // ── Stage C shared harness (C3/C4/C5) ─────────────────────────────────────────────────────────────
-        // The REAL extractor → REAL StagePointPair → REAL SelectSurvivors, with the rider translated clear of
+        // The REAL extractor → REAL StagePointPair → REAL CollisionJob, with the rider translated clear of
         // the owner so a blocker can address exactly ONE half's box (a centred pair's boxes overlap by
         // construction — the reason the mask is consulted inside test-all-then-insert rather than by
         // un-pairing). Two low-priority PROBES, one over each half and both disjoint from the blocker, then
@@ -949,8 +947,7 @@ namespace MapRenderer.Tests.Style
             boxes[boxCount] = textProbeBox; candidates[3] = Probe(boxCount, 2f, 3);  boxCount++;
 
             var survivor = new bool[4];
-            var grid = new SymbolCollisionGrid();
-            SymbolCollision.SelectSurvivors(candidates, 4, boxes, boxCount, survivor, grid);
+            NativeCollisionRunner.RunCollision(candidates, 4, boxes, boxCount, survivor);
 
             var outcome = new OptionalPairOutcome();
             bool blockerPlaced = false;

@@ -5,7 +5,7 @@
 
 using NUnit.Framework;
 using Unity.Mathematics;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests.Cameras
 {

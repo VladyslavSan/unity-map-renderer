@@ -1,4 +1,4 @@
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Unity.Rendering.Tile
 {

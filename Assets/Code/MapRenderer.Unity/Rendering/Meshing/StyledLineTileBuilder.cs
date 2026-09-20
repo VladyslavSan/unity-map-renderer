@@ -44,10 +44,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
     ///
     /// <para>ONE code path for every projection. Winding is correct BY CONSTRUCTION — <c>across</c> is tied to the
     /// same <c>up</c> the centerline was projected with (one frame), so there is no per-projection winding flip,
-    /// no separate tangent-basis second frame, and no curvature/handedness branch. The managed
-    /// <see cref="LineTessellator"/> is the planar differential oracle for <see cref="RibbonJob"/>
-    /// (<c>LineRibbonJobTests</c>). This line ordering (Subdivide → Project → Triangulate) mirrors the
-    /// fill one; see <c>GlobeLineWindingTests</c>.</para>
+    /// no separate tangent-basis second frame, and no curvature/handedness branch. This line ordering
+    /// (Subdivide → Project → Triangulate) mirrors the fill one; see <c>GlobeLineWindingTests</c>.</para>
     ///
     /// Production reaches the graph asynchronously through <see cref="ScheduleWrite"/>, driven by
     /// <c>TileBuildGraph</c>. (Vestige sweep: the synchronous, main-thread convenience over the graph that
@@ -114,9 +112,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
         internal const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        // LineTessellator.Triangulate default — RibbonJob (and its managed oracle) share it for parity.
-        // MiterLimit/RoundLimit are NOT defaulted here: layout.MiterLimit/layout.RoundLimit thread the
-        // style's own values (or LayoutProperties' own 2.0/1.05 defaults when unset).
+        // RibbonJob's round-arc division default. MiterLimit/RoundLimit are NOT defaulted here:
+        // layout.MiterLimit/layout.RoundLimit thread the style's own values (or LayoutProperties' own
+        // 2.0/1.05 defaults when unset).
         private const int DefaultRoundSegments = 4;
 
         // S91-B: lines project through the SAME projection surface as fills, not a bespoke hardcoded

@@ -7,26 +7,20 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Lines
 {
     /// <summary>
-    /// Burst-compiled 3D ribbon builder: the projection-agnostic successor to the retired 2D Burst line
-    /// tessellator. It consumes an <b>already-projected</b> centerline (origin-relative render-space <c>double3</c> points) plus
-    /// a parallel per-point surface <c>up</c>, and emits the extruded-ribbon topology directly in 3D. Because the
-    /// projection is applied BEFORE the job, this job carries no <c>TProj</c> generic and no
-    /// <c>RegisterGenericJobType</c> — one code path serves every projection (planar or curved, either handedness).
+    /// Burst-compiled 3D ribbon builder. It consumes an <b>already-projected</b> centerline
+    /// (origin-relative render-space <c>double3</c> points) plus a parallel per-point surface <c>up</c>, and
+    /// emits the extruded-ribbon topology directly in 3D. Because the projection is applied BEFORE the job,
+    /// this job carries no <c>TProj</c> generic and no <c>RegisterGenericJobType</c> — one code path serves
+    /// every projection (planar or curved, either handedness).
     ///
-    /// <para><b>Faithful port.</b> The join (miter / bevel / round), cap (butt / square / round) and index topology
-    /// are lifted 1:1 from the managed <see cref="LineTessellator"/> — same
-    /// emission order, same tie-breaking, same worst-case sizing. The ONLY substitution is the per-segment
-    /// direction: where the 2D tessellator's left normal is <c>(−dy, dx)</c>, here
+    /// <para>Join (miter / bevel / round), cap (butt / square / round) and index topology are all built from
+    /// first principles: the per-segment extrusion direction is
     /// <c>across = normalize(cross(along, up))</c> — tied to the SAME <c>up</c> the centerline was projected with,
     /// so ribbon winding is UNIFORM across projections BY CONSTRUCTION (no per-projection flip). OUTPUT WINDING:
-    /// CCW — the pipeline's single canonical winding (same as <see cref="LineTessellator"/>), reversed once to
+    /// CCW — the pipeline's single canonical winding, reversed once to
     /// Unity-front at the mesh-write boundary (<c>StyledLineTileBuilder</c>) for stock Cull Back; see
-    /// <c>docs §7.1</c> and <c>GlobeLineWindingTests</c>. Round arcs, which the 2D code sweeps with <c>atan2</c> on the unit circle,
-    /// are swept here in the local tangent-plane basis (<c>cos·e0 + sin·e1</c>) — the same equal-angle sweep,
-    /// generalised to a curved surface.</para>
-    ///
-    /// <para>The managed <see cref="LineTessellator"/> is the planar differential ORACLE: fed a flat centerline
-    /// (<c>up = +Y</c>) this job reproduces its ribbon to floating-point epsilon (<c>LineRibbonJobTests</c>).</para>
+    /// <c>docs §7.1</c> and <c>GlobeLineWindingTests</c>. Round arcs are swept in the local tangent-plane basis
+    /// (<c>cos·e0 + sin·e1</c>) — an equal-angle sweep generalised to a curved surface.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct RibbonJob : IJob
@@ -54,8 +48,8 @@ namespace MapRenderer.Jobs.Lines
         public int RoundSegments;
 
         /// <summary>Minimum miter ratio (1/cos(θ/2)) a <see cref="JoinType.Round"/> join needs before it emits
-        /// a fan; at or below this it collapses to the miter path instead (mirrors
-        /// <c>LineTessellator.Triangulate</c>'s <c>roundLimit</c>). Clamped to ≥ 1.</summary>
+        /// a fan; at or below this the corner is shallow enough that the fan would be imperceptible, so the
+        /// join collapses to the miter path instead. Clamped to ≥ 1.</summary>
         public double RoundLimit;
 
         // ── Output ────────────────────────────────────────────────────────────────────────────
@@ -72,7 +66,7 @@ namespace MapRenderer.Jobs.Lines
         public NativeArray<int> OutIndexCount;
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
-        // Worst-case sizing — identical topology to the managed LineTessellator (same join/cap emission).
+        // Worst-case sizing — bounded by the join/cap emission shape below.
         // ─────────────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>Upper bound on vertices for <paramref name="pointCount"/> raw input points.</summary>
@@ -178,11 +172,10 @@ namespace MapRenderer.Jobs.Lines
                     // that a left turn puts the CONCAVE side on the left.)
                     bool leftTurn = math.dot(math.cross(along[seg], along[seg + 1]), upJ) < 0.0;
 
-                    // Mirrors LineTessellator.Triangulate's cascade: a Round join whose corner is shallow
-                    // enough (f ≤ roundLimit) collapses to the miter path instead of a fan, and that
-                    // collapsed miter is STILL subject to miterLimit — roundLimit/miterLimit are
-                    // independently style-settable with no cross-clamp, so the cascade must be
-                    // round→miter→bevel, not round→(unbounded)miter.
+                    // A Round join whose corner is shallow enough (f ≤ roundLimit) collapses to the miter
+                    // path instead of a fan, and that collapsed miter is STILL subject to miterLimit —
+                    // roundLimit/miterLimit are independently style-settable with no cross-clamp, so the
+                    // cascade must be round→miter→bevel, not round→(unbounded)miter.
                     bool roundCollapsedToMiter = Join == JoinType.Round && NeedsMiter(n1, n2, roundLimit);
                     bool bevel = (Join == JoinType.Bevel) ||
                                  (Join == JoinType.Miter && NeedsBevel(n1, n2, miterLimit)) ||
@@ -249,16 +242,15 @@ namespace MapRenderer.Jobs.Lines
             => math.normalize(math.cross(along, up));
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
-        // Miter (mirrors LineTessellator.ComputeMiterNormals / NeedsBevel, 3D)
+        // Miter
         // ─────────────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// Computes the join bisector direction and half-angle cosine shared by
         /// <see cref="ComputeMiterNormals"/>, <see cref="ComputeInnerNormal"/> and
-        /// <see cref="NeedsBevel"/> — the one statement of this arithmetic in the file (mirrors
-        /// <c>LineTessellator.TryJoinBisector</c>, 3D). Returns false at a 180° hairpin (the normals
-        /// cancel), in which case <paramref name="mu"/> is set to <paramref name="n1"/> and
-        /// <paramref name="cosHalf"/> to 1.0 as an inert fallback.
+        /// <see cref="NeedsBevel"/> — the one statement of this arithmetic in the file. Returns false at
+        /// a 180° hairpin (the normals cancel), in which case <paramref name="mu"/> is set to
+        /// <paramref name="n1"/> and <paramref name="cosHalf"/> to 1.0 as an inert fallback.
         /// </summary>
         private static bool TryJoinBisector(double3 n1, double3 n2, out double3 mu, out double cosHalf)
         {
@@ -286,8 +278,7 @@ namespace MapRenderer.Jobs.Lines
         /// <summary>
         /// Inner-vertex normal for a bevel/round join: the SAME miter-factor magnitude the miter
         /// join's <see cref="ComputeMiterNormals"/> emits, saturated at <paramref name="miterLimit"/>
-        /// instead of falling back to bevel (mirrors <c>LineTessellator.ComputeInnerNormal</c>, 3D).
-        /// Returns the MAGNITUDE along <c>+mu</c> only (not signed) — the caller applies the
+        /// instead of falling back to bevel. Returns the MAGNITUDE along <c>+mu</c> only (not signed) — the caller applies the
         /// turn-direction sign (<c>leftTurn ? +innerN : -innerN</c>) when placing the vertex on the
         /// concave side (see <see cref="EmitBevelJoin"/>/<see cref="EmitRoundJoin"/>).
         /// </summary>
@@ -298,27 +289,25 @@ namespace MapRenderer.Jobs.Lines
 
             if (math.abs(cosHalf) < 1e-12)
                 // Saturated answer; avoids 1/0 → ±Inf through Burst. mu's DIRECTION here is
-                // floating-point noise (mirrors LineTessellator.ComputeInnerNormal); only the saturated
-                // magnitude is relied on.
+                // floating-point noise; only the saturated magnitude is relied on.
                 return mu * miterLimit;
 
             double innerFactor = math.min(1.0 / math.abs(cosHalf), miterLimit);
             return mu * innerFactor;
         }
 
-        private static bool NeedsBevel(double3 n1, double3 n2, double miterLimit)
+        internal static bool NeedsBevel(double3 n1, double3 n2, double miterLimit)
         {
             if (!TryJoinBisector(n1, n2, out double3 mu, out double cosHalf)) return true;
             if (math.abs(cosHalf) < 1e-12) return true;
-            // Magnitude test (mirrors LineTessellator.NeedsBevel): near a 180° hairpin dot can go small-NEGATIVE,
+            // Magnitude test: near a 180° hairpin dot can go small-NEGATIVE,
             // and a signed 1/dot > limit lets a huge negative miter factor slip past the bevel gate (the glitch).
             return math.abs(1.0 / cosHalf) > miterLimit;
         }
 
-        /// <summary>Mirrors <c>LineTessellator.NeedsMiter</c> (3D): true when a Round join's corner is
-        /// shallow enough (miter ratio ≤ <paramref name="roundLimit"/>) to collapse to the miter path instead
-        /// of a fan.</summary>
-        private static bool NeedsMiter(double3 n1, double3 n2, double roundLimit)
+        /// <summary>True when a Round join's corner is shallow enough (miter ratio ≤
+        /// <paramref name="roundLimit"/>) to collapse to the miter path instead of a fan.</summary>
+        internal static bool NeedsMiter(double3 n1, double3 n2, double roundLimit)
         {
             if (!TryJoinBisector(n1, n2, out double3 mu, out double cosHalf)) return false;
             if (math.abs(cosHalf) < 1e-12) return false;
@@ -326,7 +315,7 @@ namespace MapRenderer.Jobs.Lines
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
-        // Join geometry (mirrors LineTessellator; index topology verbatim, directions in 3D)
+        // Join geometry
         // ─────────────────────────────────────────────────────────────────────────────────────────
 
         private void EmitBevelJoin(
@@ -336,9 +325,8 @@ namespace MapRenderer.Jobs.Lines
         {
             double3 innerN = ComputeInnerNormal(n1, n2, miterLimit);
 
-            // Mirrors the managed LineTessellator.EmitBevelJoin (2D §2.1/§2.2) — the two branches are
-            // mirror images, not unifiable (a reflection reverses triangle orientation; see the managed
-            // file's comment for the −12 CW counterexample).
+            // The two branches below are mirror images, not unifiable: a reflection reverses triangle
+            // orientation, so the chamfer index order that is CCW in one branch is CW in the other.
             if (leftTurn)
             {
                 // Left turn ⇒ concave = left, convex = right.
@@ -433,7 +421,7 @@ namespace MapRenderer.Jobs.Lines
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────
-        // Caps (mirrors LineTessellator; the round half-circle is swept in the (across, along) basis)
+        // Caps (the round half-circle is swept in the (across, along) basis)
         // ─────────────────────────────────────────────────────────────────────────────────────────
 
         private void EmitStartCap(

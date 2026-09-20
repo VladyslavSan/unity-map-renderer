@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency. Pure blittable data carrier. TOP-LEVEL `using Unity.Mathematics;`
-// + unqualified float3/double3 — this file lives in MapRenderer.Core.Text.Placement (see PolylineArcWalker
+// + unqualified float3/double3 — this file lives in MapRenderer.Core.Text.Placement (see SymbolScreenProjection
 // for the namespace-collision trap an inline `Unity.Mathematics.X` would hit).
 
 using Unity.Mathematics;

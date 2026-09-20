@@ -45,7 +45,7 @@ using Unity.Profiling;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View.Camera;
 using MapRenderer.Tests.Visual;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;

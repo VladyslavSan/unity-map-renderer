@@ -11,7 +11,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Sprites;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;

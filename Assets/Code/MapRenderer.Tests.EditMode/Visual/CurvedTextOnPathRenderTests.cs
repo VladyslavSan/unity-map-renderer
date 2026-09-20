@@ -40,7 +40,6 @@ using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View;
 // UnityEngine ALSO declares a TextAnchor (the legacy IMGUI alignment enum) — disambiguate explicitly, the
 // same way this file's curved-render sibling handles UnityEngine.Rendering.CameraProperties.
 using TextAnchor = MapRenderer.Core.Text.TextAnchor;

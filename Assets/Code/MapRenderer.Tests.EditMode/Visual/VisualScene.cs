@@ -15,7 +15,6 @@ using Cysharp.Threading.Tasks;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Tile;
 using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
 using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;

@@ -7,7 +7,6 @@ using UnityEngine;
 using Cysharp.Threading.Tasks;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.View.Camera;
 using MapController   = MapRenderer.App.Controller;
 using TouchController = MapRenderer.App.TouchController;
 using MapHost = MapRenderer.App.MapHost;

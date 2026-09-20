@@ -14,7 +14,7 @@ namespace MapRenderer.Core.Text
     /// Render-path-agnostic: no <c>Mesh</c>/<c>MeshData</c>/<c>IRenderLayer</c>, no anchor/offset/quad
     /// assumptions (S19 owns those). Not on any per-frame hot path — shaping runs at tile-layout time.
     /// </summary>
-    public sealed class CodepointTextShaper : ITextShaper
+    public sealed class CodepointTextShaper
     {
         public ShapedRun Shape(in ShapingRequest request)
         {

@@ -12,7 +12,7 @@ using UnityEngine;
 using UnityEngine.TestTools.Constraints;
 using Is = UnityEngine.TestTools.Constraints.Is;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 

@@ -6,8 +6,8 @@ using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.App.View;
+using MapRenderer.Unity.View;
 
 namespace MapRenderer.Tests.Cameras
 {

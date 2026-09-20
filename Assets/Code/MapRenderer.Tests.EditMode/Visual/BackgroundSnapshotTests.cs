@@ -4,7 +4,6 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;

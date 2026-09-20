@@ -20,7 +20,6 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
 using LineStyleLayer = MapRenderer.Core.Style.Line.StyleLayer;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;

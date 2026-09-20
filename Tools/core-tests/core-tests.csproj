@@ -48,9 +48,11 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/TileGeometryType.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Tiles/TileBufferClip.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Protobuf/ProtobufReader.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/SignedArea.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/Polygon.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/PolygonAssembler.cs" />
+    <!-- UMR-173: relocated out of Core (zero production callers) into the test assembly's TestSupport,
+         namespace-only change. Still the independent ground truth the water corpus validates against. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/SignedArea.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/Polygon.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/PolygonAssembler.cs" />
     <!-- S4: shared projection-subdivision policy (Core, engine-free) + its tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/LineCurvatureSubdivision.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Geometry/LineCurvatureSubdivisionTests.cs" />
@@ -79,43 +81,48 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/GeoCoordinate.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/Ecef.cs" />
 
-    <!-- S06: tile cover / floating-origin / input math (Core, engine-free) -->
+    <!-- S06: tile cover / floating-origin / input math. UMR-173 moved the whole View tree out of Core
+         (it was never pinned there — see ARCHITECTURE.md §2); every file below is still engine-free, so
+         the fast loop keeps compiling them from their new MapRenderer.Unity/App homes unchanged — same
+         precedent as the MapRenderer.Unity/Text files above. -->
     <!-- S71: visible-tile-selection seam + default viewport-corner impl (replaces TileCover) -->
     <!-- S73: device-agnostic gesture intent vocabulary -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/ViewContext.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/IVisibleTileSelector.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/FrustumTileSelector.cs" />
-    <!-- S85: render/tile telemetry snapshot + cover-dims/zoom-span derivation (Core, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileTelemetrySnapshot.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/SymbolStoreTelemetrySnapshot.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/SymbolPlacementTelemetrySnapshot.cs" />
-    <!-- The three carriers above are all the telemetry Core holds: plain init-only structs with no logic. The
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/ViewContext.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/IVisibleTileSelector.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/FrustumTileSelector.cs" />
+    <!-- S85: render/tile telemetry snapshot + cover-dims/zoom-span derivation (Unity, engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/TileTelemetrySnapshot.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/SymbolStoreTelemetrySnapshot.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/SymbolPlacementTelemetrySnapshot.cs" />
+    <!-- The three carriers above are all the telemetry this tree holds: plain init-only structs with no logic. The
          publish channel that used to live here (and its shared-verbatim tests) is gone — providers now own their
          snapshot as a field and hand it out by ref, so the behaviour to test sits with the providers in
          MapRenderer.Unity and is covered by the EditMode runner instead. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileCoverStats.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/TileLodStrategy.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/FarPlanePolicy.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/DeviceScaling.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/ViewFrustum.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/FloatingOrigin.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/ViewInput.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/GestureIntent.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/TileCoverStats.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/TileLodStrategy.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/Camera/FarPlanePolicy.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/DeviceScaling.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/ViewFrustum.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/FloatingOrigin.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.App/View/ViewInput.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.App/View/GestureIntent.cs" />
 
-    <!-- S74: touch gesture recognizer + finger-sample type (Core, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/TouchSample.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/TouchGestureRecognizer.cs" />
+    <!-- S74: touch gesture recognizer + finger-sample type (App, engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.App/View/TouchSample.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.App/View/TouchGestureRecognizer.cs" />
 
-    <!-- S45: Camera system (Core, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/Angle.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/ConstrainedAngle.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/CameraProperties.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/CameraPropertiesUpdate.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/CameraPoseMath.cs" />
-    <!-- Tile-load smoothness: priority math for center-first loading (Core, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/TilePriority.cs" />
-    <!-- S72: pure two-way slider↔camera reconcile (Core, engine-free) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/View/Camera/CameraSliderBinding.cs" />
+    <!-- S45: Camera system. Angle/ConstrainedAngle/CameraProperties/CameraPoseMath are pinned to Core
+         (MapRenderer.Jobs consumes IProjection, whose signatures take `in CameraProperties`); the rest
+         moved out with the rest of the View tree (UMR-173). -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/Angle.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/ConstrainedAngle.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/CameraProperties.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/Camera/CameraPropertiesUpdate.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/CameraPoseMath.cs" />
+    <!-- Tile-load smoothness: priority math for center-first loading (Unity, engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.Unity/View/TilePriority.cs" />
+    <!-- S72: pure two-way slider↔camera reconcile (App, engine-free) -->
+    <Compile Include="../../Assets/Code/MapRenderer.App/View/Camera/CameraSliderBinding.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Data/IDataSource.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Data/FileDataSource.cs" />
     <!-- HttpDataSource removed from Core (S51): HttpClient is inherently Task-based.
@@ -123,9 +130,11 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Data/TileCache.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Data/TileScheduler.cs" />
 
-    <!-- S05: Line tessellator -->
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/LineVertex.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/LineTessellator.cs" />
+    <!-- S05: line join/cap enums. UMR-173 retired the managed LineTessellator/LineVertex (51 tests
+         permanently left the fast loop with it — the properties they asserted now belong to RibbonJob,
+         a Burst job this project cannot compile) — only the two enums, still consumed by Jobs/Unity,
+         remain. -->
+    <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/LineJoinCap.cs" />
 
     <!-- S07: painter's-algorithm layer draw-order (Core, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Rendering/LayerDrawOrder.cs" />
@@ -206,7 +215,6 @@
          tests' only registered consumers here (verified: no other registered file has a symbol use,
          only a doc-comment mention in GeoJsonParserTests.cs) — removed with them. -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/LineTessellatorTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ViewMathTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ViewInputTests.cs" />
 
@@ -387,7 +395,6 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IGlyphMetricsProvider.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/FontStack.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/ShapingRequest.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/ITextShaper.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/ArabicJoining.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/BidiReorder.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CodepointTextShaper.cs" />
@@ -505,7 +512,6 @@
 
     <!-- #5 B1: curved along-line text — Core helpers (engine-free) + their tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PolylineArcMath.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/PolylineArcWalker.cs" />
     <!-- A-2: stable tile-space line anchors (engine-free) + their tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LineAnchor.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LineAnchorPlacement.cs" />
@@ -534,7 +540,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/HorizonCullTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedGlyph.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedTextLayout.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcWalkerTests.cs" />
+    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcMathScreenTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcMathWorldSampleTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathSortKeyTests.cs" />
@@ -548,21 +554,20 @@
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolBearingTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/BillboardMath.cs" />
 
-    <!-- S20 Slice 2: screen-space collision (Core source, engine-free) -->
+    <!-- S20 Slice 2: screen-space collision primitives (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolBox.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolCandidate.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolCollision.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolCollisionGrid.cs" />
 
     <!-- Epic A / A1: T3 BuildWorldQuad billboard golden, T2 screen-projection golden + culling
          (shared verbatim; T2 needs the float4x4 shim — Shim/Types/float4x4.cs + VectorMath.mul overload). -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/BillboardMathTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolScreenProjectionTests.cs" />
 
-    <!-- S20 Slice 2: T1 collision — named/permutation-invariant/sort-key-driven survivor set (shared verbatim). -->
+    <!-- S20 Slice 2: the ComparePlacementOrder(SymbolCandidate) comparator tooth (shared verbatim). The
+         collision job itself (CollisionJob) and its placement/grid-contract teeth need NativeArray/IJob and
+         so stay Unity-only — NOT registered here. -->
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCollisionTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCollisionOrderTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCandidateCollisionTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCandidateRangeTilingTests.cs" />
 
     <!-- GeoJSON source, S1: RFC 7946 parse + client-side tile slicing (Core, engine-free).

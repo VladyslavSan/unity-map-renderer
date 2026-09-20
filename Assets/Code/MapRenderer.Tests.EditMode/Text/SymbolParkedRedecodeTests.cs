@@ -17,7 +17,6 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
 using MapRenderer.Unity.Rendering.Map;

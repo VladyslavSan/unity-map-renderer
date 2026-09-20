@@ -429,7 +429,7 @@ namespace MapRenderer.Tests
         /// <para><b>The <c>boxes[g]</c> ↔ <c>vertices[4g … 4g+3]</c> pairing holds by construction with a
         /// SINGLE symbol in the frame</b> — <c>StageCurvedAnchor</c> appends box <c>g</c> and quad <c>g</c> in
         /// the same loop iteration, <c>WorldSymbolRenderer.Emit</c> walks the quads in order, and
-        /// <c>SymbolCollision.SelectSurvivors</c> does not reorder the box pool (it sorts the CANDIDATES; the
+        /// <c>CollisionJob</c> does not reorder the box pool (it sorts the CANDIDATES; the
         /// grid stores absolute box indices). Callers must still ASSERT it
         /// (<c>boxes.Length == vertices.Length / 4</c>), never assume it.</para>
         /// </summary>

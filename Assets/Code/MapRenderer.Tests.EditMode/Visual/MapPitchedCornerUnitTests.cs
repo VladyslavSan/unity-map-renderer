@@ -24,7 +24,6 @@ using UnityEngine;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View;
 using MapRenderer.Tests.Text.Placement;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Text;

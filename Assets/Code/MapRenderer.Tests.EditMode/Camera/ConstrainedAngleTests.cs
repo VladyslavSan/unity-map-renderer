@@ -4,7 +4,7 @@
 // Tests ConstrainedAngle (S68): B2 Heading Wrap, B3 Tilt Clamp, B5 runtime Clamped, operator+.
 
 using NUnit.Framework;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests.Cameras
 {

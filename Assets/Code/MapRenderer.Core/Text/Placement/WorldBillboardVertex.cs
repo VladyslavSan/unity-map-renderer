@@ -34,7 +34,7 @@ namespace MapRenderer.Core.Text.Placement
     public struct WorldBillboardVertex
     {
         /// <summary>Tile-local render-space position (POSITION) — <c>anchorRender − tileOriginRender</c>,
-        /// baked ONCE at emit (Level 1 of the two-level RTC, <see cref="MapRenderer.Core.View.FloatingOrigin"/>).
+        /// baked ONCE at emit (Level 1 of the two-level RTC, <c>FloatingOrigin</c>).
         /// Never rebaked on camera motion; the object-to-world transform supplies Level 2 every frame.</summary>
         public float3 AnchorLocal;
 

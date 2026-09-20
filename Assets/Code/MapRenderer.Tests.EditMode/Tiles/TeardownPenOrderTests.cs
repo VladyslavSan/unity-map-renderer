@@ -8,7 +8,6 @@ using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Tile;

@@ -1,6 +1,6 @@
 #if ENABLE_PROFILER
 using Unity.Profiling;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 
 namespace MapRenderer.Unity.Rendering.Map
 {

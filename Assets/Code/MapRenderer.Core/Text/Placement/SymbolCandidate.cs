@@ -8,14 +8,13 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// #5 (B3): one collision candidate spanning a CONTIGUOUS range of <see cref="SymbolBox"/>es —
     /// all-or-nothing. A POINT symbol is a single-box candidate (its whole-symbol AABB); a CURVED along-line
-    /// symbol is an N-box candidate (one AABB per glyph). <see cref="SymbolCollision.SelectSurvivors(SymbolCandidate[],int,SymbolBox[],int,bool[],SymbolCollisionGrid)"/>
-    /// places a candidate iff EVERY box in its range is free, and — if placed — reserves ALL of them; so a
-    /// curved symbol drops entirely when any one glyph collides, and blocks others across its whole run.
+    /// symbol is an N-box candidate (one AABB per glyph). <c>CollisionJob</c> places a candidate iff EVERY
+    /// box in its range is free, and — if placed — reserves ALL of them; so a curved symbol drops entirely
+    /// when any one glyph collides, and blocks others across its whole run.
     ///
     /// <para>Only the CANDIDATES are sorted into placement order; the flat <c>boxes[]</c> array stays put
     /// (the grid stores absolute box indices), so <see cref="BoxStart"/> keeps addressing the same boxes
-    /// after the sort. Blittable-friendly (all value fields) for a future Burst pass, mirroring
-    /// <see cref="SymbolBox"/>.</para>
+    /// after the sort. Blittable-friendly (all value fields), mirroring <see cref="SymbolBox"/>.</para>
     /// </summary>
     public struct SymbolCandidate
     {
@@ -27,7 +26,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>Road-shields §10 D8: index of this candidate's FIRST <see cref="CandidateEmit"/> in the
         /// staged emit pool — mirrors <see cref="BoxStart"/>. Emits are no longer keyed by <see cref="SymbolIndex"/>:
-        /// that member keeps ONLY its survivor-identity role (<c>SymbolCollision.cs:169</c>, <c>CollisionJob.cs:34</c>).</summary>
+        /// that member keeps ONLY its survivor-identity role (<c>CollisionJob.cs:34</c>).</summary>
         public int EmitStart;
 
         /// <summary>Road-shields §10 D8: number of emits in this candidate's range — 1 for an ordinary symbol,
@@ -105,7 +104,7 @@ namespace MapRenderer.Core.Text.Placement
         /// flip a near-tied pair frame-to-frame (tile churn / reprojection) → no z-fighting-style flicker. It sits
         /// BELOW SortKey, so any strictly-higher-priority (lower-SortKey) newcomer still wins — incumbency never
         /// blocks a genuinely higher-priority symbol. The placement layer sets this each frame (feedback of history
-        /// into collision — the one deliberately-relaxed spot of the "downstream of SelectSurvivors" rule).</summary>
+        /// into collision — the one deliberately-relaxed spot of the "downstream of collision, never fed back" rule).</summary>
         public bool WasPlacedLastFrame;
 
         /// <summary>

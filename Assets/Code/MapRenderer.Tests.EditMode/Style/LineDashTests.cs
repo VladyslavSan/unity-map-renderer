@@ -8,7 +8,7 @@ using MapRenderer.Core.Json;
 using MapRenderer.Core.Style;
 using Unity.Mathematics;
 using Line = MapRenderer.Core.Style.Line;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests.Style
 {

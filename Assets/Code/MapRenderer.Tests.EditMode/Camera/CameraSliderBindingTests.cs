@@ -3,7 +3,7 @@
 
 using NUnit.Framework;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.App.View.Camera;
 
 namespace MapRenderer.Tests.Cameras
 {

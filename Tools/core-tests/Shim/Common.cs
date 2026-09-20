@@ -46,7 +46,7 @@ namespace Unity.Mathematics
         public static double clamp(double x, double lo, double hi)
             => x < lo ? lo : (x > hi ? hi : x);
 
-        // A-2: PolylineArcWalker.ArcDistanceAt clamps an int segment + saturates a float param.
+        // A-2: PolylineArcMath.ArcDistanceAt clamps an int segment + saturates a float param.
         public static int   clamp(int x, int lo, int hi)   => x < lo ? lo : (x > hi ? hi : x);
         public static float saturate(float x)              => x < 0f ? 0f : (x > 1f ? 1f : x);
 

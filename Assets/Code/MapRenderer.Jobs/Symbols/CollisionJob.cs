@@ -7,13 +7,12 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
-    /// B-4a: the Burst-compiled port of the grid-accelerated
-    /// <see cref="SymbolCollision.SelectSurvivors(SymbolCandidate[],int,SymbolBox[],int,bool[],SymbolCollisionGrid)"/>
-    /// — the serial greedy survivor selection, run as a single <see cref="IJob"/> over NATIVE data instead of the
-    /// managed path. Behaviourally IDENTICAL to the managed reference (same heapsort placement order, same
-    /// <see cref="SymbolCollision.Overlaps"/> decision, same uniform-grid prefilter) — a differential test locks it
-    /// bit-for-bit over adversarial inputs. It is ONE job, not a parallel fan-out: the greedy pass is inherently
-    /// serial (each placement depends on all prior survivors); the grid keeps it ~O(n·k).
+    /// B-4a: the Burst-compiled, grid-accelerated greedy survivor selection — sorts
+    /// <see cref="Candidates"/> into placement order (<see cref="SymbolCollision.ComparePlacementOrder(in SymbolCandidate,in SymbolCandidate)"/>),
+    /// then places each candidate iff none of its boxes overlaps (<see cref="SymbolCollision.Overlaps"/>) an
+    /// already-placed blocker, run as a single <see cref="IJob"/> over NATIVE data. It is ONE job, not a
+    /// parallel fan-out: the greedy pass is inherently serial (each placement depends on all prior survivors);
+    /// the grid keeps it ~O(n·k).
     ///
     /// <para><b>The grid is PRE-SIZED by the caller</b> (<see cref="CollisionGridSizing"/>) because a Burst job
     /// cannot grow a <see cref="NativeArray{T}"/> mid-run: the managed grid resized its node arrays inside Insert,
@@ -44,7 +43,7 @@ namespace MapRenderer.Jobs.Symbols
 
         public void Execute()
         {
-            Sort(); // heapsort Candidates[0..CandidateCount) into placement order (mirrors SymbolCollision.Sort)
+            Sort(); // heapsort Candidates[0..CandidateCount) into placement order
 
             int nodeCount = 0, survivors = 0;
             for (int i = 0; i < CandidateCount; i++)
@@ -54,13 +53,14 @@ namespace MapRenderer.Jobs.Symbols
 
                 // Zoom-gated OUT: a suppressed candidate (owning layer outside the live camera zoom's minzoom/maxzoom)
                 // is ABSENT for collision — never placed, never a blocker — so it neither wins nor blocks the winner
-                // while it eases to 0 (still emitted, fading, by the caller). Mirrors SymbolCollision.SelectSurvivors.
+                // while it eases to 0 (still emitted, fading, by the caller).
                 if (c.Suppressed) { Survivors[i] = 0; continue; }
 
                 // Place if it ignores collision, OR none of its REQUIRED boxes overlaps an already-placed
                 // blocker. Test ALL boxes first (all-or-nothing) — no box is inserted until the whole candidate
-                // wins (no self-block). Stage C's per-box optional mask mirrors SymbolCollision.SelectSurvivors
-                // branch for branch (the differential test locks the two together).
+                // wins. This SHAPE is load-bearing for Stage C's per-box optional mask too: a centred pair's two
+                // boxes overlap by construction, so testing one half before inserting the other would make the
+                // pair block itself.
                 bool place = c.AllowOverlap;
                 byte dropped = 0;
                 if (!place)
@@ -96,7 +96,7 @@ namespace MapRenderer.Jobs.Symbols
             OutSurvivorCount[0] = survivors;
         }
 
-        // ── Grid query/insert (mirrors SymbolCollisionGrid.OverlapsAny / Insert over the native arrays) ────────
+        // ── Grid query/insert over the pre-sized native arrays ──────────────────────────────────────────────
         private bool OverlapsAny(int boxIndex)
         {
             SymbolBox box = Boxes[boxIndex];
@@ -192,10 +192,9 @@ namespace MapRenderer.Jobs.Symbols
     /// <summary>
     /// Main-thread sizing for <see cref="CollisionJob"/>'s pre-allocated grid — computes the grid dimensions
     /// and the exact node-storage upper bound BEFORE the job is scheduled (a Burst job cannot grow its arrays).
-    /// The cell mapping here is BIT-IDENTICAL to <see cref="CollisionJob"/>'s (and to the managed
-    /// <c>SymbolCollisionGrid</c>) — TargetCellPx / MaxGridDim / the CellX/CellY clamp must stay in lockstep with
-    /// both, or the node bound under-counts and inserts drop (the differential test over adversarial inputs — wide
-    /// boxes, dense clusters at the grid-dim boundary — is the net that catches drift).
+    /// The cell mapping here is BIT-IDENTICAL to <see cref="CollisionJob"/>'s own <c>CellX</c>/<c>CellY</c> —
+    /// TargetCellPx / MaxGridDim / the clamp must stay in lockstep, or the node bound under-counts and inserts
+    /// drop.
     /// </summary>
     public static class CollisionGridSizing
     {
@@ -208,7 +207,7 @@ namespace MapRenderer.Jobs.Symbols
             public int   W, H;
         }
 
-        /// <summary>The grid dims bounding <paramref name="boxes"/><c>[0..count)</c> — mirrors <c>SymbolCollisionGrid.Reset</c>.</summary>
+        /// <summary>The grid dims bounding <paramref name="boxes"/><c>[0..count)</c>.</summary>
         public static Dims ComputeDims(NativeArray<SymbolBox> boxes, int count)
         {
             float minX = float.PositiveInfinity, minY = float.PositiveInfinity;

@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified double3 — this
-// file lives in MapRenderer.Core.Text.Placement (see PolylineArcWalker's header for the inline-qualification
+// file lives in MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header for the inline-qualification
 // trap this avoids).
 
 using System;

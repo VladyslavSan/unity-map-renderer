@@ -109,7 +109,7 @@ antialiased boundary looks like.** Tooth T2 (§7) permits ≤ 1 px for exactly t
 | px→world scale is measured per-vertex, per-direction, foreshortening-correct | `Line_VertexExtrude.hlsl:80-104` (`MapPixelsToWorld`) |
 | `LineRibbonVertex.Position` is the raw centerline point — the entire styled width is applied in the vertex shader, never in mesh positions | `Jobs/RibbonJob.cs:549-558` |
 | Line geometry is **not clipped to the tile boundary** — a decoded feature is ribboned as-is | `Rendering/Meshing/StyledLineTileBuilder.cs:206-308` (no clip step) |
-| The Burst job and the managed `LineTessellator` are held to **exact differential parity**, `Side` included | `Tests.EditMode/LineRibbonJobTests.cs:94-112` (`AssertParity`) |
+| The Burst job was held to **exact differential parity**, `Side` included, against a managed reference tessellator through UMR-173; the reference retired and `RibbonJob` now ships alone, its geometry pinned directly | `Tests.EditMode/RibbonJobGeometryTests.cs` |
 | MSAA is off project-wide | `Assets/Settings/RPAsset.asset:28` (`m_MSAA: 1`) |
 
 ### 3.1 The real style: what `_casing` actually means
@@ -598,27 +598,26 @@ already `+1` on both of its uses and needs no duplicate. The end cap mirrors thi
 **exactly one extra vertex per round-capped end**, and zero extra triangles.
 
 The pattern to copy is the round join's discipline of emitting a fresh flank vertex at the sign the fan
-needs. *(A note on provenance: the join does not emit each arc vertex at both signs — `LineTessellator.cs:419-423`
-and `:452-456` emit `arcStart`/`arcEnd` **once**, branching on `leftTurn`. The transferable precedent is
-"manufacture a fresh vertex at the sign this fan requires", not "duplicate every vertex per sign".)*
+needs. *(A note on provenance: the join does not emit each arc vertex at both signs — the round join emits
+`arcStart`/`arcEnd` **once**, branching on `leftTurn`. The transferable precedent is "manufacture a fresh
+vertex at the sign this fan requires", not "duplicate every vertex per sign".)*
 
 **Four consequences the implementation must handle:**
 
-1. **The managed oracle has the identical defect and must change in the same commit.**
-   `LineTessellator.cs:507-580` mirrors the job exactly — arc intermediates `+1`, `leftButt` `+1`,
-   `rightButt` `−1`, `prevFan = rightButtIdx`. `LineRibbonJobTests.AssertParity` asserts equal vertex counts
-   (`:94`), equal index counts (`:95`), index-by-index equality (`:98`) and **exact `Side` equality**
-   (`:103`). Changing one side alone turns `RoundCap_Parity` (`:181`) and `RoundCap_And_RoundJoin_Parity`
-   (`:186`) red. Changed consistently, they stay green — the differential test is itself a tooth for the fix.
+1. **The (since-retired) managed oracle had the identical defect and needed to change in the same
+   commit.** It mirrored the job exactly — arc intermediates `+1`, `leftButt` `+1`, `rightButt` `−1`,
+   `prevFan = rightButtIdx`. The differential parity tooth of the day asserted equal vertex counts, equal
+   index counts, index-by-index equality and **exact `Side` equality**, so changing one side alone turned
+   the round-cap parity teeth red; changed consistently, they stayed green — the differential test was
+   itself a tooth for the fix.
 2. **Emission order is load-bearing.** `Execute()` reads `leftPrev = v-2; rightPrev = v-1` immediately after
-   the start cap (`:151-152`), and the managed side documents the same `[count-2]=left, [count-1]=right`
-   contract (`LineTessellator.cs:521-526`). The new duplicate must therefore be emitted **before**
-   `leftButt`/`rightButt`, not appended after.
+   the start cap (`:151-152`), per the `[count-2]=left, [count-1]=right` contract. The new duplicate must
+   therefore be emitted **before** `leftButt`/`rightButt`, not appended after.
 3. **Worst-case sizing.** `RibbonJob.MaxVertexCount` (`:74-85`): `startCap` `rs + 3 → rs + 4`,
    `endCap` `rs + 1 → rs + 2`. `MaxIndexCount` is **unchanged** (no new triangles). Three callers depend on
-   these (`StyledLineTileBuilder.cs:251-252`, `LineRibbonJobTests.cs:40-41`,
-   `BurstJobRunOffMainSpikeTests.cs:131-132`). The managed tessellator is `List`-based and has no formula to
-   update.
+   these (`StyledLineTileBuilder.cs:251-252`, `FlatRibbon.Build` call sites,
+   `BurstJobRunOffMainSpikeTests.cs:131-132`). The (since-retired) managed tessellator was `List`-based and
+   had no formula to update.
 4. **A new tooth, T3c** (§7) — neither T1 nor T3a catches this: T1 cuts perpendicular to a diagonal line,
    never a cap flank, and T3a asserts no interior *dip*, whereas this is a **missing fade on part of the
    outer silhouette**. Without T3c it would pass the entire headless gate.
@@ -722,8 +721,9 @@ Rules for all of them:
   eliminate the hazard.
 - **Never re-bake a snapshot to go green.** A diff means behaviour changed.
 - Regression teeth that must not move: `LineWidth_MeasuredOnPerpendicular_MatchesExpected`,
-  `WidthChange_NoMeshRebuild_RenderedWidthChanges`, `RoundCap_Parity` and `RoundCap_And_RoundJoin_Parity`
-  (which stay green **only** if §6.5 changes both implementations consistently), the min-width floor
+  `WidthChange_NoMeshRebuild_RenderedWidthChanges`, `RibbonJobGeometryTests.RoundCap_FanTriangles_HaveUniformRimSide`
+  (the §6.5 uniform-rim-sign guarantee; through UMR-173 this was held differentially by a managed
+  reference producer, and since its retirement this is the only place it is checked), the min-width floor
   behaviour, `_Blur` staying an opt-in soft edge distinct from AA, dash coverage, and the gap-hole cut
   position (§5.1's `innerFrac` re-derivation is the thing most likely to break it).
 
@@ -739,7 +739,7 @@ boolean keyword.
 | stage | content | gate |
 |---|---|---|
 | **A1** | T1, T2, T2b, T3a land **RED-verified** against the current build: T1 fails (staircase); T2, T2b, T3a pass. Record each observation — a tooth never seen red is not a tooth. | green except intentionally-red T1 |
-| **A2** | **Round-cap tagging fix (§6.5).** One duplicated, `+1`-tagged flank vertex per round-capped end, emitted *before* `leftButt`/`rightButt`; **both** `RibbonJob` and `LineTessellator`, same commit; `MaxVertexCount` start/end cap terms +1 each, `MaxIndexCount` unchanged. RED-verified via the pre-AA `_Blur`/gap-hole probe (§7 T3c note). | full gate green, `RoundCap_*_Parity` green |
+| **A2** | **Round-cap tagging fix (§6.5).** One duplicated, `+1`-tagged flank vertex per round-capped end, emitted *before* `leftButt`/`rightButt`; **both** `RibbonJob` and the (then still live) managed tessellator, same commit; `MaxVertexCount` start/end cap terms +1 each, `MaxIndexCount` unchanged. RED-verified via the pre-AA `_Blur`/gap-hole probe (§7 T3c note). | full gate green, `RoundCap_*_Parity` green |
 | **A3** | **The straddle + the toggle.** (i) Fixed 0.5 px pad added to `outerWorld` *before* the miter multiply at `Line_VertexExtrude.hlsl:142`; the `saturate((1 − \|side\|)/fwidth(side))` ramp in `LineCoverage`; `innerFrac` re-derived against the padded outer; `dashU` still on the styled width. (ii) **Both** guarded by `_EDGE_ANTIALIASING_OFF`, `#pragma shader_feature_local` in **all five** passes. (iii) Registry + GUI, in order: `ShaderKeywords.EdgeAntialiasingOff` → `Line/PropertyNames.EdgeAntialiasing` → `Line/PropertyId.EdgeAntialiasing` → `[ToggleUI] _EdgeAntialiasing` in `Line.shader`'s (B) group → **`LineShaderGUI.ValidateMaterial` override** + `DrawLineInputs` row + XML-doc correction (incl. the stale `LineMaterialTweaker` cref) → `MapLine.mat` default. (iv) `LinePropertyNamesCount_IsExactly10` → `11`, with the `Line/PropertyNames.cs` class doc amended (§5.2 point 7). **No width knob, no new uniform, no new varying, no CBUFFER change.** T3c and T4 land here. | full gate green; T1, T2, T2b, T3a, T3c green with AA on, T4 green with AA off |
 | **A4** | T3b recorded; docs — this file's status, `meshing-design.md` §2 rewritten to the shipped model, the line shader `README.md` § antialiasing, and `docs/lessons-learned.md`'s "per-line transparent-fade AA cannot render a crisp cased line" entry corrected to the §2 mechanism. | green |
 | **A6.0** | **The AA ramps divide by the EUCLIDEAN gradient of `side`, not `fwidth`.** Two lines in `LineCoverage` — the outer edge and the gap-hole straddle. `fwidth` is Manhattan and over-reads by up to √2 with screen angle, so diagonals rendered softer *and* 0.41 px thinner than axis-aligned lines of the same styled width; the defect predates A3 and shipped with it (§2). `_Blur` and dash keep `fwidth` — separate features. | full gate green; diagonal apparent width == axis-aligned |
@@ -820,7 +820,7 @@ Two candidate mechanisms, recorded so the epic starts from something rather than
 designed here and neither is endorsed:**
 
 - **Flag boundary edges at build time** and carry a distance-to-boundary varying, giving fills the field
-  lines already have. Reach: `EarcutJob`/`PolygonAssembler` must mark which edges are real boundary, plus a new
+  lines already have. Reach: `EarcutJob` must mark which edges are real boundary, plus a new
   fill vertex stream.
 - **Some other mechanism entirely** — the maintainer's framing was that fills have no "SDF-like" rendering,
   so the answer may not be a distance ramp at all.
@@ -1041,8 +1041,8 @@ lives, and each was found by measurement rather than review.
   material in the build declares the keyword (`FillTweaker.cs`'s doc records this). This is why the keyword is
   `_OFF`-polarity with AA on by default — the shipping variant carries no keyword and can never be stripped.
   Inverting the polarity would make AA work in the Editor and silently vanish in a build.
-- **Burst/managed parity:** `RibbonJob` and `LineTessellator` are held to exact differential parity
-  including `Side` (`LineRibbonJobTests.AssertParity`). Any topology or tagging change lands in both, in one
-  commit.
+- **Burst/managed parity (historical, through UMR-173):** `RibbonJob` was held to exact differential
+  parity, including `Side`, against a managed reference tessellator; the reference is retired and `RibbonJob`'s
+  geometry is now pinned directly (`Tests.EditMode/RibbonJobGeometryTests.cs`).
 - `Unity.Mathematics` only (`System.Math` banned); `Core` stays engine-free; test-only members do not go on
   production classes. See `docs/conventions-short.md`.

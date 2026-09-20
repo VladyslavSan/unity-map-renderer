@@ -5,7 +5,6 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Tests.Text.Placement
 {

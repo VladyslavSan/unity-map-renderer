@@ -14,7 +14,6 @@ using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;

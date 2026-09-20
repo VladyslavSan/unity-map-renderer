@@ -1,11 +1,12 @@
-// Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Unity EditMode only — runs the placement through NativeCollisionRunner (NativeArray/IJob). NOT
+// registered in core-tests.csproj.
 
 using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Text.Placement
 {
@@ -77,8 +78,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
 
             var survivorFlags = new bool[n];
-            var grid = new SymbolCollisionGrid();
-            SymbolCollision.SelectSurvivors(candidates, n, boxes, boxCount, survivorFlags, grid);
+            NativeCollisionRunner.RunCollision(candidates, n, boxes, boxCount, survivorFlags);
 
             var survivors = new HashSet<int>();
             for (int i = 0; i < n; i++)

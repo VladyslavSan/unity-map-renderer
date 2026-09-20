@@ -9,12 +9,11 @@ using Unity.Mathematics;
 using Unity.Collections;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Tests.TestSupport;
 using MapRenderer.Jobs.Fill;
 using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
-using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Expressions;
 
 namespace MapRenderer.Tests.Meshing
@@ -49,8 +48,9 @@ namespace MapRenderer.Tests.Meshing
             // Arm A: the command streams read from the BYTES, independently of the decoder under test.
             var oracle = MvtFixtureStreams.ReadLayer(mvtBytes, "water");
 
-            // Ground truth: managed decode → assemble (PolygonAssembler is unchanged / out of Stage-3
-            // scope) gives the polygon structure (outer+holes) for the even-odd coverage + area check.
+            // Ground truth: managed decode → assemble (PolygonAssembler, test-side only, independent of
+            // the Burst graph under test) gives the polygon structure (outer+holes) for the even-odd
+            // coverage + area check.
             // This does NOT triangulate — the triangulation under test comes from the REAL Burst path
             // below, fed into the SAME ground truth via MeshCoverageValidator.ValidateTriangulation.
             var groundTruthPolys = new List<Polygon>();

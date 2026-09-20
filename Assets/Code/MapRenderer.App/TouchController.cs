@@ -8,11 +8,13 @@ using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem.EnhancedTouch;
 using Unity.Mathematics;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.App.View;
+using MapRenderer.Unity.View;
+using MapRenderer.Core.Geo;
+using MapRenderer.Unity.View.Camera;
 
 // Alias the Core TouchPhase to avoid CS0104 ambiguity with UnityEngine.InputSystem.TouchPhase.
-using CoreTouchPhase = MapRenderer.Core.View.TouchPhase;
+using CoreTouchPhase = MapRenderer.App.View.TouchPhase;
 // Alias EnhancedTouch.Touch to avoid CS0104 ambiguity with UnityEngine.Touch.
 using Touch = UnityEngine.InputSystem.EnhancedTouch.Touch;
 

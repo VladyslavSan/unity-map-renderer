@@ -15,7 +15,6 @@ using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Tiles;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using CoreMapView = MapRenderer.Unity.Rendering.Map.MapView;

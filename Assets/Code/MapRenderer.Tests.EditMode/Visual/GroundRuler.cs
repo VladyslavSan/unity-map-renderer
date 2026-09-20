@@ -4,7 +4,7 @@
 using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Tests
 {

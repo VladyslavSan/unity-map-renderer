@@ -10,7 +10,6 @@ using UnityEngine.TestTools.Constraints;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;

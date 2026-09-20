@@ -250,7 +250,7 @@ targets.)*
 
 ### Geometry producers declare their output winding; boundaries convert
 
-A type that **produces triangle geometry** (`EarcutJob`, `LineTessellator`, `RibbonJob`, `GlobeFillSubdivideJob`)
+A type that **produces triangle geometry** (`EarcutJob`, `RibbonJob`, `GlobeFillSubdivideJob`)
 must **state its output winding (CW/CCW) and coordinate space at the API surface** — in the XML summary of the
 method or result type, not left for a consumer to reverse-engineer. There is **one canonical winding** for the
 whole pipeline (**CCW in tile space**), every producer conforms to it, and the render-facing conversion happens
@@ -649,7 +649,7 @@ inside that namespace then needs full qualification (`CS0118`). Pluralize the se
 form, instead — `Materials`, `Meshing`, `GameObjects` are the collision-free forms already in use here.
 Audit a proposed segment with `grep -rE 'UnityEngine\.<Name>\b'` before committing to it.
 
-The same failure hits an unqualified `using`: `UnityEngine.Rendering` and `MapRenderer.Core.View.Camera`
+The same failure hits an unqualified `using`: `UnityEngine.Rendering` and `MapRenderer.Core.Geo`
 both define a `CameraProperties`, so adding `using UnityEngine.Rendering;` to a file that already uses
 this repo's own `CameraProperties` is a `CS0104` ambiguous reference. Qualify the newly-imported name (or
 alias it) rather than touching the incumbent.

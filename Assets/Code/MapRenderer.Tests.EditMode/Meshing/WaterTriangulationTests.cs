@@ -9,12 +9,11 @@ using Unity.Collections;
 using Unity.Mathematics;
 using MapRenderer.Core.Expressions;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Tests.TestSupport;
 using MapRenderer.Jobs.Fill;
 using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
-using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Meshing
 {

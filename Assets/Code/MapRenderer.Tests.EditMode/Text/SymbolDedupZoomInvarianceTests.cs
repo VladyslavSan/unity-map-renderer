@@ -9,7 +9,6 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Text;
 using MapRenderer.Unity.Text.Placement;
 using MapRenderer.Tests.Text.Placement; // TestSymbolTileBuffer

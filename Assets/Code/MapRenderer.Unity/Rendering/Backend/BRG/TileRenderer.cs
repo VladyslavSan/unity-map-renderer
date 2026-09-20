@@ -8,7 +8,7 @@ using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Rendering;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 using MapRenderer.Core.Geo;
 
 namespace MapRenderer.Unity.Rendering.Backend.BRG

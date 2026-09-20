@@ -9,8 +9,7 @@ using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View;
 using Line = MapRenderer.Core.Style.Line;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
@@ -66,7 +65,7 @@ namespace MapRenderer.Tests.Visual
             double3 tileOriginRender  = proj.Project(new GeoCoordinate { Latitude = swLL.y, Longitude = swLL.x });
             double3 sceneOriginRender = proj.Project(lookAt);
             float3x3 rebase   = math.transpose(proj.TangentBasisAt(lookAt));
-            float3   position = MapRenderer.Core.View.FloatingOrigin.TileToSceneRebased(
+            float3   position = MapRenderer.Unity.View.FloatingOrigin.TileToSceneRebased(
                 tileOriginRender, sceneOriginRender, rebase);
             quaternion q = new quaternion(rebase);
             mapGo.transform.rotation      = new Quaternion(q.value.x, q.value.y, q.value.z, q.value.w);

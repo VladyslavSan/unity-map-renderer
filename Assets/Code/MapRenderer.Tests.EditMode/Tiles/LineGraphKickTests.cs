@@ -15,7 +15,6 @@ using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Jobs.Lines;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Map;

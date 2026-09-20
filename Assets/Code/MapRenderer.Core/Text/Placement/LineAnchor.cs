@@ -13,7 +13,7 @@ namespace MapRenderer.Core.Text.Placement
     /// <para><b>Recovering positions.</b> The anchor's world (pre-RTC render-space) point is
     /// <c>lerp(pathRender[Segment], pathRender[Segment+1], T)</c> — a zoom-independent position (the A-3
     /// cross-tile identity key builds on this). The anchor's per-frame SCREEN arc distance along the projected
-    /// polyline is <see cref="PolylineArcWalker.ArcDistanceAt"/>.</para>
+    /// polyline is <see cref="PolylineArcMath.ArcDistanceAt"/>.</para>
     /// </summary>
     public readonly struct LineAnchor
     {

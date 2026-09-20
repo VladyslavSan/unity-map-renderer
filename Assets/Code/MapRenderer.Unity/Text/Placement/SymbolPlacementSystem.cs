@@ -6,7 +6,7 @@ using System;
 using System.Collections.Generic;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Jobs;

@@ -2,7 +2,6 @@
 // compiles it transitively when ProjectPointsJob calls SphericalProjection.ProjectPoint(...).
 
 using Unity.Mathematics;
-using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Core.Geo
 {

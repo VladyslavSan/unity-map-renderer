@@ -28,8 +28,7 @@ using NUnit.Framework;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.Rendering.Map;
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 

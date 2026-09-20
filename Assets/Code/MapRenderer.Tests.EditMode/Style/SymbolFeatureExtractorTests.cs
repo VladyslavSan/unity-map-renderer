@@ -347,6 +347,11 @@ namespace MapRenderer.Tests.Style
             double3 segEnd = symbol.PathRender[anchor.Segment + 1];
             double3 resolved = segStart + (segEnd - segStart) * (double)anchor.T; // math.lerp has no double3 overload in the shim
             double resolveError = math.length(resolved - expectedRenderMid);
+            // FIXTURE FRAGILITY: this passes at ~0 error only because the z=1 diagonal (0,0)->(extent,extent)
+            // subdivides into an EVEN step count, which puts a subdivision vertex exactly at the arc-length
+            // midpoint. An odd count would put the anchor mid-sub-segment instead (~1 km sagitta on this
+            // geometry, over the 1.0 m tolerance below) and flip this tooth falsely RED. A geometry/zoom
+            // change here needs re-checking the resulting subdivision count's parity, not just re-running.
             Assert.Less(resolveError, 1.0,
                 "the anchor must resolve to (approximately) the true midpoint on the finer render curve");
         }

@@ -1,6 +1,7 @@
 // Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2/4 — this
 // file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to a
-// (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See PolylineArcWalker.
+// (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the sibling
+// SymbolScreenProjection header comment for the namespace-collision trap.
 
 using System;
 using Unity.Mathematics;
@@ -75,8 +76,8 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// Road-shields §10 D8: stages a centred icon+text PAIR as ONE candidate spanning both halves' boxes —
-        /// the existing all-or-nothing multi-box machinery (<see cref="SymbolCollision.SelectSurvivors(SymbolCandidate[],int,SymbolBox[],int,bool[],SymbolCollisionGrid)"/>)
-        /// curved symbols already run on, so the pair cannot self-block. The projection/viewport gate runs ONCE,
+        /// the existing all-or-nothing multi-box machinery (<c>CollisionJob</c>) curved symbols already run
+        /// on, so the pair cannot self-block. The projection/viewport gate runs ONCE,
         /// on <paramref name="owner"/> — the halves share an anchor by construction (both emitted from the
         /// extractor's same <c>EmitAtAnchor</c> anchor), which is what makes the pair atomic at the cull too.
         /// <paramref name="rider"/>'s box/quads/emit are appended only when <paramref name="riderQuads"/> is

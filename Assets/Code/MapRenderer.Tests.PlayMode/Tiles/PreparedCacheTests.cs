@@ -20,7 +20,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;

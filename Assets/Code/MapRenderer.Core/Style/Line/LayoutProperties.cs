@@ -8,9 +8,9 @@ namespace MapRenderer.Core.Style.Line
     /// knobs baked at build time, split out of the former <c>LinePaint</c>. Read from the layer's
     /// <c>layout</c> sub-tree via <see cref="PropertyNames"/>. Engine-free; clean-room (public Style Spec).
     ///
-    /// Join and Cap are parsed once at construction into their typed enum values so the tessellator can
+    /// Join and Cap are parsed once at construction into their typed enum values so the ribbon builder can
     /// consume them directly (no per-build string switch). <c>MiterLimit</c> and <c>RoundLimit</c> remain
-    /// plain <c>double</c> because <see cref="LineTessellator.Triangulate"/> consumes <c>double</c>
+    /// plain <c>double</c> because the ribbon builder's miter-ratio math runs in <c>double</c>
     /// (changing to <c>float</c> would introduce a precision delta with no spec justification).
     /// </summary>
     public sealed class LayoutProperties

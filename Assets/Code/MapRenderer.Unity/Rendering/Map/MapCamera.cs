@@ -2,8 +2,8 @@ using System;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View;
+using MapRenderer.Unity.View.Camera;
 // Alias, not a plain `using`: the namespace segment `Rendering` collides with a bare UnityEngine type in
 // lookup — the CS0118 trap this repo documents at RenderLayerSet.cs.
 using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
@@ -63,7 +63,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <para><b>The camera normalizes the WORLD, not the paint.</b> Dividing the altitude here is what
         /// makes ground geometry DPR-independent. A style's <c>px</c> values are LOGICAL px and are converted
         /// to their consumer's space exactly once, at <c>ZoomStyleApplier</c> via
-        /// <see cref="MapRenderer.Core.View.DeviceScaling.LogicalToDevicePx"/> — never here, and never twice.</para>
+        /// <see cref="MapRenderer.Unity.View.DeviceScaling.LogicalToDevicePx"/> — never here, and never twice.</para>
         ///
         /// <para><b>Correction (S107) — the previous text was right when it was written.</b> This comment used
         /// to read <i>"PAINT is NOT DPI-scaled … never ÷DPR the paint path"</i>, and under S92 D1 that was

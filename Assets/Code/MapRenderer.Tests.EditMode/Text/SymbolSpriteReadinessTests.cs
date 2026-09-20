@@ -15,7 +15,6 @@ using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
 using MapRenderer.Core.Text.Sprites;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
@@ -254,7 +253,7 @@ namespace MapRenderer.Tests.Text
             Assert.IsFalse(anyIcon, "no atlas ever resolved, so no icon can resolve either — text-only is the correct, inert outcome");
         }
 
-        // ── T16 (docs/road-shields-design.md §5) — D6 review follow-up (REQUIRED 1): the deadline bound on
+        // ── T16 (docs/road-shields-design.md §3 D6) — D6 review follow-up (REQUIRED 1): the deadline bound on
         //    a genuinely hung fetch ────────────────────────────────────────────────────────────────────
         // Distinct from T11: T11's gate resolves (absent), reaching a terminal Status quickly, so it never
         // exercises SpritesSettled's deadline branch at all. This tooth's gate is NEVER resolved — the

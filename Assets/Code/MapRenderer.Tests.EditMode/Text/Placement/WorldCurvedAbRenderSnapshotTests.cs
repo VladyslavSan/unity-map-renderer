@@ -31,7 +31,8 @@
 // identical to the pixel, ink within 1.2%) and the delta was attributed to D12 alone by re-running against
 // the pre-D12 formula, which reproduced the old goldens digit-for-digit. So the property this tooth exists
 // to guard — rotation sense and glyph shape, which a translation cannot affect — is untouched, and neither
-// tolerance was loosened. Full numbers and the four checks: docs/road-shields-design.md §11.
+// tolerance was loosened. docs/road-shields-design.md §11 (D12) states the shipped optical-centring
+// formula this re-mint reflects.
 //
 // 'F' (a fully asymmetric glyph — no mirror symmetry in x or y) is used so a wrong rotation sense renders
 // visibly different ink (not an aliased 'F'-looking mirror) — a real discriminator, not a tautology against
@@ -49,11 +50,9 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
 // UnityEngine.Rendering ALSO declares a CameraProperties type (mesh descriptor namespace collision) —
 // disambiguate explicitly rather than qualifying every call site.
-using CameraProperties = MapRenderer.Core.View.Camera.CameraProperties;
+using CameraProperties = MapRenderer.Core.Geo.CameraProperties;
 using MapRenderer.Tests.Visual;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;

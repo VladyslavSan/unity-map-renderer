@@ -3,7 +3,7 @@
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Minimal glyph lookup a <see cref="ITextShaper"/> consults while shaping. Keyed by ATLAS codepoint
+    /// Minimal glyph lookup a <see cref="CodepointTextShaper"/> consults while shaping. Keyed by ATLAS codepoint
     /// (a presentation-form codepoint for shaped Arabic, per <see cref="PositionedGlyph.AtlasCodepoint"/>),
     /// not the source character's own codepoint. A real implementation is typically backed by one or
     /// more decoded <see cref="FontStackGlyphs"/> ranges (<see cref="SdfGlyph.Advance"/>).

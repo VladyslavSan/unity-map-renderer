@@ -35,7 +35,7 @@ using MapRenderer.Core.Style;
 using MapRenderer.Jobs.Fill;
 using MapRenderer.Jobs.Geometry;
 using Fill = MapRenderer.Core.Style.Fill;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;

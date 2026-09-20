@@ -4,8 +4,8 @@
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.App.View;
+using MapRenderer.Unity.View.Camera;
 
 namespace MapRenderer.Tests.Cameras
 {

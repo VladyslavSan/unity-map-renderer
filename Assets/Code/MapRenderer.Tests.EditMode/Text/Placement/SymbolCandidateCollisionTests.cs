@@ -1,20 +1,20 @@
-// Engine-free: shared verbatim between the Unity EditMode runner and Tools/core-tests (registered in
-// core-tests.csproj). Top-level `using Unity.Mathematics;` + unqualified float2 (namespace-collision trap —
-// see SymbolBox.cs's header comment).
+// Unity EditMode only — runs the placement through NativeCollisionRunner (NativeArray/IJob). NOT
+// registered in core-tests.csproj.
 
 using System.Collections.Generic;
 using NUnit.Framework;
 using Unity.Mathematics;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Jobs.Symbols;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// #5 (B3) — the multi-box, all-or-nothing UNIFIED collision
-    /// (<see cref="SymbolCollision.SelectSurvivors(SymbolCandidate[],int,SymbolBox[],int,bool[],SymbolCollisionGrid)"/>):
-    /// a curved along-line symbol is ONE candidate spanning N glyph boxes; it places iff EVERY box is free and,
-    /// when placed, blocks across its WHOLE run — competing with point (1-box) symbols in the SAME greedy pass.
-    /// Every assertion is OUTCOME-based (WHICH candidates survive, by <see cref="SymbolCandidate.SymbolIndex"/>).
+    /// #5 (B3) — the multi-box, all-or-nothing UNIFIED collision (<see cref="CollisionJob"/>): a curved
+    /// along-line symbol is ONE candidate spanning N glyph boxes; it places iff EVERY box is free and,
+    /// when placed, blocks across its WHOLE run — competing with point (1-box) symbols in the SAME greedy
+    /// pass. Every assertion is OUTCOME-based (WHICH candidates survive, by <see cref="SymbolCandidate.SymbolIndex"/>).
     /// </summary>
     [TestFixture]
     public class SymbolCandidateCollisionTests
@@ -56,8 +56,7 @@ namespace MapRenderer.Tests.Text.Placement
                     for (int i = 0; i < cands.Length; i++)
                         cands[i].WasPlacedLastFrame = keptSymbolIndices.Contains(cands[i].SymbolIndex);
                 var flags = new bool[cands.Length];
-                var grid = new SymbolCollisionGrid();
-                int n = SymbolCollision.SelectSurvivors(cands, cands.Length, boxes, boxes.Length, flags, grid);
+                int n = NativeCollisionRunner.RunCollision(cands, cands.Length, boxes, boxes.Length, flags);
 
                 var set = new HashSet<int>();
                 for (int i = 0; i < cands.Length; i++) if (flags[i]) set.Add(cands[i].SymbolIndex);
@@ -72,7 +71,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── THE decisive tooth: all-or-nothing. ONE colliding glyph drops the WHOLE curved symbol; remove
         //    that one glyph and the identical symbol survives. ──────────────────────────────────────────────
         [Test]
-        public void SelectSurvivors_CurvedSymbol_DropsEntirelyWhenAnySingleGlyphCollides()
+        public void Collision_CurvedSymbol_DropsEntirelyWhenAnySingleGlyphCollides()
         {
             // Point P (best key) at region A; curved C's THIRD glyph reaches into region A, the rest are far away.
             var collides = new Scene()
@@ -93,7 +92,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── A placed curved symbol blocks across its WHOLE run — a later point overlapping ANY glyph drops. ─
         [Test]
-        public void SelectSurvivors_PlacedCurvedSymbol_BlocksAPointOverlappingAnyGlyph()
+        public void Collision_PlacedCurvedSymbol_BlocksAPointOverlappingAnyGlyph()
         {
             var scene = new Scene()
                 .Add(symbolIndex: 0, sortKey: 10f, featureIndex: 0,
@@ -107,7 +106,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── No self-block: a curved symbol's own adjacent (mutually overlapping) glyph boxes must NOT block
         //    one another. Two such symbols, disjoint from each other, BOTH place. ────────────────────────────
         [Test]
-        public void SelectSurvivors_CurvedSymbol_AdjacentGlyphsDoNotSelfBlock()
+        public void Collision_CurvedSymbol_AdjacentGlyphsDoNotSelfBlock()
         {
             var scene = new Scene()
                 .Add(symbolIndex: 0, sortKey: 10f, featureIndex: 0,
@@ -121,7 +120,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── Curved-vs-point resolves by sort key, both directions. ──────────────────────────────────────────
         [Test]
-        public void SelectSurvivors_CurvedVsPoint_LowerSortKeyWins()
+        public void Collision_CurvedVsPoint_LowerSortKeyWins()
         {
             var curvedWins = new Scene()
                 .Add(symbolIndex: 0, sortKey: 10f, featureIndex: 0, rects: R((0, 0, 20, 10)))   // curved-ish, best key
@@ -138,7 +137,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── Permutation invariance over MIXED point + curved input (matches the point-only guarantee). ──────
         [Test]
-        public void SelectSurvivors_IsPermutationInvariant_OverMixedInput()
+        public void Collision_IsPermutationInvariant_OverMixedInput()
         {
             // region A cluster: C1 curved (best key) + C2 curved + P0 point all overlap; P3 point disjoint (region B).
             Scene Build(int order)
@@ -174,7 +173,7 @@ namespace MapRenderer.Tests.Text.Placement
         //    fade" — stuck even with a still camera). RED against the pre-fix comparator (reversed input flips the
         //    survivor); GREEN once FadeId makes the order total. ──
         [Test]
-        public void SelectSurvivors_SameFeatureAnchors_ResolveDeterministicallyByFadeId()
+        public void Collision_SameFeatureAnchors_ResolveDeterministicallyByFadeId()
         {
             // Two overlapping candidates, SAME sort key + feature + tile (one road's two repeat anchors), distinct FadeId.
             Scene Build(bool reversed)
@@ -203,7 +202,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── Flags carry through the multi-box path: allow-overlap places unconditionally; ignore-placement
         //    places but does not block. ─────────────────────────────────────────────────────────────────────
         [Test]
-        public void SelectSurvivors_AllowOverlapCurved_PlacesOverAPoint()
+        public void Collision_AllowOverlapCurved_PlacesOverAPoint()
         {
             var scene = new Scene()
                 .Add(symbolIndex: 0, sortKey: 10f, featureIndex: 0, rects: R((0, 0, 20, 20)))              // point, best key
@@ -214,7 +213,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         [Test]
-        public void SelectSurvivors_IgnorePlacementCurved_DoesNotBlockALaterPoint()
+        public void Collision_IgnorePlacementCurved_DoesNotBlockALaterPoint()
         {
             var scene = new Scene()
                 .Add(symbolIndex: 0, sortKey: 10f, featureIndex: 0,
@@ -224,45 +223,22 @@ namespace MapRenderer.Tests.Text.Placement
                 "an ignore-placement curved label is placed but none of its glyph boxes block a later label");
         }
 
-        // ── DIFFERENTIAL: the unified path over ALL 1-box candidates reproduces the legacy single-box
-        //    SelectSurvivors EXACTLY — so wrapping point symbols as candidates changed nothing for them. ──────
+        // ── A 1-box candidate is exactly a point symbol: the unified path changed nothing for single-box
+        //    symbols. Both the legacy box-only path and the differential this used to run against are gone
+        //    (§2), so this is now a direct property — the same overlapping-cluster-plus-disjoint-label shape
+        //    that pins the box-only comparator tooth, rebuilt as 1-box candidates through the same job. ──────
         [Test]
-        public void SelectSurvivors_AllSingleBoxCandidates_MatchLegacyPointPath()
+        public void Collision_AllSingleBoxCandidates_MatchLegacyPointPath()
         {
-            var grid = new SymbolCollisionGrid();
-            int[] counts = { 1, 2, 3, 50, 500 };
-            int[] seeds = { 1, 7, 42, 999 };
-            foreach (int count in counts)
-            foreach (int seed in seeds)
-            {
-                SymbolBox[] baseBoxes = RandomBoxes(count, seed);
-
-                // Legacy point path.
-                var legacyBoxes = (SymbolBox[])baseBoxes.Clone();
-                var legacyFlags = new bool[count];
-                SymbolCollision.SelectSurvivors(legacyBoxes, count, legacyFlags, grid);
-                var legacy = new HashSet<int>();
-                for (int i = 0; i < count; i++) if (legacyFlags[i]) legacy.Add(legacyBoxes[i].SymbolIndex);
-
-                // Unified path: one 1-box candidate per box (boxes stay put, candidates carry the keys).
-                var candBoxes = (SymbolBox[])baseBoxes.Clone();
-                var cands = new SymbolCandidate[count];
-                for (int i = 0; i < count; i++)
-                    cands[i] = new SymbolCandidate
-                    {
-                        BoxStart = i, BoxCount = 1,
-                        SortKey = candBoxes[i].SortKey, FeatureIndex = candBoxes[i].FeatureIndex,
-                        TileKey = candBoxes[i].TileKey, AllowOverlap = candBoxes[i].AllowOverlap,
-                        IgnorePlacement = candBoxes[i].IgnorePlacement, SymbolIndex = candBoxes[i].SymbolIndex,
-                    };
-                var candFlags = new bool[count];
-                SymbolCollision.SelectSurvivors(cands, count, candBoxes, count, candFlags, grid);
-                var unified = new HashSet<int>();
-                for (int i = 0; i < count; i++) if (candFlags[i]) unified.Add(cands[i].SymbolIndex);
-
-                CollectionAssert.AreEquivalent(legacy, unified,
-                    $"unified 1-box-candidate path must equal the legacy point path (count={count} seed={seed})");
-            }
+            var scene = new Scene()
+                .Add(symbolIndex: 0, sortKey: 30f, featureIndex: 0, rects: R((0, 0, 20, 20)))     // region A
+                .Add(symbolIndex: 1, sortKey: 10f, featureIndex: 1, rects: R((2, 2, 18, 18)))     // region A (best key)
+                .Add(symbolIndex: 2, sortKey: 20f, featureIndex: 2, rects: R((4, 4, 16, 16)))     // region A
+                .Add(symbolIndex: 3, sortKey: 99f, featureIndex: 3, rects: R((100, 0, 120, 20))); // region B (disjoint)
+            CollectionAssert.AreEquivalent(new[] { 1, 3 }, scene.Survivors(),
+                "a 1-box candidate collides exactly like a point symbol: the best-key label in the " +
+                "overlapping cluster survives, plus the disjoint label — the unified candidate path changes " +
+                "nothing for single-box symbols");
         }
 
         // ── A-5 sticky-placement hysteresis (anti-flicker). Incumbency (WasPlacedLastFrame) breaks EQUAL-sort-key
@@ -280,7 +256,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── FIXED POINT: feeding last frame's survivor set back in reproduces it exactly (idempotent). This is the
         //    anti-oscillation + B-1-compatibility proof: a static frame's survivors don't change under hysteresis. ──
         [Test]
-        public void SelectSurvivors_Hysteresis_IsFixedPoint()
+        public void Collision_Hysteresis_IsFixedPoint()
         {
             var cold = ClusterAB().Survivors();                 // S = cold survivors (no history)
             var withHistory = ClusterAB().Survivors(cold);      // feed S back as the kept-set
@@ -294,7 +270,7 @@ namespace MapRenderer.Tests.Text.Placement
         //    tiebreak — but whichever was placed last frame stays placed. This is the tile-churn/reprojection flip
         //    that A-5 exists to stop. ──
         [Test]
-        public void SelectSurvivors_Hysteresis_OverridesFeatureTiebreak_KeepingTheIncumbent()
+        public void Collision_Hysteresis_OverridesFeatureTiebreak_KeepingTheIncumbent()
         {
             CollectionAssert.AreEquivalent(new[] { 0 }, ClusterAB().Survivors(),
                 "cold: the lower feature index (0) wins the equal-sort-key tie");
@@ -307,7 +283,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── YIELDS TO A GENUINELY HIGHER-PRIORITY NEWCOMER: incumbency sits BELOW SortKey, so a strictly lower-
         //    SortKey newcomer still wins and the stale incumbent drops (no absolute lock). ──
         [Test]
-        public void SelectSurvivors_Hysteresis_YieldsToLowerSortKeyNewcomer()
+        public void Collision_Hysteresis_YieldsToLowerSortKeyNewcomer()
         {
             var scene = new Scene()
                 .Add(symbolIndex: 0, sortKey: 20f, featureIndex: 0, rects: R((0, 0, 20, 20)))   // incumbent, LOWER priority
@@ -320,7 +296,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── WITHIN-FRAME DETERMINISM given a fixed kept-set: the survivor set is independent of candidate input
         //    order (T1 permutation-invariance still holds — it is only the GLOBAL history-independence A-5 trades). ──
         [Test]
-        public void SelectSurvivors_Hysteresis_IsPermutationInvariant_GivenFixedKeptSet()
+        public void Collision_Hysteresis_IsPermutationInvariant_GivenFixedKeptSet()
         {
             var kept = new HashSet<int> { 1 }; // make symbol 1 the incumbent in an equal-sort-key cluster
             Scene BuildOrdered(bool reversed)
@@ -341,33 +317,6 @@ namespace MapRenderer.Tests.Text.Placement
             CollectionAssert.AreEquivalent(new[] { 1 }, BuildOrdered(false).Survivors(kept));
             CollectionAssert.AreEquivalent(new[] { 1 }, BuildOrdered(true).Survivors(kept),
                 "with a fixed kept-set the survivor set does not depend on input order (incumbent 1 wins either way)");
-        }
-
-        // Deterministic random boxes with unique SymbolIndex/FeatureIndex; wide enough to span several grid
-        // cells; small sort-key range so ties are common (feature index still totally orders them).
-        private static SymbolBox[] RandomBoxes(int count, int seed)
-        {
-            var rng = new System.Random(seed);
-            var boxes = new SymbolBox[count];
-            for (int i = 0; i < count; i++)
-            {
-                float x = (float)(rng.NextDouble() * 2000.0);
-                float y = (float)(rng.NextDouble() * 1200.0);
-                float w = 30f + (float)(rng.NextDouble() * 270.0);
-                float h = 10f + (float)(rng.NextDouble() * 40.0);
-                boxes[i] = new SymbolBox
-                {
-                    Min = new float2(x, y),
-                    Max = new float2(x + w, y + h),
-                    SortKey = rng.Next(0, 6),
-                    FeatureIndex = i,
-                    TileKey = rng.Next(0, 4),
-                    SymbolIndex = i,
-                    AllowOverlap = false,
-                    IgnorePlacement = false,
-                };
-            }
-            return boxes;
         }
     }
 }

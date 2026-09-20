@@ -17,6 +17,7 @@ using MapRenderer.Unity.Text;
 using SymbolStyle = MapRenderer.Core.Style.Symbol;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.Style
 {
@@ -277,8 +278,7 @@ namespace MapRenderer.Tests.Style
             boxes[boxCount++] = blockerBox;
 
             var survivor = new bool[instanceCount + 1];
-            SymbolCollision.SelectSurvivors(candidates, instanceCount + 1, boxes, boxCount, survivor,
-                new SymbolCollisionGrid());
+            NativeCollisionRunner.RunCollision(candidates, instanceCount + 1, boxes, boxCount, survivor);
 
             Assert.AreEqual(0, SurvivingEmitCount(candidates, survivor, instanceCount + 1, emit, SymbolKind.Icon),
                 "the dot must go down with its name — an icon surviving a blocked text IS the orphan-dot artefact");

@@ -3,10 +3,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geometry
 {
     /// <summary>
-    /// Per-vertex output of the 3D array ribbon builder (<c>RibbonJob</c>) — the projection-agnostic
-    /// successor to <see cref="LineVertex"/> (2D). The centerline is projected FIRST (to origin-relative render
-    /// space + a per-point surface up); the ribbon is then built in 3D, so every field is final render-space
-    /// data — no downstream reconstruction, no separate tangent frame, no winding flip.
+    /// Per-vertex output of the 3D ribbon builder (<c>RibbonJob</c>). The centerline is projected FIRST (to
+    /// origin-relative render space + a per-point surface up); the ribbon is then built in 3D, so every
+    /// field is final render-space data — no downstream reconstruction, no separate tangent frame, no
+    /// winding flip.
     ///
     /// <para>Winding is correct BY CONSTRUCTION: <see cref="Across"/> is derived as
     /// <c>normalize(cross(along, up))</c> from the SAME <c>up</c> the centerline was projected with (one frame),
@@ -25,9 +25,9 @@ namespace MapRenderer.Core.Geometry
         /// <summary>
         /// 3D extrusion direction in the surface tangent plane (perpendicular to <see cref="Up"/> and the line).
         /// <b>Magnitude carries the miter factor</b> (1 for straight/terminal, cap-rim, and bevel/round OUTER
-        /// vertices; min(1/cos(θ/2), miterLimit) for a miter join and the bevel/round INNER vertex) — the SAME
-        /// contract as <see cref="LineVertex.Normal"/>, so the shader (<c>Line_VertexExtrude.hlsl</c>) applies
-        /// <c>lateral = across/|across| · |across| · outerM</c> unchanged. Per-side sign is baked in.
+        /// vertices; min(1/cos(θ/2), miterLimit) for a miter join and the bevel/round INNER vertex), so the
+        /// shader (<c>Line_VertexExtrude.hlsl</c>) applies
+        /// <c>lateral = across/|across| · |across| · outerM</c>. Per-side sign is baked in.
         /// </summary>
         public double3 Across;
 

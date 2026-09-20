@@ -24,8 +24,8 @@ using NUnit.Framework;
 using UnityEngine;
 using Unity.Mathematics;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View;
+using MapRenderer.Unity.View.Camera;
 
 namespace MapRenderer.Tests.Tiles
 {

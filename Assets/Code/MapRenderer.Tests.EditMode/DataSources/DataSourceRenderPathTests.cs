@@ -17,13 +17,12 @@ using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
-using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Tests.TestSupport;
 using MapRenderer.Jobs.Projection;
 using MapRenderer.Unity.Rendering.Source;
 using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Jobs.Mvt;
-using MapRenderer.Tests.TestSupport;
 
 namespace MapRenderer.Tests.DataSources
 {

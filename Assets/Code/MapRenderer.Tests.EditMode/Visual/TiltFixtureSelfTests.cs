@@ -46,7 +46,6 @@ using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Style.Symbol;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Tests.Text.Placement;
 using MapRenderer.Unity.Common;
 using MapRenderer.Unity.Rendering.Backend;

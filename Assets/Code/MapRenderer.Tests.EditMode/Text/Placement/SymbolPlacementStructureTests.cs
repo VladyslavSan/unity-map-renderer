@@ -9,7 +9,6 @@ using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Text;
@@ -705,7 +704,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── #5 B3 END-TO-END: two OVERLAPPING curved symbols (same line, allow-overlap OFF) collide through the
-        //    real rotated-glyph box → candidate → SelectSurvivors → emit chain — only the lower-sort-key one
+        //    real rotated-glyph box → candidate → CollisionJob → emit chain — only the lower-sort-key one
         //    places. This is the decisive proof that curved symbols actually collide (every other curved Tick
         //    test is single-symbol or allow-overlap); it also exercises SymbolBox.BuildRotatedGlyph for real. ──
         [Test]

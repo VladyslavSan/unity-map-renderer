@@ -130,8 +130,8 @@ that mechanism, do not refine it.
 
 Each is real, independent of the width question, and much smaller than the width work implied.
 
-1. **The corner miter is baked in world space.** `LineTessellator.ComputeMiterNormals` (and its
-   `RibbonJob` twin) bake `normalize(n₁+n₂)` scaled by `1/cos(θ_world/2)`. The premise is *not* that a
+1. **The corner miter is baked in world space.** `RibbonJob.ComputeMiterNormals` bakes
+   `normalize(n₁+n₂)` scaled by `1/cos(θ_world/2)`. The premise is *not* that a
    styled width is a screen quantity — §1 denies that. It is that a **miter factor is a property of the
    corner as it appears**, and the ground→screen map is anisotropic, so the world half-angle is not the
    screen one; a band of constant world width still needs its corner mitred by the angle the viewer sees.
@@ -144,10 +144,10 @@ Each is real, independent of the width question, and much smaller than the width
    clamp rule.~~ **RESOLVED, in two parts.** First, the concave vertex of a bevel/round join now emits
    `min(1/cos(θ/2), miterLimit)` — the same bisector-direction, miter-factor magnitude the miter join
    already emits at that corner, saturated at `miterLimit` instead of falling back to bevel (see
-   `LineTessellator.ComputeInnerNormal`, `RibbonJob.ComputeInnerNormal`; pinned by
-   `LineTessellatorTests.InnerJoin_*` and `LineRibbonJobTests.InnerJoin_*`). Second — found while
-   re-deriving the first part — that magnitude vertex was being emitted on the **wrong side of the
-   corner**: `LineTessellator.cs:144`'s comment claimed `t1×t2 > 0 ⇒ left turn, outer side = left`, but a
+   `RibbonJob.ComputeInnerNormal`; pinned by `RibbonJobGeometryTests.InnerJoin_*` and
+   `LineRibbonJobTests.InnerJoin_*`). Second — found while re-deriving the first part — that magnitude
+   vertex was being emitted on the **wrong side of the corner**: the original comment claimed
+   `t1×t2 > 0 ⇒ left turn, outer side = left`, but a
    left turn actually puts the CONCAVE side on the left (the two half-width bands overlap there); the
    convex (uncovered-wedge) side is the other one. So bevel/round joins were chamfering/fanning the
    concave side (hidden inside the band overlap — a bevel rendered as a miter, a round join never rendered
@@ -156,9 +156,9 @@ Each is real, independent of the width question, and much smaller than the width
    join-side-correction stage fixed it, moving the chamfer/arc to the convex side and the single
    bisector/miter-factor vertex to the concave side — the *derivation* of the magnitude (this item's
    original scope) was correct throughout and needed no change. Pinned by
-   `LineTessellatorTests.JoinSide_BevelAndRound_ChamferIsOnTheConvexSide` (region-membership: the chamfer
+   `RibbonJobGeometryTests.JoinSide_BevelAndRound_ChamferIsOnTheConvexSide` (region-membership: the chamfer
    chord / arc sit strictly outside both segments' half-width bands) and
-   `LineTessellatorTests.JoinVertices_NormalTimesSide_IsUnchanged` (the AA/offset contract is unaffected).
+   `RibbonJobGeometryTests.JoinVertices_NormalTimesSide_IsUnchanged` (the AA/offset contract is unaffected).
    This left one thing open — see the new item below.
 3. **Square caps** bake `across ∓ along` (length √2) and are indistinguishable from a 90° join by
    `(bisector, miter)` alone. `distanceAlong == 0` separates the *start* cap; the end cap is not separable
@@ -188,13 +188,11 @@ Each is real, independent of the width question, and much smaller than the width
    correction restores far more of the intended band than the culled sliver removes), so this is a
    sharp-corner artefact to schedule, not a regression to revert. **This is the one place the canonical
    CCW winding contract (`docs/coordinates-and-projections.md` §7.1) does not hold**, so the bound above is
-   pinned rather than left as prose: `LineTessellatorTests.ShortSegment_InnerJoinFold_OnsetIsExactlyTheDocumentedSCrit`
+   pinned rather than left as prose: `RibbonJobGeometryTests.ShortSegment_InnerJoinFold_OnsetIsExactlyTheDocumentedSCrit`
    asserts, for all three join types at a 90° corner where `S_crit` is exactly 2.0, that S = 1.8 folds
    exactly one triangle at exactly −0.8, that S = 2.0 makes it exactly degenerate, and that S = 2.2 is
-   uniformly CCW. That exact pin is on the **managed** producer; the Burst arm reaches the same regime
-   through `LineRibbonJobTests.ShortSegment_FoldRegime_Parity` (index-, `Side`- and `Across`-exact against
-   the oracle), so a Jobs-only divergence at the boundary is caught but its *value* is pinned only via
-   parity. `AllJoinCapCombinations_*`'s uniform-CCW claim is scoped to its own 10-unit fixtures, an order
+   uniformly CCW. That exact pin runs directly against the Burst producer (`RibbonJob`), which ships this
+   geometry. `AllJoinCapCombinations_*`'s uniform-CCW claim is scoped to its own 10-unit fixtures, an order
    of magnitude clear of this regime. Fixing it requires the world width, which
    neither ribbon producer has by construction (width is a shader uniform × per-vertex `WidthScale`). Applies
    to all three join types, including the miter path that has shipped since before this stage. Same
@@ -203,10 +201,13 @@ Each is real, independent of the width question, and much smaller than the width
 
 Three smaller findings from the join-side-correction review are recorded here rather than fixed in-stage:
 
-- **No *direct* analytic tooth on the Burst arm's right-turn branch or the round join's convex rim.** Both
-  are carried transitively by `LineRibbonJobTests.AssertParity`, which is index-, `Side`- and `Across`-exact
-  against the managed producer. Worth one direct Jobs-side assertion if `AssertParity` is ever loosened —
-  which is exactly the hedge `InnerJoin_Bevel_90LeftTurn_Across_MatchesManagedAnalytic` provides on the left.
+- ~~**No *direct* analytic tooth on the Burst arm's right-turn branch or the round join's convex rim.**~~
+  **RESOLVED.** Both were carried only transitively, by a differential-parity oracle against a managed
+  reference producer; that oracle retired with the reference. Each now has a direct assertion on the Burst
+  arm: `RibbonJobGeometryTests.InnerJoin_Round_90RightTurn_Unclamped_MirrorSignBranch` (right-turn sign
+  branch) and `RibbonJobGeometryTests.SharpRoundJoin_PreservesFan_RimAtHalfWidthRadius` (the convex rim
+  sits at exactly halfWidth from the corner), with
+  `LineRibbonJobTests.InnerJoin_Bevel_90LeftTurn_Across_MatchesAnalyticIntersection` on the left.
 - **`ComputeInnerNormal`'s `|cos(θ/2)| < 1e-12` branch returns `mu · miterLimit`** with a `mu` whose
   *direction* is floating-point noise, where `ComputeMiterNormals` returns the inert `n1` fallback for the
   same condition. The branch is narrow (reachable only for `|n₁+n₂| ∈ [1e-12, 2e-12)`) and documented at both
@@ -237,8 +238,8 @@ on the first day.
 
 ## 5. Dash distance-along reset
 
-The managed producer's `LineVertex.DistanceAlong` and the Burst producer's `LineRibbonVertex.DistanceAlong`
-reset to 0 at the start of each RING (each geometry part), not once per tile. A source feature can decode
+The Burst producer's `LineRibbonVertex.DistanceAlong` resets to 0 at the start of each RING (each
+geometry part), not once per tile. A source feature can decode
 into many rings — boundary and transportation layers split at attribute changes and way boundaries, not at
 the tile grid, so a feature that looks like one road on screen is rarely one part.
 

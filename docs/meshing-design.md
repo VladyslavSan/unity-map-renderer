@@ -19,13 +19,13 @@ The path from decoded vector-tile geometry to a GPU `Mesh`, per geometry kind.
 ## The word "tessellation" is retired
 
 "Tessellation" used to name **four unrelated things**, which is exactly why this path was hard to reason about.
-The only survivor is `LineTessellator`, where "tessellate" now means strictly **triangulate**.
+"Tessellate" now means strictly **triangulate**, nothing else.
 
 | Former loose meaning | Now called | Lives in |
 |----------------------|-----------|----------|
 | the whole decode→mesh chain | **the mesh pipeline** | `FillMeshPipeline`, the `StyledFill/LineTileBuilder`s |
 | inserting curvature points (globe) | **Subdivide** | `SubdivideJob` (line), `GlobeFillSubdivideJob` (fill) — job-scheduling-design.md §8 stage 5 Group B retired the managed `SubdivideCenterline` this row used to name |
-| earcut / ribbon-offset | **Triangulate** (the only surviving "tessellate") | `EarcutJob`, `LineTessellator` (oracle), `RibbonJob` |
+| earcut / ribbon-offset | **Triangulate** (the only surviving "tessellate") | `EarcutJob`, `RibbonJob` |
 | "build one whole tile's mesh" (async scheduling) | **mesh build** (worker) + **consume** (main thread) | `TileManager` (`KickMeshBuild`, `MeshBuildTask`, `MaxMeshBuildsPerTick` / `ConsumeMeshBuild`, `MaxConsumesPerTick`) |
 
 That last row is the tile-build loop — two verbs, no "phases":
@@ -44,7 +44,7 @@ That last row is the tile-build loop — two verbs, no "phases":
   Driven entirely by `IProjection.MaxRefineAngleRad` (∞ for Mercator ⇒ no split; a small angle for the globe).
   No projection constants leak in — the flat case is the degenerate value of one formula, not a branch.
 - **Triangulate** — rings/centerline → triangle vertices + indices. Fills use ear-clipping (`EarcutJob`);
-  lines extrude a ribbon (`RibbonJob`, with `LineTessellator` as its planar differential oracle).
+  lines extrude a ribbon (`RibbonJob`).
 - **Project** — tile-space → geodetic surface (`TileToGeoJob`, projection-independent) → render-space `double3` +
   per-vertex `up`, through the chosen `IProjection` (`ProjectPointsJob<TProj>`).
 - **Write** — stream the vertices/indices into a caller-allocated `Mesh.MeshData` on the worker; the main thread
@@ -121,7 +121,6 @@ rule in [`conventions-short.md`](conventions-short.md).
 | `TileRenderOrigin` | `MapRenderer.Core` | The single source of a tile's bake/RTC origin (SW corner projected). Engine-free, shared by fills/lines/symbols/camera — **not** fill-specific, so it lives in Core, not on the fill mesher. |
 | `TileToGeoJob` | `MapRenderer.Jobs` | Project stage part 1: tile-space → geodetic surface (projection-independent). Takes a `TileId`. |
 | `RibbonJob` | `MapRenderer.Jobs` | Line Triangulate: projection-agnostic 3D ribbon from a `(point, up)` array. |
-| `LineTessellator` | `MapRenderer.Core` | The planar differential **oracle** for `RibbonJob` (`LineRibbonJobTests`). |
 | `StyledFillTileBuilder` | `MapRenderer.Unity` | Fill orchestration: color eval → `FillMeshGraph` → write mesh (globe subdivide is a graph node on the curved arm, not a separate step). |
 | `StyledLineTileBuilder` | `MapRenderer.Unity` | Line orchestration: Subdivide → Project → `RibbonJob` → write mesh. |
 | `MeshDataPayload` | `MapRenderer.Unity` | The per-`(tile, layer)` mesh handle the consume loop uploads + disposes. |

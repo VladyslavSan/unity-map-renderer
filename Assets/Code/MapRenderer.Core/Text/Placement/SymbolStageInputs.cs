@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2/4 — this
-// file lives in MapRenderer.Core.Text.Placement (see PolylineArcWalker for the namespace-collision trap).
+// file lives in MapRenderer.Core.Text.Placement (see SymbolScreenProjection for the namespace-collision trap).
 // BLITTABLE: value-only fields so a producer can store these as SoA and a Burst job (Lever C) reads them
 // directly — mirrors the SymbolBox / PlacedQuad / SymbolCandidate blittable-struct pattern.
 

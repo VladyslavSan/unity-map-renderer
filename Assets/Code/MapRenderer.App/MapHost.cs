@@ -5,8 +5,7 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Data;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View;
 using Unity.Mathematics;
 
 // S51: HttpDataSource removed from Core; HTTP moved to Unity layer as UnityWebRequestDataSource.

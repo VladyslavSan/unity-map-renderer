@@ -13,7 +13,7 @@ namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
     /// S20 Slice 2: one symbol's screen-space collision record — the axis-aligned bounding box
-    /// <see cref="SymbolCollision.SelectSurvivors"/> tests for overlap, plus the greedy placement-order key
+    /// <c>CollisionJob</c> tests for overlap, plus the greedy placement-order key
     /// (<see cref="SortKey"/> + the <see cref="FeatureIndex"/>/<see cref="TileKey"/> stable tiebreak) and
     /// the per-symbol overlap flags. <see cref="Min"/>/<see cref="Max"/> are in logical screen pixels with
     /// <c>text-padding</c> ALREADY applied (see <see cref="Build"/>); <see cref="SymbolIndex"/> is the

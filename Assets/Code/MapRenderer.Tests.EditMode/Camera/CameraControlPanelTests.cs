@@ -7,7 +7,7 @@ using NUnit.Framework;
 using UnityEngine;
 using MapRenderer.Core.Geo;
 using MapRenderer.App;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.App.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
@@ -73,7 +73,7 @@ namespace MapRenderer.Tests.Cameras
                 panel.Map = view;
                 panel.Tick();
 
-                double expectedMetres = MapRenderer.Core.View.Camera.CameraPoseMath.AltitudeForZoom(
+                double expectedMetres = MapRenderer.Core.Geo.CameraPoseMath.AltitudeForZoom(
                     10.0, view.Camera.ViewportPx.y, view.Camera.CurrentProperties.VerticalFovDeg);
 
                 Assert.That(panel.Distance,  Is.EqualTo(expectedMetres).Within(1.0),

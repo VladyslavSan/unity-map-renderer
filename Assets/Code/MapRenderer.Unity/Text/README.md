@@ -38,7 +38,7 @@ TileManager's per-tile KICK ──▶ SymbolSubsystem.TryBeginBuild (main, prolo
 | Concern | Assembly / path | Key files |
 |---|---|---|
 | Shaping, bidi, glyph atlas/SDF, font stacks | `Core/Text/` | `CodepointTextShaper`, `BidiReorder`, `ArabicJoining`, `GlyphAtlas*`, `FontStack*`, `TextQuadLayout`, `CurvedTextLayout` |
-| Placement math (engine-free) | `Core/Text/Placement/` | `SymbolBox`, `SymbolCollision(Grid)`, `SymbolScreenProjection`, `PolylineArcWalker`, `SymbolTileBuffer`/`ShapedSymbol` (the reused per-build shape buffer), `PlacedQuad`, `SymbolBearing` |
+| Placement math (engine-free) | `Core/Text/Placement/` | `SymbolBox`, `SymbolCollision`, `SymbolScreenProjection`, `PolylineArcMath`, `SymbolTileBuffer`/`ShapedSymbol` (the reused per-build shape buffer), `PlacedQuad`, `SymbolBearing` |
 | Tile build orchestration (off-thread) | `Unity/Text/` | `SymbolSubsystem`, `StyledSymbolTileBuilder`, `SymbolTileStore` |
 | Glyph atlas texture (GPU) | `Unity/Text/` | `GlyphAtlasTexture`, `GlyphManager` |
 | Per-frame placement | `Unity/Text/Placement/` | `SymbolPlacementSystem` (the god-method: project → stage → collide → emit) |
@@ -76,7 +76,7 @@ labels are **~21.8 ms** — labels *are* the frame cost right now.
    `cos`, max-angle `atan2`/`sin`/`cos`, rotated-box `sin`/`cos`). It is all `math.*` in **managed C#**
    (no Burst SIMD/inlining) and re-runs every frame because the projection changes.
 
-2. **The arc lookup is quadratic.** `PolylineArcWalker.At()` (`Core/Text/Placement/PolylineArcWalker.cs`)
+2. **The arc lookup is quadratic.** `PolylineArcMath.At()` (`Core/Text/Placement/PolylineArcMath.cs`)
    does a **linear scan over the whole polyline to find the segment — for every glyph**. Glyph
    arc-distances are monotonically increasing along a label, so this should be a single forward-walking
    cursor (O(pathVerts + glyphs)); as written it is O(anchors × glyphs × pathVertices) per label. If
@@ -102,7 +102,7 @@ are, cheapest first:
 
 | Lever | What | Reduces | Effort |
 |---|---|---|---|
-| **A. De-quadratic the arc walk** | single forward cursor in `PolylineArcWalker.At()` / place all a label's glyphs in one polyline pass | CPU (algorithmic), independent of thread/Burst | small, Core-only, test-covered |
+| **A. De-quadratic the arc walk** | single forward cursor in `PolylineArcMath.At()` / place all a label's glyphs in one polyline pass | CPU (algorithmic), independent of thread/Burst | small, Core-only, test-covered |
 | **B. Move `Stage` off the main thread** | run the managed staging loop on a worker — it builds plain data (`PlacedQuad`/`SymbolBox`/`SymbolCandidate`) and touches **no Unity API**, so it needs no Burst/nativization to relocate | main-thread occupancy (the 12.77 ms) | medium |
 | **C. Nativize + Burst `Stage`** | blittable inputs/outputs → the trig-heavy loop becomes a Burst job (SIMD + inlined trig) that also runs off-main | CPU **and** occupancy — the endgame | large |
 

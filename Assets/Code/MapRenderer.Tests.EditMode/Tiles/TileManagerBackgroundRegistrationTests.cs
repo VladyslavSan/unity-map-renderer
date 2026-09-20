@@ -14,7 +14,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View.Camera;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile;

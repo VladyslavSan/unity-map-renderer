@@ -4,7 +4,7 @@ using UnityEngine;
 using UnityEngine.Pool;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
-using MapRenderer.Core.View;
+using MapRenderer.Unity.View;
 using MapRenderer.Unity.Common;
 
 namespace MapRenderer.Unity.Rendering.Backend

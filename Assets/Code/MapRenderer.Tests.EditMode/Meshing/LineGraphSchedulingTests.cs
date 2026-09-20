@@ -514,13 +514,13 @@ namespace MapRenderer.Tests.Meshing
             renderCentre = default; radius = 0.0; return false;
         }
 
-        public GeoCoordinate3D ScreenToGround(double2 screenPx, double2 viewportPx, in MapRenderer.Core.View.Camera.CameraProperties camera)
+        public GeoCoordinate3D ScreenToGround(double2 screenPx, double2 viewportPx, in MapRenderer.Core.Geo.CameraProperties camera)
             => throw new NotSupportedException("RightHandedSphereTestProjection is a geometry-only test double.");
-        public double2 GroundToScreen(in GeoCoordinate3D ground, double2 viewportPx, in MapRenderer.Core.View.Camera.CameraProperties camera)
+        public double2 GroundToScreen(in GeoCoordinate3D ground, double2 viewportPx, in MapRenderer.Core.Geo.CameraProperties camera)
             => throw new NotSupportedException("RightHandedSphereTestProjection is a geometry-only test double.");
         public double ClampValidLatitude(double latitudeDegrees) => math.clamp(latitudeDegrees, -90.0, 90.0);
         public bool IsFinitePlanarWorld => false;
-        public GeoCoordinate3D ClampLookAtToWorld(double2 viewportPx, in MapRenderer.Core.View.Camera.CameraProperties camera)
+        public GeoCoordinate3D ClampLookAtToWorld(double2 viewportPx, in MapRenderer.Core.Geo.CameraProperties camera)
             => throw new NotSupportedException("RightHandedSphereTestProjection is a geometry-only test double.");
     }
 }

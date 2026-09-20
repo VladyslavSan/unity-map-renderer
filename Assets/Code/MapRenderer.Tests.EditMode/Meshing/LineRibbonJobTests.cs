@@ -1,8 +1,6 @@
 using System.Collections.Generic;
 using System.IO;
 using NUnit.Framework;
-using Unity.Collections;
-using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geometry;
@@ -14,22 +12,16 @@ using MapRenderer.Tests.TestSupport;
 namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
-    /// Planar differential oracle for <see cref="RibbonJob"/> (3D, Burst) vs the managed 2D reference
-    /// <see cref="LineTessellator.Triangulate"/>. Fed a FLAT centerline (points on the XZ plane, <c>up = +Y</c>),
-    /// the 3D array builder must reproduce the managed ribbon: mapping flat 2D <c>(x, y) → 3D (x, 0, y)</c>,
-    /// <c>Position → (x, 0, z)</c>, <c>Across → (nx, 0, nz)</c>, with <c>Position.y == 0</c> and <c>Across.y == 0</c>.
-    ///
-    /// <para>This is the safety net that needs no builder, no projection, and no GPU (S100). Parity is
-    /// TIGHT-TOLERANCE, not bit-exact: the single no-branch 3D formulation reorders the same float ops (an extra
-    /// normalize; the round arc swept in a local basis rather than global <c>atan2</c>), so vertices agree to
-    /// ~1e-9 — pixel-identical — but not to the last bit. Chasing bit-exactness would require reintroducing the
-    /// planar-special frame this stage deletes. Triangle topology (integer indices) must match EXACTLY.</para>
+    /// Direct teeth against <see cref="RibbonJob"/> (3D, Burst) over a flat centerline (points on the XZ
+    /// plane, <c>up = +Y</c>, via <see cref="FlatRibbon"/>). Through UMR-173 this file held the
+    /// differential-parity oracle against a managed 2D reference tessellator; the reference is retired and
+    /// the first-principles properties it asserted moved to <c>RibbonJobGeometryTests</c>. What remains
+    /// here are the teeth that were always direct assertions on the job's own output, not comparisons —
+    /// they name themselves as such in their own doc comments below.
     /// </summary>
     [TestFixture]
     public class LineRibbonJobTests
     {
-        private const double Eps = 1e-9;
-
         private static string FixturePath =>
             Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
 
@@ -38,84 +30,7 @@ namespace MapRenderer.Tests.Meshing
         private static (LineRibbonVertex[] verts, int[] indices) RunJob(
             double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments,
             double roundLimit = 1.05)
-        {
-            int capV = RibbonJob.MaxVertexCount(pts.Length, roundSegments);
-            int capI = RibbonJob.MaxIndexCount(pts.Length, roundSegments);
-
-            var points = new NativeArray<double3>(pts.Length == 0 ? 1 : pts.Length, Allocator.TempJob);
-            var ups    = new NativeArray<double3>(pts.Length == 0 ? 1 : pts.Length, Allocator.TempJob);
-            var outV   = new NativeArray<LineRibbonVertex>(capV == 0 ? 1 : capV, Allocator.TempJob);
-            var outI   = new NativeArray<int>(capI == 0 ? 1 : capI, Allocator.TempJob);
-            var vc     = new NativeArray<int>(1, Allocator.TempJob);
-            var ic     = new NativeArray<int>(1, Allocator.TempJob);
-            try
-            {
-                for (int i = 0; i < pts.Length; i++)
-                {
-                    points[i] = new double3(pts[i].x, 0.0, pts[i].y); // flat centerline: 2D (x,y) → 3D (x,0,y)
-                    ups[i]    = new double3(0.0, 1.0, 0.0);            // Mercator up = +Y
-                }
-
-                new RibbonJob
-                {
-                    Points         = points,
-                    Ups            = ups,
-                    PointCount     = pts.Length,
-                    Join           = join,
-                    Cap            = cap,
-                    MiterLimit     = miterLimit,
-                    RoundSegments  = roundSegments,
-                    RoundLimit     = roundLimit,
-                    OutVertices    = outV,
-                    OutIndices     = outI,
-                    OutVertexCount = vc,
-                    OutIndexCount  = ic,
-                }.Schedule().Complete();
-
-                int nv = vc[0], ni = ic[0];
-                var verts   = new LineRibbonVertex[nv];
-                var indices = new int[ni];
-                for (int i = 0; i < nv; i++) verts[i]   = outV[i];
-                for (int i = 0; i < ni; i++) indices[i] = outI[i];
-                return (verts, indices);
-            }
-            finally
-            {
-                points.Dispose(); ups.Dispose(); outV.Dispose(); outI.Dispose(); vc.Dispose(); ic.Dispose();
-            }
-        }
-
-        /// <summary>Assert the 3D ribbon job matches the managed 2D reference for <paramref name="pts"/> under the
-        /// given style. Counts + indices exact; vertex geometry within <see cref="Eps"/>; the extruded plane's
-        /// out-of-plane component (Position.y / Across.y) must be zero.</summary>
-        private static void AssertParity(
-            double2[] pts, JoinType join, CapType cap, double miterLimit, int roundSegments, string label,
-            double roundLimit = 1.05)
-        {
-            var managed  = LineTessellator.Triangulate(pts, join, cap, miterLimit, roundSegments, roundLimit);
-            var (jv, ji) = RunJob(pts, join, cap, miterLimit, roundSegments, roundLimit);
-
-            Assert.AreEqual(managed.Vertices.Length, jv.Length, $"{label}: vertex count");
-            Assert.AreEqual(managed.Indices.Length,  ji.Length, $"{label}: index count");
-
-            for (int i = 0; i < ji.Length; i++)
-                Assert.AreEqual(managed.Indices[i], ji[i], $"{label}: index[{i}]");
-
-            for (int i = 0; i < jv.Length; i++)
-            {
-                LineVertex m = managed.Vertices[i]; LineRibbonVertex j = jv[i];
-                Assert.AreEqual(m.Side,       j.Side,       $"{label}: v[{i}].Side");        // pure assignment
-                Assert.AreEqual(m.WidthScale, j.WidthScale, $"{label}: v[{i}].WidthScale");
-
-                Assert.AreEqual(m.Position.x,   j.Position.x,   Eps, $"{label}: v[{i}].Position.x");
-                Assert.AreEqual(m.Position.y,   j.Position.z,   Eps, $"{label}: v[{i}].Position.z (2D-y)");
-                Assert.AreEqual(0.0,            j.Position.y,   Eps, $"{label}: v[{i}].Position.y must be 0");
-                Assert.AreEqual(m.Normal.x,     j.Across.x,     Eps, $"{label}: v[{i}].Across.x");
-                Assert.AreEqual(m.Normal.y,     j.Across.z,     Eps, $"{label}: v[{i}].Across.z (2D-y)");
-                Assert.AreEqual(0.0,            j.Across.y,     Eps, $"{label}: v[{i}].Across.y must be 0");
-                Assert.AreEqual(m.DistanceAlong, j.DistanceAlong, Eps, $"{label}: v[{i}].DistanceAlong");
-            }
-        }
+            => FlatRibbon.Build(pts, join, cap, miterLimit, roundSegments, roundLimit);
 
         // ── Degenerate / smoke ───────────────────────────────────────────────────────────────────
 
@@ -127,107 +42,10 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(0, ji.Length, "< 2 points → 0 indices.");
         }
 
-        [Test]
-        public void DuplicateConsecutivePoints_CollapsedIdentically()
-        {
-            var pts = new[]
-            {
-                new double2(0, 0), new double2(0, 0),
-                new double2(10, 0), new double2(10, 0), new double2(20, 5),
-            };
-            AssertParity(pts, JoinType.Miter, CapType.Butt, 2.0, 4, "dup-collapse");
-        }
-
-        // ── Straight / miter / bevel / caps ────────────────────────────────────────────────────────
-
-        [Test]
-        public void TwoPoints_Butt_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0) },
-                            JoinType.Miter, CapType.Butt, 2.0, 4, "2pt-butt");
-
-        [Test]
-        public void MiterJoin_ShallowCorner_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 3) },
-                            JoinType.Miter, CapType.Butt, 4.0, 4, "miter-shallow");
-
-        [Test]
-        public void MiterJoin_SharpCorner_FallsBackToBevel_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(1, 1) },
-                            JoinType.Miter, CapType.Butt, 2.0, 4, "miter->bevel");
-
-        [Test]
-        public void BevelJoin_LeftTurn_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 8) },
-                            JoinType.Bevel, CapType.Butt, 2.0, 4, "bevel-left");
-
-        [Test]
-        public void BevelJoin_RightTurn_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, -8) },
-                            JoinType.Bevel, CapType.Butt, 2.0, 4, "bevel-right");
-
-        [Test]
-        public void SquareCap_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 4) },
-                            JoinType.Miter, CapType.Square, 4.0, 4, "square-cap");
-
-        // ── Round join / cap (the local-basis arc sweep) ─────────────────────────────────────────────
-
-        [Test]
-        public void RoundJoin_BothTurns_Parity()
-        {
-            AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 8) },
-                         JoinType.Round, CapType.Butt, 2.0, 4, "round-join-left");
-            AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, -8) },
-                         JoinType.Round, CapType.Butt, 2.0, 4, "round-join-right");
-        }
-
-        [Test]
-        public void RoundCap_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(20, 4) },
-                            JoinType.Miter, CapType.Round, 4.0, 3, "round-cap");
-
-        [Test]
-        public void RoundCap_And_RoundJoin_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(18, 6), new double2(28, 6) },
-                            JoinType.Round, CapType.Round, 2.0, 4, "round-both");
-
-        // ── Inner-join miter clamp (bevel/round inner vertex now carries the miter factor) ──────────
-        //
-        // BevelJoin_LeftTurn_Parity / BevelJoin_RightTurn_Parity above use a 38.7° turn (factor 1.060) —
-        // the UNclamped branch only, and weakly. MiterJoin_SharpCorner_FallsBackToBevel_Parity already
-        // exercises the clamped branch via the miter→bevel fallback, but stays green whether both arms
-        // agree at 1.0 (un-fixed) or 2.0 (fixed) — parity alone cannot tell the two apart. These two
-        // teeth force the clamped branch explicitly, with the fixture that also proves it clamps managed-side
-        // (LineTessellatorTests.InnerJoin_Bevel_150LeftTurn_ClampedBranch / ..._Round_150LeftTurn_...).
-
-        [Test]
-        public void InnerJoin_ClampedAngle_Bevel_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(-15.980762113533157, 15.0) },
-                            JoinType.Bevel, CapType.Butt, 2.0, 4, "inner-clamp-bevel");
-
-        [Test]
-        public void InnerJoin_ClampedAngle_Round_Parity()
-            => AssertParity(new[] { new double2(0, 0), new double2(10, 0), new double2(-15.980762113533157, 15.0) },
-                            JoinType.Round, CapType.Butt, 2.0, 4, "inner-clamp-round");
-
-        // Short-segment fold regime. Every OTHER parity fixture in this file uses ≥10-unit segments against
-        // HalfWidth 2 — an order of magnitude clear of the regime where the inner-join quad provably inverts
-        // (docs/line-rendering-design.md §3 item 5). LineTessellatorTests pins the boundary exactly, but on
-        // the MANAGED oracle; without these cases the Burst producer — the one that actually ships — is
-        // unexercised at the documented boundary, and a Jobs-only divergence there would ship green.
-        // Same 90° fixture, S = 1.8 < S_crit = 2.0.
-        [TestCase(JoinType.Miter, "fold-miter")]
-        [TestCase(JoinType.Bevel, "fold-bevel")]
-        [TestCase(JoinType.Round, "fold-round")]
-        public void ShortSegment_FoldRegime_Parity(JoinType join, string label)
-            => AssertParity(new[] { new double2(0, 0), new double2(1.8, 0), new double2(1.8, 10) },
-                            join, CapType.Butt, 2.0, 4, label);
-
-        // ── line-round-limit: shallow round joins collapse to miter (Burst twin) ────────────────────
+        // ── line-round-limit: shallow round joins collapse to miter ────────────────────────────────
 
         /// <summary>Mixed-regime fixture: a shallow (20°, collapses to miter) join followed by a sharp (90°,
-        /// fan preserved) join in the SAME polyline — the combination the managed-only teeth in
-        /// <c>LineTessellatorTests</c> don't cover, since they exercise one join per fixture.</summary>
+        /// fan preserved) join in the SAME polyline.</summary>
         private static readonly double2[] MixedRoundLimitFixture =
         {
             new double2(0, 0),
@@ -236,16 +54,9 @@ namespace MapRenderer.Tests.Meshing
             new double2(15.976724774602397, 12.817127641115771),  // further 90° turn — sharp, fan preserved
         };
 
-        [Test]
-        public void RoundLimit_MixedShallowAndSharp_Parity()
-            => AssertParity(MixedRoundLimitFixture, JoinType.Round, CapType.Butt, 2.0, 4, "round-limit-mixed",
-                             roundLimit: 1.05);
-
         /// <summary>
-        /// Direct assertion on the raw Job output (deliberately redundant with the parity tooth above and
-        /// with <c>LineTessellatorTests.ShallowRoundJoin_CollapsesToMiter_MatchesMiterPathExactly</c>): the
-        /// tooth that survives if <see cref="AssertParity"/> is ever loosened. Exact counts worked out by hand
-        /// from <see cref="MixedRoundLimitFixture"/>'s emission shape — see the inline breakdown below.
+        /// Direct assertion on the raw Job output. Exact counts worked out by hand from
+        /// <see cref="MixedRoundLimitFixture"/>'s emission shape — see the inline breakdown below.
         /// </summary>
         [Test]
         public void RoundLimit_ShallowCorner_JobEmitsMiterVertexCountDirectly()
@@ -267,28 +78,12 @@ namespace MapRenderer.Tests.Meshing
         }
 
         /// <summary>
-        /// F1 fix — Burst twin of <c>LineTessellatorTests.RoundLimit_ExceedsMiterLimit_CascadesToBevel_
-        /// NotUnboundedMiter</c>: roundLimit(3.0) and miterLimit(2.0) independently style-settable, corner
-        /// f=2.5 sits between them, must cascade round→miter→bevel (not fall through to an unbounded
-        /// ComputeMiterNormals spike). Parity-only is sufficient here — both producers share the SAME
-        /// roundCollapsedToMiter dispatch shape, and index-count parity alone discriminates bevel (3 join
-        /// verts) from an unbounded miter (2).
+        /// Direct analytic assertion on the Burst side: the inner-join vertex at a 90° left turn (bevel)
+        /// sits at the analytic intersection of the two concave offset lines — hand-computed here, not
+        /// read from a managed arm.
         /// </summary>
         [Test]
-        public void RoundLimit_ExceedsMiterLimit_CascadesToBevel_Parity()
-            => AssertParity(
-                new[] { new double2(0, 0), new double2(10, 0), new double2(3.2, 7.332121111929344) },
-                join: JoinType.Round, cap: CapType.Butt, miterLimit: 2.0, roundSegments: 4,
-                label: "round-limit-exceeds-miter", roundLimit: 3.0);
-
-        /// <summary>
-        /// One direct analytic assertion on the Burst side (deliberately redundant with T1 ∧ parity):
-        /// the tooth that survives if <see cref="AssertParity"/> is ever loosened. Same fixture as
-        /// <c>LineTessellatorTests.InnerJoin_Bevel_90LeftTurn_Unclamped_MatchesConcaveOffsetLineIntersection</c>,
-        /// mapped flat 2D (x,y) → 3D (x,0,y).
-        /// </summary>
-        [Test]
-        public void InnerJoin_Bevel_90LeftTurn_Across_MatchesManagedAnalytic()
+        public void InnerJoin_Bevel_90LeftTurn_Across_MatchesAnalyticIntersection()
         {
             var pts = new[] { new double2(0, 0), new double2(10, 0), new double2(10, 10) };
             var (jv, _) = RunJob(pts, JoinType.Bevel, CapType.Butt, 2.0, 4);
@@ -316,14 +111,20 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(1.4142135623730951, len, 1e-9, $"|Across| should be √2 = 1.4142135623730951. Got {len:G17}.");
         }
 
-        // ── Fixture-wide oracle over real line geometry (geolines layer) ────────────────────────────
+        // ── Fixture-wide robustness over real line geometry (geolines layer) ────────────────────────
 
+        /// <summary>
+        /// Runs <see cref="RibbonJob"/> over every real line path in the fixture's geolines layer and
+        /// asserts basic geometric health: finite positions, an index count that is a multiple of 3, and
+        /// a flat-mapping's out-of-plane component (<c>Across.y</c>) staying zero. No longer a
+        /// differential comparison — the managed reference it once ran against is retired.
+        /// </summary>
         [Test]
-        public void Fixture_Geolines_Parity_MiterButt()
+        public void Fixture_Geolines_RibbonJob_ProducesHealthyGeometry()
         {
             Assert.IsTrue(File.Exists(FixturePath), $"Fixture missing: {FixturePath}");
             // IR C1 P3: the command streams come from the bytes (MvtFixtureStreams), not off a decoded
-            // feature — the ribbon oracle must not share its input path with production's decoder.
+            // feature — this must not share its input path with production's decoder.
             var layer = MvtFixtureStreams.ReadLayer(File.ReadAllBytes(FixturePath), "geolines");
             Assert.IsNotNull(layer, "geolines layer present in fixture");
 
@@ -337,7 +138,20 @@ namespace MapRenderer.Tests.Meshing
                 foreach (var path in paths)
                 {
                     if (path.Count < 2) continue;
-                    AssertParity(path.ToArray(), JoinType.Miter, CapType.Butt, 2.0, 4, $"geolines#{fi}");
+
+                    var (jv, ji) = RunJob(path.ToArray(), JoinType.Miter, CapType.Butt, 2.0, 4);
+                    string label = $"geolines#{fi}";
+
+                    Assert.AreEqual(0, ji.Length % 3, $"{label}: index count must be a multiple of 3.");
+                    foreach (var v in jv)
+                    {
+                        Assert.IsFalse(double.IsNaN(v.Position.x) || double.IsNaN(v.Position.y) || double.IsNaN(v.Position.z),
+                            $"{label}: Position must be finite.");
+                        Assert.IsFalse(double.IsNaN(v.Across.x) || double.IsNaN(v.Across.y) || double.IsNaN(v.Across.z),
+                            $"{label}: Across must be finite.");
+                        Assert.AreEqual(0.0, v.Across.y, 1e-9, $"{label}: flat mapping must keep Across.y == 0.");
+                        Assert.AreEqual(0.0, v.Position.y, 1e-9, $"{label}: flat mapping must keep Position.y == 0.");
+                    }
                     pathsChecked++;
                 }
             }

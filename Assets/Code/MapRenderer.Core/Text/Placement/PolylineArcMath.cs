@@ -1,6 +1,7 @@
 // Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2 — this
 // file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to a
-// (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See PolylineArcWalker.
+// (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the sibling
+// SymbolScreenProjection header comment for the namespace-collision trap.
 
 using System;
 using Unity.Mathematics;
@@ -8,11 +9,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// The arc-walk geometry of curved along-line text, factored out of <see cref="PolylineArcWalker"/> as
-    /// pure, allocation-free static functions over caller-owned spans. Blittable-shaped (spans of value types,
-    /// no class state) so the same math drives both the managed per-frame walker AND the future Burst staging
-    /// job (Lever C) — one source of truth, no divergence. <see cref="PolylineArcWalker"/> is now a thin
-    /// stateful wrapper that holds the reused buffers and forwards to these.
+    /// The arc-walk geometry of curved along-line text: pure, allocation-free static functions over
+    /// caller-owned spans. Blittable-shaped (spans of value types, no class state) so the same math drives
+    /// both <see cref="SymbolStagingMath"/>'s per-frame walk AND the future Burst staging job (Lever C) — one
+    /// source of truth, no divergence. The caller owns the cumulative-length buffer and the resumable cursor
+    /// (Lever A) as plain locals, threaded across calls by <c>ref</c>.
     /// </summary>
     public static class PolylineArcMath
     {

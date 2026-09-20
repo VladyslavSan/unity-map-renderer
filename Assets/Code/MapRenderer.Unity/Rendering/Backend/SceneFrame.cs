@@ -4,7 +4,7 @@ namespace MapRenderer.Unity.Rendering.Backend
 {
     /// <summary>
     /// The per-frame scene frame the render backends place tiles relative to (S91-C, Level-2 of the two-level
-    /// RTC — see <see cref="MapRenderer.Core.View.FloatingOrigin"/>). It bundles the two projection-derived
+    /// RTC — see <see cref="MapRenderer.Unity.View.FloatingOrigin"/>). It bundles the two projection-derived
     /// quantities a backend's per-frame <c>Rebuild</c> needs so ONE camera-orbit pose works for BOTH the plane
     /// and the globe: the look-at projected into render space, and the render→look-at-local-ENU rotation.
     ///

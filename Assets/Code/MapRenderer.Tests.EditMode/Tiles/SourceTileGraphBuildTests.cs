@@ -20,7 +20,7 @@ using Unity.Collections;
 using Unity.Jobs;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
-using MapRenderer.Core.View.Camera;
+using MapRenderer.Unity.View.Camera;
 using MapRenderer.Jobs.Fill;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;

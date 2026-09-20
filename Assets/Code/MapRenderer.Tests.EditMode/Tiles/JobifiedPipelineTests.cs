@@ -11,12 +11,11 @@ using Unity.Jobs;
 using Unity.Mathematics;
 using UnityEngine;
 using MapRenderer.Core.Geo;
-using MapRenderer.Core.Geometry;
 using MapRenderer.Core.Tiles;
+using MapRenderer.Tests.TestSupport;
 using MapRenderer.Jobs.Fill;
 using MapRenderer.Jobs.Geometry;
 using MapRenderer.Jobs.Mvt;
-using MapRenderer.Tests.TestSupport;
 using MapRenderer.Core.Expressions;
 namespace MapRenderer.Tests.Tiles
 {

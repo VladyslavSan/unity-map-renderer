@@ -2,7 +2,6 @@
 // All Mercator formulas are delegated to WebMercator statics — no formula duplication.
 
 using Unity.Mathematics;
-using MapRenderer.Core.View.Camera;
 
 namespace MapRenderer.Core.Geo
 {

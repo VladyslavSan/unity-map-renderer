@@ -15,7 +15,6 @@ using MapRenderer.Core.Geo;
 using MapRenderer.Core.Style;
 using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
-using MapRenderer.Core.View.Camera;
 using MapRenderer.Unity.Rendering.Backend;
 using MapRenderer.Unity.Rendering.Map;
 using MapRenderer.Unity.Rendering.Style;
