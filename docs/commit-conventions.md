@@ -39,6 +39,7 @@ Trailers (see below)
 | `build` | player-build tooling: `Tools/build.sh`, `Assets/Editor/BuildScript.cs`, build settings |
 | `text` | the symbol subsystem: text shaping, icon symbols, placement, collision, the glyph atlas, `SymbolTileStore` |
 | `backlog` | roadmap & planning docs (e.g. the MapLibre parity spec) |
+| `tests` | the test tree: test assemblies, their layout, and the harness code under `Assets/Tests` |
 | `docs` | documentation |
 
 Add a scope here when a genuinely new area appears — don't stretch an existing one or invent an ad-hoc tag.

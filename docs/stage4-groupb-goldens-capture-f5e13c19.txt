@@ -9,10 +9,10 @@
 # Each line is one capture site's per-stream SHA-256 digests (base64), copied verbatim into the matching
 # frozen-golden constants below — this file is the durable record that they were captured from the
 # independent implementation, not re-derived from the graph after deletion (R6 / B.7):
-#   SITE1 → Assets/Code/MapRenderer.Tests.EditMode/Tiles/FillMeshGraphParityTests.cs (FrozenGoldensMercator / FrozenGoldensSpherical)
-#   SITE2 → Assets/Code/MapRenderer.Tests.EditMode/Tiles/FillMeshGraphGlobeParityTests.cs (FrozenGoldens)
-#   SITE3 → Assets/Code/MapRenderer.Tests.EditMode/Meshing/StyledFillExtrusionGraphWriteTests.cs (FrozenGoldensFlat / FrozenGoldensSpherical)
-#   SITE4 → Assets/Code/MapRenderer.Tests.EditMode/Tiles/TileBuildGraphTests.cs (FrozenGoldensFlat / FrozenGoldensSpherical)
+#   SITE1 → Assets/Tests/MapRenderer.Tests.EditMode/Tiles/FillMeshGraphParityTests.cs (FrozenGoldensMercator / FrozenGoldensSpherical)
+#   SITE2 → Assets/Tests/MapRenderer.Tests.EditMode/Tiles/FillMeshGraphGlobeParityTests.cs (FrozenGoldens)
+#   SITE3 → Assets/Tests/MapRenderer.Tests.EditMode/Meshing/StyledFillExtrusionGraphWriteTests.cs (FrozenGoldensFlat / FrozenGoldensSpherical)
+#   SITE4 → Assets/Tests/MapRenderer.Tests.EditMode/Tiles/TileBuildGraphTests.cs (FrozenGoldensFlat / FrozenGoldensSpherical)
 
 SITE1[WebMercatorProjection]: Vertex=BGT9vCbMRHS/Ni3PF1gWcHP4HK8NZKoEh+0AX5qcjyY= World=e5Kjjs7aiA1F+5QY8M53IoLBxLSTuEKehkCzPIMXCO8= Up=8j1uwFahQZ2mr/d02vWtnxyHtzu+DFiN5jMA/6NRO/k= FeatIdx=FufcsnPOzP5M4IKJAwSFCfn8TPyaCN/bm14hxU4Cs3Q= Indices=NHdZriRpUzF7iiWCExTHR6Iz5GwlLlBkZiyA/dG8Cdk= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=vZan4ovogL6+dDbAOpmv82Z1gd89/Piwz4fRI1hmd8w=
 SITE1[SphericalProjection]: Vertex=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= World=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= Up=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= FeatIdx=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= Indices=47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=vZan4ovogL6+dDbAOpmv82Z1gd89/Piwz4fRI1hmd8w=

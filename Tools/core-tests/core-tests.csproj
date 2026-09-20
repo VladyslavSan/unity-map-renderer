@@ -50,13 +50,13 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Protobuf/ProtobufReader.cs" />
     <!-- UMR-173: relocated out of Core (zero production callers) into the test assembly's TestSupport,
          namespace-only change. Still the independent ground truth the water corpus validates against. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/SignedArea.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/Polygon.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/TestSupport/PolygonAssembler.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/TestSupport/SignedArea.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/TestSupport/Polygon.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/TestSupport/PolygonAssembler.cs" />
     <!-- S4: shared projection-subdivision policy (Core, engine-free) + its tests (shared verbatim) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Geometry/LineCurvatureSubdivision.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Geometry/LineCurvatureSubdivisionTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Visual/SnapshotCoverage.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Geometry/LineCurvatureSubdivisionTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Visual/SnapshotCoverage.cs" />
 
     <!-- VerifiedDisposable: shared IDisposable base (Core, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Lifetime/VerifiedDisposable.cs" />
@@ -144,7 +144,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Json/JsonParser.cs" />
     <!-- GeoJSON S2: deterministic JSON serialization, the inline-`data` half of SourceKey's identity. -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Json/JsonCanonical.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Json/JsonCanonicalTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Json/JsonCanonicalTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleLayerType.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/StyleLayer.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/SourceDefinition.cs" />
@@ -172,9 +172,9 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/IIndexedFeature.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/IFeatureKeyResolver.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/IIndexedFeatureSource.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/ITileCommandStreamFeature.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/DictionaryFeature.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/InMemoryTileFeature.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.Shared/ITileCommandStreamFeature.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.Shared/DictionaryFeature.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.Shared/InMemoryTileFeature.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/EvaluationContext.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Classification.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Expression.cs" />
@@ -196,71 +196,71 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Expressions/Ops/Variables.cs" />
 
     <!-- S81: shared engine-free test double for IDataSource (used by TileSchedulerOrderingTests in both runners) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/TestDataSource.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.Shared/TestDataSource.cs" />
     <!-- fetch-scheduler-web-hang: the both-runners home for the scheduler-ordering teeth (T1/T3/T4). -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/DataSources/TileSchedulerOrderingTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/DataSources/TileSchedulerOrderingTests.cs" />
 
     <!-- Engine-free EditMode tests, shared verbatim (run in both Unity and dotnet) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Lifetime/VerifiedDisposableTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Lifetime/SharedDisposableTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/AngleTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ConstrainedAngleTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Projection/ProjectionMathTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/CameraPropertiesTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Meshing/PolygonAssemblerTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Lifetime/VerifiedDisposableTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Lifetime/SharedDisposableTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Camera/AngleTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Camera/ConstrainedAngleTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Projection/ProjectionMathTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Camera/CameraPropertiesTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Meshing/PolygonAssemblerTests.cs" />
     <!-- A0 (Core oracle cleanup): EarcutTests / EarcutDegenerateTriangleTests / EarcutEarTestScanBoundTests
          moved off this project — they now drive MapRenderer.Jobs.Fill.EarcutJob (NativeArray/Burst),
          which this project cannot compile. A permanent loss to the fast loop; see
          docs/mesh-triangulation-robustness-design.md. MvtFixtureStreams/MvtGeometry were those three
          tests' only registered consumers here (verified: no other registered file has a symbol use,
          only a doc-comment mention in GeoJsonParserTests.cs) — removed with them. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ViewMathTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/ViewInputTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Visual/SnapshotCoverageTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Camera/ViewMathTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Camera/ViewInputTests.cs" />
 
     <!-- S85: TileCoverStats + FrustumTileSelector aspect/Flat teeth (engine-free; shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/TileCoverStatsTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Tiles/TileCoverStatsTests.cs" />
 
     <!-- Tile-load smoothness T6: TilePriority monotonicity/determinism (engine-free; shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/TilePriorityTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Tiles/TilePriorityTests.cs" />
 
     <!-- S63: Camera interaction invariants (engine-free; IProjection + ViewInput anchored tests) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/CameraInteractionTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Camera/CameraInteractionTests.cs" />
 
     <!-- S74: touch gesture recognizer tests (engine-free; B-CLASSIFY/B-CLAMP/B-PANPIN/T-FAKESOURCE) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/TouchGestureRecognizerTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Camera/TouchGestureRecognizerTests.cs" />
 
     <!-- S72: two-way slider↔camera reconcile tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Camera/CameraSliderBindingTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Camera/CameraSliderBindingTests.cs" />
 
     <!-- S07: engine-free layer-order + snapshot-color tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Rendering/LayerDrawOrderTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Visual/SnapshotColorTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Rendering/LayerDrawOrderTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Visual/SnapshotColorTests.cs" />
 
     <!-- S08: style-spec model tests (shared verbatim) -->
 
     <!-- S83a: TileJSON parse + SourceDefinition resolution tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/TileJsonTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/TileJsonTests.cs" />
 
     <!-- S09: expression engine tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/ExprTestUtil.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/LiteralTypeTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/LookupTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/DecisionTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/RampCurveTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/ColorCoercionTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/MathOpTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/ColorTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/FeatureDataTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ExprTestUtil.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/LiteralTypeTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/LookupTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/DecisionTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/RampCurveTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ColorCoercionTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/MathOpTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ColorTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/FeatureDataTests.cs" />
     <!-- T1a (string→id key hoist): the int-vs-string path structural proof, engine-free. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/FeatureKeyExpressionTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/FeatureKeyExpressionTests.cs" />
     <!-- T3 (string→id key hoist): GeoJSON / non-index-capable features stay on the string path, engine-free. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/FeatureKeyExpressionCapabilityTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/ZoomTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/StringTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/LetVarTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/ClassificationTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/ExpressionErrorTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/FeatureKeyExpressionCapabilityTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ZoomTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/StringTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/LetVarTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ClassificationTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ExpressionErrorTests.cs" />
 
     <!-- S10: filters (legacy + expression) — Core sources -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/FilterDialect.cs" />
@@ -268,24 +268,24 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/CompiledFilter.cs" />
 
     <!-- S11: type assertions + paint evaluator tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Expressions/AssertionTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/AssertionTests.cs" />
     <!-- S60: StylePropertyTests — full coverage for StyleProperty<T> (absorbed the retired
          PaintPropertyEvaluatorTests + DataDrivenPaintEvaluatorTests at cleanup B1) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/StylePropertyTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/StylePropertyTests.cs" />
     <!-- S60: StyleLayerEncapsulationTests — reflection asserts on internal fields -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/StyleLayerEncapsulationTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/StyleLayerEncapsulationTests.cs" />
     <!-- UMR-108: StyleLayerEagerParseTests — eager Parse acceptance (permanent registration) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/StyleLayerEagerParseTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/StyleLayerEagerParseTests.cs" />
 
     <!-- S10: filters tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/LegacyFilterTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/FilterDialectTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Filters/FilterEquivalenceTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Filters/LegacyFilterTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Filters/FilterDialectTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Filters/FilterEquivalenceTests.cs" />
     <!-- Epic A / A6: MvtFeatureAdapter fold-verbatim byte-parity guard (F-5) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Globe/GlobeTileSelectorTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Globe/GlobeTileSelectorTests.cs" />
     <!-- UMR-125: tilt cover-growth characterisation + the on-screen-size instrument's own proof -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/TiltCoverGrowthTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Tiles/ProjectedAreaLodTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Tiles/TiltCoverGrowthTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Tiles/ProjectedAreaLodTests.cs" />
 
     <!-- S39: MVT property/id decoding tests (shared verbatim) -->
 
@@ -295,13 +295,13 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/StyleLayer.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/FillPattern.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Fill/LayoutProperties.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/FillLayoutTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/FillPatternTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/FillLayoutTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/FillPatternTests.cs" />
     <!-- S23 I1: fill-extrusion style plumbing (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FillExtrusion/PropertyNames.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FillExtrusion/PaintProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/FillExtrusion/StyleLayer.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/FillExtrusionPaintTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/FillExtrusionPaintTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/PropertyNames.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/PaintProperties.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LayoutProperties.cs" />
@@ -311,9 +311,9 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Background/StyleLayer.cs" />
 
     <!-- S13/S14: Engine-free paint tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/LinePaintTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/LinePaintTests.cs" />
     <!-- E3: background paint tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/BackgroundPaintTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/BackgroundPaintTests.cs" />
 
     <!-- S105 Slice 1: Symbol style layer + text-field resolver (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/PropertyNames.cs" />
@@ -323,8 +323,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/TextFieldResolver.cs" />
 
     <!-- S105 Slice 1: A1 symbol-layer parse + A2 text-field resolution (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolStyleLayerTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/TextFieldResolverTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/SymbolStyleLayerTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/TextFieldResolverTests.cs" />
 
     <!-- Slice A: text layout-options wiring (LayoutProperties → TextLayoutOptions), engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/TextLayoutOptionsBuilder.cs" />
@@ -344,7 +344,7 @@
          cost — a RELOCATION, not a retired oracle: SymbolTileStore.cs, SymbolSnapshot.cs,
          SymbolReconciler.cs, SymbolTileStoreTests.cs, SymbolReconcilerTests.cs,
          SymbolDedupZoomInvarianceTests.cs all moved out; they still run, just in the Unity EditMode runner
-         (Assets/Code/MapRenderer.Tests.EditMode/Text/). A 7th, mechanical consequence of the store's removal:
+         (Assets/Tests/MapRenderer.Tests.EditMode/Text/). A 7th, mechanical consequence of the store's removal:
          CrossTileIdentityTests.cs constructed a SymbolTileStore in its Store_* cases — those 3 cases moved
          to Text/Placement/CrossTileIdentityStoreTests.cs (EditMode-only); the file's OWN engine-free
          CrossTileSymbolKey.For-math teeth stay registered below, unmoved. -->
@@ -353,19 +353,19 @@
 
     <!-- Engine-free shader-path resolution shared by LineDashTests/LineOffsetTests (ShaderPropertyParser's
          AssetDatabase-based MapShaderPath is Editor-only and cannot be registered here). -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Structure/EngineFreeShaderPaths.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Structure/EngineFreeShaderPaths.cs" />
 
     <!-- S43: LineDash (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LineDash.cs" />
 
     <!-- S43: Engine-free tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/LineDashTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/LineDashTests.cs" />
 
     <!-- S44: LineOffset (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Line/LineOffset.cs" />
 
     <!-- S44: Engine-free tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/LineOffsetTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/LineOffsetTests.cs" />
 
     <!-- S18 Slice 1: glyph-PBF decode + data carriers (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SdfGlyph.cs" />
@@ -375,7 +375,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/GlyphPbfDecoder.cs" />
 
     <!-- S18 Slice 1: T2 glyph-PBF decode test (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/GlyphPbfDecodeTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/GlyphPbfDecodeTests.cs" />
 
     <!-- S18 Slice 2: atlas packing + CPU atlas (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/GlyphAtlasEntry.cs" />
@@ -383,10 +383,10 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/GlyphAtlas.cs" />
 
     <!-- S18 Slice 2: T3 SDF-crispness + atlas packing/blit tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/SdfDistanceFieldTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/GlyphAtlasTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/SdfDistanceFieldTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/GlyphAtlasTests.cs" />
     <!-- S105 Slice 3b: fixed-size atlas (Size-constant + graceful overflow) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/GlyphAtlasFixedSizeTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/GlyphAtlasFixedSizeTests.cs" />
 
     <!-- S18 Slice 3: clean-room shaper (Option Y, no HarfBuzz) — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/PositionedGlyph.cs" />
@@ -400,7 +400,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CodepointTextShaper.cs" />
 
     <!-- S18 Slice 3: T1 Arabic shaping golden + teeth (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextShapingTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/TextShapingTests.cs" />
 
     <!-- S18 Slice 4: font-stack resolution + fallback + glyph cache (Core source, engine-free) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/GlyphRangeKey.cs" />
@@ -411,22 +411,22 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/FontStackResolver.cs" />
 
     <!-- S18 Slice 4: T5 font-stack fallback tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/FontStackFallbackTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/FontStackFallbackTests.cs" />
 
     <!-- S18 Unity-side batch: GlyphManager (fetch/decode/cache/atlas wiring) — engine-free despite
          living under Assets/MapRenderer.Unity/Text (see its file header: no UnityEngine reference). -->
     <Compile Include="../../Assets/Code/MapRenderer.Unity/Text/GlyphManager.cs" />
 
     <!-- S18 Unity-side batch: fake in-memory IGlyphSource test double (mirrors TestDataSource) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.Shared/TestGlyphSource.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.Shared/TestGlyphSource.cs" />
 
     <!-- S18 Unity-side batch: GlyphManager fetch/decode/cache/atlas tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/GlyphManagerTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/GlyphManagerTests.cs" />
 
     <!-- I1: sprite JSON index — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteEntry.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteIndex.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Sprites/SpriteIndexTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Sprites/SpriteIndexTests.cs" />
 
     <!-- Padded sprite repack (docs/labels-and-symbols-design.md §5.2.1): rect planning + pixel composition,
          both engine-free (the composer works over RGBA32 byte arrays, not Texture2D). -->
@@ -434,33 +434,33 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpritePadPlan.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/ShelfRectPacker.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteSheetPadder.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Sprites/SpriteSheetPadderTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Sprites/SpriteSheetPadderTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteSheetComposer.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Sprites/SpriteSheetComposerTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Sprites/SpriteSheetComposerTests.cs" />
 
     <!-- I3: icon labels — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteAtlasView.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolKind.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Style/Symbol/IconImageResolver.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/IconQuadLayout.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/IconImageResolverTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/IconQuadLayoutTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/IconImageResolverTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/IconQuadLayoutTests.cs" />
     <!-- The skirt's carrier chain, extraction → builder → collision box (engine-free; shared verbatim). -->
     <!-- P2 REQUIRED-1: the Up carrier chain (Block A), driven through real extraction + build (engine-free). -->
 
     <!-- Road shields (docs/road-shields-design.md): G1-G6 acceptance teeth. T10/T11 are [UnityTest]-only,
          NOT added here (Text/SymbolSpriteReadinessTests.cs, TestSupport/GatedSpriteSource.cs). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/AlignmentResolution.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Style/SymbolTestFixtures.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/SymbolTestFixtures.cs" />
     <!-- Pitch-alignment epic, P1: icon-pitch-alignment parse + AlignmentResolution.ResolvePitch. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/AlignmentResolutionTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/AlignmentResolutionTests.cs" />
 
     <!-- P-A (non-centred icon+text pairing): the pairing predicate's teeth — engine-free. -->
 
     <!-- Road shields §10 (symbol pairing, D8-D11): the pair resolver — engine-free. -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolPairRole.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolPairing.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolPairingTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolPairingTests.cs" />
 
     <!-- S19: symbol layout (text-only) — Core source, engine-free -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolQuad.cs" />
@@ -476,15 +476,15 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/TextQuadLayout.cs" />
 
     <!-- S19 Slice 1: layout tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextQuadLayoutTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/TextQuadLayoutTests.cs" />
     <!-- S19 Slice 2: anchor/offset/justify tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextAnchorOffsetJustifyTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/TextAnchorOffsetJustifyTests.cs" />
     <!-- Stage 4 (§11 G8/D12): vertical-centring teeth (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextVerticalCentringTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/TextVerticalCentringTests.cs" />
     <!-- S19 Slice 3: word-wrap tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextWrapTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/TextWrapTests.cs" />
     <!-- S19 Slice 4: RTL layout tests (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/TextRtlLayoutTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/TextRtlLayoutTests.cs" />
     <!-- TextQuadLayoutAllocTests.cs is Unity-only (UnityEngine.TestTools.Constraints) — NOT registered here. -->
 
     <!-- S20 Slice 1: placement/billboard math (Core source, engine-free) -->
@@ -515,43 +515,43 @@
     <!-- A-2: stable tile-space line anchors (engine-free) + their tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LineAnchor.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/LineAnchorPlacement.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/LineAnchorPlacementTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/LineAnchorPlacementTests.cs" />
     <!-- A-3: cross-tile label identity (engine-free) + its tests. CrossTileIdentityTests.cs's own engine-free
          `For`-math teeth stay in this project; its Store_* cases moved out (reader cutover 4.2 — see this
          file's note by the six-file relocation, above) to Text/Placement/CrossTileIdentityStoreTests.cs
          (EditMode-only). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/CrossTileSymbolKey.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/CrossTileIdentityTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/CrossTileIdentityTests.cs" />
     <!-- Stage 2 (labels-async-reconcile): label-text interning for the low-alloc dedup key + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolStringTable.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStringTableTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolStringTableTests.cs" />
     <!-- B-3: pre-projection horizon/distance cull (engine-free) + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolFarPlaneCull.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolFarPlaneCullTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolFarPlaneCullTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileCoverage.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolTileCoverageTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolTileCoverageTests.cs" />
     <!-- Tile-key codec (IR B4): lifted out of SymbolFeatureExtractor so Core consumers keep it -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileKey.cs" />
     <!-- Moves the coverage cull ahead of the SoA batch build (cull-after-dedup, before Build) -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolTileCoverageFilter.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolTileCoverageFilterTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolTileCoverageFilterTests.cs" />
     <!-- S3: globe far-side horizon cull, a gather fade-out trigger (engine-free) + its tests -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/HorizonCull.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/HorizonCullTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/HorizonCullTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedGlyph.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/CurvedTextLayout.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcMathScreenTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcMathWorldSampleTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathSortKeyTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathCurvedVertexTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcMathScreenTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/PolylineArcMathWorldSampleTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathSortKeyTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathCurvedVertexTests.cs" />
     <!-- P2 T-2: SampleUp exact per-glyph sample (engine-free; shared verbatim). -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathCurvedUpTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextLayoutTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathCurvedUpTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/CurvedTextLayoutTests.cs" />
     <!-- W4: curved-text vertical centring teeth (shared verbatim) -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/CurvedTextCentringTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolTranslateTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolBearingTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/CurvedTextCentringTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolTranslateTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolBearingTests.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/BillboardMath.cs" />
 
     <!-- S20 Slice 2: screen-space collision primitives (Core source, engine-free) -->
@@ -561,14 +561,14 @@
 
     <!-- Epic A / A1: T3 BuildWorldQuad billboard golden, T2 screen-projection golden + culling
          (shared verbatim; T2 needs the float4x4 shim — Shim/Types/float4x4.cs + VectorMath.mul overload). -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/BillboardMathTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolScreenProjectionTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/BillboardMathTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolScreenProjectionTests.cs" />
 
     <!-- S20 Slice 2: the ComparePlacementOrder(SymbolCandidate) comparator tooth (shared verbatim). The
          collision job itself (CollisionJob) and its placement/grid-contract teeth need NativeArray/IJob and
          so stay Unity-only — NOT registered here. -->
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCollisionTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/Text/Placement/SymbolCandidateRangeTilingTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolCollisionTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolCandidateRangeTilingTests.cs" />
 
     <!-- GeoJSON source, S1: RFC 7946 parse + client-side tile slicing (Core, engine-free).
          RingWindowClipperParityTests.cs is Unity-only (it drives RingClipJob) — NOT registered here. -->
@@ -578,11 +578,11 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/GeoJson/GeoJsonModel.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/GeoJson/GeoJsonParser.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/GeoJson/GeoJsonTileSlicer.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/GeoJson/GeoJsonTestFixtures.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/GeoJson/WebMercatorTilingTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/GeoJson/WindowClipperTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/GeoJson/GeoJsonParserTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/GeoJson/GeoJsonTileSlicerTests.cs" />
-    <Compile Include="../../Assets/Code/MapRenderer.Tests.EditMode/GeoJson/GeoJsonForkNeutralityTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/GeoJson/GeoJsonTestFixtures.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/GeoJson/WebMercatorTilingTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/GeoJson/WindowClipperTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/GeoJson/GeoJsonParserTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/GeoJson/GeoJsonTileSlicerTests.cs" />
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/GeoJson/GeoJsonForkNeutralityTests.cs" />
   </ItemGroup>
 </Project>

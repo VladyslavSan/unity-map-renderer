@@ -51,10 +51,10 @@ produced the first one.
 - `Assets/Code/MapRenderer.App/` — **the product (composition root)**: `MapHost` + scene wiring, plus
   the dev-facing surfaces built on it (camera control, menus, diagnostics/telemetry) — not a place for
   renderer/mesh-building logic.
-- `Assets/Code/MapRenderer.Tests.EditMode/` — headless EditMode tests.
-- `Assets/Code/MapRenderer.Tests.PlayMode/` — PlayMode tests (multi-frame/async behaviour EditMode can't
+- `Assets/Tests/MapRenderer.Tests.EditMode/` — headless EditMode tests.
+- `Assets/Tests/MapRenderer.Tests.PlayMode/` — PlayMode tests (multi-frame/async behaviour EditMode can't
   exercise).
-- `Assets/Code/MapRenderer.Tests.Shared/` — shared test infra/fixtures used by both test runners.
+- `Assets/Tests/MapRenderer.Tests.Shared/` — shared test infra/fixtures used by both test runners.
 - `Assets/Fixtures/` — committed test data (e.g. a sample MVT tile).
 - Assemblies are split via `.asmdef`; Core does not depend on `MapRenderer.Unity`.
 
