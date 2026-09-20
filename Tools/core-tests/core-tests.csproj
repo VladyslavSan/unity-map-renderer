@@ -242,33 +242,21 @@
     <!-- S83a: TileJSON parse + SourceDefinition resolution tests (shared verbatim) -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/TileJsonTests.cs" />
 
-    <!-- S09: expression engine tests (shared verbatim) -->
+    <!-- S09/S11: expression engine tests (shared verbatim) -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ExprTestUtil.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/LiteralTypeTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/LookupTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/DecisionTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/RampCurveTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ColorCoercionTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/MathOpTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ColorTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/FeatureDataTests.cs" />
-    <!-- T1a (string→id key hoist): the int-vs-string path structural proof, engine-free. -->
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/FeatureKeyExpressionTests.cs" />
-    <!-- T3 (string→id key hoist): GeoJSON / non-index-capable features stay on the string path, engine-free. -->
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/FeatureKeyExpressionCapabilityTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ZoomTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/StringTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/LetVarTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ClassificationTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/ExpressionErrorTests.cs" />
+    <!-- UMR-176: merged from 8 single-fixture files (Color/Decision/LetVar/Lookup/MathOp/RampCurve/
+         String/Zoom)Tests.cs — each class kept verbatim, its own namespace+using block. -->
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/OperatorTests.cs" />
+    <!-- UMR-176: merged from 8 single-fixture files (Assertion/Classification/ColorCoercion/
+         ExpressionError/FeatureData/FeatureKeyExpression(Capability)/LiteralType)Tests.cs — each class
+         kept verbatim, its own namespace+using block. -->
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/SemanticsTests.cs" />
 
     <!-- S10: filters (legacy + expression) — Core sources -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/FilterDialect.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/LegacyFilterTranslator.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Filters/CompiledFilter.cs" />
 
-    <!-- S11: type assertions + paint evaluator tests (shared verbatim) -->
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Expressions/AssertionTests.cs" />
     <!-- S60: StylePropertyTests — full coverage for StyleProperty<T> (absorbed the retired
          PaintPropertyEvaluatorTests + DataDrivenPaintEvaluatorTests at cleanup B1) -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/StylePropertyTests.cs" />
@@ -280,9 +268,9 @@
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/StyleLayerEagerParseTests.cs" />
 
     <!-- S10: filters tests (shared verbatim) -->
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Filters/LegacyFilterTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Filters/FilterDialectTests.cs" />
-    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Filters/FilterEquivalenceTests.cs" />
+    <!-- UMR-176: merged from LegacyFilterTests.cs + FilterDialectTests.cs + FilterEquivalenceTests.cs —
+         each class kept verbatim, its own namespace+using block. -->
+    <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Filters/FilterCompilationTests.cs" />
     <!-- Epic A / A6: MvtFeatureAdapter fold-verbatim byte-parity guard (F-5) -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Globe/GlobeTileSelectorTests.cs" />
     <!-- UMR-125: tilt cover-growth characterisation + the on-screen-size instrument's own proof -->
