@@ -175,6 +175,9 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
 - **Placement is architectural, not test-driven** — `ARCHITECTURE.md` §2 "Module boundaries" is the rule.
 - Logic that can be unit-tested **must** have EditMode tests wherever it lives; validate via the recipe above
   before declaring done.
+- **Where that test GOES — topic, kind, lane, size — is `docs/test-conventions.md`.** It is an ordered
+  decision tree, first match wins. Read it before adding a test FILE; a new file is correct only when the
+  subject is new.
 - Engine-only behavior (mesh build, rendering, camera) lives in `MapRenderer.Unity`; verify it visually
   in the Editor (a step the user runs).
 - Vendored third-party code goes under `Assets/Code/ThirdParty/<name>/` with its license, and an entry in

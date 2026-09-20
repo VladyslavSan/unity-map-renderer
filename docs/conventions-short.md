@@ -56,6 +56,21 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     *defensive copy* per read (worse than by-value).
   - Small structs (`float3`, `double2`, `TileId`) stay by value.
 
+- **A parse artifact never escapes the parser. `JsonValue` belongs at the boundary and dies there.**
+  - A style-model member that names a SPEC PROPERTY (`TextField`, `IconImage`, `Filter`) must be a typed
+    `StyleProperty<T>` / enum / array — never a `JsonValue`. Handing out a DOM node pushes "what shape is
+    this really?" onto every consumer, forever, and hides the expression **Kind** the renderer switches on
+    (`RidesUniform`, `SurvivingLayerGate`).
+  - *The one legitimate exception, and it must be NAMED for what it is:* a `Raw`/`Root` member that exists
+    so unknown or forward-compat keys survive a round trip — `StyleLayer.Raw` is compared whole by the
+    restyle survivor gate, which the typed views cannot do because they drop what they do not model.
+  - *The test:* does the member name a property the spec defines? Then type it. Does it name the original
+    document? Then `Raw` is right, and say in one line who needs it unparsed.
+  - `JsonValue` as a `Parse(...)` PARAMETER is correct and is not this rule.
+  - **Known live exceptions:** `LayoutProperties.TextField` and `LayoutProperties.IconImage` are still raw
+    `JsonValue` today — tracked as UMR-183. This is the rule new and touched code is held to, not a claim
+    that the codebase already keeps it everywhere.
+
 - **Data carriers: object-initializer construction; geo coords are `(Latitude, Longitude)`.**
   - Plain data carriers expose `init`-only auto-properties and are built with named members
     (`new GeoCoordinate { Latitude = …, Longitude = … }`), not positional ctors.
@@ -311,6 +326,23 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     `Texture2D` plus an unread `.meta`. Put it under a folder ending in `~`
     (`Assets/Fixtures/visual-references~/`) — Unity's importer ignores it entirely, while
     `File.ReadAllBytes` and a file browser still see the original bytes.
+
+- **Where a new test FILE goes is a decision tree, not a question to ask.** Full detail, rationale, and the
+  folder table: [`test-conventions.md`](test-conventions.md) — this file governs test CODE, that one
+  governs test PLACEMENT. In summary, first match wins:
+  1. Asserts a shape — source text, the file tree, or reflection that IS the assertion — → `Structure/`.
+  2. Renders/reads pixels back, or needs a GPU → `Visual/`.
+  3. Needs real frames to settle → PlayMode, under its topic's folder.
+  4. Every named type is `Core`/BCL/NUnit/`Unity.Mathematics` → EditMode under its topic's folder, **and**
+     add the `<Compile Include>` to `Tools/core-tests/core-tests.csproj` in the same commit.
+  5. Otherwise → EditMode under its topic's folder.
+  The topic is one word from the commit-scope vocabulary (`docs/commit-conventions.md`). Only `camera` and
+  `projection` are one folder matching the word; every other topic's default folder has its own
+  exceptions — `style` → `Style/` (expressions → `Expressions/`, filters → `Filters/`), `text` → `Text/`
+  (placement/collision → `Text/Placement/`, sprite atlas → `Text/Sprites/`), `tile-pipeline` → `Tiles/`,
+  `meshing` → `Meshing/`, `decode` → the format's own folder (`Mvt/`/`GeoJson/`/`Json/`), `render-layers` →
+  `Rendering/` — full table and reasoning in `test-conventions.md` §5. A file over 1,200 lines splits by
+  subject; two files never merge just for being small.
 
 - **Test code must not bloat the production codebase.** A member that exists solely for a test does not belong
   on the production class.
