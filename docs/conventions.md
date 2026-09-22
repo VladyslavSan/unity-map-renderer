@@ -471,7 +471,7 @@ state on the next call. Prior art with the reasoning in its own summary: `MvtLay
 "might this value be absent?". A never-allocated `default(NativeArray<T>)` disposes cleanly, so absence is
 not the hazard and a guard defending against it is noise. `TilePrologueOutput.Layers` is the worked example
 post the per-layer build-object stage: a `BuildGraphRequest` call that found nothing to build
-(`job-scheduling-design.md` §8 stage 5) returns `null` rather than a struct with uncreated fields, so the
+returns `null` rather than a struct with uncreated fields, so the
 slot holds `null`, and its disposal (`Layers[i]?.Dispose()`) skips the call entirely — the null-conditional
 operator recognizes absence for a reference type exactly the way an `IsCreated` guard does for a value type,
 without duplicating any type's own internal guard, because neither is a *second* dispose.

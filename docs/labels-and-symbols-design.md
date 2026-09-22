@@ -635,8 +635,8 @@ expressed in the rebased look-at frame. Mercator returns no occluder ⇒ no-op.
 
 Projecting only the original MVT vertices renders a long segment as a straight screen chord instead of the
 projected curve. `SymbolFeatureExtractor` subdivides the tile-local path per `IProjection.MaxRefineAngleRad`
-(Mercator = ∞ ⇒ no split), the same policy the mesh line path uses (`SubdivideJob`,
-`job-scheduling-design.md` §8 stage 5 Group B) via the shared engine-free `Core` helper
+(Mercator = ∞ ⇒ no split), the same policy the mesh line path uses (`SubdivideJob`)
+via the shared engine-free `Core` helper
 `LineCurvatureSubdivision`. **The hazard this avoids:** `LineAnchor.Segment` indexes the path vertex array —
 computed against the tile-local path (`LineAnchorPlacement.Compute`) but resolved against the render path
 (`SymbolStagingMath`). Subdividing only the projected path (not the tile-local one first) would desync those
@@ -689,9 +689,8 @@ no dedicated type; it is inline in `SymbolPlacementSystem`. `MapRenderer.Jobs/Sy
 calls `BillboardMath.BuildWorldQuad` directly at emit time. `MapRenderer.Core/Coordinates/`: `IProjection`
 (`ProjectPoint`, `TryGetHorizonOccluder`, `MaxRefineAngleRad`), `SphericalProjection`, `WebMercator`,
 `CameraPoseMath`. `MapRenderer.Unity/View/`: `FloatingOrigin`. `MapRenderer.Unity/Rendering/Backend/`:
-`SceneFrame`. Mesh-path prior art: `SubdivideJob` (job-scheduling-design.md §8 stage 5 Group B — this note's
-own engine-free `LineCurvatureSubdivision` is the ported form the mesh path's `SubdivideCenterline` retired in
-favour of), `ProjectPointsJob<TProj>`, `FrustumTileSelector`.
+`SceneFrame`. Mesh-path prior art: `SubdivideJob`, which shares the engine-free `Core` helper
+`LineCurvatureSubdivision` with this path, `ProjectPointsJob<TProj>`, `FrustumTileSelector`.
 
 ## Relationship to other work
 

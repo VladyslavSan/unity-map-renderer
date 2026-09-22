@@ -24,7 +24,7 @@ The path from decoded vector-tile geometry to a GPU `Mesh`, per geometry kind.
 | Former loose meaning | Now called | Lives in |
 |----------------------|-----------|----------|
 | the whole decode→mesh chain | **the mesh pipeline** | `FillMeshPipeline`, the `StyledFill/LineTileBuilder`s |
-| inserting curvature points (globe) | **Subdivide** | `SubdivideJob` (line), `GlobeFillSubdivideJob` (fill) — job-scheduling-design.md §8 stage 5 Group B retired the managed `SubdivideCenterline` this row used to name |
+| inserting curvature points (globe) | **Subdivide** | `SubdivideJob` (line), `GlobeFillSubdivideJob` (fill) |
 | earcut / ribbon-offset | **Triangulate** (the only surviving "tessellate") | `EarcutJob`, `RibbonJob` |
 | "build one whole tile's mesh" (async scheduling) | **mesh build** (worker) + **consume** (main thread) | `TileManager` (`KickMeshBuild`, `MeshBuildTask`, `MaxMeshBuildsPerTick` / `ConsumeMeshBuild`, `MaxConsumesPerTick`) |
 
