@@ -8,7 +8,7 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// Test-side validator for the globe-fill adaptive SUBDIVISION stage (earcut → 1→4 curvature refine).
-    /// See docs/mesh-triangulation-robustness-design.md §6.2 (measured root cause: a non-conforming
+    /// See docs/mesh-triangulation-robustness-design.md (measured root cause: a non-conforming
     /// adaptive split leaves a T-junction gap where a split triangle's neighbour stays flat).
     ///
     /// This is a MANAGED MIRROR of the real Burst <c>GlobeFillSubdivideJob&lt;TProj&gt;</c>
@@ -17,10 +17,10 @@ namespace MapRenderer.Tests
     /// the real job is proven separately (Unity-only <c>GlobeSubdivisionJobParityTests</c>) by ORDERED
     /// OUTPUT-STREAM equality — this class must not diverge from that mirror.
     ///
-    /// Checks — magnitude AND fidelity AND coverage (design §6.2 "severity, not count"):
+    /// Checks — magnitude AND fidelity AND coverage ("severity, not count"):
     ///   • MaxGapFracTile  — the worst render-space T-junction gap, as a fraction of the tile's render-space
-    ///                       diagonal span (NOT a raw T-junction tally, which is large-and-meaningless by
-    ///                       construction on a correct conforming split too).
+    ///                       diagonal span (NOT a raw T-junction tally, which is large and meaningless
+    ///                       even on a correct conforming split).
     ///   • FlippedTris / DegenerateTris — the 1→4 split must stay orientation-preserving and non-collapsing.
     ///   • CoverageAreaRelError — subdivision must exactly partition each earcut triangle's area (catches a
     ///                            "fix" that drops/duplicates sub-triangles without leaving a T-junction).
@@ -249,7 +249,7 @@ namespace MapRenderer.Tests
 
                     if (w.depth > maxDepthReached) maxDepthReached = w.depth;
 
-                    // Per-EDGE marking (candidate A, mesh-triangulation-robustness-design.md §6.2): a mark is
+                    // Per-EDGE marking (mesh-triangulation-robustness-design.md): a mark is
                     // a function of an edge's two endpoints ALONE, so two triangles sharing an edge compute
                     // the identical mark — conforming without connectivity. Force 0 marks at the depth cap or
                     // once the budget is exhausted (emit flat, same as today's per-triangle stop test).
@@ -304,7 +304,7 @@ namespace MapRenderer.Tests
                             stack.Add((mCA, w.a, w.b, childDepth, w.rootIdx, w.feat));
                         }
                     }
-                    else // markCount == 2 — locked rotation (plan's "2-mark template" section): apex = the
+                    else // markCount == 2 — locked rotation (the "2-mark template"): apex = the
                          // vertex opposite the UNMARKED edge (shared by both marked edges); a0 = predecessor
                          // of apex, c0 = successor of apex in the A→B→C→A cycle.
                     {
@@ -372,7 +372,7 @@ namespace MapRenderer.Tests
             {
                 // mesh boundary (1 owner) or non-manifold (>2). A non-manifold earcut edge (>2 owners, e.g.
                 // where a zero-width bridge seam is retraced) is skipped here — a residual conditional false
-                // negative (Codex review, Minor #3): if two of its >2 owners subdivided asymmetrically, that
+                // negative (review finding): if two of its >2 owners subdivided asymmetrically, that
                 // crack is not surfaced by case (a). Not observed on the corpus (its worst gap IS caught via a
                 // manifold edge); a manifold-only assumption is acceptable for this single-tile testbench.
                 if (owners.Count != 2) continue;
@@ -596,9 +596,9 @@ namespace MapRenderer.Tests
 
                 // A root that was ALREADY degenerate before subdivision (earcut's own zero-width bridge
                 // triangles, used to stitch a hole into the outer ring) is out of this validator's scope —
-                // it is an earcut concern (mesh-triangulation-robustness epic, scope-fenced here), not
+                // it is an earcut concern, out of scope here, not
                 // something subdivision introduced. Only count NEW degeneracy/flips on a root that started
-                // with a real (non-degenerate) area. The 1e-6 cutoff is absolute (Codex review, Minor #4),
+                // with a real (non-degenerate) area. The 1e-6 cutoff is absolute (review finding),
                 // but roots are earcut output of INTEGER tile-space ring vertices, so any non-degenerate root
                 // has |area2| >= 1 — the cutoff can only ever catch the exact-zero bridge slits, never a
                 // legitimately-tiny real triangle.
@@ -612,7 +612,7 @@ namespace MapRenderer.Tests
         }
 
         // PER-ROOT (not a global total). A global Σsub vs Σearcut lets a dropped leaf region cancel a
-        // duplicated one elsewhere → 0 error on a malformed partition (Codex review, Major #2). Summing each
+        // duplicated one elsewhere → 0 error on a malformed partition (review finding). Summing each
         // root's own leaves against that root's own area and taking the MAX relative error closes that hole:
         // subdivision must partition EACH earcut triangle exactly. Leaves group by RootIndex (lineage the
         // mirror records). A root already ~zero (earcut's zero-width bridge slit — out of scope, see
@@ -637,7 +637,7 @@ namespace MapRenderer.Tests
                 // curvature-fidelity is not a subdivision property. thinness = minAltitude/longestEdge =
                 // area2/longestEdge²; < 0.03 is a ~30:1 needle. Well-formed leaves (~0.3+) are unaffected, so
                 // a genuine "disable subdivision" fix (whole earcut edges as leaf edges, well-formed) still
-                // trips this gate. (Earcut needle geometry is scope-fenced to that epic, like the bridge slit.)
+                // trips this gate. (Earcut needle geometry is out of scope here, like the bridge slit.)
                 double2 ta = leaves[i].Tile, tb = leaves[i + 1].Tile, tc = leaves[i + 2].Tile;
                 double longestSq = math.max(DistSq(ta, tb), math.max(DistSq(tb, tc), DistSq(tc, ta)));
                 double area2 = math.abs(SignedArea2(ta, tb, tc));

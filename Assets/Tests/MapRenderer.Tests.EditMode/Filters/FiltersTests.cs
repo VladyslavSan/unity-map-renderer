@@ -41,9 +41,9 @@ namespace MapRenderer.Tests.Filters
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Epic A / A6 (plan §F-5, load-bearing byte-parity guard): <c>MvtFeature</c> implements
-    /// <see cref="IFeature"/> directly (the retired <c>MvtFeatureAdapter</c> folded in verbatim — design
-    /// §B-2). This test pins that implementation against its EXACT documented semantics (not just "some
+    /// Load-bearing byte-parity guard: <c>MvtFeature</c> implements
+    /// <see cref="IFeature"/> directly. This test pins that implementation against its EXACT
+    /// documented semantics, not just "some
     /// reasonable behaviour"):
     /// <list type="bullet">
     ///   <item><c>TryGetProperty</c>: a feature with no real property store (its <see cref="MvtFeature.Store"/>
@@ -149,7 +149,7 @@ namespace MapRenderer.Tests.Filters
 
     /// <summary>
     /// Seam test: exercises FeatureSelector.SelectFeatures, verifying it routes through
-    /// SourceLayerResolver (S08 seam) and applies the $type filter correctly against real MvtFeature geometry.
+    /// SourceLayerResolver and applies the $type filter correctly against real MvtFeature geometry.
     /// </summary>
     [TestFixture]
     internal class FeatureSelectorTests
@@ -329,7 +329,7 @@ namespace MapRenderer.Tests.Filters
             Assert.That(result.Count, Is.EqualTo(0), "Null StyleLayer should yield empty selection");
         }
 
-        // ── IR B7: the ordinal-returning overload ─────────────────────────────────────────────────
+        // ── The ordinal-returning overload ────────────────────────────────────────────────────────
 
         /// <summary>
         /// The ordinal is the feature's position in the <b>source layer's</b> feature list — never its
@@ -706,7 +706,7 @@ namespace MapRenderer.Tests.Filters
 
         // ── T3 — fallback correctness (both refusal gates) ──────────────────────────────────────
 
-        // Two-get comparison: the byte-identity argument only holds for get-vs-number-literal (F3); a
+        // Two-get comparison: the byte-identity argument only holds for get-vs-number-literal; a
         // get-vs-get shape could compare two strings, so it stays refused.
         [TestCase("[\"<\",[\"get\",\"a\"],[\"get\",\"b\"]]")]
         // Multi-arm match: outside the restricted single-arm membership shape match-widening accepts.
@@ -911,7 +911,7 @@ namespace MapRenderer.Tests.Filters
         /// ...]</c> sub-tree anywhere — deliberately NARROWER than "uses this key at all": only a
         /// <c>match</c> input compiles to <c>InStringSet</c> (a bare <c>==</c>/<c>!=</c> against the same key
         /// compiles to a different, non-scanning op). Gating the per-key non-vacuity counters on this walk
-        /// — not on key presence alone — is what R4 (review) requires: presence over-claims "the membership
+        /// — not on key presence alone — is what review requires: presence over-claims "the membership
         /// scan ran" for a key whose filters are all equality forms.</summary>
         private static bool FilterUsesGetKeyViaMatch(JsonValue node, string key)
         {
@@ -951,7 +951,7 @@ namespace MapRenderer.Tests.Filters
 
         // ── coverage pin ────────────────────────────────────────────────────────────────────────
 
-        /// <summary>Pins the measured fast-path coverage (design doc §3): all 105 of liberty.json's
+        /// <summary>Pins the measured fast-path coverage: all 105 of liberty.json's
         /// filtered layers compile end-to-end through the accepted op subset (103 before <c>road_link</c>/
         /// <c>road_link_casing</c> gained the compact <c>InStringSet</c> membership path; 93
         /// before <c>has</c> and ordered comparisons were added; 44 before <c>match</c>). The last 2
@@ -1062,7 +1062,7 @@ namespace MapRenderer.Tests.Filters
 
             // Per-key floors, each asserted separately (never summed — an aggregate is satisfied by `class`
             // alone), and each gated on MATCH-FORM participation (FilterUsesGetKeyViaMatch), not mere key
-            // presence — R4 (review): a presence-only gate over-claims "the membership scan ran" for a key
+            // presence — review: a presence-only gate over-claims "the membership scan ran" for a key
             // whose filters are all equality forms (this is exactly what caught `ramp`, and would have let
             // an all-equality `brunnel` corpus pass a presence-based floor vacuously). Measured 2026-09-05
             // over croatia-dalmatia + sample-tile, this exact corpus: class=27864, brunnel=57. Each floor
@@ -1784,7 +1784,7 @@ namespace MapRenderer.Tests.Filters
         // ── tooth 7 — batched Execute: geometry kind read per feature (synthetic on both halves) ──
 
         /// <summary>
-        /// P10: liberty.json emits zero <c>$type</c>/<c>geometry-type</c> filters, so no corpus sweep can
+        /// liberty.json emits zero <c>$type</c>/<c>geometry-type</c> filters, so no corpus sweep can
         /// ever exercise <see cref="NativeOperation.GeometryEqual"/> — both the filter AND the fixture must
         /// be hand-built. <c>["==",["geometry-type"],"Polygon"]</c> over a layer whose feature 0 is a Point
         /// and feature 1 is a Polygon: if the batched <c>Execute</c> read the geometry-kind column at a

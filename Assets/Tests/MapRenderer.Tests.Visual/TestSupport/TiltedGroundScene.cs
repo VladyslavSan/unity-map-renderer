@@ -2,11 +2,9 @@
 // snapshot fixture uses.
 // NOT registered in Tools/core-tests/core-tests.csproj.
 //
-// Stage T — the SHARED tilt-measurement harness. Extracted from LineProbeSymmetrySnapshotTests.BuildScene /
-// SetupLitAmbient / RestoreAmbient / AssertGpuContext (S111), which already built exactly this camera-and-
-// chrome recipe. CONTENT-AGNOSTIC on purpose: this class knows nothing about lines, styles, materials or
-// symbols — the consumer attaches its own GameObject(s) — which is what lets it serve both the line/join
-// consumer (T2/T3) and the symbol consumer (T4) from one harness.
+// The SHARED tilt-measurement harness. CONTENT-AGNOSTIC on purpose: it knows nothing about lines, styles,
+// materials or symbols — the consumer attaches its own GameObject(s) — which is what lets the line/join
+// fixtures and the symbol fixtures share one harness.
 
 #if UNITY_EDITOR
 using System;
@@ -21,24 +19,23 @@ namespace MapRenderer.Tests
     /// <summary>
     /// Configuration for <see cref="TiltedGroundScene"/>. A plain data carrier: object-initializer
     /// construction with field-initializer defaults (<c>docs/conventions-short.md</c>, "Data carriers:
-    /// object-initializer construction"). Defaults are EXACTLY <c>LineProbeSymmetrySnapshotTests.BuildScene</c>'s
-    /// values, so repointing that fixture onto this harness (Step 4) is a no-op wherever a default applies.
+    /// object-initializer construction"). The defaults are the pose
+    /// <c>LineProbeSymmetrySnapshotTests</c> measures at.
     /// </summary>
     internal sealed class TiltedGroundSceneConfig
     {
-        // Plain { get; set; }, not init: MapRenderer.Tests.EditMode has no IsExternalInit polyfill of
-        // its own (only Core and Unity define init-only members), so a test-owned carrier stays mutable
-        // rather than adding a polyfill file for one fixture class — same call as
-        // A6NonMvtDecoderTests.FixtureTileLayer and SymbolIconRenderSnapshotTests.SymbolInk.
-        /// <summary>The whole point of the harness; 0 is the inert control every T tooth's RED-verification
-        /// forces it to.</summary>
+        // Plain { get; set; }, not init: MapRenderer.Tests.EditMode has no IsExternalInit polyfill of its
+        // own (only Core and Unity define init-only members), so a test-owned carrier stays mutable rather
+        // than adding a polyfill file for one fixture class.
+        /// <summary>The whole point of the harness; 0 is the inert control a tooth's RED-verification forces
+        /// it to.</summary>
         public double TiltDegrees { get; set; } = 55.0;
 
-        /// <summary>Heading 0 makes a world ±Z step a pure screen-y step. T2 relies on this AND asserts it
-        /// (the single-row precondition in <c>LineProbeSymmetrySnapshotTests.WithRenderedRoad</c> /
-        /// <c>TiltFixtureSelfTests.MeasureRoadBand</c>); T3 relies on it too but does NOT assert it — it
-        /// measures along whatever screen direction the projection returns, so a heading ≠ 0 would silently
-        /// change what it measures rather than fail loudly.</summary>
+        /// <summary>Heading 0 makes a world ±Z step a pure screen-y step. The band fixtures assert that
+        /// precondition (<c>LineProbeSymmetrySnapshotTests.WithRenderedRoad</c> /
+        /// <c>TiltFixtureSelfTests.MeasureRoadBand</c>). A fixture that measures along whatever screen
+        /// direction the projection returns relies on it too but cannot assert it, so a heading ≠ 0 there
+        /// changes what it measures rather than failing loudly.</summary>
         public double HeadingDegrees { get; set; } = 0.0;
 
         public double Zoom { get; set; } = 8.0;
@@ -50,8 +47,8 @@ namespace MapRenderer.Tests
 
         public double DevicePixelRatio { get; set; } = 1.0;
 
-        /// <summary>The line arms render on the shared dark-slate background; the symbol arm (T4) overrides
-        /// this to white, because <c>WorldSymbolInkAnalysis.InkThreshold</c> reads dark ink on white.</summary>
+        /// <summary>The line arms render on the shared dark-slate background; the symbol arm overrides this
+        /// to white, because <c>WorldSymbolInkAnalysis.InkThreshold</c> reads dark ink on white.</summary>
         public Color BackgroundColor { get; set; } = new Color(0.05f, 0.05f, 0.08f, 1f);
 
         /// <summary>The line arms need the lit recipe (real PBR, a live viewDirectionWS); the symbol arm does
@@ -60,9 +57,8 @@ namespace MapRenderer.Tests
 
         public float AltitudeMultiplier { get; set; } = 1f;
 
-        /// <summary><c>null</c> ⇒ <see cref="MapCamera"/> supplies <see cref="WebMercatorProjection"/>, so
-        /// P3/P4 can pass <c>SphericalProjection</c> later. NO T tooth exercises this — stated as a non-claim
-        /// in the T design (§6).</summary>
+        /// <summary><c>null</c> ⇒ <see cref="MapCamera"/> supplies <see cref="WebMercatorProjection"/>; a
+        /// caller may pass <c>SphericalProjection</c>. No tilt tooth exercises the curved arm today.</summary>
         public IProjection Projection { get; set; } = null;
     }
 
@@ -85,9 +81,9 @@ namespace MapRenderer.Tests
 
         private readonly (int quality, UnityEngine.Rendering.AmbientMode mode, Color light) _savedAmbient;
 
-        /// <summary>World metres per device pixel at the look-at — the frame's ruler. §3.2: every world size
-        /// a T fixture wants must derive from this, never a bare metre literal (a metre literal is sub-pixel
-        /// at this pose — one device px is hundreds of metres at zoom 8 / lat 30).</summary>
+        /// <summary>World metres per device pixel at the look-at — the frame's ruler. Every world size a
+        /// tilt fixture wants must derive from this, never a bare metre literal: one device px is hundreds
+        /// of metres at zoom 8 / lat 30, so a metre literal is sub-pixel at this pose.</summary>
         public double MetresPerDevicePixel => MapCam.MetresPerDevicePixel;
 
         private TiltedGroundScene(
@@ -105,16 +101,15 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Builds the scene: ambient/light (if <see cref="TiltedGroundSceneConfig.LitAmbient"/>) →
-        /// camera + off-screen RT → <see cref="MapCamera"/>, in that order — verbatim from
-        /// <c>LineProbeSymmetrySnapshotTests.SetupLitAmbient</c> / <c>BuildScene</c> (S111).
+        /// camera + off-screen RT → <see cref="MapCamera"/>, in that order.
         ///
         /// <para><b>Safe by construction against a partial failure.</b> The ambient/light block mutates
         /// PROCESS-GLOBAL state that only <see cref="Dispose"/> restores — but nothing owns that restore
         /// until this method RETURNS. If <c>new RenderTexture</c> / <c>new CameraProperties</c> /
         /// <c>new MapCamera</c> below were to throw, the light and the ambient override would otherwise leak
-        /// with no owner, corrupting every lit render for the rest of the batch process (the stale-shader-
-        /// global genre <c>docs/line-rendering-design.md</c> §1.1 already recorded once). The <c>try</c>/
-        /// <c>catch</c> below is this constructor being its own <c>Dispose</c> for the window before one
+        /// with no owner, corrupting every lit render for the rest of the batch process — the stale
+        /// shader-global genre <c>docs/line-rendering-design.md</c> records. The <c>try</c>/<c>catch</c>
+        /// below is this constructor being its own <c>Dispose</c> for the window before one
         /// exists.</para></summary>
         public static TiltedGroundScene Create(TiltedGroundSceneConfig config)
         {
@@ -178,11 +173,10 @@ namespace MapRenderer.Tests
 
         /// <summary>Renders <paramref name="snapshot"/>'s off-screen target off this scene's camera.
         ///
-        /// <para>Re-syncs the <see cref="MapCamera"/> FIRST — not belt-and-braces: <c>SyncToCamera</c> is
-        /// idempotent (<c>MapCamera.cs:181</c>) and its LAST act pushes <c>_MapFrameMetersPerDevicePixel</c>,
-        /// which is PROCESS state (<c>docs/line-rendering-design.md</c> §1.1 records a fixture reading a ruler
-        /// three zoom levels stale, left behind by an earlier fixture in the same batch). A scene that renders
-        /// always pushes its own ruler immediately before rendering.</para></summary>
+        /// <para>Re-syncs the <see cref="MapCamera"/> FIRST. <c>SyncToCamera</c> is idempotent, and its LAST
+        /// act pushes <c>_MapFrameMetersPerDevicePixel</c>, which is PROCESS state: an earlier fixture in the
+        /// same batch can leave a stale ruler behind (see <c>docs/line-rendering-design.md</c>). A scene that
+        /// renders always pushes its own ruler immediately before rendering.</para></summary>
         public void Render(SnapshotRenderer snapshot)
         {
             MapCam.SyncToCamera();
@@ -193,8 +187,8 @@ namespace MapRenderer.Tests
         /// = projection.Project(LookAt)</c>, <c>Rebase = float3x3.identity</c>.
         ///
         /// <para><b>THE NAME CARRIES THE CAVEAT.</b> Identity rebase is correct for Web-Mercator and is NOT
-        /// spherical staging — it is the P2 lesson, made unusable-by-accident rather than merely commented.
-        /// A spherical consumer (a future tooth passing <see cref="TiltedGroundSceneConfig.Projection"/> =
+        /// spherical staging; the name makes that unusable by accident rather than merely commented.
+        /// A spherical consumer (a tooth passing <see cref="TiltedGroundSceneConfig.Projection"/> =
         /// <c>SphericalProjection</c>) must build its own frame; this method must not be renamed or wrapped
         /// in a way that hides that limitation.</para></summary>
         public SceneFrame BuildIdentityRebaseSceneFrame()

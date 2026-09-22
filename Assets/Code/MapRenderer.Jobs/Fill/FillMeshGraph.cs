@@ -10,72 +10,36 @@ using MapRenderer.Jobs.Projection;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// Schedules the fill measure graph over one <see cref="FillMeshPipeline.LayerInput"/>, returning an
-    /// UNCOMPLETED <see cref="FillGraphOutput"/> (job-scheduling-design.md §3.2, §8 stage 1). job-scheduling-
-    /// design.md §8 stage 4 Group B: this is now the ONLY mesher — the synchronous
-    /// <c>FillMeshPipeline.Schedule</c> it was measured against is retired; its regression pins survive as
-    /// frozen per-stream goldens (<c>FillMeshGraphParityTests</c>, <c>FillMeshGraphGlobeParityTests</c>,
-    /// <c>StyledFillExtrusionGraphWriteTests</c>, <c>TileBuildGraphTests</c>).
+    /// Schedules the fill measure graph over one <see cref="FillMeshPipeline.LayerInput"/>, and returns an
+    /// UNCOMPLETED <see cref="FillGraphOutput"/>. Nothing in this file calls <c>Complete()</c>.
     ///
     /// <para><b>The <c>.AsArray()</c> rule — obeyed everywhere in this file.</b> No <c>.AsArray()</c> at
     /// schedule time on any list a graph node resizes: a view captured before the resize has the stale
     /// length. Every node here either holds the <see cref="NativeList{T}"/> itself and resolves it inside
-    /// <c>Execute</c>, or takes <c>AsDeferredJobArray()</c> — resolved to the list's EXECUTE-time state, not
-    /// its state when the view was taken (proven for this exact construction by
-    /// <c>RingAssemblyDeferredCountTests</c>). This is the single easiest way to ship a silently
-    /// wrong-length graph.</para>
+    /// <c>Execute</c>, or takes <c>AsDeferredJobArray()</c>, which resolves to the list's EXECUTE-time
+    /// state.</para>
     ///
-    /// <para><b>What runs on the main thread at schedule time — legitimately</b>, because it reads only
-    /// BORROWED inputs, never a job output: the empty-input guard; the <c>maxRingLen</c>/<c>totalVerts</c>
-    /// pre-pass sizing the clip's ping-pong buffers (not absorbed into <c>RingClipJob</c>, which
-    /// would edit an existing call site and <c>RingClipJobTests</c>); <c>maxPolygons = maxHoles =
-    /// max(1, RingVisitOrder.Length)</c> (a valid upper bound because the clip stage only ever DROPS
-    /// rings); and passing <c>input.Geometry.FeatureGeometryType</c> to <c>RingAssemblyJob</c> BORROWED and
-    /// <c>[ReadOnly]</c> rather than building a <see cref="TileGeometryBuffers"/> the graph would then own
-    /// (<c>AdoptDerivedLists</c> computes its ring count at CALL time, which is wrong before the
-    /// select/clip job has run).</para>
+    /// <para><b>Input lifetime is a contract.</b> The borrowed <c>input.Geometry</c> and
+    /// <c>input.RingVisitOrder</c> stay live <c>[ReadOnly]</c> job inputs until <c>Handle.Complete()</c>.
+    /// The caller must not dispose either before it completes the returned
+    /// <see cref="FillGraphOutput"/>.</para>
     ///
-    /// <para><b>Input lifetime is a contract, and it is new.</b> Unlike the retired <c>FillMeshPipeline.Schedule</c>,
-    /// which did not retain its input past the call, <see cref="Schedule"/> DOES: the borrowed
-    /// <c>input.Geometry</c> and <c>input.RingVisitOrder</c> are live <c>[ReadOnly]</c> job inputs until
-    /// <c>Handle.Complete()</c> (design §6's ownership rule arriving one stage early). The caller
-    /// must not dispose either before completing the returned <see cref="FillGraphOutput"/>.</para>
-    ///
-    /// <para><b>The capacity error flags are never-fired backstops here</b>, same posture as
-    /// <c>FillMeshPipeline.EnsureCapacity</c>: That bound makes <c>SizingJob</c>'s
-    /// <c>MaxPolygons</c>/<c>MaxHoles</c> capacity check unreachable from THIS caller (only a test handing
-    /// <c>SizingJob</c> an artificially small capacity standalone can trip it). Downstream nodes do not
-    /// branch on the flag — the write graph (stage 2) is what reads it and settles a faulted layer as
-    /// zero-vertex, mirroring the design doc's stated shape. A hypothetical trip through THIS file today
-    /// reads NOTHING in every later node, not garbage-length flat lists: every node that holds a sizing-owned
-    /// buffer struct (<see cref="TriangulationBuffers"/>/<c>RibbonBuffers</c>) bounds its own loop —
-    /// or its deferred count — by a column its sizing job resizes, never a borrowed count that job's early
-    /// return does not touch. Nodes past the aggregate bound by columns the AGGREGATE sizes, and inherit
-    /// emptiness through it (job-scheduling-design.md §7 rule 2).
-    /// <c>FillSizingJobTests.SizingCapacityOverrun_LeavesGatherAndAggregate_WithNothingToDo</c> is the
-    /// observing tooth for <see cref="FillGatherJob{TComparer}"/> and <see cref="AggregateJob"/> — it
-    /// drives both over the same buffers and goes red if either re-introduces a borrowed count as its loop
-    /// bound. <see cref="EarcutBatchJob"/> has no loop of its own to bound (it is deferred over
-    /// <c>buffers.PerPolyOuterCount</c>); <c>FillMeshGraphStructureTests</c> pins that deferred-count source
-    /// structurally instead.</para>
-    ///
-    /// <b>No <c>Complete()</c> anywhere in this file.</b>
+    /// <para><b>The capacity error flags are never-fired backstops here.</b> A trip leaves every later node
+    /// with nothing to do, not with garbage-length flat lists: each node bounds its own loop — or its
+    /// deferred count — by a column its sizing job resizes, never by a borrowed count.</para>
     /// </summary>
     public static class FillMeshGraph
     {
-        /// <summary>Vertices per batch for this graph's tile→geo node (<see cref="TileToGeoJob"/>,
-        /// job-scheduling-design.md §8 stage 6). <c>1024</c>: <see cref="TileToGeoJob.GeoAt"/> is ~2
-        /// <c>exp</c>, 1 <c>atan</c>, 1 <c>pow</c> per vertex — tens of ns each, so 1024 vertices is roughly
-        /// 10-50 µs of work, comfortably above a batch hand-off's own cost while still splitting a corpus
-        /// tile's few-thousand vertices several ways. A starting value chosen by this reasoning, not a
-        /// measured optimum — see the design doc's dated measurement before moving it.</summary>
+        /// <summary>Vertices per batch for this graph's tile→geo node (<see cref="TileToGeoJob"/>).
+        /// <see cref="TileToGeoJob.GeoAt"/> runs several transcendental functions per vertex, so 1024
+        /// vertices carries enough work to cover a batch hand-off and still splits a corpus tile several
+        /// ways. A starting value from that reasoning, not a measured optimum.</summary>
         internal const int VertexBatch = 1024;
 
-        /// <summary>Polygons per batch for <see cref="EarcutBatchJob"/> (job-scheduling-design.md §8 stage
-        /// 6). <c>1</c>: earcut is superlinear in a polygon's vertex count and corpus polygons vary by orders
-        /// of magnitude, so per-polygon work is wildly uneven — batch 1 lets the job system's work-stealing
-        /// act as the load balancer, rather than pinning a long polygon and its neighbours to one
-        /// worker.</summary>
+        /// <summary>Polygons per batch for <see cref="EarcutBatchJob"/>. Earcut is superlinear in a
+        /// polygon's vertex count and corpus polygons vary by orders of magnitude, so batch 1 lets the job
+        /// system's work-stealing balance the load instead of pinning a long polygon and its neighbours to
+        /// one worker.</summary>
         internal const int EarcutPolygonBatch = 1;
 
         /// <summary>Schedules the fill measure graph for one layer. Returns <see cref="default"/>
@@ -85,8 +49,7 @@ namespace MapRenderer.Jobs.Fill
         /// polls or completes it before reading any field.
         /// </summary>
         /// <param name="input">By value, not <c>in</c> — <see cref="FillMeshPipeline.LayerInput"/> is a
-        /// mutable struct, and the conventions gate is <c>in</c> ⟺ <c>readonly struct</c>; <c>in</c>
-        /// on a non-readonly struct forces a defensive copy per member read.</param>
+        /// mutable struct, and <c>in</c> on one forces a defensive copy per member read.</param>
         /// <param name="deps">Upstream dependency this whole layer's chain must wait for.</param>
         public static FillGraphOutput Schedule(
             FillMeshPipeline.LayerInput input, JobHandle deps = default)
@@ -94,13 +57,8 @@ namespace MapRenderer.Jobs.Fill
             if (!input.Geometry.IsCreated || !input.RingVisitOrder.IsCreated || input.RingVisitOrder.Length == 0)
                 return default;
 
-            // Validated HERE, before any node schedules — not left to ProjectionDispatch's own throw. A
-            // throw from deeper in this method (after RingSelect/RingClip/RingAssembly/sizing/gather/earcut/
-            // aggregate have already scheduled, all holding input.Geometry as a live [ReadOnly] input) would
-            // propagate with no terminal handle ever constructed — nothing left to Complete() those jobs, so
-            // the caller's own cleanup throws trying to dispose geometry the safety system still considers
-            // in flight (the bystander-fault signature, not the real defect). Fail fast, before anything is
-            // in flight to strand.
+            // Validated HERE, before any node schedules: a throw from deeper in this method strands the
+            // already-scheduled jobs that hold input.Geometry, with no terminal handle to Complete() them.
             if (input.Projection == null)
                 throw new NotSupportedException(
                     "FillMeshGraph.Schedule received a null Projection — every caller resolves the " +
@@ -136,9 +94,8 @@ namespace MapRenderer.Jobs.Fill
             JobHandle derived;
             JobHandle clipDisposeHandle = default;
 
-            // Kept as a local as well as consumed here: the boundary-band node below needs to know
-            // whether a window exists at all, and the window's own value cannot say so — an unset
-            // double2 is (0,0), the tile's origin corner.
+            // Kept as a local: the boundary-band node needs to know whether a window exists at all, and the
+            // window value cannot say so — an unset double2 is (0,0), the tile's origin corner.
             bool clipEnabled = input.Clip.TryWindow(source.Extent, out double2 clipMin, out double2 clipMax);
             if (clipEnabled)
             {
@@ -166,7 +123,7 @@ namespace MapRenderer.Jobs.Fill
                 }.Schedule(deps);
             }
 
-            // ── Ring assembly (existing, unmodified except the additive bool). ─────────────────────────
+            // ── Ring assembly. ────────────────────────────────────────────────────────────────────────
             var polys = PolygonDescriptors.Allocate(maxPolygons, maxHoles);
 
             JobHandle assembled = new RingAssemblyJob
@@ -179,9 +136,8 @@ namespace MapRenderer.Jobs.Fill
                 OutHoleRingIdxs = polys.HoleRingIdxs, OutPolygonCount = polys.PolyCountArr, OutHoleCount = polys.HoleCountArr,
             }.Schedule(derived);
 
-            // ── Sizing — also folds in the ring-count statistic (RingOffsets.Length - 1): it is already a
-            // borrowed input here, so this needs no dedicated node/edge the way the deleted FillRingCountJob
-            // did. Depends on assembly directly; no join needed.
+            // ── Sizing — also folds in the ring-count statistic (RingOffsets.Length - 1), which is already
+            // a borrowed input here. Depends on assembly directly; no join needed.
             var counts  = FillGraphOutput.AllocateCounts();
             var error   = FillGraphOutput.AllocateError();
             var buffers = TriangulationBuffers.Allocate();
@@ -196,7 +152,7 @@ namespace MapRenderer.Jobs.Fill
                 Counts = counts, Error = error,
             }.Schedule(assembled);
 
-            // ── Gather (the hole sort — same struct comparer FillMeshPipeline.Schedule uses). ───────────
+            // ── Gather (the hole sort). ───────────────────────────────────────────────────────────────
             var comparer = new FillMeshPipeline.HoleRingComparer(outVerts.AsDeferredJobArray(), outOffsets.AsDeferredJobArray());
             JobHandle gathered = new FillGatherJob<FillMeshPipeline.HoleRingComparer>
             {
@@ -208,32 +164,20 @@ namespace MapRenderer.Jobs.Fill
                 Buffers = buffers,
             }.Schedule(sized);
 
-            // ── Earcut batch, parallel over polygons (job-scheduling-design.md §8 stage 6, C.3/C.4):
-            // EarcutJob's fields untouched — GetSubArray + Execute() inside. Count source is
-            // buffers.PerPolyOuterCount — a WRITTEN list, not merely borrowed, but this job only READS it
-            // (SizingJob resizes it to exactly polyCount); a written list as the count source invites a
-            // question a read-only one does not, so it is called out here. A capacity early-return in
-            // SizingJob leaves PerPolyOuterCount at length 0, so this runs zero batches — strictly better
-            // than reading garbage-length flat lists downstream (FillMeshGraph.cs's own doc, above). ────────
+            // ── Earcut batch, parallel over polygons. The count source is buffers.PerPolyOuterCount, which
+            // SizingJob resizes to exactly polyCount — and leaves at 0 on a capacity early-return. ────────
             JobHandle triangulated = new EarcutBatchJob
             {
                 PolyHoleCount = polys.PolyHoleCount,
                 Buffers = buffers,
             }.Schedule(buffers.PerPolyOuterCount, EarcutPolygonBatch, gathered);
 
-            // ── The arm split (job-scheduling-design.md §3.7): picks the AGGREGATE targets. Exactly
-            // WriteGeometry's predicate. No null test — the guard at the top of this method already threw,
-            // so Projection is non-null here. "Always subdivide" would be wrong: on a flat projection every
-            // edge mark is false, so a flat layer would only ever take GlobeFillSubdivideJob's markCount==0
-            // pass-through path — paying its per-vertex Project()/tangent-basis + vertex-key map overhead for
-            // no split at all, instead of streaming earcut's already-minimal merged vertex array straight
-            // through (vertex sharing: sharing narrows, but does not remove, this cost —
-            // it does not restore the flat arm's O(1) vertex reuse, which needs no hash lookup at all).
+            // ── The arm split: picks the AGGREGATE targets, on exactly WriteGeometry's predicate. Always
+            // subdividing would pay GlobeFillSubdivideJob's per-vertex cost on flat layers that never split.
             bool curved = !double.IsInfinity(input.Projection.MaxRefineAngleRad);
 
-            // ── Aggregate (exact sizing). Flat arm: these five ARE the graph's final output columns. Curved
-            // arm: throwaway buffers — GlobeFillScatterJob overwrites the same-named locals below with the
-            // post-subdivision columns, which is the graph's actual one-column-set output on that arm. ──────
+            // ── Aggregate (exact sizing). Flat arm: these ARE the graph's final output columns. Curved arm:
+            // throwaway buffers — GlobeFillScatterJob overwrites the same locals with its own columns. ─────
             NativeList<double2> tileVertices;
             NativeList<double3> worldPositions;
             NativeList<double3> vertexUp;
@@ -273,17 +217,11 @@ namespace MapRenderer.Jobs.Fill
             }.Schedule(triangulated);
 
             // ── The boundary band, BOTH ARMS. It appends outward-band quads to the aggregate's own columns,
-            // so it must run after the node that owns the interior's vertex count, and after the clip/select
-            // (the boundary) and ring assembly (which ring is an outer, which a hole) it reads.
-            //
-            // On the curved arm it runs HERE, upstream of subdivision, not after it. A band quad is
-            // degenerate in tile space (its outer vertices share their inner twin's coordinate), so its long
-            // edges have the SAME two endpoints as the interior boundary edge they abut — and a subdivision
-            // mark is a function of an edge's endpoints alone, so the two compute the identical mark and stay
-            // conforming. The quad's diagonal shares that same tile-space pair and is conforming for the same
-            // reason; only the zero-length radial edges are different, and they subtend no angle. Emitting the band after subdivision instead would leave its inner ring on the flat
-            // chord while the interior's boundary bulges onto the sphere: a visible gap at low zoom, which is
-            // exactly where the shipped globe scene lives.
+            // so it runs after the node that owns the interior vertex count, and after the clip/select and
+            // ring assembly it reads. On the curved arm it runs HERE, upstream of subdivision: a band quad is
+            // degenerate in tile space, so its long edges share endpoints with the interior boundary edge
+            // they abut and take the identical mark. After subdivision the band's inner ring would stay on
+            // the flat chord while the interior bulges onto the sphere — a visible gap at low zoom.
             JobHandle banded = aggregated;
             if (!input.SuppressBoundaryBand)
             {
@@ -302,14 +240,10 @@ namespace MapRenderer.Jobs.Fill
                 }.Schedule(aggregated);
             }
 
-            // Every derived list, and the earcut buffers / polygon-descriptor GROUPS, are dead after
-            // aggregate — they either fed it directly or fed a node it already transitively depends on. Each
-            // group disposes its own containers via its own DisposeAfter — no hand-counted array, no forgotten
-            // increment (the confound a hand-counted array invites — see TriangulationBuffers's own doc).
-            // The three ring columns and the polygon descriptors outlive the aggregate by one node on both
-            // arms: FillBandJob reads both. `banded` IS `aggregated` only when the layer suppresses the band.
-            // The triangulation buffers are NOT re-pointed — the band node reads none of them; it recovers
-            // each triangle's feature from VertexFeatureIdx instead.
+            // Every derived list, and the earcut / polygon-descriptor groups, are dead after aggregate. Each
+            // group disposes its own containers through its own DisposeAfter. The three ring columns and the
+            // polygon descriptors outlive the aggregate by one node on both arms: FillBandJob reads both.
+            // The triangulation buffers are NOT re-pointed — the band node reads none of them.
             JobHandle disposeListsAfterAggregate = ScheduleDispose(outVerts, banded);
             disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outOffsets, banded));
             disposeListsAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, ScheduleDispose(outFeatIdx, banded));
@@ -318,9 +252,7 @@ namespace MapRenderer.Jobs.Fill
             JobHandle disposeAfterAggregate = JobHandle.CombineDependencies(disposeListsAfterAggregate, polys.DisposeAfter(banded));
 
             // ── Flat arm: tile → geodetic → project, straight into the final output columns. Curved arm:
-            // NEITHER node is scheduled — GlobeFillSubdivideJob projects internally and never reads
-            // WorldPositions/VertexUp (job-scheduling-design.md §3.7's dead-curved-arm-projection finding), so
-            // computing them first would be pure waste. ─────────────────────────────────────────────────────
+            // neither runs — GlobeFillSubdivideJob projects internally and reads no WorldPositions/VertexUp.
             JobHandle terminalGeometry;
             JobHandle geometryDisposeHandle;
             if (!curved)
@@ -339,18 +271,11 @@ namespace MapRenderer.Jobs.Fill
             }
             else
             {
-                // The geodetic/project nodes are genuinely dead here: GlobeFillSubdivideJob takes only
-                // TileVerts/TriangleIndices/VertexFeatureIdx and projects internally — it has no
-                // WorldPositions/VertexUp input to read, established by reading the job's field list.
-                //
-                // geo was pre-sized by AggregateJob and re-sized by the band node (fields every caller of
-                // those jobs fills) but never READ on this arm — dispose after the last job that touched it,
-                // which is the band node, not the aggregate. Same rule as any buffer.
+                // geo is written by AggregateJob and the band node, but never READ on this arm — dispose
+                // after the band node, the last job that touched it.
                 JobHandle disposeGeo = ScheduleDispose(geo, banded);
-                // worldPositions/vertexUp/vertexEast were likewise written but are dead buffers here — the
-                // scattered lists below become the graph's actual world/up/east columns on this arm.
-                // vertexBand is NOT among them: it is a live subdivision INPUT, disposed with the other two
-                // below once the subdivide node has read it.
+                // worldPositions/vertexUp/vertexEast are dead here — the scattered lists below become this
+                // arm's world/up/east columns. vertexBand is NOT among them: it is a subdivision INPUT.
                 JobHandle deadAggregateColumnsDispose = JobHandle.CombineDependencies(
                     ScheduleDispose(worldPositions, banded), ScheduleDispose(vertexUp, banded), ScheduleDispose(vertexEast, banded));
 

@@ -25,8 +25,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// Per-layer line mesh builder. Mirrors <see cref="StyledFillTileBuilder"/> but for line-type style
     /// layers.
     ///
-    /// Pipeline (S100, IR B3; IR C1 P2/P3; job-scheduling-design.md §8 stage 5 Group B — now on the Burst job
-    /// graph, <see cref="LineMeshGraph"/>): BORROW the source-layer's shared tile-local
+    /// Pipeline (on the Burst job graph, <see cref="LineMeshGraph"/>): BORROW the source-layer's shared
+    /// tile-local
     ///   <see cref="TileGeometryBuffers"/> (Waist 1 — materialized once inside the DECODE and owned by the
     ///   decoded layer, lent to every style layer naming that source-layer) → gather this layer's
     ///   <b>selection</b> (by <see cref="SelectedTileFeature.Ordinal"/>) of rings with
@@ -60,7 +60,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     ///   Stream 3 — Color (Float32x4) + TexCoord2/widthScale (Float32x1) interleaved via <see cref="LineWidthColor"/>. 20B stride.
     ///   Index buffer — UInt32.
     ///
-    /// Color (D1): a DATA-DRIVEN line-color is baked per feature via <see cref="StyleProperty{T}"/>, converted
+    /// Color: a DATA-DRIVEN line-color is baked per feature via <see cref="StyleProperty{T}"/>, converted
     /// to linear via <c>Color.linear</c> off the main thread, over a white <c>_BaseColor</c>. A constant or
     /// zoom-only line-color is NOT baked — it rides <c>_BaseColor</c>, bound by
     /// <see cref="Materials.MaterialFactory.BindLinePaintToApplier"/> for exactly the complementary case, over a
@@ -82,7 +82,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// S14: Color + WidthScale interleaved on stream 3. Canonical field order matches the canonical
+        /// Color + WidthScale interleaved on stream 3. Canonical field order matches the canonical
         /// descriptor order (Color enum=3 before TexCoord2 enum=6), so stream-3 byte offsets are Color@0,
         /// WidthScale@16. Stride = 16 (float4) + 4 (float) = 20 bytes.
         /// </summary>
@@ -117,17 +117,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // 2.0/1.05 defaults when unset).
         private const int DefaultRoundSegments = 4;
 
-        // S91-B: lines project through the SAME projection surface as fills, not a bespoke hardcoded
-        // WebMercator.Forward. Launch-time projection config threads a chosen projection here; until then this
-        // single seam defaults to WebMercator (Mercator output is bit-for-bit).
+        // Lines project through the SAME projection surface as fills, not a bespoke hardcoded
+        // WebMercator.Forward. This single seam defaults to WebMercator.
         private static readonly IProjection DefaultProjection = new WebMercatorProjection();
 
         // White vertex color = identity multiply.
         private static readonly Vector4 WhiteColor = new Vector4(1f, 1f, 1f, 1f);
 
         /// <summary>
-        /// job-scheduling-design.md §8 stage 5 (A2.0): the per-feature bake — everything the retired
-        /// synchronous <c>WriteMeshData</c> did before its ring loop, lifted out so a graph-arm processor can
+        /// The per-feature bake — the work that precedes the ring gather, so a graph-arm processor can
         /// run it on the seam and hand the result to the pump. Mirrors <c>StyledFillTileBuilder.BuildLayerInput</c>'s split: bakes this
         /// layer's per-feature membership, colour and width columns (<paramref name="featureColors"/>/
         /// <paramref name="featureWidths"/>, caller-owned from here on, indexed by feature ORDINAL — the same
@@ -165,7 +163,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
             projection ??= DefaultProjection; // null ⇒ WebMercator; the launch-time projection is threaded via BuildGraphRequest
 
-            // IR C1 P2: the per-feature columns below are sized to the LAYER and indexed by
+            // The per-feature columns below are sized to the LAYER and indexed by
             // SelectedTileFeature.Ordinal, because the ordinal is what the buffer's RingFeatureIdx names. A
             // slot-indexed column would permute colours and widths the moment this layer's filter rejects
             // anything — the geometry would stay right and only the attribution would be wrong.
@@ -207,7 +205,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         colors[ordinal] = new Vector4(linear.r, linear.g, linear.b, linear.a);
                     }
 
-                    // S14 data-driven opacity: bake evaluated opacity into vertex alpha, ONLY when opacity
+                    // Data-driven opacity: bake evaluated opacity into vertex alpha, ONLY when opacity
                     // depends on the feature (else BindLinePaintToApplier already bound _Opacity and baking
                     // double-applies). NativeArray's indexer returns a value, not a variable, so this is a
                     // read-modify-write.
@@ -221,12 +219,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
                         }
                     }
 
-                    // S14 data-driven width: bake evaluated width into WidthScale (multiplier on _Width). When
+                    // Data-driven width: bake evaluated width into WidthScale (multiplier on _Width). When
                     // width depends on the feature, BindLinePaintToApplier binds _Width as a device-px constant
                     // of 1 — so _Width == the device-pixel ratio (1.0 at dpr 1) and WidthScale carries the full
-                    // evaluated LOGICAL pixel width; otherwise WidthScale stays the ribbon's factor. The bake is
-                    // deliberately dpr-free (S107): scaling it would put the ratio inside the geometry, so a
-                    // live ratio change would need a full mesh rebuild and PreparedTileCache would serve it stale.
+                    // evaluated LOGICAL pixel width; otherwise WidthScale stays the ribbon's factor. The bake
+                    // is dpr-free: scaling it would put the ratio inside the geometry, so a live ratio change
+                    // would need a full mesh rebuild and PreparedTileCache would serve it stale.
                     if (paint.Width.DependsOnFeature)
                     {
                         if (paint.Width.TryEvaluate(zoom, feature, out float widthVal))
@@ -242,7 +240,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     FeatureSelected   = selected,
                     OriginRender      = tileOriginRender,
                     Projection        = projection,
-                    Join              = layout.Join, // S60: Join/Cap are already parsed enums (no per-build string switch)
+                    Join              = layout.Join, // Join/Cap are already parsed enums (no per-build string switch)
                     Cap               = layout.Cap,
                     MiterLimit        = layout.MiterLimit,
                     RoundLimit        = layout.RoundLimit,
@@ -259,7 +257,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             }
         }
 
-        // ── Write step (job-scheduling-design.md §8 stage 5) ──────────────────────────────────────
+        // ── Write step (job-scheduling-design.md) ─────────────────────────────────────────────────
 
         /// <summary>
         /// The write graph's node for one NON-EMPTY line layer — owns the vertex-stream layout and the
@@ -275,7 +273,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// (<c>Vertices.Length &gt; 0 &amp;&amp; Indices.Length &gt; 0</c>) and error-free.</param>
         /// <param name="featureColors">Per-feature linear colour, indexed by <c>output.VertexFeatureIdx</c>.</param>
         /// <param name="featureWidths">Per-feature width scale, same indexing.</param>
-        /// <remarks><c>internal</c>, not <c>private</c>: job-scheduling-design.md §8 stage 5 tooth (g) —
+        /// <remarks><c>internal</c>, not <c>private</c>:
         /// <c>TestTileMeshBuilder.BuildLineFromLayer{TProj}</c> (the generic, Burst-unregistered-projection
         /// entry point) completes the write step through this method directly, reached across the assembly
         /// boundary via <c>MapRenderer.Unity</c>'s own <c>InternalsVisibleTo("MapRenderer.Tests.Shared")</c>
@@ -304,7 +302,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// job-scheduling-design.md §8 stage 5: the write graph's per-layer entry point — allocates one
+        /// The write graph's per-layer entry point — allocates one
         /// exact-size <see cref="Mesh.MeshDataArray"/> sized to <paramref name="output"/>'s real
         /// vertex/index count and hands it to <see cref="ScheduleStreamWrite"/>. Returns UNCOMPLETED — the
         /// caller polls/completes <see cref="MeshWriteOutput.Handle"/> before taking the payload. Mirrors

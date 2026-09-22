@@ -3,26 +3,26 @@
 // Grouped by what they exercise: billboard/cross-tile/horizon-cull math, then line-anchor and curved-polyline arc math, then the smaller pure-math fixtures (bearing, candidate tiling, collision order, far-plane cull, pairing, screen projection), then the staging-math family (curved up/vertex, sort-key, core staging), then string table and tile coverage/translate.
 //
 // Contents:
-//   BillboardMathTests                  — Epic A / A1 (design §11 A1 D2/D3/D4/D6): BuildWorldQuad golden (element-by-element corners/UVs, up to the A0-F2 Y-negation) + AnchorLocal/Tangent/AlignFlags carry- through.
-//   CrossTileIdentityTests              — A-3: cross-tile point-symbol identity (CrossTileSymbolKey) — the For-math primitive, engine-free.
-//   HorizonCullTests                    — S3: the globe far-side horizon cull — a polar-plane test, EXACT for on-surface points (globe symbol anchors).
-//   LineAnchorPlacementTests            — A-2: Compute places along-line anchors ONCE in tile space, as stable LineAnchor topology.
-//   PolylineArcMathScreenTests          — #5 B1 — the geometric core of curved text: walk a screen polyline by arc length, get point + tangent.
-//   PolylineArcMathWorldSampleTests     — Stage AC (curved-world) T-CPU: SegmentAt (the resumable segment search factored out of At) and SampleWorld (the double3 world-polyline sampler at an already-resolved (seg,t)) — the seam SymbolStagingMath.StageCurvedAnchor uses to bake a per-glyph world…
-//   SymbolBearingTests                  — #4 — the alignment→billboard-rotation mapping.
+//   BillboardMathTests                  — BuildWorldQuad golden (element-by-element corners/UVs, up to the Y-negation) + AnchorLocal/Tangent/AlignFlags carry- through.
+//   CrossTileIdentityTests              — cross-tile point-symbol identity (CrossTileSymbolKey) — the For-math primitive, engine-free.
+//   HorizonCullTests                    — the globe far-side horizon cull — a polar-plane test, EXACT for on-surface points (globe symbol anchors).
+//   LineAnchorPlacementTests            — Compute places along-line anchors ONCE in tile space, as stable LineAnchor topology.
+//   PolylineArcMathScreenTests          — the geometric core of curved text: walk a screen polyline by arc length, get point + tangent.
+//   PolylineArcMathWorldSampleTests     — SegmentAt (the resumable segment search factored out of At) and SampleWorld (the double3 world-polyline sampler at an already-resolved (seg,t)) — the seam SymbolStagingMath.StageCurvedAnchor uses to bake a per-glyph world…
+//   SymbolBearingTests                  — the alignment→billboard-rotation mapping.
 //   SymbolCandidateRangeTilingTests     — Engine-free (pure Core types + NUnit) — shared verbatim between the Unity EditMode runner and the fast dotnet core-tests project.
 //   SymbolCollisionTests                — The one direct tooth for ComparePlacementOrder: the placement order key is (SortKey, WasPlacedLastFrame, FeatureIndex, TileKey, FadeId), each term breaking a tie left by the one before it.
 //   SymbolFarPlaneCullTests             — The Core distance math for the pre-projection far-plane symbol cull: a symbol farther from the camera than the cull distance is culled; a non-positive distance disables it; and the per-frame rebase rotation is applied to the anchor (so the cull measures…
 //   SymbolPairingTests                  — Engine-free (pure Core types + NUnit) — shared verbatim between the Unity EditMode runner and the fast dotnet core-tests project.
-//   SymbolScreenProjectionTests         — S20 T2: TryProjectAnchor golden + culling, over a hand-built view-projection matrix chosen so every value is hand-computable (no live camera needed — the EditMode-only SymbolScreenProjectionUnityTests cross-checks against a REAL…
-//   SymbolStagingMathCurvedUpTests      — P2 T-2: pins PolylineArcMath.SampleUp's per-glyph sample EXACTLY — a large (90 deg), synthetic per-vertex up span, so the difference is not float noise.
+//   SymbolScreenProjectionTests         — TryProjectAnchor golden + culling, over a hand-built view-projection matrix chosen so every value is hand-computable (no live camera needed — the EditMode-only SymbolScreenProjectionUnityTests cross-checks against a REAL…
+//   SymbolStagingMathCurvedUpTests      — pins PolylineArcMath.SampleUp's per-glyph sample EXACTLY — a large (90 deg), synthetic per-vertex up span, so the difference is not float noise.
 //   SymbolStagingMathCurvedVertexTests  — Root-cause regression for the curved-symbol glyph-overlap defect: a glyph straddling a polyline VERTEX must be rotated by the CHORD across its own footprint (blending the two segment angles either side of the vertex), not the raw single-segment tangent a…
-//   SymbolStagingMathSortKeyTests       — Blocker B1 (salvaged from reverted 6e39e282): SanitizeSortKey normalizes a non-finite baked symbol-sort-key to float.MaxValue (sorts LAST) so ComparePlacementOrder stays a strict total order.
-//   SymbolStagingMathTests              — Lever C step 1: the pure blittable-input staging math extracted from SymbolPlacementSystem.
-//   SymbolStringTableTests              — Stage 2 (symbols-async-reconcile): SymbolStringTable — the string→int table that lets the cross-tile dedup key partition by an integer id instead of a string hash.
+//   SymbolStagingMathSortKeyTests       — SanitizeSortKey normalizes a non-finite baked symbol-sort-key to float.MaxValue (sorts LAST) so ComparePlacementOrder stays a strict total order.
+//   SymbolStagingMathTests              — the pure blittable-input staging math extracted from SymbolPlacementSystem.
+//   SymbolStringTableTests              — SymbolStringTable — the string→int table that lets the cross-tile dedup key partition by an integer id instead of a string hash.
 //   SymbolTileCoverageFilterTests       — ClassifyActive — the per-block tile-coverage classifier that WRITES a per-record Keep / Fade / Drop decision (a tile that WAS on screen fades out instead of popping) without compacting the record list.
 //   SymbolTileCoverageTests             — The per-tile screen-coverage pre-cull metric.
-//   SymbolTranslateTests                — Slice C / #4 — the pure text-translate screen-delta math (the engine-free half; the SymbolPlacementSystem.Tick integration is proven separately in EditMode).
+//   SymbolTranslateTests                — the pure text-translate screen-delta math (the engine-free half; the SymbolPlacementSystem.Tick integration is proven separately in EditMode).
 
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -42,9 +42,9 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Epic A / A1 (design §11 A1 D2/D3/D4/D6): <see cref="BillboardMath.BuildWorldQuad"/> golden
-    /// (element-by-element corners/UVs, up to the A0-F2 Y-negation) + AnchorLocal/Tangent/AlignFlags carry-
-    /// through. The screen-space <c>BuildQuad</c> this class tested pre-Epic-A is retired with the dead
+    /// <see cref="BillboardMath.BuildWorldQuad"/> golden
+    /// (element-by-element corners/UVs, up to the Y-negation) + AnchorLocal/Tangent/AlignFlags carry-
+    /// through. The screen-space <c>BuildQuad</c> this class used to test is retired with the dead
     /// screen render path it built for; <c>BuildWorldQuad</c> is its only surviving production consumer.
     /// </summary>
     [TestFixture]
@@ -64,12 +64,12 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // Epic A / A1 (design §11 A1 D2/D3/D4/D6): BuildWorldQuad — the world-anchored sibling of BuildQuad.
+        // BuildWorldQuad — the world-anchored sibling of BuildQuad.
         // ══════════════════════════════════════════════════════════════════════════════════════════════
 
         // ── Golden: unit scale, no rotation, no translate, anchor at 0 — the expected corners below are the
         //    same anchor-relative baked-px corners MakeQuad()'s TopLeft/BottomRight decompose into (no
-        //    scale/rotation/anchor to apply at these params), up to the A0-F2 Y-negation (Offset.y is the
+        //    scale/rotation/anchor to apply at these params), up to the Y-negation (Offset.y is the
         //    corner's Y negated). Pins the corner math is REUSED, not re-derived, and that
         //    AnchorLocal/Page/AlignFlags carry through. Inlined literals — the old BuildQuad oracle this test
         //    used is retired with the dead screen render path it built. ──
@@ -101,16 +101,16 @@ namespace MapRenderer.Tests.Text.Placement
                      })
             {
                 Assert.AreEqual(expectedScreenPx.x, world.Offset.x, 1e-5f, $"{label}: Offset.x matches BuildQuad's ScreenPx.x (no translate offset here — anchor is 0)");
-                Assert.AreEqual(-expectedScreenPx.y, world.Offset.y, 1e-5f, $"{label}: Offset.y is the A0-F2 NEGATION of BuildQuad's ScreenPx.y");
+                Assert.AreEqual(-expectedScreenPx.y, world.Offset.y, 1e-5f, $"{label}: Offset.y is the NEGATION of BuildQuad's ScreenPx.y");
                 Assert.AreEqual(expectedUv.x, world.Uv.x, 1e-6f, $"{label}: UV stays attached to its ORIGINAL corner (no flip)");
                 Assert.AreEqual(expectedUv.y, world.Uv.y, 1e-6f, $"{label}: UV.y unflipped too");
                 Assert.AreEqual(anchorLocal, world.AnchorLocal, $"{label}: AnchorLocal is the same on every corner");
-                Assert.AreEqual(0f, world.AlignFlags, $"{label}: AlignFlags stays 0 in A1 (viewport-aligned only; A3 wires the map-bearing bit)");
-                Assert.AreEqual(ZeroFloat3, world.Tangent, $"{label}: Tangent stays zero for a point/icon caller (Stage AC, unread by the shader when AlignFlags bit1 is clear)");
+                Assert.AreEqual(0f, world.AlignFlags, $"{label}: AlignFlags stays 0 (viewport-aligned only; the map-bearing bit)");
+                Assert.AreEqual(ZeroFloat3, world.Tangent, $"{label}: Tangent stays zero for a point/icon caller (unread by the shader when AlignFlags bit1 is clear)");
             }
         }
 
-        // ── D4: text-translate rides as an ADDITIVE, UNROTATED corner offset (with the SAME Y-negation as
+        // ── Text-translate rides as an ADDITIVE, UNROTATED corner offset (with the SAME Y-negation as
         //    the corner) — every corner shifts by translateDeltaPx identically, no double-apply, no rotation
         //    of the translate itself. ──
         [Test]
@@ -137,7 +137,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── NEW-F2: colour carries VERBATIM — no sRGB→linear (or any other) conversion. A non-trivial,
+        // ── Colour carries VERBATIM — no sRGB→linear (or any other) conversion. A non-trivial,
         //    non-black/non-white colour in must come out byte-identical, on every corner. ──
         [Test]
         public void BuildWorldQuad_ColorRgb_CarriesVerbatim_NoGammaConversion()
@@ -175,9 +175,9 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(tr.Offset.x, br.Offset.x, 1e-5f, "TR/BR share the right edge (same X)");
         }
 
-        // ── Stage AC (curved-world) D-I/D-A: tangentLocal/alignFlags ride VERBATIM onto every corner —
+        // ── tangentLocal/alignFlags ride VERBATIM onto every corner —
         //    curved's discriminator (bit1 set, a nonzero Tangent) must not be dropped or blended per-corner.
-        //    P2: surfaceUp rides the same way, onto Up — added here rather than a separate test since it is
+        //    surfaceUp rides the same way, onto Up — added here rather than a separate test since it is
         //    the identical "carries verbatim to every corner" contract as Tangent. ──
         [Test]
         public void BuildWorldQuad_TangentLocalAndAlignFlags_CarryVerbatimToEveryCorner()
@@ -205,7 +205,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A-3: cross-tile point-symbol identity (<see cref="CrossTileSymbolKey"/>) — the <c>For</c>-math primitive,
+    /// Cross-tile point-symbol identity (<see cref="CrossTileSymbolKey"/>) — the <c>For</c>-math primitive,
     /// engine-free.
     ///
     /// <para><see cref="CrossTileSymbolKey.For"/> stays a GENERAL grid primitive — still
@@ -214,7 +214,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// lands within one cell (the doc's original "1px-at-max-zoom" would not); (2) FINE ENOUGH — distinct symbols
     /// &gt; a few cells apart keep different keys; plus the 3-axis (globe Y), icon, and text parity cases.</para>
     ///
-    /// <para><b>Reader cutover (4.2).</b> The <c>Store_*</c> cases that exercised
+    /// <para><b>Reader cutover.</b> The <c>Store_*</c> cases that exercised
     /// <see cref="MapRenderer.Unity.Text.SymbolTileStore"/>'s dedup moved to
     /// <c>CrossTileIdentityStoreTests</c> (EditMode-only, alongside this file) — the store now reads a baked
     /// native block, which needs <c>Unity.Collections</c> that this project's core-tests shim lacks. This file's
@@ -251,7 +251,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.Greater(math.abs(a10.x - a11.x), qMax, "a max-zoom grid would NOT collapse the diff (why display-zoom)");
         }
 
-        // ── (S1) the 3-axis defect: on the globe, two equator-mirrored anchors (30°N / 30°S, same longitude)
+        // ── The 3-axis defect: on the globe, two equator-mirrored anchors (30°N / 30°S, same longitude)
         //    share render X/Z (both ∝ cosφ) but differ in Y (=sinφ·R, opposite sign) — an x/z-only key collides
         //    them into one symbol. Non-look-at latitudes so cosφ≠0 (X/Z genuinely equal, not both ~0). ──
         [Test]
@@ -293,8 +293,8 @@ namespace MapRenderer.Tests.Text.Placement
                 "same anchor+text on a different layer is a different label");
         }
 
-        // ── I6 (a): two icon symbols (text=null) at the SAME cell/layer but DIFFERENT icon-image must stay
-        //    distinct — the I5b-deferred gap this stage closes (pre-fix they collide: same text==null, so the
+        // ── (a) two icon symbols (text=null) at the SAME cell/layer but DIFFERENT icon-image must stay
+        //    distinct — the deferred icon-dedup gap this closes (pre-fix they collide: same text==null, so the
         //    old 4-arg key ignored the icon entirely). ──
         [Test]
         public void IconIdentity_DistinctIconImage_AreDistinct()
@@ -307,7 +307,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreNotEqual(keyA.GetHashCode(), keyB.GetHashCode(), "…and distinct hashes");
         }
 
-        // ── I6 (b): the SAME icon-image across a parent/child reprojected anchor (the real adjacent-zoom
+        // ── (b) the SAME icon-image across a parent/child reprojected anchor (the real adjacent-zoom
         //    diff from teeth (1)) still collapses to one identity — icons get the same seamless-swap dedup
         //    text symbols already have. ──
         [Test]
@@ -327,7 +327,7 @@ namespace MapRenderer.Tests.Text.Placement
                 "the same icon reprojected parent→child lands in the same identity cell");
         }
 
-        // ── I6 (c) text parity: two text keys (IconImage explicitly null) are equal + hash equal — the guard-skip
+        // ── (c) text parity: two text keys (IconImage explicitly null) are equal + hash equal — the guard-skip
         //    fold must not perturb the text-only path. ──
         [Test]
         public void TextParity_ExplicitNullIconImage_EqualsAndHashesSame()
@@ -347,7 +347,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S3: the globe far-side horizon cull — a polar-plane test, EXACT for on-surface points (globe symbol
+    /// The globe far-side horizon cull — a polar-plane test, EXACT for on-surface points (globe symbol
     /// anchors). Teeth: near-side kept / far-side hidden, cross-checked against an INDEPENDENT ray-sphere
     /// oracle (deliberately NOT the horizon half-angle test — that is algebraically identical to
     /// <c>dot &lt; radius²</c> and would be a tautological check); the planar no-op (<c>globeRadiusSq &lt; 0</c>)
@@ -538,12 +538,12 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A-2: <see cref="LineAnchorPlacement.Compute"/> places along-line anchors ONCE in tile space, as stable
+    /// <see cref="LineAnchorPlacement.Compute"/> places along-line anchors ONCE in tile space, as stable
     /// <see cref="LineAnchor"/> topology. These teeth pin: the anchor positions (spacing walk + segment
     /// transitions), the build-time hard cap (the anti-hang guard, moved here from the old per-frame loop), the
     /// line-center + short-line degeneracies, and the decisive no-slide property — an anchor recovers the SAME
     /// world point (<c>lerp(path[seg], path[seg+1], t)</c>) regardless of any per-frame projection, which is what
-    /// the old fixed-screen-px-from-start walk could not do (and the A-3 identity key builds on).
+    /// the old fixed-screen-px-from-start walk could not do (and the cross-tile identity key builds on).
     /// </summary>
     [TestFixture]
     public class LineAnchorPlacementTests
@@ -555,7 +555,7 @@ namespace MapRenderer.Tests.Text.Placement
             return l;
         }
 
-        // Recover an anchor's world point from the polyline it indexes (the A-3 forward-guard helper).
+        // Recover an anchor's world point from the polyline it indexes (the forward-guard helper).
         private static double2 WorldOf(List<double2> path, LineAnchor a)
             => math.lerp(path[a.Segment], path[a.Segment + 1], a.T);
 
@@ -640,7 +640,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// #5 B1 — the geometric core of curved text: walk a screen polyline by arc length, get point + tangent.
+    /// The geometric core of curved text: walk a screen polyline by arc length, get point + tangent.
     /// Drives <see cref="PolylineArcMath"/> directly (the SCREEN/<c>float2</c> path) over a local resumable
     /// cursor, the same idiom <c>SymbolStagingMath</c> uses in production; pairs with the WORLD/<c>double3</c>
     /// side in <see cref="PolylineArcMathWorldSampleTests"/>.
@@ -794,7 +794,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Stage AC (curved-world) T-CPU: <see cref="PolylineArcMath.SegmentAt"/> (the resumable segment search
+    /// T-CPU: <see cref="PolylineArcMath.SegmentAt"/> (the resumable segment search
     /// factored out of <see cref="PolylineArcMath.At"/>) and <see cref="PolylineArcMath.SampleWorld"/> (the
     /// <c>double3</c> world-polyline sampler at an already-resolved <c>(seg,t)</c>) — the seam
     /// <c>SymbolStagingMath.StageCurvedAnchor</c> uses to bake a per-glyph world anchor/tangent at the SAME
@@ -1067,7 +1067,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Candidate(sortKey: 2f, wasPlacedLastFrame: true, featureIndex: 0, tileKey: 0, fadeId: 0)), 0,
                 "a lower sort key must order first regardless of every tiebreak field");
 
-            // Equal sort key -> incumbency (A-5 hysteresis) breaks the tie.
+            // Equal sort key -> incumbency (hysteresis) breaks the tie.
             Assert.Less(SymbolCollision.ComparePlacementOrder(
                 Candidate(sortKey: 5f, wasPlacedLastFrame: true, featureIndex: 9, tileKey: 9, fadeId: 9),
                 Candidate(sortKey: 5f, wasPlacedLastFrame: false, featureIndex: 0, tileKey: 0, fadeId: 0)), 0,
@@ -1333,7 +1333,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S20 T2: <see cref="SymbolScreenProjection.TryProjectAnchor"/> golden + culling, over a hand-built
+    /// <see cref="SymbolScreenProjection.TryProjectAnchor"/> golden + culling, over a hand-built
     /// view-projection matrix chosen so every value is hand-computable (no live camera needed — the
     /// EditMode-only <c>SymbolScreenProjectionUnityTests</c> cross-checks against a REAL
     /// <c>Camera.WorldToScreenPoint</c>/<c>projectionMatrix</c>).
@@ -1453,7 +1453,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(50f, screenPx.y, 1e-4f);
         }
 
-        // ── S2 keystone tooth: a NON-identity rebase (SceneFrame.Rebase on a globe look-at) must actually be
+        // ── Keystone tooth: a NON-identity rebase (SceneFrame.Rebase on a globe look-at) must actually be
         //    applied, not silently dropped. Uses a real globe rebase (transpose(TangentBasisAt(lookAt))) at a
         //    NON-origin look-at, and a NON-look-at anchor -- a point AT the look-at has local = anchor -
         //    sceneOrigin = 0, so rebase * 0 = 0 with or without the fix (non-discriminating, the design table's
@@ -1578,7 +1578,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             int staged = SymbolStagingMath.StageCurved(in s, screenPath, depthPath, validPath, worldPath, worldUpPath,
                 glyphs, anchors, fadeIds, wasPlaced, pathPoints, cumulativeLengths, bearingRadians: 0f,
-                view: default, ordinal: 0, // W3: no view transform ⇒ the pre-W3 screen box, byte-identical
+                view: default, ordinal: 0, // No view transform ⇒ the screen box, byte-identical
                 p.Boxes, ref p.BoxCount, p.Quads, ref p.QuadCount, p.Candidates, p.Emit, ref p.EmitCount);
 
             Assert.AreEqual(1, staged);
@@ -1666,7 +1666,7 @@ namespace MapRenderer.Tests.Text.Placement
                 new double3(100, 0, 0),
                 new double3(100 + 100 * math.cos(bendRad), 0, 100 * math.sin(bendRad)),
             };
-            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this rotation-only tooth
+            var worldUpPath = new float3[worldPath.Length]; // unread by this rotation-only tooth
 
             // 3 glyphs, ArcCenter cumulative-advance midpoints (40-baked-px advance each), scale = 1
             // (TextSizePx == OneEm). The MIDDLE glyph is 20-baked-px half-wide and lands exactly on the vertex
@@ -1725,7 +1725,7 @@ namespace MapRenderer.Tests.Text.Placement
             var validPath = new byte[] { 1, 1 };
             // World path mirrors the screen path 1:1 (index-aligned) on the flat XZ plane.
             var worldPath = new[] { double3.zero, new double3(direction.x, 0, direction.y) * 200.0 };
-            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this rotation-only tooth
+            var worldUpPath = new float3[worldPath.Length]; // unread by this rotation-only tooth
             var glyphs = new[]
             {
                 new CurvedGlyph { ArcCenter = 20f, Cell = Cell(10f) },
@@ -1756,7 +1756,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(tiltRad, p.Quads[q].RotationRadians, Tol);
         }
 
-        // ── A8 (P-B non-regression): curved TEXT must be untouched by the icon work — it leaves
+        // ── Non-regression: curved TEXT must be untouched by the icon work — it leaves
         //    CurvedStageInput.AtlasKind/IconRotateRadians at their defaults, so the emit is the same Text /
         //    zero-rotation record it always was. This is the tooth that goes RED if a future change routes
         //    curved text through the icon arm (or defaults AtlasKind the wrong way). ──
@@ -1765,7 +1765,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             var screenPath = new[] { float2.zero, new float2(400f, 0f) };
             var worldPath = new[] { double3.zero, new double3(400, 0, 0) };
-            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this atlas/rotation-only tooth
+            var worldUpPath = new float3[worldPath.Length]; // unread by this atlas/rotation-only tooth
             var glyphs = new[]
             {
                 new CurvedGlyph { ArcCenter = 20f, Cell = Cell(10f) },
@@ -1797,7 +1797,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(glyphs.Length, p.BoxCount - boxCountBefore, "one box per glyph, unchanged");
         }
 
-        // ── A4 (P-B): a ONE-GLYPH curved ICON stages one candidate per anchor, routed to the SPRITE atlas
+        // ── A ONE-GLYPH curved ICON stages one candidate per anchor, routed to the SPRITE atlas
         //    and rotated to the projected tangent — the whole point of reusing the curved path for icons. ──
         [Test]
         public void StageCurved_OneGlyphIcon_StagesPerAnchor_IntoTheIconAtlas_WithARotatedBox()
@@ -1809,7 +1809,7 @@ namespace MapRenderer.Tests.Text.Placement
             var depthPath = new[] { 0f, 0f };
             var validPath = new byte[] { 1, 1 };
             var worldPath = new[] { double3.zero, new double3(dir.x, 0, dir.y) * 600.0 };
-            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this rotation/atlas tooth
+            var worldUpPath = new float3[worldPath.Length]; // unread by this rotation/atlas tooth
 
             // A deliberately WIDE cell (24 x 12) so the rotated box is measurably wider in x than the cell.
             var iconCell = new SymbolQuad
@@ -1883,7 +1883,7 @@ namespace MapRenderer.Tests.Text.Placement
             var depthPath = new[] { 0f, 0f };
             var validPath = new byte[] { 1, 1 };
             var worldPath = new[] { double3.zero, new double3(200, 0, 0) };
-            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this translate-delta tooth
+            var worldUpPath = new float3[worldPath.Length]; // unread by this translate-delta tooth
             var glyphs = new[]
             {
                 new CurvedGlyph { ArcCenter = 40f, Cell = Cell(10f) },
@@ -2008,7 +2008,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Blocker B1 (salvaged from reverted 6e39e282): <see cref="SymbolStagingMath.SanitizeSortKey"/> normalizes a
+    /// <see cref="SymbolStagingMath.SanitizeSortKey"/> normalizes a
     /// non-finite baked <c>symbol-sort-key</c> to <c>float.MaxValue</c> (sorts LAST) so
     /// <see cref="SymbolCollision.ComparePlacementOrder(in SymbolCandidate, in SymbolCandidate)"/> stays a strict total
     /// order. A NaN key is intransitive → the unstable heapsort's survivor set becomes input-order dependent; this
@@ -2113,8 +2113,8 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, c.FeatureIndex); Assert.AreEqual(7, c.TileKey);
             Assert.AreEqual(0, c.SymbolIndex); Assert.AreEqual(123, c.FadeId);
             Assert.IsFalse(c.WasPlacedLastFrame);
-            // §10 P7: an ORDINARY (unpaired) symbol's candidate satisfies EmitCount == 1, EmitStart == SymbolIndex —
-            // byte-identical to the pre-§10 shape (one record, one candidate, one emit).
+            // An ORDINARY (unpaired) symbol's candidate satisfies EmitCount == 1, EmitStart == SymbolIndex —
+            // one record, one candidate, one emit.
             Assert.AreEqual(1, c.EmitCount, "an ordinary point label has exactly one emit");
             Assert.AreEqual(c.SymbolIndex, c.EmitStart, "EmitStart == SymbolIndex for an unpaired candidate");
 
@@ -2124,7 +2124,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0.5f, p.Quads[0].Depth, Tol);
         }
 
-        // ── B3 (P-B): icon-rotate on the POINT path — the SIGN tooth. 90° is the discriminator on purpose:
+        // ── icon-rotate on the POINT path — the SIGN tooth. 90° is the discriminator on purpose:
         //    a sign-flipped impl passes the 180° case (R(pi) == -I is its own inverse) and fails this one,
         //    which is why liberty's only real value is not what pins the direction. ──
         private static PointStageInput RotatedIconInput(float iconRotateRadians, AlignmentMode alignment)
@@ -2166,7 +2166,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0.7f - math.PI / 2f, pMap.Quads[0].RotationRadians, Tol,
                 "map + icon-rotate 90 -> bearing - pi/2 composed");
 
-            // (c) The BOX is deliberately NOT rotated by icon-rotate (KL-B1): the point path's box is the
+            // (c) The BOX is NOT rotated by icon-rotate: the point path's box is the
             // unrotated AABB even under a live bearing, so rotating it here would make the convention
             // inconsistent with the case it must match.
             Assert.AreEqual(100f - 12f, p.Boxes[0].Min.x, Tol, "the collision box stays the unrotated AABB");
@@ -2229,7 +2229,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(-unrotatedTopRight.Offset.y, flippedTopRight.Offset.y, Tol, "180 deg negates y");
         }
 
-        // I5a: AtlasKind (the icon/text discriminator) must ride through emit[ordinal] unchanged — a plain
+        // AtlasKind (the icon/text discriminator) must ride through emit[ordinal] unchanged — a plain
         // pass-through, not yet consumed anywhere, but the thread must not silently drop it.
         [Test]
         public void StagePoint_IconAtlasKind_CarriesThroughToEmit()
@@ -2272,7 +2272,7 @@ namespace MapRenderer.Tests.Text.Placement
                 TextSizePx = TextQuadLayout.OneEm,
                 TranslateAnchor = TextTranslateAnchor.Viewport, RotationAlignment = AlignmentMode.Viewport,
                 Color = new float4(1, 1, 1, 1),
-                // AtlasKind left at its default — every pre-I5a caller never sets it.
+                // AtlasKind left at its default — no existing caller sets it.
             };
             var quads = new[] { Cell(1f) };
             var p = Pools.New();
@@ -2312,7 +2312,7 @@ namespace MapRenderer.Tests.Text.Placement
             // World path mirrors the screen path 1:1 (index-aligned, per StageJob's contract) — a flat
             // east-only line at Y=Z=0, TileOriginRender left at its float3-zero default.
             var worldPath  = new[] { new double3(0, 0, 0), new double3(100, 0, 0) };
-            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this box/tangent tooth
+            var worldUpPath = new float3[worldPath.Length]; // unread by this box/tangent tooth
             var glyphs     = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = Cell(6f) } };
             var anchors    = new[] { new LineAnchor(0, 0.5f) };  // arc distance 50 along the 100-px line
             long fid = SymbolStagingMath.LineFadeId(9, 0, 3, 0);
@@ -2335,13 +2335,13 @@ namespace MapRenderer.Tests.Text.Placement
 
             SymbolCandidate c = p.Candidates[0];
             Assert.AreEqual(1, c.BoxCount); Assert.AreEqual(fid, c.FadeId);
-            // §10 P7: a curved symbol is never paired — EmitCount == 1, EmitStart == SymbolIndex, unchanged.
+            // A curved symbol is never paired — EmitCount == 1, EmitStart == SymbolIndex.
             Assert.AreEqual(1, c.EmitCount, "a curved label has exactly one emit");
             Assert.AreEqual(c.SymbolIndex, c.EmitStart, "EmitStart == SymbolIndex for a curved candidate");
             Assert.AreEqual(new float2(50, 0).x, p.Quads[0].AnchorScreenPx.x, Tol);
             Assert.AreEqual(0f, p.Quads[0].AnchorScreenPx.y, Tol);
             Assert.AreEqual(0.7f, p.Quads[0].Depth, Tol);
-            // Stage AC: the world sample at the same arc=50 midpoint, narrowed against the default-zero
+            // The world sample at the same arc=50 midpoint, narrowed against the default-zero
             // TileOriginRender — AnchorLocal == the world point itself; Tangent is the unit +X direction.
             Assert.AreEqual(50f, p.Quads[0].AnchorLocal.x, Tol);
             Assert.AreEqual(0f, p.Quads[0].AnchorLocal.y, Tol);
@@ -2359,7 +2359,7 @@ namespace MapRenderer.Tests.Text.Placement
             var depthPath  = new[] { 0f, 0f };
             var validPath  = new byte[] { 1, 1 };
             var worldPath  = new[] { new double3(0, 0, 0), new double3(10, 0, 0) };
-            var worldUpPath = new float3[worldPath.Length]; // P2: unread by this too-long-to-fit tooth
+            var worldUpPath = new float3[worldPath.Length]; // unread by this too-long-to-fit tooth
             // glyph span 0..100 baked-px * scale 1 = 100 px symbol, longer than the 10-px line → never fits.
             var glyphs     = new[] { new CurvedGlyph { ArcCenter = 0f, Cell = Cell(6f) },
                                      new CurvedGlyph { ArcCenter = 100f, Cell = Cell(6f) } };
@@ -2376,7 +2376,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(0, p.BoxCount);
         }
 
-        // ── C7 (stage C) — a masked pair leaves every OTHER candidate shape untouched, and does not perturb
+        // ── C7 — a masked pair leaves every OTHER candidate shape untouched, and does not perturb
         //    the box-range tiling / fade-id uniqueness the collision + fade layers depend on. ──────────────
         [Test]
         public void OptionalPair_DoesNotLeakIntoLoneOrCurvedCandidates_OrBreakRangeTiling()
@@ -2414,7 +2414,7 @@ namespace MapRenderer.Tests.Text.Placement
             candidateCount += SymbolStagingMath.StageCurved(in curved,
                 new[] { new float2(0, 400), new float2(200, 400) }, new[] { 0f, 0f }, new byte[] { 1, 1 },
                 new[] { new double3(0, 0, 0), new double3(200, 0, 0) },
-                new float3[2], // P2: unread by this pair-shape/range-tiling tooth
+                new float3[2], // unread by this pair-shape/range-tiling tooth
                 new[] { new CurvedGlyph { ArcCenter = -8f, Cell = Cell(6f) }, new CurvedGlyph { ArcCenter = 8f, Cell = Cell(6f) } },
                 new[] { new LineAnchor(0, 0.5f) },
                 new[] { curvedFadeId, SymbolStagingMath.LineFadeId(9, 0, 5, -1) }, new byte[] { 0, 0 },
@@ -2423,7 +2423,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             // A BOTH-optional pair, with a stale last-frame verdict carried in — the shape most likely to leak.
             // Staged LAST on purpose: a pair consumes TWO emits, so any candidate AFTER one legitimately has
-            // EmitStart > SymbolIndex (§10 P7's identity holds only while every prior candidate emitted once).
+            // EmitStart > SymbolIndex (that identity holds only while every prior candidate emitted once).
             PointStageInput owner = Lone(3, new float2(500, 100), 1003L, SymbolKind.Icon);
             owner.PairOptional = true;
             PointStageInput rider = Lone(4, new float2(500, 100), 1004L, SymbolKind.Text);
@@ -2495,7 +2495,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Stage 2 (symbols-async-reconcile): <see cref="SymbolStringTable"/> — the string→int table that lets the
+    /// <see cref="SymbolStringTable"/> — the string→int table that lets the
     /// cross-tile dedup key partition by an integer id instead of a string hash. Its BIJECTION within a
     /// lifetime (different string ⇒ different id, ordinal) is the property the dedup partition-preservation
     /// rests on, so it gets its own falsifiable teeth here.
@@ -2819,7 +2819,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Slice C / #4 — the pure <c>text-translate</c> screen-delta math (the engine-free half; the
+    /// #4 — the pure <c>text-translate</c> screen-delta math (the engine-free half; the
     /// <c>SymbolPlacementSystem.Tick</c> integration is proven separately in EditMode). Viewport-anchor and
     /// map-anchor-at-bearing-0 are fully testable here; the bearing tests assert structure (magnitude,
     /// ≠ viewport) rather than the exact rotated coordinates, because the map-under-bearing SIGN is

@@ -6,12 +6,10 @@ using System.Collections.Generic;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// A resolved <c>text-font</c> stack (an ordered list of font names). S18 Slice 3 only needed
-    /// <see cref="ShapingRequest"/> to carry this through — the clean-room shaper
+    /// A resolved <c>text-font</c> stack (an ordered list of font names). The clean-room shaper
     /// (<see cref="CodepointTextShaper"/>) does not consult it; advances come from
-    /// <see cref="ShapingRequest.Metrics"/> instead. Slice 4 adds <see cref="RequestToken"/> (the
-    /// glyph-PBF <c>{fontstack}</c> fetch key) and per-glyph fallback resolution
-    /// (<see cref="FontStackResolver"/>, T5).
+    /// <see cref="ShapingRequest.Metrics"/> instead. <see cref="RequestToken"/> is the glyph-PBF
+    /// <c>{fontstack}</c> fetch key; per-glyph fallback lives in <see cref="FontStackResolver"/>.
     /// </summary>
     public sealed class FontStack
     {
@@ -23,9 +21,8 @@ namespace MapRenderer.Core.Text
         /// <c>", "</c> (comma + space) — confirmed against the committed glyph-PBF fixtures, whose
         /// decoded multi-font <see cref="FontStackGlyphs.Name"/> uses this exact join (e.g.
         /// "Noto Sans Regular, Noto Naskh Arabic Regular, ..."). Not URL-encoded — that is the fetch
-        /// layer's job (deferred to the Unity <c>GlyphManager</c>). Computed on demand (not an
-        /// <c>init</c> property), so Slice 3's existing <c>Names</c>-only object-initializer
-        /// construction is unaffected.
+        /// layer's job (deferred to the Unity <c>GlyphManager</c>). Computed on demand, not an
+        /// <c>init</c> property, so a <c>Names</c>-only object initializer still constructs it.
         /// </summary>
         public string RequestToken => BuildRequestToken(Names);
 

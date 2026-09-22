@@ -6,31 +6,23 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// The fill graph's sizing node: reproduces <c>FillMeshPipeline.cs:312–371</c>'s earcut-scratch sizing
-    /// pass — the four prefix-sum offset tables plus every flat scratch/output list downstream nodes
-    /// (<see cref="FillGatherJob{TComparer}"/>, <see cref="EarcutBatchJob"/>, <see cref="AggregateJob"/>)
-    /// consume, sized once and up front (job-scheduling-design.md §3.2, §8 stage 1) and held as one
-    /// <see cref="TriangulationBuffers"/> field (§8 stage 4's R2 reshape). A single-threaded job may resize a list
-    /// it owns.
-    ///
-    /// <para><b>Also reports the ring-count statistic.</b> <see cref="RingOffsets"/> is already a borrowed
-    /// input here (needed to compute each polygon's outer/hole vertex counts), so <see cref="Counts"/>[0]'s
-    /// <see cref="FillGraphCounts.RingCount"/> is a one-line read of a value this node already holds — no
-    /// dedicated node/edge, unlike the deleted <c>FillRingCountJob</c> whose sole product this was.</para>
+    /// The fill graph's sizing node: the four prefix-sum offset tables, plus every flat scratch and output
+    /// list that <see cref="FillGatherJob{TComparer}"/>, <see cref="EarcutBatchJob"/> and
+    /// <see cref="AggregateJob"/> consume, sized once and up front. A single-threaded job may resize a list
+    /// it owns. It also reports <see cref="FillGraphCounts.RingCount"/>, a one-line read of
+    /// <see cref="RingOffsets"/>, which it already borrows.
     ///
     /// <para><b>Schedulable standalone</b> — its capacities are plain <c>int</c> fields, not derived from a
     /// borrowed input, so a test can hand it an undersized <see cref="MaxPolygons"/>/<see cref="MaxHoles"/>
     /// and observe the error flag without building a whole graph.</para>
     ///
-    /// <para><b>Error, not a throw.</b> <see cref="Error"/> is set — never
-    /// <see cref="FillMeshPipeline.EnsureCapacity"/>'s throw, which a Burst job cannot raise — and every
-    /// output list is left at length 0 (nothing written past capacity): <see cref="Execute"/> returns before
-    /// touching any of them.</para>
+    /// <para><b>Error, not a throw</b>, which a Burst job cannot raise. On overrun <see cref="Execute"/>
+    /// returns before touching any output list, so every one stays at length 0.</para>
     ///
-    /// <para><b>Clear vs. uninitialised is reproduced exactly</b> (must match, or output differs silently):
-    /// <c>Buffers.FlatSortedHoleCounts</c>, <c>Buffers.PerPolyIndexCount</c> and <c>Buffers.PerPolyForceClip</c>
-    /// are <see cref="NativeArrayOptions.ClearMemory"/> (<c>FillMeshPipeline.cs:356,368,369</c>); every other
-    /// flat list is <see cref="NativeArrayOptions.UninitializedMemory"/>.</para>
+    /// <para><b>Clear vs. uninitialised must match, or the output differs silently.</b>
+    /// <c>Buffers.FlatSortedHoleCounts</c>, <c>Buffers.PerPolyIndexCount</c> and
+    /// <c>Buffers.PerPolyForceClip</c> are <see cref="NativeArrayOptions.ClearMemory"/>; every other flat
+    /// list is <see cref="NativeArrayOptions.UninitializedMemory"/>.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct SizingJob : IJob
@@ -106,8 +98,6 @@ namespace MapRenderer.Jobs.Fill
                     holeVertTotal += RingOffsets[hri + 1] - RingOffsets[hri];
                 }
 
-                // Mirrors FillMeshPipeline.cs's scratch-capacity sizing exactly — see that method's doc for
-                // the base/split-headroom rationale.
                 int polyVC        = outerLen + holeVertTotal;
                 int baseCap       = polyVC + holeCount * 2;
                 int splitBudget   = math.min(EarcutJob.MaxSplits, math.max(8, holeCount * 4));
@@ -121,27 +111,14 @@ namespace MapRenderer.Jobs.Fill
                 indexOffsets.Add(indexOffsets[pi] + idxCap);
             }
 
-            // Defence-in-depth, NOT the parallel earcut's precondition (job-scheduling-design.md §8 stage 6,
-            // C.2 — see this job's own type doc). A non-monotonic table here would surface only as an
-            // Editor-only GetSubArray bounds throw downstream; this turns that into an error code compiled
-            // into every build. Strictly increasing is right: workCap >= 16 (baseCap + splitBudget*2 with
-            // splitBudget >= 8, above), idxCap >= 3 (above, explicitly), sortedHoleLen >= 1 (above,
-            // explicitly), and polyVC >= 3 because RingAssemblyJob.cs skips any ring with rLen < 3 — so
-            // outerLen >= 3 is guaranteed before this job ever sees it.
+            // Defence-in-depth. A non-monotonic table would otherwise surface only as an Editor-only
+            // GetSubArray bounds throw downstream; this turns it into an error code compiled into every
+            // build. Strictly increasing holds: workCap >= 16, idxCap >= 3, sortedHoleLen >= 1, and
+            // polyVC >= 3 because RingAssemblyJob skips any ring shorter than 3 vertices.
             //
-            // This return (and the two capacity returns above) protects the WHOLE downstream chain: every
-            // column a downstream node bounds its own loop by stays at length 0 (the four offset tables above
-            // may already be non-empty on THIS return — they are filled before this check — but no node
-            // bounds a loop by one of them). Every node that holds a sizing-owned buffer struct
-            // (TriangulationBuffers/RibbonBuffers) bounds its own loop — or its deferred count — by a
-            // column its sizing job resizes, never a borrowed count that job's early return does not touch.
-            // Nodes past the aggregate bound by columns the AGGREGATE sizes, and inherit emptiness through
-            // it. A downstream node re-introducing a borrowed count as its loop bound would silently reopen
-            // the release-build OOB this stage found and fixed — FillSizingJobTests
-            // .SizingCapacityOverrun_LeavesGatherAndAggregate_WithNothingToDo is the observing tooth for
-            // FillGatherJob.Execute and AggregateJob.Execute; EarcutBatchJob has no loop of its own to
-            // bound (deferred over buffers.PerPolyOuterCount) — FillMeshGraphStructureTests pins that
-            // deferred-count source structurally instead.
+            // This return, and the two capacity returns above, protect the whole downstream chain: every
+            // column a downstream node bounds its own loop by stays at length 0. The four offset tables may
+            // already be non-empty here, but no node bounds a loop by one of them.
             for (int pi = 0; pi < polyCount; pi++)
             {
                 if (vertexOffsets[pi + 1] <= vertexOffsets[pi] || holeCountOffsets[pi + 1] <= holeCountOffsets[pi] ||

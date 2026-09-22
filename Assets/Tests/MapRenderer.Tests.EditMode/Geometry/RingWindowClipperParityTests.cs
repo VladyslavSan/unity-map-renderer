@@ -18,7 +18,7 @@ namespace MapRenderer.Tests.Geometry
     /// ~0.1 s <c>dotnet test</c> loop, which is the point of a source that exists to serve fixtures. That
     /// leaves a second copy of an in-repo algorithm, which this repo normally treats as a smell. This test is
     /// what converts the copy from an UNVERIFIED duplicate into a CHECKED equivalence, and it is also the
-    /// retirement path: when the geometry-IR epic lands, the job can delegate to the managed clipper and this
+    /// retirement path: when the geometry IR lands, the job can delegate to the managed clipper and this
     /// stays green.</para>
     /// </summary>
     [TestFixture]
@@ -128,7 +128,7 @@ namespace MapRenderer.Tests.Geometry
                 }
                 offsets[corpus.Count] = cursor;
 
-                // IR B7: the clip walks a caller-supplied visit order. "Every ring, in decode order" is the
+                // The clip walks a caller-supplied visit order. "Every ring, in decode order" is the
                 // identity order, which is what this parity fixture always meant by RingCount.
                 var visitOrder = new NativeArray<int>(corpus.Count, Allocator.Persistent);
                 for (int i = 0; i < corpus.Count; i++) visitOrder[i] = i;

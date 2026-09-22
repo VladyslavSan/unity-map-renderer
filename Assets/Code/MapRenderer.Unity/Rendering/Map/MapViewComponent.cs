@@ -27,7 +27,7 @@ namespace MapRenderer.Unity.Rendering.Map
         // Profiler-counter telemetry hooks, implemented in MapViewComponent.ProfilerCounters.cs — a partial
         // half that is ENTIRELY inside `#if ENABLE_PROFILER`. With no implementing part (a release player) the
         // C# compiler erases these calls, so the consumer is stripped structurally rather than by a comment,
-        // and this glue class stays free of conditional compilation. See docs/telemetry-design.md §3.
+        // and this glue class stays free of conditional compilation. See docs/telemetry-design.md.
         partial void AttachTelemetryCounters();
         partial void ReleaseTelemetryCounters();
         partial void MirrorTelemetryCounters();

@@ -1,32 +1,31 @@
 # Shaders
 
 The map renderer's HLSL shader tree. Layout, include rules, and naming conventions live here so a
-future layer (or a file move) has a rule to follow rather than a precedent to reverse-engineer.
-
-Updated in **S66** (structural cleanup): each layer is now self-contained; `Common/` holds only
-a reference template, not the live framework. Updated in **S23 I2a**: the one sanctioned exception to
-self-containment is a shared px→world include at `Shaders/Map/PixelsToWorld.hlsl` — see "Shared px→world
-include" below.
+new layer (or a file move) has a rule to follow rather than a precedent to reverse-engineer.
 
 ## Architecture (rendering logic)
 
-The folder rules below are *structure*; this section is the *logic* — what these shaders compute and
-the invariants they hold.
+### Minimal delta over stock URP
 
-### Minimal delta over stock URP Lit
-
-Every map shader is **stock URP Lit, verbatim, minus only genuine logic deltas**. A verbatim copy of
-the URP Lit set is vendored at `Unity/Lit/` (`Shader "Template/UnityLit"`) as a diff baseline — a `diff`
-of a map pass against its `Unity/Lit/` counterpart should reduce to exactly:
+Every map shader is **stock URP Lit or Unlit, verbatim, minus only genuine logic deltas**. Verbatim
+copies of both URP sets are vendored at `Unity/Lit/` (`Shader "Template/UnityLit"`) and
+`Unity/Unlit/` as diff baselines — a `diff` of a map pass against its vendored counterpart reduces
+to exactly:
 
 1. the Properties header (map paint props + the tweakable render-state params
    `_SrcBlend/_DstBlend/_SrcBlendAlpha/_DstBlendAlpha/_ZWrite/_ZTest/_Cull/_BlendOp`),
 2. those render-state commands parameterized, and
-3. the layer hook — `MapVertexModify` (Fill) or `Line_VertexExtrude` (Line) — plus the coverage/alpha.
+3. the layer hook — `MapVertexModify` (Fill, FillExtrusion) or `Line_VertexExtrude` (Line) — plus
+   the coverage/alpha it feeds and the keywords that gate it.
 
 Everything else stays byte-identical, **including the full keyword-gated feature set**. Do not
-hand-strip "unused" keywords (`_NORMALMAP`, `_DETAIL`, …): `shader_feature` compiles them out when the
-material doesn't set them, so keeping them costs nothing and preserves parity. See `Unity/Lit/README.md`.
+hand-strip "unused" keywords (`_NORMALMAP`, `_DETAIL`, …): `shader_feature` compiles them out when
+the material does not set them, so keeping them costs nothing and preserves parity.
+
+The unlit twins omit `_NORMALMAP` / `_PARALLAXMAP` / `_DETAIL_*`, and that **is** the parity rather
+than an exception to it: stock URP Unlit declares none of them, and a `<Layer>_UnlitInput.hlsl`
+declares no `_BumpMap` / `_DetailAlbedoMap` CBUFFER member, so enabling one would compile a branch
+that reads properties the shader never declares. See `Unity/Lit/README.md`.
 
 ### No flat-ground assumption — the per-vertex frame
 
@@ -40,228 +39,239 @@ The shaders make **no flat-ground (XZ / +Y) assumption**. The geometric frame is
   frame (T=along, B=across, N=up) with no extra vertex stream, so normal-map/detail/parallax work.
 - **lift** (the 0.001 m z-fight nudge) is along the surface normal, not world `+Y`.
 
-What's still Mercator-tied is the **position** itself: the mesh builders project 2D tile geometry to a
-flat `Vector3(x, 0, y)` via `WebMercator.Forward`. Making *placement* projection-agnostic is the globe
-epic — `IProjection` exposes a stateless `ProjectPoint` math + a `Kind` enum the Burst mesh job switches on,
-which emits `position + frame` for any projection; the mesh then bakes a non-zero-Y `across` + radial
-normals and **these shaders consume them with no change**. (Fill's `MapVertexModify` translate is the
-last per-vertex spot still written in XZ; it moves to the normal-relative frame with the same edit.)
+Projection choice therefore lives entirely upstream of the shader: the mesh jobs emit
+`position + frame`, and a shader that consumes both needs no branch on which projection produced it.
 
 ### Line coverage & uv
 
-`Line_VertexExtrude` is the single extrusion site — all five line passes call it, so silhouettes are
-identical by construction. It emits the line's native parameterization in the standard `uv` channel (a
-`float3`): `uv.x` = distance-along in line-width units (`dashU`), `uv.y` = signed cross `∈[-1,1]`
-(`side`), `uv.z` = gap inner-fraction. `uv.xy` doubles as the real surface UV fed to
-`InitializeStandardLitSurfaceData` (not `float2(0,0)`); `LineCoverage(uv.y, uv.z, uv.x)` produces the
-`fwidth`-feathered ribbon coverage that drives the forward-pass alpha and the depth/shadow/gbuffer
-`clip()`. The four non-forward line passes are **capability-only** — inert for transparent lines
-(URP skips Queue ≥ 2501), present so S69 can flip lines opaque without adding passes.
+`Line_VertexExtrude` is the single extrusion site — every line pass of both twins calls it, so
+silhouettes cannot diverge between passes. It emits the line's native parameterization in the
+standard `uv` channel: `uv.x` = distance-along in line-width units (`dashU`), `uv.y` = signed cross
+`∈[-1,1]` (`side`), `uv.z` = gap inner-fraction. `uv.xy` doubles as the surface UV fed to
+`InitializeStandardLitSurfaceData`; `LineCoverage(uv.y, uv.z, uv.x)` produces the
+feathered ribbon coverage that drives the forward-pass alpha and the depth/shadow/gbuffer `clip()`.
 
-### Two rulers, on purpose (S110, S111)
+`uv.xy` is `(dashU, side)`, not a conventional surface UV. A layer that binds a uv-dependent line
+texture samples on that axis — which is the axis a `line-pattern` feature wants, and is why no
+line material binds one today.
+
+The non-forward line passes are **capability-only** — inert for transparent lines, because URP
+excludes `Queue ≥ 2501` from the opaque depth/GBuffer prepasses. They are present so the line
+rendering mode can go opaque without adding passes.
+
+### Two rulers, on purpose
 
 The line shader converts pixels to world metres with **two different rulers**, and neither can do the
-other's job.
+other's job. `Line_VertexExtrude` binds each one under its own name so a change to one cannot move
+the other by accident; that file carries the authoritative per-consumer audit.
 
 | ruler | who reads it | why it must be that one |
 |---|---|---|
-| `MapPixelsToWorld(centerWS, unitDir_WS)` — a **per-vertex, per-direction measurement** | the AA straddle pad, the **min-width floor** (`minHalfWorld`), the `_HAIRLINE_SOLID_CORE` floor (via the pad), and `line-translate` | these are genuinely SAMPLING-GRID quantities *at that vertex*: half a device pixel of ramp must land on half a device pixel of framebuffer, a 1 px legibility floor must rescue a road **where** it thinned, and a translate is a screen displacement. The line shader binds one `metresPerDevicePx` for all of them so they cannot drift apart |
-| `_MapFrameMetersPerDevicePixel` — a **frame constant**, measured off the camera (`2·d_lookAt·tan(fov/2)/viewportPx.y`) and pushed by `MapCamera.SyncToCamera` | `widthWorld`, `line-gap-width`, `line-offset`, and the dash divisor `dashMetersPerUnit` | `line-width: N px` means N px **top-down**: it fixes a world width once and the perspective divide decides the rest. A pattern welded to the ground must not depend on where on screen you look, and neither must the width (S116; `docs/line-rendering-design.md` §1) |
+| `MapPixelsToWorld(centerWS, unitDir_WS)` — a **per-vertex, per-direction measurement** | the AA straddle pad, the **min-width floor** (`minHalfWorld`), the `_HAIRLINE_SOLID_CORE` floor (via the pad), and `line-translate` (its own per-axis calls) | these are SAMPLING-GRID quantities *at that vertex*: half a device pixel of ramp must land on half a device pixel of framebuffer, a 1 px legibility floor must rescue a road **where** it thinned, and a translate is a screen displacement. The line shader binds one `metresPerDevicePx` for all of them so they cannot drift apart |
+| `_MapFrameMetersPerDevicePixel` — a **frame constant**, measured off the camera (`2·d_lookAt·tan(fov/2)/viewportPx.y`) and pushed by `MapCamera.SyncToCamera` | `widthWorld`, `line-gap-width`, `line-offset`, and the dash divisor `dashMetersPerUnit` (which reads the global directly) | `line-width: N px` means N px **top-down**: it fixes a world width once and the perspective divide decides the rest. A pattern welded to the ground must not depend on where on screen you look, and neither must the width (`docs/line-rendering-design.md` §1) |
 
-**The failure surface — one root, four visible symptoms.** `MapPixelsToWorld` is a *measurement*, and
-`dashU` was the one consumer that **integrated** it along the road while every other consumer is bounded
-by the styled width. It varies:
+Keep them named and keep them distinct. One expression serving both is how a change to the width
+silently rebases every screen quantity that shares it.
 
-1. **with depth** (`refMag ∝ |clip.w|`) — the world period grew with distance and the pattern crawled as
-   the camera tilted;
+### Why the width family cannot ride the measurement
+
+`MapPixelsToWorld` is a *measurement*, so it varies three ways that a styled width must not:
+
+1. **with depth** — `refMag ∝ |clip.w|`, so a far vertex probes with a longer ruler;
 2. **with direction** — the probe steps along `across` while dashes run `along`, so two roads at equal
-   depth with perpendicular bearings got different periods;
-3. **with the *sign* of the direction** — *historical: S111 removed this term at source, so the
-   measurement no longer varies this way at all.* The two ribbon vertices of a station share one centreline
-   point and carry opposite `extrudeN`, so they probed the projection in opposite directions and got rulers
-   differing by exactly `(1+e)/(1−e)`, `e = 0.02·tan(fov/2)·(across·fwd)` (1.91 % at fov 60 / tilt 55°;
-   the exact fov-60 ceiling is **2.336 %** — the `2.31 %` quoted before S111 is the first-order `2e` —
-   **exactly 0** when `across ⊥ fwd`). Every dash boundary tilted off perpendicular, by an
-   angle growing linearly with accumulated `dashU` — **the diagonal parallelograms**;
-4. **because it is sampled per vertex and interpolated** — `dashU` is a plain varying, so the GPU renders
-   the perspective-correct *chord* of a hyperbola: the period stepped at every road vertex and depended on
-   the road's tessellation density (1.12× between a 2 km and a 30 km mesh). A flat/Mercator projection
-   never subdivides, so the sparse case is the normal one.
+   depth with perpendicular bearings measure differently;
+3. **because it is sampled per vertex and interpolated** — a quantity derived from it is a plain
+   varying, so the GPU renders the perspective-correct *chord* of a hyperbola. A value derived that
+   way steps at every road vertex and depends on the mesh's tessellation density (1.12× between a
+   2 km and a 30 km mesh). A flat/Mercator projection never subdivides, so the sparse case is the
+   normal one.
 
-A frame constant has no depth term, no direction, no sign, and is identical at every vertex so any
-interpolant is exact. All four go in one move.
+It does **not** vary with the *sign* of the direction. The helper multiplies the measured pixel span
+by `clipRef.w / clipCenter.w`, dividing out the foreshortening the probe itself picks up. Because
+`clip.w` is affine in world position, that cancels identically and to all orders for either sign of
+`dirWS`; under an orthographic projection `wRef == w0` bitwise, so the factor is exactly `1.0` and
+the helper is **bit-identical** to an uncorrected one. Without the correction the two rulers for one
+physical axis differ by `(1+e)/(1−e)`, `e = 0.02·tan(fov/2)·(across·fwd)` — **1.910 %** at fov 60 /
+tilt 55°, a **2.336 %** ceiling at fov 60, and exactly **0** when `across ⊥ fwd`.
 
-**What S110 left, and S111 fixed.** S110 moved only the dash parameterisation off the measurement; the
-measurement itself kept all four dependencies for width / gap / offset / translate. **S111 removed the
-*sign* dependence at source**: the helper now multiplies the measured pixel span by
-`clipRef.w / clipCenter.w`, dividing out the foreshortening the probe itself picked up. Because `clip.w`
-is affine in world position, that cancels *identically and to all orders* for either sign of `dirWS` —
-and under an orthographic projection `wRef == w0` bitwise, so the factor is exactly `1.0` and the helper
-is **bit-identical** to its pre-S111 self. Depth and direction dependence stay, deliberately: they are
-what keeps a road N px wide under tilt.
+A frame constant has no depth term, no direction, no sign, and is identical at every vertex, so any
+interpolant of it is exact. Depth and direction dependence stay in the measurement on purpose: they
+are what keeps the AA pad half a device pixel, and a road N px wide, under tilt.
 
-What the sign asymmetry actually cost — **the pre-S111 text here was wrong in both halves**, quoting the
-*ratio* `(1+e)/(1−e)` where an *absolute* `(1±e)` deviation belongs:
+**A ruler defect is not observable as a screen width.** The two band edges sized with opposite-sign
+rulers sit at world offsets `+H·k(1+e)` and `−H·k(1−e)`, so their **world separation is exactly
+`2Hk`** — the errors cancel *before* the perspective divide — while the band's centre shifts. Screen
+position is *rational* in world offset, so the rendered width moves by a different, much smaller
+amount. A screen-width measurement is therefore **not a null** for this class of defect, which is why
+`LineProbeSymmetrySnapshotTests` measures **world** offsets and asserts their ratio.
 
-- the band's two edges sat at world offsets `+H·k(1+e)` and `−H·k(1−e)`, so their **world separation was
-  already exactly `2Hk`** — the errors cancel *before* the perspective divide — while the band's **centre**
-  sat `e·h` = **0.0757 px** off the centreline on a 16 px road (0.95 % of the *half*-width). The
-  often-quoted **0.15 px** is `2·e·h`, the difference between the two half-widths: true, but mislabelled;
-- the AA pad rendered **0.5047 / 0.4953 px**, i.e. `0.5·(1±e)` — *not* the `0.4905 px` this file used to
-  claim, which is `0.5·(1−e)/(1+e)`;
-- the **rendered screen width was never exactly invariant** either, because screen position is *rational*
-  in world offset: correcting the geometry moves it by **+0.008 px** on a 16 px band and **+0.478 px** on a
-  120 px one. A screen-width measurement is therefore *not* a null for this defect — which is why S111's
-  teeth (`LineProbeSymmetrySnapshotTests`) measure **world** offsets and assert their ratio;
-- `line-offset` was the one consumer **not** bounded by the styled width: both station vertices take a
-  *common* offset, each measured with its own ruler, so `L` device px of offset leaked `e·L` into the
-  **half-width** — **12.1 %** at `L = 160` on a 24 px line, and unbounded in `L`.
+`line-offset` is the one width-family consumer **not** bounded by the styled width: both station
+vertices take a *common* offset, so `L` device px of offset leaks `e·L` into the **half-width** —
+**12.1 %** at `L = 160` on a 24 px line, and unbounded in `L`.
 
-**Still open after S111, and NEEDS A DECISION — `refPx` measures the wrong span for the width family.**
-`refPx` is the *length* of a 2D NDC delta. For a vertex whose screen-x is `sx` px off centre, the probe's
-step along `dirWS` changes that vertex's depth, so the projected point slides **radially** as well as along
-the intended screen direction — contributing a component ≈ `|sx|·e` px, which adds **in quadrature**: at
-`sx = 100` a 0.946 px component grows a 2.91 px span to 3.06 px, i.e. **+5.1 %**.
+### Open — `refPx` measures the wrong span for the width family
 
-That is not a harmless refinement, because **the width family does not want the 2D magnitude — it wants the
-component perpendicular to the line.** The radial component points away from the screen centre; whatever
-part of it runs *along* the line contributes nothing to the band's perpendicular thickness, yet inflates
-`refPx` and so shrinks `pxToWorld`. In the S111 fixture (east–west road, heading 0) the radial component is
-entirely along the road, so **all** of it is spurious: the band is ~5 % too narrow at `sx = 100`, measured
-as a **2.8–3.0 px** inward bow of the silhouettes across the central 200 columns of a 120 px band at
-fov 60 / tilt 55.
+**This needs a maintainer decision. It is not settled, and it is not fixed.**
 
-**That is larger than the 1.910 % sign asymmetry S111 just removed.** It is unchanged by S111 — the
-`w`-ratio scales both signs alike — and it is why the S111 teeth measure within ±10 columns of the screen
-centre. Whether to project the NDC delta onto the perpendicular screen direction instead of taking its
-magnitude is an open call, not a settled one; it is deliberately **not** fixed here.
+`refPx` is the *length* of a 2D NDC delta. For a vertex whose screen-x is `sx` px off centre, the
+probe's step along `dirWS` changes that vertex's depth, so the projected point slides **radially** as
+well as along the intended screen direction — contributing a component ≈ `|sx|·e` px, which adds **in
+quadrature**: at `sx = 100` a 0.946 px component grows a 2.91 px span to 3.06 px, i.e. **+5.1 %**.
 
-**Expected new behaviour, so it is not misfiled as a regression.** Before S110 the on-screen dash period
-was *constant everywhere* — which is precisely the incoherent "screen-constant dashes" the world-anchored
-semantic rejects. After it, the period falls as `depth⁻²`: 55.06 px at the look-at → 19.87 px at 110 km in
-the T1 fixture, and ~16× smaller near a `4·altitude` far plane. At a ~3 px period the fragment walk
-degrades (once `fwidth(dashU)` exceeds a run length the `k = 0` branch produces a `lerp` ramp instead of a
-correct average) and far dashes go mushy. This is inherent to the semantic — a pattern welded to the road
-*must* foreshorten, and MapLibre behaves the same way. The feather itself is fine: `fwidth(dashU)`
-self-calibrates to the true local screen gradient, so the ramp stays ≈2 device px before and after.
+That is not a harmless refinement, because **the width family does not want the 2D magnitude — it
+wants the component perpendicular to the line.** The radial component points away from the screen
+centre; whatever part of it runs *along* the line contributes nothing to the band's perpendicular
+thickness, yet inflates `refPx` and so shrinks the returned scale. On an east–west road at heading 0
+the radial component is entirely along the road, so **all** of it is spurious: the band is ~5 % too
+narrow at `sx = 100`, measured as a **2.8–3.0 px** inward bow of the silhouettes across the central
+200 columns of a 120 px band at fov 60 / tilt 55.
 
-**Fail-safe.** The global is not a ShaderLab property and is not in `UnityPerMaterial`, so an unset frame
-reads `0`; the divisor is 0 and the guard sets `dashU = 0`. That renders a **uniform half-coverage line**
-(`smoothstep(−dfw, +dfw, 0) == 0.5` exactly) — **not** a solid one. No dash edges, never a moving pattern:
-visible and inert, never corrupt.
+**That is larger than the 1.910 % sign asymmetry the `w`-ratio removes**, and the `w`-ratio does not
+touch it — that factor scales both signs alike. It is why the probe-symmetry teeth measure within
+**±10 columns** of the screen centre.
 
-**Also note** `dashU` is the surface `u` fed to `InitializeStandardLitSurfaceData` (`uv.xy`, above), so
-S110 moved the axis `_BaseMap`/`_BumpMap`/detail maps would sample on. Inert today — `MapLine.mat` binds
-no texture and the uv-dependent shader features are gated off — and it is the axis S17 `line-pattern`
-wants, but a stage that binds a uv-dependent line texture must know this moved.
+The fork: project the NDC delta onto the perpendicular screen direction, or keep taking its
+magnitude. Projecting costs a second screen-space direction at every measured vertex and changes
+every rendered width away from the screen centre; keeping the magnitude leaves the bow. Nothing in
+`PixelsToWorld.hlsl` records this, so this file is its only home — do not drop it while resolving it.
+
+### Dash period under a world-anchored pattern
+
+A pattern welded to the road **must** foreshorten: the on-screen dash period falls as `depth⁻²`. That
+is the semantic working, not a regression — a screen-constant period is the incoherent alternative it
+rejects. Where the period reaches a few device pixels the fragment walk degrades: once
+`fwidth(dashU)` exceeds a run length the first slot's branch produces a `lerp` ramp instead of a
+correct average, and far dashes go soft. The feather itself is unaffected — `fwidth(dashU)`
+self-calibrates to the local screen gradient, so the ramp stays ≈2 device px at any depth.
+
+### Fail-safes
+
+`_MapFrameMetersPerDevicePixel` is not a ShaderLab property and is not in `UnityPerMaterial`, so an
+unpushed frame reads `0`. Two consumers, two different fail-safes, and the split is intentional:
+
+- **the width family** falls back to the per-vertex measurement. It is unreachable in production —
+  `MapCamera.SyncToCamera` pushes the global — so reaching it means a render path forgot to push.
+  A plausibly-sized line is a better failure than the alternative: `0` gives `widthWorld = 0`, and
+  every road of every styled width collapses to the same 1 device-px hairline, which looks like a
+  defect in something other than the missing push. The branch is on a uniform, so no wave diverges.
+- **the dash divisor** does *not* take that branch. A divisor of `0` sets `dashU = 0`, which renders a
+  **uniform half-coverage line** (`smoothstep(−dfw, +dfw, 0) == 0.5` exactly) — **not** a solid one.
+  No dash edges, never a moving pattern: visible and inert, never corrupt. Routing it through the
+  width's fallback would trade that benign symptom for a subtle one.
 
 ## Layout
+
+The tree is two levels of grouping, and each level has a rule:
+
+- `Map/<Kind>/` is the unit of self-containment — one geometry kind. Its **root** holds the map
+  helpers every shading mode of that kind shares: the vertex hook
+  (`<Kind>_VertexModify.hlsl` / `Line_VertexExtrude.hlsl`) and the pass bodies that are identical
+  across modes (`<Kind>_DepthOnlyPass.hlsl`, `<Kind>_DepthNormalsPass.hlsl`).
+- `Map/<Kind>/{Lit,Unlit}/` holds the entry point (`.shader`) and everything mode-specific: the
+  `<Kind>_<Mode>Input.hlsl` (CBUFFER + DOTS bridge + `InitializeStandardLitSurfaceData` + paint
+  props) and the mode's own pass bodies.
 
 ```
 Shaders/
   Common/
     LitInput.Template.hlsl   reference skeleton — copy when adding a new layer; NO .shader includes it
   Map/
-    PixelsToWorld.hlsl      shared px→world measurement (S23 I2a) — the one sanctioned cross-folder include
-    Fill/
-      Fill.shader
-      Fill_LitInput.hlsl       CBUFFER + DOTS bridge + InitializeStandardLitSurfaceData + fill paint props
-      Fill_VertexModify.hlsl   MapVertexModify body (fill-translate); includes ../PixelsToWorld.hlsl
-      Fill_LitForwardPass.hlsl
-      Fill_LitGBufferPass.hlsl
-      Fill_ShadowCasterPass.hlsl
-      Fill_DepthOnlyPass.hlsl
-      Fill_DepthNormalsPass.hlsl
-    Line/
-      Line.shader
-      Line_LitInput.hlsl         CBUFFER + DOTS bridge + InitializeStandardLitSurfaceData + line paint props
-      Line_VertexExtrude.hlsl    LineAttributes struct + Line_VertexExtrude() + LineCoverage() — shared by all line passes (S67); includes ../PixelsToWorld.hlsl
-      Line_LitForwardPass.hlsl
-      Line_LitGBufferPass.hlsl   (S67, capability-only — inert for transparent lines)
-      Line_ShadowCasterPass.hlsl (S67, capability-only — inert for transparent lines)
-      Line_DepthOnlyPass.hlsl    (S67, capability-only — inert for transparent lines)
-      Line_DepthNormalsPass.hlsl (S67, capability-only — inert for transparent lines)
+    PixelsToWorld.hlsl       shared px→world measurement — the one sanctioned Map-root include
+    Fill/                    Fill_VertexModify, Fill_BandCoverage, Fill_Depth{Only,Normals}Pass
+      Lit/                   Fill.shader + Fill_LitInput + forward/gbuffer/shadowcaster bodies
+      Unlit/                 FillUnlit.shader + Fill_UnlitInput + forward body
+    FillExtrusion/           same shape as Fill/
+      Lit/  Unlit/
+    Line/                    Line_VertexExtrude, Line_Depth{Only,Normals}Pass
+      Lit/                   Line.shader + Line_LitInput + forward/gbuffer/shadowcaster bodies
+      Unlit/                 LineUnlit.shader + Line_UnlitInput + forward body
+    Symbol/
+      SymbolWorldPitchAlign.hlsl   shared by Text/ and Icon/ — the same sibling-parent pattern
+      Text/  Icon/           one .shader + _Input.hlsl + _ForwardPass.hlsl each
+  Unity/
+    Lit/  Unlit/             verbatim vendored URP sets — diff baselines, bound by no material
 ```
 
-- `Map/<Layer>/` holds one geometry kind's `.shader`, its `<Layer>_LitInput.hlsl`, its pass bodies,
-  and (Fill only) `Fill_VertexModify.hlsl`. Each layer is fully self-contained — no cross-folder
-  `../../Common/…` includes — **except the sanctioned `../PixelsToWorld.hlsl`** (S23 I2a; see "Shared
-  px→world include" below).
-- `Common/` holds only `LitInput.Template.hlsl`, a Map-flavoured skeleton that **no `.shader` ever
-  includes** (the `.Template.hlsl` infix signals "reference only"). New layers copy it and add their
-  own paint props at the `// ── <Layer> paint props go here ──` markers.
-- A helper **genuinely shared by two or more layers** lives at `Shaders/Map/` (their sibling-parent),
-  not in `Common/` — the pattern `SymbolWorldPitchAlign.hlsl` set and `PixelsToWorld.hlsl` (S23 I2a)
-  follows. `Common/` itself grows only for a reference template, never speculatively; this entire stage
-  was the cost of having blurred that once.
+`Common/` holds only `LitInput.Template.hlsl`, a Map-flavoured skeleton that **no `.shader` ever
+includes** (the `.Template.hlsl` infix signals "reference only"). New layers copy it and add their
+own paint props at the `// ── <Layer> paint props go here ──` markers.
 
-## Include order (every pass, every layer)
+A helper **genuinely shared by two or more kinds** lives at their sibling-parent — `Shaders/Map/` for
+`PixelsToWorld.hlsl`, `Shaders/Map/Symbol/` for `SymbolWorldPitchAlign.hlsl` — never in `Common/`.
+`Common/` stays template-only: a shared framework extracted for one consumer costs confusing naming
+and a `Common/` that is not common, so extract only when a **second kind genuinely needs it**.
+
+## Include rules
 
 The `.shader` (not the pass body) controls includes, in the natural define-before-use order, matching
 Unity's own shaders:
 
 ```hlsl
 // in each Pass's HLSLPROGRAM, after the #pragmas:
-#include "<Layer>_LitInput.hlsl"     // 1. CBUFFER + DOTS bridge + surface helpers (declares props)
-#include "Fill_VertexModify.hlsl"    // 2. (Fill only) MapVertexModify body — before any pass uses it
-#include "<Layer>_<Pass>.hlsl"       // 3. pass body — vertex/fragment entry points
+#include "<Kind>_<Mode>Input.hlsl"   // 1. CBUFFER + DOTS bridge + surface helpers (declares props)
+#include "../<Kind>_VertexModify.hlsl"  // 2. the vertex hook — before any pass uses it
+#include "<Kind>_<Pass>.hlsl"        // 3. pass body — vertex/fragment entry points
 ```
 
-Pass bodies `#include` only the URP library headers they need (`Lighting.hlsl`, `Shadows.hlsl`, etc.);
-they do NOT re-include their own layer input. The `.shader` already provides it.
+Pass bodies `#include` only the URP library headers they need (`Lighting.hlsl`, `Shadows.hlsl`, …);
+they do **not** re-include their own layer input. The `.shader` already provides it. Define-before-use
+is the rule — a pass body included before the file that defines its hook would need a
+forward-declaration prototype to compile, and that prototype is what makes an include order rot
+unnoticed.
 
-This replaces the old forward-declaration hack (S66): previously the pass body was included first
-(pulling its own layer input), and then the vertex-modify file defined the body — which contradicted
-the documented include order and required a prototype declaration to paper over it.
-The hack is gone. Define-before-use is the rule.
+A `../` reach is sanctioned in exactly two shapes, and
+`ShaderStructureTests.MapLayerFiles_ShareOnlyViaSanctionedInclude` validates them **structurally** —
+each `../` target must resolve on disk to one of the two — rather than against a name allow-list:
+
+1. **`../PixelsToWorld.hlsl`** at the `Map/` root, reached from each kind's vertex file.
+2. **The Lit/Unlit split** — a file under `Map/<Kind>/{Lit,Unlit}/` reaching one level up to its
+   **own** kind root for that kind's shared includes.
+
+Anything else — a reach into `Common/`, into a sibling kind, or outside `Map/` — fails, as does a
+`../` include that resolves to nothing. Intra-folder includes are bare
+(`#include "Fill_LitInput.hlsl"`).
 
 ## Naming
 
-- File names: `<Layer>_<OriginalUnityName>` — each file is named for its layer and the URP file it
+- File names: `<Kind>_<OriginalUnityName>` — each file is named for its kind and the URP file it
   derives from. The URP origin is cited in each file's provenance header.
   Examples: `Fill_LitForwardPass.hlsl` ← URP `LitForwardPass.hlsl`; `Line_LitInput.hlsl` ← URP `LitInput.hlsl`.
-- Shaders declare `Shader "Map/<Layer>"` (e.g. `Map/Fill`, `Map/Line`).
+- A map-specific helper with no URP counterpart is named for its **function** instead —
+  `Fill_VertexModify.hlsl`, `Line_VertexExtrude.hlsl`, `PixelsToWorld.hlsl`.
+- Shaders declare `Shader "Map/<Kind>"` (e.g. `Map/Fill`, `Map/Line`), the unlit twins `Map/<Kind>Unlit`.
 - Materials bind their shader **by GUID** (the `.mat`'s `m_Shader` guid → the `.shader.meta` guid), so
-  renaming the `Shader "…"` string does not break a material. Only `Shader.Find("Map/<Layer>")` (used
+  renaming the `Shader "…"` string does not break a material. Only `Shader.Find("Map/<Kind>")` (used
   in tests) depends on the declared name.
 - The custom inspector is bound via `CustomEditor` by C# class name, not shader name — unaffected by
   shader renames.
 
 ## Lines fork on purpose
 
-Line keeps its own `Line_LitInput.hlsl` and `Line_LitForwardPass.hlsl` — not because Line is
-special-cased, but because each layer is self-contained. Specifically: the line's TEXCOORD attribute
-set (TEXCOORD0 = extrudeN, TEXCOORD1 = side+dist, TEXCOORD2 = widthScale) clashes with the fill
-input's UV set, so they cannot share an input header. The two layers fork their inputs on purpose;
-`InitializeStandardLitSurfaceData` is duplicated verbatim across them — this is the honest
-duplication, co-located and visible, rather than a speculative `Common/` abstraction that never
-actually shared.
+Line keeps its own input header and forward pass — not because Line is special-cased, but because
+each kind is self-contained. Specifically: the line's TEXCOORD attribute set (TEXCOORD0 = extrudeN,
+TEXCOORD1 = side+dist, TEXCOORD2 = widthScale) clashes with the fill input's UV set, so they cannot
+share an input header. `InitializeStandardLitSurfaceData` is duplicated verbatim across them — this
+is the honest duplication, co-located and visible, rather than a speculative `Common/` abstraction
+that never actually shared.
 
 ## Shared px→world include
 
-`Fill_VertexModify.hlsl` and `Line_VertexExtrude.hlsl` (and, from S23 I2b, `FillExtrusion_VertexModify.hlsl`)
-each `#include "../PixelsToWorld.hlsl"` — a shared `MapPixelsToWorld(centerWS, dirWS)` measurement at
-`Shaders/Map/PixelsToWorld.hlsl`, the sibling-parent of `Fill/`, `Line/`, and `FillExtrusion/`. Before S23
-I2a each carrier held a sentinel-pinned, character-identical copy of the same block, kept honest only by a
-test comparing the copies byte for byte — real duplication, verified rather than trusted, and it had
-already drifted once (see `docs/line-translate-parity-design.md`). One copy retires that mechanism; the
-placement mirrors the existing `SymbolWorldPitchAlign.hlsl` precedent (`Shaders/Map/Symbol/`, included by
-both `Symbol/Text/` and `Symbol/Icon/`).
+`Fill_VertexModify.hlsl`, `Line_VertexExtrude.hlsl` and `FillExtrusion_VertexModify.hlsl` each
+`#include "../PixelsToWorld.hlsl"` — one `MapPixelsToWorld(centerWS, dirWS)` measurement at
+`Shaders/Map/PixelsToWorld.hlsl`, the sibling-parent of all three.
 
-## Extract to `Common/` only when truly shared
+The fence on it is **positive**, and the shape matters: a test that compares per-carrier copies byte
+for byte catches drift between copies that exist and says nothing when a copy comes back.
+`SharedPixelsToWorldInclude_ReferencedByEveryCarrier` instead asserts that every carrier includes the
+shared file **and** that no carrier locally re-defines the function.
 
-Only extract a pass or helper to `Common/` when a **second layer genuinely needs it**. Never
-speculatively. The cost of extracting speculatively (a shared framework used by one layer, confusing
-naming, a `Common/` that is not common) was the motivation for this whole stage. A genuinely-shared map
-*helper* (not a Unity-mirrored pass/input) lives at `Shaders/Map/` instead — `Common/` stays
-template-only (see "Shared px→world include" above).
-
-Intra-folder includes are bare (`#include "Fill_LitInput.hlsl"`). There are no cross-folder
-`../../Common/…` includes from any layer — the one sanctioned cross-folder include anywhere in `Map/` is
-`../PixelsToWorld.hlsl`.
+The include's **position** inside a carrier is load-bearing, not cosmetic: it must sit after the
+carrier's own include-guard `#define` and before the first call, because its body reads URP macros
+(`TransformWorldToHClip`, `UNITY_MATRIX_P`, `_ScreenParams`) that only the layer input declares.
 
 ## DOTS / BRG instancing
 
 Lit shaders carry `#pragma multi_compile_instancing` and `UNITY_DOTS_INSTANCED_PROP` property sets so
-they render under the BatchRendererGroup backend (S49). The CBUFFER, the `UNITY_DOTS_INSTANCING`
-block, and any BRG SoA packing must stay byte-aligned.
+they render under the BatchRendererGroup backend. The CBUFFER, the `UNITY_DOTS_INSTANCING` block, and
+any BRG SoA packing must stay byte-aligned, and the CBUFFER must be byte-identical across every pass
+of a shader — the SRP Batcher requires it. Never add or remove a CBUFFER member in per-pass code.

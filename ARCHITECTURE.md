@@ -38,13 +38,13 @@ that aren't your differentiator.
 
 **Vendor as clean permissive dependencies — don't reinvent** (one-line notice each):
 - **text bidi** (UAX #9, mixed LTR/RTL) → a **managed** ICU-derived lib (ICU4N / BidiReshapeSharp) when
-  mixed-direction labels arrive — never hand-roll full UAX #9. (S18 ships only bounded Arabic joining +
+  mixed-direction labels arrive — never hand-roll full UAX #9. (the shaper ships only bounded Arabic joining +
   single-run RTL, which *is* small enough to own; see below.)
 - **text shaping** (full GSUB/GPOS glyph-index shaping) → `HarfBuzzSharp` (MIT) — an entire subfield; never
   hand-roll — **BUT** only relevant to the *beyond-parity* "Model B" (runtime SDF from shipped fonts by glyph
   index). Our locked model consumes MapLibre's **glyph-PBF SDF** (codepoint-keyed), which pre-bakes the
   rasterisation offline and needs no runtime shaper — so HarfBuzz is **not** on the parity path (MapLibre
-  itself doesn't use it; it uses an ICU subset via `mapbox-gl-rtl-text`). See `stages/S18` §6.1 / R1.
+  itself doesn't use it; it uses an ICU subset via `mapbox-gl-rtl-text`).
 - **SDF glyphs** → MapLibre **glyph-PBF** (codepoint-keyed, fetched from the style `glyphs` URL); NOT
   TextMeshPro, NOT runtime font rasterisation. (Model B / TextMeshPro kept only as a deferred beyond-parity option.)
 - *(if MVT via lib instead of hand-roll)* → `protobuf-net` (MIT) / `Google.Protobuf` (BSD)
@@ -297,7 +297,7 @@ Step 2+ concern (first multi-layer render); Step 0 (single layer) doesn't hit it
   background thread: a managed closure can never reach a Burst worker, and on a WebGL build it has nowhere
   to run at all (`docs/web-target.md`). Where a body is still managed at the type level, a scheduler seam
   may dispatch it off-main as an interim step, but that seam is deleted at each site once the site's data
-  is native — see `docs/job-scheduling-design.md` §4–5.
+  is native — see `docs/job-scheduling-design.md`, the dispatch discriminator and the scheduler seam.
 
 ### Coordinate precision / floating origin (non-negotiable)
 Unity transforms are 32-bit float; world-scale Mercator coordinates jitter badly. The core computes in

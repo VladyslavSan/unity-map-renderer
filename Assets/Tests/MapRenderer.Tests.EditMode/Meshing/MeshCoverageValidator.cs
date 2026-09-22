@@ -9,10 +9,10 @@ namespace MapRenderer.Tests
     /// <summary>
     /// Test-side validator for the polygon triangulation stage (decode → assemble → earcut). Checks that a
     /// triangulation faithfully reproduces its source polygon-with-holes, independent of projection (it works
-    /// in flat tile space). It is deliberately rasterisation-based, not area-only: a thin folded sliver has
+    /// in flat tile space). It is rasterisation-based, not area-only: a thin folded sliver has
     /// ~zero area but is visible, so an area check alone would pass a torn mesh.
     ///
-    /// Invariants (see docs/mesh-triangulation-robustness-design.md §3):
+    /// Invariants (see docs/mesh-triangulation-robustness-design.md):
     ///   • ForceClips == 0        — the triangulator never gave up and emitted garbage;
     ///   • WindingFlips == 0      — no inverted (folded) triangle;
     ///   • AreaRelError small     — Σ tri area ≈ Σ(outer − holes);

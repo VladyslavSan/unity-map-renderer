@@ -6,8 +6,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
     /// One fill-extrusion layer's graph output — the roof measure plus the wall geometry, scheduled together
-    /// by <see cref="FillExtrusionMeshGraph.Schedule"/> (job-scheduling-design.md §8 stage 5, the wall-job
-    /// stage). Mirrors <see cref="FillGraphOutput"/>'s shape: returned with <see cref="Handle"/> UNCOMPLETED —
+    /// by <see cref="FillExtrusionMeshGraph.Schedule"/> (job-scheduling-design.md).
+    /// Mirrors <see cref="FillGraphOutput"/>'s shape: returned with <see cref="Handle"/> UNCOMPLETED —
     /// the caller polls <c>Handle.IsCompleted</c>, calls <see cref="Dispose"/> (which completes first), or
     /// reads <see cref="Roof"/>/<see cref="Walls"/> only after its own <c>Handle.Complete()</c>.
     /// </summary>

@@ -682,7 +682,7 @@ namespace MapRenderer.Tests.Jobs
             finally { result.Dispose(); }
         }
 
-        // ── T1e: the RING INDIRECTION itself (IR B7a review finding R1/B1) ────────────────────────
+        // ── T1e: the RING INDIRECTION itself ──────────────────────────────────────────────────────
 
         /// <summary>
         /// The job reads <b>the rings <c>RingVisitOrder</c> names, in the order it names them</b> — not
@@ -690,7 +690,7 @@ namespace MapRenderer.Tests.Jobs
         /// produce ring 2's geometry first, then ring 0's, each carrying <b>its own</b> feature index, and
         /// ring 1 must not appear at all.
         ///
-        /// <para><b>Why it exists — this loop was unobserved on the branch that actually runs.</b> B7a replaced
+        /// <para><b>Why it exists — this loop was unobserved on the branch that actually runs.</b> The shared buffer replaced
         /// <c>for (ri = 0; ri &lt; RingCount; ri++)</c> with <c>for (k…) { int ri = RingVisitOrder[k]; … }</c>.
         /// Every other clip fixture in the repo — the rest of this file, <c>RingWindowClipperParityTests</c>,
         /// <c>Jobs/TileGeometryMaterializerSeamTests</c>, <c>Jobs/TileGeometryStoreTests</c>,
@@ -876,7 +876,7 @@ namespace MapRenderer.Tests.Jobs
 
                 var (bMin, _) = tileId.MercatorBounds();
 
-                // IR C1 P3: ONE buffer, owned by the decoded LAYER and BORROWED by both Schedule calls
+                // ONE buffer, owned by the decoded LAYER and BORROWED by both Schedule calls
                 // (Schedule derives its own private copy of the rings it visits and disposes only that).
                 TileGeometryBuffers geometry = layer.Geometry;
                 NativeArray<int> visitOrder  = TestTileMeshBuilder.FullVisitOrder(geometry);
@@ -928,7 +928,7 @@ namespace MapRenderer.Tests.Jobs
                     unclipped.Dispose();
                     clipped.Dispose();
                     // The shared buffer outlived BOTH Schedule calls — that is the borrow contract. It is
-                    // NOT disposed here (IR C1 P3): the decoded tile owns it and frees it with `using`.
+                    // NOT disposed here: the decoded tile owns it and frees it with `using`.
                     visitOrder.Dispose();
                 }
             }
@@ -980,7 +980,7 @@ namespace MapRenderer.Tests.Jobs
             }
         }
 
-        /// <param name="visitOrder">IR B7: the ring indices this pass visits, in order. <c>null</c> ⇒ the
+        /// <param name="visitOrder">The ring indices this pass visits, in order. <c>null</c> ⇒ the
         /// identity order (every ring, in decode order), which is what <c>RingCount</c> used to mean here.</param>
         /// <param name="ringFeatureIdx">Which feature each ring belongs to. <c>null</c> ⇒ all rings share
         /// feature 0, which is what the hole teeth need (they rely on shared feature grouping).</param>
@@ -1017,7 +1017,7 @@ namespace MapRenderer.Tests.Jobs
                 RingFeatureIdx = new NativeList<int>(math.max(1, rings.Length), Allocator.Persistent),
             };
 
-            // IR B7: the visit order IS the ring set. Default = identity (every ring, in decode order).
+            // The visit order IS the ring set. Default = identity (every ring, in decode order).
             int[] order = visitOrder ?? IdentityOrder(rings.Length);
             var visitOrderArr = new NativeArray<int>(order.Length, Allocator.Persistent);
             for (int i = 0; i < order.Length; i++) visitOrderArr[i] = order[i];
@@ -1103,7 +1103,7 @@ namespace MapRenderer.Tests.Jobs
             var polyCountArr  = new NativeArray<int>(1, Allocator.Persistent);
             var holeCountArr  = new NativeArray<int>(1, Allocator.Persistent);
 
-            // IR B7: the assembler is kind-gated. Every ring here belongs to the single synthetic feature 0,
+            // The assembler is kind-gated. Every ring here belongs to the single synthetic feature 0,
             // and every one of these fixtures is a polygon fixture.
             var featureKinds = new NativeArray<TileGeometryType>(1, Allocator.Persistent);
             featureKinds[0] = TileGeometryType.Polygon;
@@ -1181,11 +1181,11 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // TileGeometryBuffersTests — IR stage B1 — ownership teeth for TileGeometryBuffers
+    // TileGeometryBuffersTests — ownership teeth for TileGeometryBuffers
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR stage B1: the ownership teeth for <see cref="TileGeometryBuffers"/> — the struct that now owns the
+    /// The ownership teeth for <see cref="TileGeometryBuffers"/> — the struct that now owns the
     /// ring-stage buffers <c>FillMeshPipeline.Schedule</c> used to hold as private locals.
     ///
     /// <para>Every case asserts a <b>non-vacuity precondition</b> first (the buffers really were allocated,
@@ -1240,7 +1240,7 @@ namespace MapRenderer.Tests.Jobs
         /// views over them. This is the tooth that catches a wrong backing-mode discriminator — and it is
         /// the <b>only</b> one.
         /// <para><b>Measured, not assumed:</b> disposing an <c>AsArray()</c> view is a <b>silent no-op</b>
-        /// under Collections 6.5.0 — <i>not</i> a throw. B1's RED sweep set the discriminator so
+        /// under Collections 6.5.0 — <i>not</i> a throw. A RED sweep set the discriminator so
         /// <c>Dispose()</c> freed the views instead of the lists: no exception was raised, the backing lists
         /// simply leaked, and the <b>entire behavioural clip corpus stayed green</b>; this test was the single
         /// failure. Do not assume the collections safety system catches view-vs-list ownership mistakes, and
@@ -1384,19 +1384,19 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// IR B7 T2b — the per-feature kind column must survive a <b>derive</b>, and the derived buffer's
+        /// T2b — the per-feature kind column must survive a <b>derive</b>, and the derived buffer's
         /// <c>Dispose</c> must not reach into the buffer it was derived from.
         ///
-        /// <para>This is the direct replacement for B3's clip-handover tooth. The mechanism inverted: the
+        /// <para>This is the direct replacement for the clip-handover tooth. The mechanism inverted: the
         /// column used to be <b>transferred</b> (released from the pre-clip buffer, adopted by the clipped
-        /// one), because the source was about to be disposed. Since B7 the source is <b>borrowed</b> — it is
+        /// one), because the source was about to be disposed. The source is now <b>borrowed</b> — it is
         /// the store's shared buffer, several fill layers derive from it — so it must be left completely
         /// intact, and the derived buffer gets a <b>copy</b>.</para>
         ///
         /// <para>Why this needs a test at all: an <c>AdoptDerivedLists</c> that <i>took</i> the array instead
         /// of copying it would pass every behavioural fill test in the repo. The first layer to derive would
         /// work; the second would read a freed column, or the store's <c>Dispose</c> would double-free — and
-        /// the collections safety system does <b>not</b> reliably surface either (B1 measured a whole green
+        /// the collections safety system does <b>not</b> reliably surface either (measured: a whole green
         /// corpus over a leaking-view discriminator). The observable difference is here, in the source
         /// buffer's state after the derived one dies.</para></summary>
         [Test]
@@ -1468,23 +1468,21 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // TileGeometryMaterializerSeamTests — IR stage B2 — Waist 1's producer seam from FillMeshGraph.Schedule
+    // TileGeometryMaterializerSeamTests — Waist 1's producer seam from FillMeshGraph.Schedule
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR stage B2: the teeth on Waist 1's producer seam as seen from <c>FillMeshGraph.Schedule</c>.
+    /// The teeth on Waist 1's producer seam as seen from <c>FillMeshGraph.Schedule</c>.
     ///
     /// <para>The fixture is one GeoJSON polygon <b>with a hole</b>, authored by inverting a chosen tile's own
     /// <c>ToLonLat</c> so both rings land on exact tile-local integers well inside the tile, and sliced by the
     /// production <c>GeoJsonParser</c> → <c>GeoJsonProjectedDataset</c> → <c>GeoJsonTileSlicer</c> stack. The
-    /// extent is <b>8192, never 4096</b>: every fill fixture in the repo uses 4096, so a stage that
+    /// extent is <b>8192, never 4096</b>: every fill fixture in the repo uses 4096, so an implementation that
     /// substituted that literal for the buffer's own extent would be undiscriminated by all of them.</para>
     ///
-    /// <para><b>GeoJSON S2: the arm is now the PRODUCTION decoder.</b> These teeth used to drive a test-side
-    /// <c>GeoJsonSliceMaterializer</c> that flattened a <c>TileSlice</c> onto the producer seam. S2 promoted
-    /// that flatten into <see cref="GeoJsonTileDecoder"/>, and the test-side copy was deleted rather than
-    /// kept: a second implementation of the same join is one that can drift, and every test using the double
-    /// would then go green against a shape production does not produce.</para>
+    /// <para><b>The geojson arm drives the PRODUCTION decoder</b>, <see cref="GeoJsonTileDecoder"/>, not
+    /// a test-side double: a second implementation of the same join can drift, and every test using
+    /// the double would then go green against a shape production does not produce.</para>
     /// </summary>
     [TestFixture]
     public class TileGeometryMaterializerSeamTests
@@ -1554,7 +1552,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// T2a — Stage 1b's clip window is derived from the <b>buffer's own</b> extent. At extent 8192 the
+        /// T2a — the clip window is derived from the <b>buffer's own</b> extent. At extent 8192 the
         /// standard 64-unit buffer gives <c>[−128, 8320]²</c>, which contains the whole fixture, so enabling
         /// the clip is a provable no-op. A window sized from the 4096 reference literal would be
         /// <c>[−64, 4224]²</c> and would cut the fixture in half.
@@ -1606,7 +1604,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// T2b — Stage 4a's tile→geodetic conversion reads the <b>buffer's own</b> extent too, which T2a
+        /// T2b — the tile→geodetic conversion reads the <b>buffer's own</b> extent too, which T2a
         /// cannot see. The same geodetic polygon sliced into the same tile at 4096 and at 8192 must land in
         /// the same place in world space; a <c>TileToGeoJob</c> reading a 4096 literal would place the 8192
         /// arm at twice tile-local scale — an error of order a whole tile edge.
@@ -1761,7 +1759,7 @@ namespace MapRenderer.Tests.Jobs
             finally { geometry.Dispose(); }
         }
 
-        /// <summary>IR B7: visit every ring in decode order, schedule, and free what this harness owns.
+        /// <summary>Visit every ring in decode order, schedule, and free what this harness owns.
         /// <c>Schedule</c> BORROWS the buffer — it derives its own — so the caller keeps ownership and this
         /// never disposes it.</summary>
         private static FillGraphOutput Run(TileGeometryBuffers geometry, TileBufferClip clip)
@@ -1793,11 +1791,11 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // WaistOneProducerAgreementTests — IR C1 fix stage B3/B4 — Waist 1's two producers agree on feature count
+    // WaistOneProducerAgreementTests — Waist 1's two producers agree on feature count
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR C1 fix stage, B3/B4: <b>Waist 1's two producers agree on the feature count, and the lockstep is a
+    /// <b>Waist 1's two producers agree on the feature count, and the lockstep is a
     /// property of the type rather than of one writer.</b>
     ///
     /// <para>Three consumers size a per-feature column from a count and then index it by
@@ -1812,7 +1810,7 @@ namespace MapRenderer.Tests.Jobs
     {
         private static readonly TileId Tile = new TileId { Z = 3, X = 4, Y = 5 };
 
-        // ── B3 root cause · the two producers early-out on the same thing ─────────────────────────────
+        // ── Root cause · the two producers early-out on the same thing ────────────────────────────────
 
         /// <summary>Three features, none of which carries a path — a GeoJSON feature list sliced away at
         /// this tile is the realistic source. The old <c>ringTotal == 0</c> early-out returned
@@ -1855,7 +1853,7 @@ namespace MapRenderer.Tests.Jobs
 
         /// <summary>The agreement itself, stated as a comparison rather than as two separate numbers: given
         /// the same three features carrying no geometry, the MVT producer and the path producer must report
-        /// the same feature count. This is the property B3's consumer change relies on.</summary>
+        /// the same feature count. This is the property the consumer change relies on.</summary>
         [Test]
         public void BothWaistOneProducers_ReportTheSameFeatureCount_ForFeaturesWithNoGeometry()
         {
@@ -1898,7 +1896,7 @@ namespace MapRenderer.Tests.Jobs
             Assert.AreEqual(0, fromPaths.FeatureCount);
         }
 
-        // ── B4 · the lockstep is enforced by MvtLayer, not by MvtDecoder's discipline ──────────────────
+        // ── The lockstep is enforced by MvtLayer, not by MvtDecoder's discipline ───────────────────────
 
         private static MvtLayer LayerWith(int featureCount)
         {
@@ -1974,7 +1972,7 @@ namespace MapRenderer.Tests.Jobs
             layer.Dispose();
         }
 
-        /// <summary>The structural half of B4: <c>Geometry</c> is no longer a writable field, so the only
+        /// <summary>The structural half: <c>Geometry</c> is no longer a writable field, so the only
         /// way in is the guarded one above. A behavioural tooth alone cannot see this — a second writer
         /// would simply bypass both guards.</summary>
         [Test]

@@ -9,14 +9,14 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// The draw-side payload of one collision candidate: the contiguous range of staged
     /// <see cref="PlacedQuad"/>s to emit if it survives, and the material/mesh slot to emit them into.
-    /// <para><b>NOT keyed by <see cref="SymbolCandidate.SymbolIndex"/>.</b> Since §10 (D8) a candidate owns a
+    /// <para><b>NOT keyed by <see cref="SymbolCandidate.SymbolIndex"/>.</b> A candidate owns a
     /// RANGE of emits — <see cref="SymbolCandidate.EmitStart"/>/<see cref="SymbolCandidate.EmitCount"/>, mirroring
     /// <see cref="SymbolCandidate.BoxStart"/>/<see cref="SymbolCandidate.BoxCount"/> — because a centred icon+text
     /// pair is ONE candidate emitting TWO of these (the halves live in different atlases, so they cannot share
     /// one emit). Indexing this pool by <c>SymbolIndex</c> reads the wrong emit for every candidate after the
     /// first pair; always go through the owning candidate's range. Collision may still sort the candidates
     /// freely — the ranges point INTO this pool and are unaffected.</para>
-    /// Blittable (all ints) so the staging math can fill it in a Burst job (Lever C).
+    /// Blittable (all ints) so the staging math can fill it in a Burst job.
     /// </summary>
     public struct CandidateEmit
     {
@@ -29,29 +29,28 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>Per-symbol-layer material/mesh slot the surviving quads draw into.</summary>
         public int Slot;
 
-        /// <summary>I5a — the texture the emitted quads sample from (glyph atlas vs. sprite atlas), carried
-        /// from <see cref="PointStageInput.AtlasKind"/>. Default <see cref="SymbolKind.Text"/>. NOT yet
-        /// consumed by the draw side (I5b partitions the draw by it).</summary>
+        /// <summary>The texture the emitted quads sample from (glyph atlas vs. sprite atlas), carried
+        /// from <see cref="PointStageInput.AtlasKind"/>. Default <see cref="SymbolKind.Text"/>.</summary>
         public SymbolKind AtlasKind;
 
-        /// <summary>Epic A / A1 (design §11 A1 D2/D6): the world-anchored draw payload, read ONLY by
+        /// <summary>The world-anchored draw payload, read ONLY by
         /// <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/> when <see cref="IsWorld"/> is
-        /// true — never a batch tile array indexed by <c>tileIndex</c> (the BLOCKER this design fixes).
+        /// true — never a batch tile array indexed by <c>tileIndex</c>.
         /// <see cref="AnchorLocal"/>/<see cref="TileOriginRender"/> mirror <see cref="PointStageInput"/>'s
         /// identically-named fields (the SAME bake); <see cref="TileKey"/> keys the renderer's per-
-        /// (tile,slot,kind) slot dictionary (D1).</summary>
+        /// (tile,slot,kind) slot dictionary.</summary>
         public float3 AnchorLocal;
 
         /// <summary>See <see cref="PointStageInput.TileOriginRender"/> — the render-space origin
         /// <see cref="AnchorLocal"/> was baked against.</summary>
         public double3 TileOriginRender;
 
-        /// <summary>The symbol's tile key (D1's slot-dictionary key) — always populated on a point candidate
+        /// <summary>The symbol's tile key (the slot-dictionary key) — always populated on a point candidate
         /// (mirrors <see cref="PointStageInput.TileKey"/>), default 0 on a curved candidate (unread, since
         /// <see cref="IsWorld"/> is false there).</summary>
         public long TileKey;
 
-        /// <summary>Epic A / A1 (design §11 A1 D4): the additive screen-space corner offset from
+        /// <summary>The additive screen-space corner offset from
         /// <c>text-translate</c>, computed by <see cref="SymbolStagingMath.StagePoint"/> as
         /// <c>screenPx − s.ScreenPx</c> (both already resolved there) — the world path does not project the
         /// anchor, so it cannot fold the translate into it the way the OLD path does; instead
@@ -60,12 +59,12 @@ namespace MapRenderer.Core.Text.Placement
         public float2 TranslateDeltaPx;
 
         /// <summary>True when the world-anchored draw sink should read this candidate — set by BOTH
-        /// <see cref="SymbolStagingMath.StagePoint"/> (D2/D6) and, since Stage AC, <see cref="SymbolStagingMath.StageCurved"/>;
+        /// <see cref="SymbolStagingMath.StagePoint"/> and <see cref="SymbolStagingMath.StageCurved"/>;
         /// the emit loop branches on this WITHOUT a per-candidate record lookup. See <see cref="AlongLine"/>
         /// for which of the two it was.</summary>
         public bool IsWorld;
 
-        /// <summary>Stage AC (curved-world): true ONLY when <see cref="SymbolStagingMath.StageCurved"/> set
+        /// <summary>True ONLY when <see cref="SymbolStagingMath.StageCurved"/> set
         /// this candidate's emit — <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/> reads
         /// each quad's OWN <see cref="PlacedQuad.AnchorLocal"/>/<see cref="PlacedQuad.Tangent"/> instead of
         /// this record's per-CANDIDATE <see cref="AnchorLocal"/> (which a curved candidate leaves default —
@@ -73,10 +72,10 @@ namespace MapRenderer.Core.Text.Placement
         public bool AlongLine;
 
         /// <summary>
-        /// P-B: a constant CPU-side quad rotation (radians) applied ON TOP of the shader's live tangent
+        /// A constant CPU-side quad rotation (radians) applied ON TOP of the shader's live tangent
         /// rotation — read ONLY when <see cref="AlongLine"/> is true, where
-        /// <see cref="PlacedQuad.RotationRadians"/> is deliberately unusable (the renderer forces it to 0 so
-        /// the rotation comes from the projected world <see cref="PlacedQuad.Tangent"/> instead, Stage AC).
+        /// <see cref="PlacedQuad.RotationRadians"/> is unusable (the renderer forces it to 0 so the rotation
+        /// comes from the projected world <see cref="PlacedQuad.Tangent"/> instead).
         /// Today's only source is <c>icon-rotate</c> on a map-aligned line icon; curved text leaves it 0, so
         /// the renderer passes the same <c>0f</c> it used to hardcode.
         /// <para>A per-CANDIDATE field rather than a per-quad one because an along-line candidate has exactly
@@ -94,14 +93,13 @@ namespace MapRenderer.Core.Text.Placement
         /// </summary>
         public float ExtraRotationRadians;
 
-        /// <summary>P2: the unit surface normal at this candidate's anchor (point/icon arm) — pre-RTC
+        /// <summary>The unit surface normal at this candidate's anchor (point/icon arm) — pre-RTC
         /// render-space DIRECTION, from <c>IProjection.ProjectPoint(...).Up</c> via
-        /// <see cref="PointStageInput.SurfaceUp"/>. WRITTEN by P2; UNREAD by every shader (the pitch-alignment
-        /// tangent-frame branch is P3).</summary>
+        /// <see cref="PointStageInput.SurfaceUp"/>. Written, but not yet read by any shader.</summary>
         public float3 SurfaceUp;
 
         /// <summary>
-        /// W2 — the UNIT of this emit's corner offsets, and the factor that produces it.
+        /// The UNIT of this emit's corner offsets, and the factor that produces it.
         /// <list type="bullet">
         /// <item><b><c>0</c></b> ⇒ <c>WorldBillboardVertex.Offset</c> is in LOGICAL SCREEN PIXELS (the
         /// pre-W2 unit). This is the struct's zero value, so every point emit, every non-map-pitched curved
@@ -110,16 +108,15 @@ namespace MapRenderer.Core.Text.Placement
         /// pixel factor the renderer multiplied them by
         /// (<c>BuildWorldQuad</c>'s <c>emScale = TextSizePx · this</c>).</item>
         /// </list>
-        /// <para><b>One value carries BOTH the unit conversion and the shader's bit2.</b> There is
-        /// deliberately no separate <c>bool MapPitched</c>: a design where a flag and a scale can disagree is a
-        /// design where the shader can reinterpret pixels as metres — which is exactly the class of defect
-        /// this epic kept re-landing. <c>WorldSymbolRenderer.Emit</c> derives the multiplier and the flag from
-        /// this one field.</para>
+        /// <para><b>One value carries BOTH the unit conversion and the shader's bit2.</b> There is no
+        /// separate <c>bool MapPitched</c>: a design where a flag and a scale can disagree is a design where
+        /// the shader can reinterpret pixels as metres. <c>WorldSymbolRenderer.Emit</c> derives the
+        /// multiplier and the flag from this one field.</para>
         /// <para><b>Written in exactly one place</b> — <see cref="SymbolStagingMath.StageCurved"/>'s
         /// <c>worldArc</c> predicate, carried into <c>StageCurvedAnchor</c>'s emit. It is the SAME value
         /// <c>arcScale</c> already spaces the glyph anchors with, so a map-pitched symbol's spacing and its
-        /// drawn size come from one constant and foreshorten together (the settled model: a map-pitched
-        /// <c>text-size</c> is X px TOP-DOWN, like <c>line-width</c>).</para>
+        /// drawn size come from one constant and foreshorten together: a map-pitched <c>text-size</c> is
+        /// X px TOP-DOWN, like <c>line-width</c>.</para>
         /// </summary>
         public float CornerMetresPerLogicalPixel;
 
@@ -134,7 +131,7 @@ namespace MapRenderer.Core.Text.Placement
         public float HaloWidthPx;
 
         /// <summary><c>text-halo-blur</c> in LOGICAL px — how much the halo run widens the AA transition.
-        /// Scaled to device px by the SAME factor as <see cref="HaloWidthPx"/> (S107: both are added to a
+        /// Scaled to device px by the SAME factor as <see cref="HaloWidthPx"/> (both are added to a
         /// signed distance the SDF shader carries in device px, so scaling one without the other renders the
         /// halo inconsistently at dpr ≠ 1).</summary>
         public float HaloBlurPx;

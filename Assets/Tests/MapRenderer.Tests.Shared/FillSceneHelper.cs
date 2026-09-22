@@ -1,5 +1,5 @@
-// S54: test-only helper that replaces MapFillBootstrap in snapshot tests.
-// Builds a fill mesh from the fixture via StyledFillTileBuilder and creates a lit material.
+// Test-only helper: builds a fill mesh from the fixture via StyledFillTileBuilder and creates a lit
+// material.
 
 using System.IO;
 using NUnit.Framework;
@@ -16,16 +16,11 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Replaces the retired <c>MapFillBootstrap</c> in snapshot tests (S54).
-    ///
     /// Builds a fill <see cref="Mesh"/> from the committed fixture tile via
-    /// <see cref="StyledFillTileBuilder.BuildMesh"/>, attaches it to a new
-    /// <see cref="GameObject"/> with a <c>MeshFilter</c> + <c>MeshRenderer</c>, and
-    /// scales/centres the transform so the mesh fits in <c>viewSize</c> world units (matching
-    /// the old <see cref="MapFillBootstrap.FitToView"/> behaviour).
-    ///
-    /// The returned material is created from <c>MaterialFactory.CreateFillMaterial</c> so
-    /// all shader properties (<c>_BaseColor</c>, <c>_Opacity</c>, etc.) are available.
+    /// <see cref="StyledFillTileBuilder.BuildMesh"/>, attaches it to a new <see cref="GameObject"/> with a
+    /// <c>MeshFilter</c> + <c>MeshRenderer</c>, and scales/centres the transform so the mesh fits in
+    /// <c>viewSize</c> world units. The returned material carries every shader property
+    /// (<c>_BaseColor</c>, <c>_Opacity</c>, …).
     ///
     /// Callers must <c>Object.DestroyImmediate</c> the returned GameObject when done.
     /// </summary>
@@ -50,7 +45,7 @@ namespace MapRenderer.Tests
             string layerName = "countries",
             IProjection projection = null, // null ⇒ WebMercator; pass a SphericalProjection for a globe
             bool fitToView = true,         // false ⇒ leave the transform at identity so the caller can place
-                                           //          the GO itself (e.g. the real ENU-rebase placement, S91-C)
+                                           //          the GO itself (e.g. a real camera-relative ENU rebase)
             // Test-only oracle knob — see SyncMeshWrite.Fill. Production never sets it; a fixture that
             // measures the boundary band's own contribution renders the same scene with and without it.
             bool suppressBoundaryBand = false)
@@ -77,8 +72,8 @@ namespace MapRenderer.Tests
             var selected = TestTileMeshBuilder.Select(fillStyleLayer, mvtLayer, styleZoom);
 
             // Origin is derived from (id, projection) inside the builder — a globe projection bakes relative
-            // to the ECEF corner, Mercator relative to the SW-corner (mercX, 0, mercZ). No caller-side origin.
-            // IR C1 P3: the LAYER's own buffer, borrowed; the decode above used the same id.
+            // to the ECEF corner, Mercator relative to the SW-corner (mercX, 0, mercZ). No caller-side
+            // origin. The LAYER's own buffer is borrowed; the decode above used the same id.
             Mesh mesh = TestTileMeshBuilder.BuildFillFromLayer(
                 mvtLayer, selected, paint, styleZoom, new TileId { Z = 0, X = 0, Y = 0 }, projection,
                 suppressBoundaryBand: suppressBoundaryBand);
@@ -91,7 +86,7 @@ namespace MapRenderer.Tests
             // Material — a PLAIN material on the Fill shader (NOT a Material Variant): this snapshot helper
             // toggles local shader keywords at runtime (e.g. _NORMALMAP), which does not take effect on a
             // runtime variant clone. Apply the painter contract via the tweaker to reproduce the per-layer
-            // material state (white identity, ZWrite off) without the variant linkage. (S58.)
+            // material state (white identity, ZWrite off) without the variant linkage.
             var fillShader = MapMaterialSetTestUtil.Load().FillMaterial.shader;
             var mat = new Material(fillShader) { name = "FillSceneHelper_Fill" };
             FillMaterialTweaker.ApplyPainterContract(mat);
@@ -100,8 +95,8 @@ namespace MapRenderer.Tests
             applier.ApplyZoom(new MapRenderer.Unity.Rendering.Style.StyleFrameInputs(styleZoom, 1.0, 0.0));
             mr.sharedMaterial = mat;
 
-            // FitToView: scale+center so the mesh fits in viewSize world units (same as MapFillBootstrap).
-            // Skipped when the caller drives placement itself (real camera-relative ENU rebase, S91-C).
+            // FitToView: scale+center so the mesh fits in viewSize world units. Skipped when the caller
+            // drives placement itself (a real camera-relative ENU rebase).
             if (mesh != null && fitToView) FitToView(mapGo.transform, mesh, viewSize);
 
             return (mapGo, mat);
@@ -112,8 +107,8 @@ namespace MapRenderer.Tests
         private static void FitToView(Transform t, Mesh mesh, float viewSize)
         {
             Bounds b   = mesh.bounds;
-            // Use all three dims: flat Mercator meshes have size.y ≈ 0 (so this equals the old XZ fit), but a
-            // globe (ECEF) mesh spans Y too and must be fit in 3D.
+            // Use all three dims: a flat Mercator mesh has size.y ≈ 0, but a globe (ECEF) mesh spans Y too
+            // and must be fit in 3D.
             float maxDim = Mathf.Max(b.size.x, Mathf.Max(b.size.y, b.size.z), 1e-6f);
             float scale  = viewSize / maxDim;
             t.localScale    = Vector3.one * scale;

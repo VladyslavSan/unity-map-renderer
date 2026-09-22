@@ -6,10 +6,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Sprites
 {
     /// <summary>
-    /// I3 — the read-only sprite-sheet view <c>SymbolFeatureExtractor</c> consumes to
+    /// The read-only sprite-sheet view <c>SymbolFeatureExtractor</c> consumes to
     /// resolve <c>icon-image</c> names to sheet rects and lay out icon quads: the icon analogue of
     /// <see cref="IGlyphAtlasView"/>. Unlike the glyph atlas (which grows/packs at runtime), a sprite sheet
-    /// is a single pre-baked image decoded once (I4), so this is a plain carrier over an already-parsed
+    /// is a single pre-baked image decoded once, so this is a plain carrier over an already-parsed
     /// <see cref="SpriteIndex"/> plus the sheet's pixel dimensions — no packer/grow machinery.
     /// </summary>
     public sealed class SpriteAtlasView

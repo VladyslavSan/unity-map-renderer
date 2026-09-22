@@ -17,7 +17,7 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// S18 Unity-side batch: the deferred Unity half of Slice 2's SDF glyph atlas — wraps a
+    /// The Unity half of the SDF glyph atlas — wraps a
     /// <see cref="Texture2DArray"/> (single-channel <see cref="TextureFormat.R8"/>, one array LAYER per
     /// <see cref="GlyphAtlas"/> PAGE) and uploads each page's <see cref="GlyphAtlas.PagePixels"/> CPU
     /// buffer to its layer via <see cref="Texture2DArray.SetPixelData{T}(T[],int,int)"/> +
@@ -25,7 +25,7 @@ namespace MapRenderer.Unity.Text
     /// <see cref="GlyphAtlas"/> itself stays engine-free (Core) — this is the ONLY point an atlas touches
     /// <c>UnityEngine</c>.
     ///
-    /// <para><b>Stage M — single-page byte-identical.</b> An atlas that never overflows a page
+    /// <para><b>Single-page byte-identical.</b> An atlas that never overflows a page
     /// (<see cref="GlyphAtlas.PageCount"/> == 1, the invariant for any map that fits) uploads a
     /// Texture2DArray with exactly ONE layer — layer 0 holds the SAME bytes a pre-Stage-M
     /// <see cref="Texture2D"/> would have, and every <c>SymbolQuad.Page</c>/<c>BillboardVertex.Page</c> is

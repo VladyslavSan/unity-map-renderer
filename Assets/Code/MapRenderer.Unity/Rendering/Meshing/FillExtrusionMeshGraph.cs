@@ -11,8 +11,8 @@ using MapRenderer.Jobs.Projection;
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// Schedules one fill-extrusion layer's roof + wall graph (job-scheduling-design.md §8 stage 5, the
-    /// wall-job stage): the roof measure via <see cref="FillMeshGraph.Schedule"/>, composed UNCHANGED, plus
+    /// Schedules one fill-extrusion layer's roof + wall graph (job-scheduling-design.md): the roof measure
+    /// via <see cref="FillMeshGraph.Schedule"/>, composed UNCHANGED, plus
     /// the wall chain — <see cref="RingSelectJob"/> or <see cref="RingClipJob"/> (raw, pre-earcut ring
     /// vertices off the borrowed geometry, on the same <c>input.Clip</c> branch the roof takes) →
     /// <see cref="ProjectionColumnSizingJob"/> → <see cref="TileToGeoJob"/> →
@@ -22,27 +22,24 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// and walls both read <c>input.Geometry</c>'s columns <c>[ReadOnly]</c> only, so they are independent
     /// and may run concurrently.
     ///
-    /// <para><b>Walls honour the tile-buffer clip</b> (UMR-93, fixed 2026-09-07 — the walls previously took
-    /// <c>RingSelectJob</c> unconditionally, so with the shipped <c>FillTileBufferClip: 0</c> config the roof
-    /// was cut at the tile boundary while the walls were not, and neighbouring tiles each raised a crossing
-    /// building's whole wall set). The wall chain reads the same <c>input.Clip</c> window the roof does, and a
-    /// wall is emitted for EVERY edge of the clipped ring — the cut edges introduced by the window included,
-    /// because what is extruded is the clipped polygon. Reasoning and the one condition that reopens the
-    /// alternative (translucent fill-extrusion): job-scheduling-design.md §8 stage 5's UMR-93 note.</para>
+    /// <para><b>Walls honour the tile-buffer clip.</b> The wall chain reads the same <c>input.Clip</c>
+    /// window the roof does, and a wall is emitted for EVERY edge of the clipped ring — the cut edges
+    /// introduced by the window included, because what is extruded is the clipped polygon. The reasoning,
+    /// and the one condition that reopens the alternative (translucent fill-extrusion), are in
+    /// job-scheduling-design.md.</para>
     ///
-    /// <para><b>Byte-identical is NOT inherited at the managed-vs-Burst projection boundary</b> (this graph
-    /// schedules Burst jobs the retired managed <c>WriteWalls</c> loop never touched): linear quantities are
-    /// bit-exact, quantities downstream of a transcendental diverge by a magnitude that depends on the call
-    /// site (never a flat ULP figure carried between them) — job-scheduling-design.md §8 stage 5's opening
-    /// invariant block is the measurement, including this call site's own wall-tail figures. Scheduling
+    /// <para><b>Byte-identical is NOT inherited at the managed-vs-Burst projection boundary:</b> linear
+    /// quantities are bit-exact, quantities downstream of a transcendental diverge by a magnitude that
+    /// depends on the call site (never a flat ULP figure carried between them) — job-scheduling-design.md
+    /// carries the measurement, including this call site's own wall-tail figures. Scheduling
     /// instead of running does not itself move a bit: every node here is either an <c>IJob</c> (identical
     /// <c>Execute()</c> under <c>.Run()</c> or <c>.Schedule()</c>) or an element-wise-independent
     /// <c>IJobParallelForDefer</c> batched by <see cref="VertexBatch"/> — the batch size chooses which
-    /// worker evaluates a given index, never the expression (job-scheduling-design.md §8 stage 6).</para>
+    /// worker evaluates a given index, never the expression.</para>
     ///
     /// <para>Sits in <c>MapRenderer.Unity</c>, not beside its siblings in <c>MapRenderer.Jobs</c> — the one
-    /// mesh graph that does not, a deliberate choice (job-scheduling-design.md §8 stage 5 §7, maintainer
-    /// decision 2026-09-04, Option 1): <see cref="StyledFillExtrusionTileBuilder.WallQuadJob"/> writes
+    /// mesh graph that does not, by decision:
+    /// <see cref="StyledFillExtrusionTileBuilder.WallQuadJob"/> writes
     /// <see cref="StyledFillExtrusionTileBuilder.PositionNormal"/>/<see cref="StyledFillExtrusionTileBuilder.ExtrudeAndBake"/>
     /// — the vertex-stream layout at the <c>Mesh.MeshData</c> boundary, which the same discriminator that
     /// would move this graph puts in Unity.</para>
@@ -52,7 +49,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     public static class FillExtrusionMeshGraph
     {
         /// <summary>Vertices per batch for this graph's wall-chain <see cref="TileToGeoJob"/> node
-        /// (job-scheduling-design.md §8 stage 6) — same reasoning as <see cref="FillMeshGraph.VertexBatch"/>:
+        /// (job-scheduling-design.md) — same reasoning as <see cref="FillMeshGraph.VertexBatch"/>:
         /// ~10-50 µs of work per 1024 vertices, comfortably above a batch hand-off's own cost. A starting
         /// value chosen by this reasoning, not a measured optimum — see the design doc's dated measurement
         /// before moving it.</summary>

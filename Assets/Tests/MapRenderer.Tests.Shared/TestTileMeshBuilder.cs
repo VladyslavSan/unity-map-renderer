@@ -1,7 +1,6 @@
-// S89 Stage B test helper: synchronous fill/line mesh build for tests that used the retired
-// StyledFill/LineTileBuilder.BuildMesh / BuildMeshData+UploadMesh convenience. Allocates a writable
-// MeshDataArray on the (test) main thread, builds the mesh via WriteMeshData, and applies to a Mesh — the same
-// worker-write path the production pipeline uses at kick+consume, collapsed to one synchronous call.
+// Test helper: synchronous fill/line mesh build. Allocates a writable MeshDataArray on the (test) main
+// thread, builds the mesh via WriteMeshData, and applies it to a Mesh — the same worker-write path the
+// production pipeline uses at kick+consume, collapsed to one synchronous call.
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -28,7 +27,7 @@ namespace MapRenderer.Tests
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
         /// <summary>
-        /// IR B7: the production selection shape, for a test that hands over a plain feature list. Ordinals are
+        /// The production selection shape, for a test that hands over a plain feature list. Ordinals are
         /// <c>0..n-1</c> — the identity, which is exactly what an unfiltered selection over a layer whose
         /// features ARE this list produces.
         /// </summary>
@@ -41,12 +40,12 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// IR B7: the shared buffer for a test that hands over a plain list of SYNTHETIC features —
-        /// materialized from ALL of them (not just the polygons), which is what a whole source layer holds.
-        /// Caller owns it.
+        /// The shared buffer for a test that hands over a plain list of SYNTHETIC features — materialized
+        /// from ALL of them (not just the polygons), which is what a whole source layer holds. Caller owns
+        /// it.
         ///
-        /// <para><b>IR C1 P3: synthetic features only.</b> A real decoded <c>MvtFeature</c> no longer carries
-        /// a command stream — its layer owns the geometry — so a caller holding a decoded layer must read
+        /// <para><b>Synthetic features only.</b> A real decoded <c>MvtFeature</c> carries no command
+        /// stream — its layer owns the geometry — so a caller holding a decoded layer must read
         /// <c>ITileLayer.Geometry</c> (see the <c>ITileLayer</c> overloads of the builders below) instead of
         /// re-materializing here. The guard below makes that mistake LOUD: without it a decoded feature list
         /// would materialize to zero rings and the test would report "no geometry" rather than "you used the
@@ -63,7 +62,7 @@ namespace MapRenderer.Tests
                 IFeature f = features[i];
                 if (f != null && !(f is ITileCommandStreamFeature))
                     throw new System.ArgumentException(
-                        $"feature {i} is a {f.GetType().Name}, which carries no command stream. Since IR C1 P3 " +
+                        $"feature {i} is a {f.GetType().Name}, which carries no command stream. Since the decoded tile owns its geometry, " +
                         "geometry belongs to the LAYER: read ITileLayer.Geometry (or use the ITileLayer " +
                         "overload of BuildFill/BuildLine) instead of re-materializing a decoded feature list.",
                         nameof(features));
@@ -74,7 +73,7 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// IR B7: "visit every ring, in decode order" — the identity visit order, for a test that drives
+        /// "Visit every ring, in decode order" — the identity visit order, for a test that drives
         /// <c>FillMeshGraph.Schedule</c> directly and has no selection or sort key to express. Caller owns
         /// the returned array.
         /// </summary>
@@ -89,7 +88,7 @@ namespace MapRenderer.Tests
 
         /// <summary>Synchronous fill-layer mesh build. Returns null when the layer produces no geometry.
         /// Pass <paramref name="projection"/> to build with a non-default projection (e.g. the globe).
-        /// <para>IR B7: this is the byte-identity harness for fill's ring visit order — it routes through the
+        /// <para>This is the byte-identity harness for fill's ring visit order — it routes through the
         /// REAL selection → rank → visit-order construction (materialize the whole feature list, ordinals
         /// 0..n-1, production <c>WriteMeshData</c>). A "simplification" that bypassed that path would leave
         /// <c>FillSortKeyAndOpacityTests</c> — the only instrument in the repo that discriminates fill draw
@@ -109,7 +108,7 @@ namespace MapRenderer.Tests
             bool suppressBoundaryBand = false)
         {
             var mda = Mesh.AllocateWritableMeshData(1);
-            // S91-C: the builder bakes relative to the tile's SW corner projected through the SAME projection —
+            // The builder bakes relative to the tile's SW corner projected through the SAME projection —
             // Mercator: (mercX, 0, mercZ) == MercatorBounds().min; globe: the ECEF corner. Derive it from
             // (id, projection) here (NOT a caller-supplied Mercator origin) so a globe fixture bakes correctly.
             double3 renderOrigin = TileRenderOrigin.Project(id, projection);
@@ -124,7 +123,7 @@ namespace MapRenderer.Tests
             finally { geometry.Dispose(); }
         }
 
-        /// <summary>S23 I2b: synchronous fill-extrusion-layer mesh build (roof + walls). Returns null when the
+        /// <summary>Synchronous fill-extrusion-layer mesh build (roof + walls). Returns null when the
         /// layer produces no geometry. Mirrors <see cref="BuildFill"/>'s synthetic-feature shape (materialize
         /// the whole feature list, ordinals 0..n-1, production <c>WriteMeshData</c>).</summary>
         public static Mesh BuildFillExtrusion(
@@ -145,7 +144,7 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Synchronous line-layer mesh build. Returns null when the layer produces no geometry.
-        /// <para>IR C1 P2: the feature list IS the source layer here, so ordinals are 0..n-1 and the buffer is
+        /// <para>The feature list IS the source layer here, so ordinals are 0..n-1 and the buffer is
         /// materialized over all of it — the same "whole layer, identity selection" shape
         /// <see cref="BuildFill"/> already uses.</para></summary>
         public static Mesh BuildLine(
@@ -163,7 +162,7 @@ namespace MapRenderer.Tests
             finally { geometry.Dispose(); }
         }
 
-        /// <summary>Projection-aware line build (S91-C): bakes relative to the tile's SW corner projected
+        /// <summary>Projection-aware line build: bakes relative to the tile's SW corner projected
         /// through <paramref name="projection"/> (the SAME origin the vertices use), so a globe fixture lays
         /// its lines on the sphere. Mirrors the projection-aware <see cref="BuildFill"/>.</summary>
         public static Mesh BuildLine(
@@ -183,15 +182,10 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>
-        /// IR C1 P2: a line build whose SOURCE LAYER is wider than this style layer's selection — the
-        /// production shape. <paramref name="layerFeatures"/> is what the shared per-source-layer buffer
-        /// covers; <paramref name="selection"/> is the <c>(ordinal, feature)</c> subset the style layer's
-        /// filter admitted, so slot and ordinal genuinely differ.
-        /// <para>The signature is deliberately stable across P2's conversion: before it, the builder mints
-        /// from <paramref name="selection"/> and <paramref name="layerFeatures"/> only names what the layer
-        /// holds; after it, the layer's buffer is materialized here and lent to the builder. A tooth written
-        /// against this helper therefore measures the pre-conversion output and re-measures the
-        /// post-conversion one.</para>
+        /// A line build whose SOURCE LAYER is wider than this style layer's selection — the production
+        /// shape. <paramref name="layerFeatures"/> is what the shared per-source-layer buffer covers;
+        /// <paramref name="selection"/> is the <c>(ordinal, feature)</c> subset the style layer's filter
+        /// admitted, so slot and ordinal genuinely differ.
         /// </summary>
         public static Mesh BuildLineFromLayer(
             IReadOnlyList<IFeature> layerFeatures, IReadOnlyList<SelectedTileFeature> selection,
@@ -210,7 +204,7 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Build a line layer's mesh and return only the written vertex count (0 = no geometry). Used
-        /// by the S14 data-driven-bake teeth that only need "did the bake produce geometry?".</summary>
+        /// by the data-driven-bake teeth that only need "did the bake produce geometry?".</summary>
         public static int LineVertexCount(
             IReadOnlyList<IFeature> features, Line.PaintProperties paint, Line.LayoutProperties layout,
             double zoom, double extent, TileId id, double2 origin)
@@ -228,13 +222,12 @@ namespace MapRenderer.Tests
             return vertexCount;
         }
 
-        // ── IR C1 P3: the DECODED-LAYER overloads ────────────────────────────────────────────────────────
+        // ── The DECODED-LAYER overloads ──────────────────────────────────────────────────────────────────
         // A decoded layer owns its buffer, so these BORROW it (never dispose) and take neither an extent nor
         // a materialization step. They also take the SELECTION explicitly, because the buffer spans the whole
         // layer while a style layer's filter may admit a strict subset — the exact pairing production makes.
         // And they assert the buffer's own tile address matches the id the caller bakes the render origin
-        // from: those two disagreeing is precisely the mispairing C1 exists to make impossible, and a harness
-        // that quietly allowed it would build a mesh at the wrong place.
+        // from: a harness that allowed those two to disagree would build a mesh at the wrong place.
 
         private static void AssertLayerPairing(ITileLayer layer, TileId id)
         {
@@ -245,7 +238,7 @@ namespace MapRenderer.Tests
                     $"the layer's buffer belongs to tile {geometry.Tile.Z}/{geometry.Tile.X}/{geometry.Tile.Y} " +
                     $"but the build was asked for {id.Z}/{id.X}/{id.Y}. Decode the fixture with the SAME " +
                     "TileId the build uses (MvtDecoder.Decode(id, bytes)) — the buffer is the sole authority " +
-                    "for its tile address since IR C1 P3.", nameof(id));
+                    "for its tile address.", nameof(id));
         }
 
         /// <summary>The ordinal-bearing selection for one style layer over one decoded layer — the production
@@ -291,16 +284,12 @@ namespace MapRenderer.Tests
         ///
         /// <para><b>Note for callers passing a concrete struct literal</b> (<c>new SphericalProjection()</c>,
         /// <c>new WebMercatorProjection()</c>, …) rather than an <see cref="IProjection"/>-typed variable:
-        /// overload resolution silently prefers this method's generic sibling,
-        /// <see cref="BuildLineFromLayer{TProj}"/>, for such a call (an exact-type match beats this
-        /// overload's implicit boxing conversion) — see that method's own doc. Existing call sites this
-        /// rebinds: <c>GlobeLineWindingTests.cs:54-55</c>, <c>RightHandedSphereProjectionWindingTests.cs:110-111</c>,
-        /// <c>GlobeLineSnapshotTests.cs:44</c>. Harmless — both siblings drive the SAME graph
-        /// (<c>LineMeshGraph.Schedule</c>'s switch dispatches to the identical <c>ScheduleTyped</c> call the
-        /// generic sibling makes directly), and <c>FillSharedBufferTests.cs:2874</c> (the merged home of the
-        /// former <c>LineGraphParityTests.cs</c>) keeps <c>Schedule</c>'s own
-        /// switch under cover independently — but worth knowing before "why did this call route through the
-        /// OTHER overload" surprises a future reader.</para></summary>
+        /// overload resolution prefers this method's generic sibling,
+        /// <see cref="BuildLineFromLayer{TProj}"/>, because an exact-type match beats this overload's
+        /// implicit boxing conversion. Both siblings drive the SAME graph —
+        /// <c>LineMeshGraph.Schedule</c>'s switch dispatches to the identical <c>ScheduleTyped</c> call the
+        /// generic sibling makes directly — so the rebinding changes the route and nothing
+        /// else.</para></summary>
         public static Mesh BuildLineFromLayer(
             ITileLayer layer, IReadOnlyList<SelectedTileFeature> selection, Line.PaintProperties paint,
             Line.LayoutProperties layout, double zoom, TileId id, IProjection projection)
@@ -313,14 +302,14 @@ namespace MapRenderer.Tests
             return Finish(mda, vertexCount, bounds, "TestLineGlobe");
         }
 
-        /// <summary>job-scheduling-design.md §8 stage 5, tooth (g): line build over a DECODED layer for a
-        /// projection Burst never registers generically for — calls <c>LineMeshGraph.ScheduleTyped&lt;TProj&gt;</c>
+        /// <summary>Line build over a DECODED layer for a projection Burst never registers generically
+        /// for — calls <c>LineMeshGraph.ScheduleTyped&lt;TProj&gt;</c>
         /// directly (reached across the assembly boundary via <c>MapRenderer.Unity</c>'s
         /// <c>InternalsVisibleTo("MapRenderer.Tests.Shared")</c> grant) rather than the closed
         /// <c>LineMeshGraph.Schedule</c> switch this overload's <see cref="IProjection"/> sibling goes
         /// through. This is the ONLY production-adjacent caller of <c>ScheduleTyped</c> from outside
         /// <c>MapRenderer.Jobs</c> — kept in the test assembly, not production, because it has no production
-        /// caller (<c>RightHandedSphereProjectionWindingTests</c>' own tooth (g) shape). Overload resolution
+        /// caller. Overload resolution
         /// prefers this generic form over the sibling for a concrete struct argument (an exact-type match
         /// beats the sibling's implicit boxing conversion), so an existing call site passing a concrete
         /// <c>readonly struct : IProjection</c> — never registered with Burst — binds here without an

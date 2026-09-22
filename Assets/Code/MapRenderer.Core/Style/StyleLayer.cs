@@ -54,7 +54,7 @@ namespace MapRenderer.Core.Style
         public bool IsVisibleAtZoom(double zoom)
             => Visible && (!MinZoom.HasValue || zoom >= MinZoom.Value) && (!MaxZoom.HasValue || zoom < MaxZoom.Value);
 
-        /// <summary>Raw <c>filter</c> sub-tree (legacy or expression), or null. Parsed in S10.</summary>
+        /// <summary>Raw <c>filter</c> sub-tree (legacy or expression), or null.</summary>
         public JsonValue Filter;
 
         /// <summary>The full original layer JSON object, retained so unknown/forward-compat keys survive

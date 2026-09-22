@@ -1,4 +1,4 @@
-// Line-dasharray GPU/visual acceptance test (UMR-176 pack: meshing topic).
+// Line-dasharray GPU/visual acceptance test.
 //
 // Split by TWO using collisions, not the line cap: `CameraProperties` (MapRenderer.Core.Geo
 // vs UnityEngine.Rendering) and bare `Object` (System.Object vs UnityEngine.Object) —
@@ -30,14 +30,14 @@ namespace MapRenderer.Tests.Visual
     // Unity EditMode only — real MapCamera + Camera/RenderTexture, off-screen GPU render + CPU readback.
     // NOT registered in Tools/core-tests/core-tests.csproj.
     //
-    // S110 — the RENDERED teeth for world-anchored line dashes.
+    // The RENDERED teeth for world-anchored line dashes.
     //
     // THE DEFECT, IN ONE LINE: dashU divided by widthWorld, i.e. by MapPixelsToWorld's PER-VERTEX screen
     // measurement. That measurement varies four ways, and dashU is the one consumer that INTEGRATES the
     // variation along the road instead of being bounded by the styled width:
     //   1. with DEPTH                     — the world period grew with distance; the pattern crawled under tilt.
     //   2. with DIRECTION                 — measured along `across` while dashes run `along`.
-    //   3. with the SIGN of the direction — HISTORICAL: S111 removed this term at source. The two ribbon
+    //   3. with the SIGN of the direction — no longer reachable; the helper is direction-symmetric. The two ribbon
     //                                       vertices of a station share one centreline point and carry opposite
     //                                       extrudeN, so MapPixelsToWorld probed ONE-SIDED in opposite
     //                                       directions and their rulers differed by (1+e)/(1−e); every dash
@@ -48,8 +48,8 @@ namespace MapRenderer.Tests.Visual
     // that killed only the depth term would pass T1 and still ship the rotation the maintainer reported:
     //   T1 measures term 1 and is algebraically ZERO for term 3 at its bearing (across ⊥ fwd on a N–S road).
     //   T7 probed term 3, and measures term 2 via its arc-length clause, at CONSTANT depth, so term 1 cannot
-    //      help it. Since S111 the sign term has no mechanism left in the tree, and its primary discriminator
-    //      is LineProbeSymmetrySnapshotTests, which measures the helper directly.
+    //      help it. The sign term has no mechanism left in the tree, and its primary discriminator is
+    //      LineProbeSymmetrySnapshotTests, which measures the helper directly.
     //   T8 measures term 4 as a purely RELATIVE statement — "the same road with more vertices renders the same
     //      dashes" — which needs no derivation in this file to be believed.
     //   T2 measures the dpr basis, is GREEN today, and must stay green: at tilt 0 the per-vertex divisor
@@ -58,7 +58,7 @@ namespace MapRenderer.Tests.Visual
     // FIXTURE SHAPE IS LOAD-BEARING. Every arm drives the material through the PRODUCTION seam — a style JSON
     // with line-dasharray parsed into a RenderLayerSet, then set.ApplyZoom(zoom, dpr). Setting _DashArray on a
     // hand-made material would test the shader while leaving the wiring unmeasured. The frame global itself is
-    // pushed by the real MapCamera (S116 moved it there from ApplyZoom), which BuildScene constructs; with both
+    // pushed by the real MapCamera, which BuildScene constructs; with both
     // seams in the loop, a missing push renders a uniform HALF-COVERAGE line
     // (dashU ≡ 0 ⇒ smoothstep(−dfw,+dfw,0) == 0.5 exactly) and every tooth here fails with "no dash edges".
 
@@ -110,7 +110,7 @@ namespace MapRenderer.Tests.Visual
         }";
 
         /// <summary>
-        /// Metres of road per DASH UNIT — the quantity S110 makes frame-constant. It is
+        /// Metres of road per DASH UNIT — a frame constant. It is
         /// <c>_Width(device px) × metresPerDevicePx</c> = <c>(16·dpr) × (mpp(zoom)/dpr)</c>, so the dpr
         /// CANCELS and this is one number for both ratios. That cancellation is exactly why a CPU-only
         /// round-trip tooth cannot see a device-vs-logical basis error, and why T2 has to render.
@@ -183,14 +183,14 @@ namespace MapRenderer.Tests.Visual
             Material mat = set[0].Material;
             Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.DashCount), Is.EqualTo(2f),
                 "precondition: _DashCount must be 2, or the shader's dash branch is dead and every edge " +
-                "count below would be zero for a reason that has nothing to do with this stage.");
+                "count below would be zero for a reason that has nothing to do with what is under test.");
             Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.Width),
                 Is.EqualTo(StyledLineWidthPx * (float)devicePixelRatio).Within(1e-3f),
-                $"precondition: _Width must reach the shader in DEVICE px ({StyledLineWidthPx}×dpr, S107).");
+                $"precondition: _Width must reach the shader in DEVICE px ({StyledLineWidthPx}×dpr).");
             Assert.That(Shader.GetGlobalFloat(ShaderProperties.FrameGlobalIds.MapFrameMetersPerDevicePixel),
                 Is.GreaterThan(0f),
                 "precondition: the frame constant must have been pushed — by MapCamera.SyncToCamera, which " +
-                "the MapCamera ctor above runs (S116; it used to be RenderLayerSet.ApplyZoom). A 0 here means " +
+                "the MapCamera ctor above runs (the MapCamera ctor). A 0 here means " +
                 "the dash divisor is 0, the guard sets dashU = 0, and the line renders at a UNIFORM HALF " +
                 "COVERAGE with no dash edges at all.");
 
@@ -384,8 +384,8 @@ namespace MapRenderer.Tests.Visual
                 "with the horizon off-screen, or the edge count measures clipping instead of dashes.");
 
             float[] cov = coverage.ToArray();
-            // Vacuity guard. dashU over the first 2 km is at most 0.41 under every hypothesis this stage
-            // weighs, so those samples are inside the first ON run. Not asserted on sample 0 alone: at this
+            // Vacuity guard. dashU over the first 2 km is at most 0.41 under every hypothesis weighed
+            // here, so those samples are inside the first ON run. Not asserted on sample 0 alone: at this
             // depth 100 m is 0.19 screen px, so the first few samples all land on the butt cap's own pixel.
             int onInPrefix = 0;
             for (int i = 0; i < 20 && i < cov.Length; i++) if (cov[i] >= 0.5f) onInPrefix++;
@@ -402,10 +402,10 @@ namespace MapRenderer.Tests.Visual
                 double arc = math.lerp(arcs[lo], arcs[math.min(lo + 1, arcs.Count - 1)], t);
 
                 // THE ROAD'S OWN END IS NOT A DASH EDGE. The butt cap at the far end is an ON→OFF
-                // transition whenever the last run happens to be ON, and before S110 it was: with the
-                // per-vertex divisor dashU only reached 13.51 over this road, phase 1.51, inside an ON run
-                // — so the un-fixed tree rendered 2 dash edges PLUS the cap. Counting the cap would let a shallow
-                // fix that merely got dashU_max past 15 reach a count of 4 without ever crossing 21.
+                // transition whenever the last run happens to be ON. With a per-vertex divisor dashU only
+                // reaches 13.51 over this road, phase 1.51, inside an ON run — 2 dash edges PLUS the cap.
+                // Counting the cap would let a shallow fix that merely got dashU_max past 15 reach a count
+                // of 4 without ever crossing 21.
                 // The window is ~2.7 screen px at this depth, well past the ≈2 px dash feather and far
                 // from any dash boundary either hypothesis puts near the end.
                 if (arc > T1RoadLengthM - CapExclusionM) continue;
@@ -417,23 +417,22 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>T1 (REQUIRED) — the DEPTH term.</b> A north–south road 110 km long, viewed at 55° of tilt,
+        /// <b>T1 — the DEPTH term.</b> A north–south road 110 km long, viewed at 55° of tilt,
         /// must carry FOUR ON→OFF dash edges, and the fourth must sit at the arc length the world-anchored
         /// parameterisation puts it at (dashU = 21).
         ///
-        /// <para>RED against the un-fixed tree by arithmetic: with the per-vertex divisor the ruler grows
+        /// <para>RED against a per-vertex divisor by arithmetic: that ruler grows
         /// with view depth, so dashU only reaches 13.51 over the same road and crosses 3 and 9 alone —
         /// <b>2</b> edges, and no fourth edge to locate. Non-knife-edge in both directions: losing the
         /// fourth edge needs dashU_max 6.61 % low, gaining a fifth needs it 20.07 % high.</para>
         ///
-        /// <para>The count is a TOPOLOGICAL invariant, which is why term 4 cannot confound it: the un-fixed
-        /// tree's per-vertex dashU sequence was strictly increasing, so its chord interpolant was monotone
-        /// and exact at the stations, hence a monotone rise from 0 to 13.51 crossed 3 and 9 once each and
-        /// never reached 15 — 2 edges at ANY tessellation. The edge POSITIONS did move with tessellation
-        /// before S110, which is why a position is asserted only on the fixed side, where dashU is
-        /// linear.</para>
+        /// <para>The count is a TOPOLOGICAL invariant, which is why term 4 cannot confound it: a per-vertex
+        /// dashU sequence is strictly increasing, so its chord interpolant is monotone and exact at the
+        /// stations, hence a monotone rise from 0 to 13.51 crosses 3 and 9 once each and never reaches 15 —
+        /// 2 edges at ANY tessellation. Edge POSITIONS move with tessellation under that model, which is why
+        /// a position is asserted only where dashU is linear.</para>
         ///
-        /// <para>Blind to terms 2 and 3 — deliberately. On a north–south road <c>across ⊥ fwd</c>, so the
+        /// <para>Blind to terms 2 and 3, by design. On a north–south road <c>across ⊥ fwd</c>, so the
         /// sign asymmetry <c>e = 0.02·tan(fov/2)·(across·fwd)</c> is ALGEBRAICALLY ZERO here, not merely
         /// small. That is T7's job.</para>
         /// </summary>
@@ -478,16 +477,15 @@ namespace MapRenderer.Tests.Visual
         private const double T7StationM    =  2_000.0;
 
         /// <summary>How far inside the styled edge each probe row sits, in device px. The probe OFFSET is
-        /// then derived from the band that actually renders (it used to be a hard-coded 6, which encoded
-        /// "the band is 16 px" — the premise S116 deleted). Clear of the ±0.5 px AA straddle with 2 px to
-        /// spare.</summary>
+        /// then derived from the band that actually renders, never a constant encoding a fixed band width.
+        /// Clear of the ±0.5 px AA straddle with 2 px to spare.</summary>
         private const double T7ProbeInsetPx = 2.0;
 
         /// <summary>Skew tolerance, expressed PER PIXEL OF PROBE SEPARATION rather than as an absolute — the
         /// quantity the tooth is about is an ANGLE, and a band that renders <c>cos θ</c> thinner puts the two
         /// probes closer together, which would silently scale an absolute bound's discriminating power.
-        /// <c>1.0 px over the original 12 px separation</c>, so the historical RED (3.94 px over 12 px =
-        /// 0.3283) keeps its 3.9× margin whatever the band width.</summary>
+        /// <c>1.0 px over a 12 px separation</c>, so the 3.94 px over 12 px (= 0.3283) this tooth
+        /// discriminates at keeps a 3.9× margin whatever the band width.</summary>
         private const double T7MaxSkewPerSeparationPx = 1.0 / 12.0;
 
         /// <summary>
@@ -530,17 +528,17 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>T7 (REQUIRED) — the SIGN term, i.e. the rotation the maintainer reported.</b> On an east–west
+        /// <b>T7 — the SIGN term, i.e. the rotation the maintainer reported.</b> On an east–west
         /// road under tilt, a dash boundary must be PERPENDICULAR to the road: sampled on two scanlines
         /// 6 px either side of the centreline, each ON→OFF edge must land at the same screen x on both.
         ///
-        /// <para>THE MECHANISM, and why no other tooth in this stage can see it. The two ribbon vertices of
+        /// <para>THE MECHANISM, and why no other tooth in this file can see it. The two ribbon vertices of
         /// a station share ONE centreline position and carry OPPOSITE <c>extrudeN</c>
         /// (<c>RibbonJob</c>'s <c>MakeVertex(p2, n1, …, +1)</c> / <c>MakeVertex(p2, -n1, …, −1)</c>), and
         /// the shader handed that signed direction straight to <c>MapPixelsToWorld</c>, which probed
-        /// ONE-SIDED and so returned two different rulers for one physical axis. <b>S111 divided the probe's
-        /// own foreshortening back out, so the helper is direction-symmetric and this mechanism no longer
-        /// exists at source; the sign term's primary discriminator is now
+        /// ONE-SIDED and so returned two different rulers for one physical axis. <b>The helper now divides
+        /// the probe's own foreshortening back out, so it is direction-symmetric and this mechanism no
+        /// longer exists at source; the sign term's primary discriminator is
         /// <c>LineProbeSymmetrySnapshotTests</c>, which measures the helper itself.</b> The two rulers
         /// differed by exactly <c>(1+e)/(1−e)</c> with
         /// <c>e = 0.02·tan(fov/2)·(across·fwd)</c> — independent of depth, zoom, altitude, width and screen
@@ -549,7 +547,7 @@ namespace MapRenderer.Tests.Visual
         /// iso-dashU contour stayed a straight line but stopped being perpendicular to the road, and the
         /// tilt grew LINEARLY with accumulated dashU. Diagonal parallelograms.</para>
         ///
-        /// <para>RED before S110 at 3.94 px of probe-to-probe skew on the dashU = 21 edge (≈18°), with two
+        /// <para>Discriminates at 3.94 px of probe-to-probe skew on the dashU = 21 edge (≈18°), with two
         /// more edges above 3.6 px — a 3.9× margin that did not hinge on locating one particular edge. The
         /// assertion takes the MAX and not the mean: the innermost edge sits near the look-at where the
         /// effect was genuinely small (1.13 px) and averaging it in would make the tooth knife-edge.</para>
@@ -588,9 +586,8 @@ namespace MapRenderer.Tests.Visual
                     int centreRow = (int)math.round(originSp.y);
                     ProbeMapping centre = MapProbeRow(scene.UnityCamera, originSp.y);
                     float thickness = MeasureBandThicknessPx(pixels, centreRow, 0, Size - 1, background, plateau);
-                    // RE-DERIVED (S116). This used to demand 16.0 ± 1.5 px — the styled width itself, i.e.
-                    // "a px width holds its DEVICE width under tilt", the premise the width model deleted.
-                    // A styled px width now fixes a WORLD width at the look-at; this road runs ACROSS the
+                    // NOT the styled width itself: "a px width holds its DEVICE width under tilt" is not the
+                    // model. A styled px width fixes a WORLD width at the look-at; this road runs ACROSS the
                     // view azimuth, so its across-axis lies in the ground plane along the tilt direction and
                     // picks up that plane's foreshortening: 16·cos 55° = 9.177 px (measured 9.173).
                     // It is a PRECONDITION for the probe placement below, not the tooth.
@@ -623,11 +620,11 @@ namespace MapRenderer.Tests.Visual
                     // edges, and it swamps the effect this tooth exists to catch. Each probe therefore gets
                     // its own screen→world map, solved from the real camera, and the boundary is compared
                     // where "perpendicular" is genuinely a null: the arc length the boundary sits at.
-                    // PRE-EXISTING, deliberately left: these pass a pixel INDEX where GroundRowSolver documents
-                    // a screen-y (index j's centre is at j + 0.5), so each probe is placed half a row off. That
-                    // shifts probe PLACEMENT, not a measured quantity, so it is second-order here — but it is
-                    // fatal in a tooth where 0.5 px IS the measurement. Fixing it would move T7's probes, which
-                    // S111 is fenced from doing; if T7 ever flakes, symmetrise the offsets and fix this together.
+                    // These pass a pixel INDEX where GroundRowSolver documents a screen-y (index j's centre
+                    // is at j + 0.5), so each probe is placed half a row off. That shifts probe PLACEMENT,
+                    // not a measured quantity, so it is second-order here — but it is fatal in a tooth where
+                    // 0.5 px IS the measurement. Fixing it moves T7's probes; if T7 ever flakes, symmetrise
+                    // the offsets and fix this together.
                     ProbeMapping upperMap = MapProbeRow(scene.UnityCamera, centreRow + probeOffset);
                     ProbeMapping lowerMap = MapProbeRow(scene.UnityCamera, centreRow - probeOffset);
                     TestContext.WriteLine($"T7: probe world-z {upperMap.Z:F0} / {lowerMap.Z:F0} m, " +
@@ -679,10 +676,10 @@ namespace MapRenderer.Tests.Visual
                         $"T7: only {pairs} dash boundaries appear on BOTH probes; fewer than 4 makes the " +
                         "max below rest on too little.");
 
-                    // The ANGLE, not the absolute displacement: the probes are now placed from the band that
+                    // The ANGLE, not the absolute displacement: the probes are placed from the band that
                     // rendered, and a cos θ-thinner band brings them closer together, which would silently
-                    // relax an absolute bound. Threshold = the original 1.0 px over the original 12 px
-                    // separation, so the historical RED (3.94 px over 12 px) keeps its 3.9× margin.
+                    // relax an absolute bound. Threshold = 1.0 px over a 12 px separation, so the 3.94 px
+                    // over 12 px this tooth discriminates at keeps a 3.9× margin.
                     double skewPerSeparation = maxSkewPx / (2.0 * probeOffset);
                     TestContext.WriteLine(
                         $"T7: probe separation {2 * probeOffset} px, skew {maxSkewPx:F4} px ⇒ " +
@@ -695,14 +692,15 @@ namespace MapRenderer.Tests.Visual
                         $"skew of {skewPerSeparation:F5} px per px of separation, i.e. it " +
                         "is not perpendicular to the road. HISTORICALLY that was the sign term: the two " +
                         "ribbon vertices of a station share one centreline point and carry opposite " +
-                        "extrudeN, and the pre-S111 MapPixelsToWorld probed ONE-SIDED, so with the " +
+                        "extrudeN, and the earlier MapPixelsToWorld probed ONE-SIDED, so with the " +
                         "per-vertex divisor they got rulers (1+e)/(1−e) = 1.910 % apart and dashU differed " +
-                        "across the ribbon. S111 removed that mechanism at source, and a frame-constant " +
+                        "across the ribbon. That mechanism was removed at source, and a frame-constant " +
                         "divisor additionally has no direction and no sign — so a reading here is NOT " +
                         "explained by the historical cause. Investigate what it is rather than assuming.");
 
                     // Term 2, for one line: the same WORLD period T1 measures on a perpendicular road.
-                    // Before S110 the east-west edges sat elsewhere entirely, so this clause was RED too.
+                    // Under a per-vertex divisor the east-west edges sit elsewhere entirely, so this clause
+                    // discriminates too.
                     for (int i = 0; i < lowerArc.Count; i++)
                     {
                         double want = FallingEdgeArc(i);
@@ -722,7 +720,7 @@ namespace MapRenderer.Tests.Visual
         // ── T8: the SAMPLING term — vertex-density independence ──────────────────────────────────
 
         /// <summary>
-        /// <b>T8 (REQUIRED) — the SAMPLING term.</b> The SAME road, meshed two ways, must render its dashes
+        /// <b>T8 — the SAMPLING term.</b> The SAME road, meshed two ways, must render its dashes
         /// in the same places: a 56-station mesh at 2 km spacing and a bare two-point mesh must put every
         /// dash edge within 1 screen px of each other.
         ///
@@ -736,15 +734,15 @@ namespace MapRenderer.Tests.Visual
         /// fix dashU is exactly linear in arc length, and a chord of a linear function IS the function, so
         /// the dependence vanishes rather than shrinking.</para>
         ///
-        /// <para>RED before S110 at ≈12.4 and ≈12.7 px of displacement — the largest margin of any tooth here.
-        /// It is also the only purely RELATIVE measurement in the stage: it needs no derivation in this
+        /// <para>Discriminates at ≈12.4 and ≈12.7 px of displacement — the largest margin of any tooth here.
+        /// It is also the only purely RELATIVE measurement here: it needs no derivation in this
         /// file to be believed.</para>
         ///
         /// <para>TWO GUARDS, both non-obvious. (1) The sparse mesh is TWO POINTS, not 30 km stations: with
         /// 30 km stations the second edge lands within 0.00 px because the 60 km station sits almost exactly
         /// where dashU = 9 falls, so the chord passes through the true value and the tooth is inert on that
-        /// edge. (2) The count is asserted equal and ≥ 2 before pairing — and note that BEFORE S110 BOTH
-        /// MESHES PRODUCED 2 EDGES, so a count assertion discriminated nothing. T8's whole signal is
+        /// edge. (2) The count is asserted equal and ≥ 2 before pairing — under the broken model BOTH
+        /// MESHES PRODUCE 2 EDGES, so a count assertion discriminates nothing. T8's whole signal is
         /// positional, which is exactly what makes it independent of T1 rather than a copy of it.</para>
         /// </summary>
         [Test]
@@ -772,7 +770,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(sparseY.Length, Is.EqualTo(denseY.Length),
                     $"T8: the two meshes produced different edge counts ({denseY.Length} vs " +
                     $"{sparseY.Length}) and cannot be paired. Note this clause discriminated NOTHING " +
-                    "before S110 — both meshes yielded 2 — it exists so the positional comparison below is " +
+                    "under the earlier ruler — both meshes yielded 2 — it exists so the positional comparison below is " +
                     "never taken over mismatched pairs.");
 
                 double maxDelta = 0.0;
@@ -786,7 +784,7 @@ namespace MapRenderer.Tests.Visual
 
                 Assert.That(maxDelta, Is.LessThanOrEqualTo(1.0),
                     $"the same road rendered with a different vertex count moved dash edge #{worst + 1} by " +
-                    $"{maxDelta:F3} screen px. Before S110 the tree measured ≈12.4 px on the first edge and " +
+                    $"{maxDelta:F3} screen px. Under the earlier ruler the tree measured ≈12.4 px on the first edge and " +
                     "≈12.7 px on the second: dashU was a per-vertex varying over a hyperbola, so the " +
                     "rendered chord — and therefore the dash period — depended on the road's tessellation. " +
                     "After the fix dashU " +
@@ -861,7 +859,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(at2.measured, Is.EqualTo(at2.expected).Within(3.0),
                     $"dpr 2: the first dash transition must sit {at2.expected:F1} px from frame centre; " +
                     $"measured {at2.measured:F1} px. A reading near 192 px is the LOGICAL-basis error: " +
-                    "_Width arrives doubled (device px, S107) while the ruler was left in metres per " +
+                    "_Width arrives doubled (device px) while the ruler was left in metres per " +
                     "LOGICAL px, so the dash unit doubles and the pattern is twice as coarse on a dense " +
                     "panel — the identity at dpr 1, hence invisible to every other test.");
 

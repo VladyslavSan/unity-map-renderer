@@ -3,11 +3,11 @@
 // The three pump-related fixtures first (subsystem pump, work scheduler, tail pump), then the store lifecycle fixture, then the standalone allocation regression pin.
 //
 // Contents:
-//   SymbolSubsystemPumpTests           — Stall-#1 fix (Stage A): the symbol subsystem no longer builds every fetched tile inline on the main thread and no longer re-uploads the 16 MB glyph atlas per glyph-adding tile.
+//   SymbolSubsystemPumpTests           — the symbol subsystem no longer builds every fetched tile inline on the main thread and no longer re-uploads the 16 MB glyph atlas per glyph-adding tile.
 //   SymbolSubsystemWorkSchedulerTests  — ReconcileDispatch_* proves T2 (the WebGL-only permanent placement wedge at :899): under Inline the pickup lands ONE CurrentBatch call later than the schedule (PickupCompletedReconcile runs BEFORE ScheduleReconcileIfDirty inside CurrentBatch), so the tooth…
-//   SymbolTailPumpTests                — Epic A / A5a-A5b: the acceptance teeth for the worker-phase / tail split — the worker phase (TryBeginBuild's returned pass) stops after the pool-side extract and hands a ready tail (via the A5b pool→main handoff) to PumpBuilds' budgeted tail-start loop…
+//   SymbolTailPumpTests                — The acceptance teeth for the worker-phase / tail split — the worker phase (TryBeginBuild's returned pass) stops after the pool-side extract and hands a ready tail (via the pool→main handoff) to PumpBuilds' budgeted tail-start loop…
 //   SymbolTileStoreTests               — The symbol-lifecycle fix (zoom-out-then-in "no symbols" bug): SymbolTileStore keeps a released-to-cache tile's symbols WARM and restores them on a prepared-cache hit (which does not re-fetch), while a truly-evicted tile drops them.
-//   TextQuadLayoutAllocTests           — S19 Slice 4: the layout hot path (steady, single-line, no-wrap) must allocate ZERO managed garbage once the caller's output List capacity has stabilized -- see TextQuadLayout's class doc for why (an in-place List index write per emitted quad, no auxiliary…
+//   TextQuadLayoutAllocTests           — The layout hot path (steady, single-line, no-wrap) must allocate ZERO managed garbage once the caller's output List capacity has stabilized -- see TextQuadLayout's class doc for why (an in-place List index write per emitted quad, no auxiliary…
 
 using System;
 using System.Collections;
@@ -53,8 +53,8 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Stall-#1 fix (Stage A): the symbol subsystem no longer builds every fetched tile inline on the main
-    /// thread and no longer re-uploads the 16 MB glyph atlas per glyph-adding tile. A5b: the worker phase is
+    /// The symbol subsystem no longer builds every fetched tile inline on the main
+    /// thread and no longer re-uploads the 16 MB glyph atlas per glyph-adding tile. The worker phase is
     /// now driven by <see cref="SymbolSubsystem.TryBeginBuild"/> (kick-time) + the returned pass's
     /// <c>RunWorkerAndHandoff</c> (pool), and <see cref="SymbolSubsystem.PumpBuilds"/> starts at most
     /// <c>MaxBuildsPerFrame</c> ready TAILS/frame + performs at most ONE coalesced atlas upload (the
@@ -103,7 +103,7 @@ namespace MapRenderer.Tests.Text
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
                 zoom: 5.0, heading: 0.0, tilt: 0.0));
 
-            // D11/E2: the subsystem no longer owns a MapMaterialSet (per-layer materials moved to
+            // The subsystem no longer owns a MapMaterialSet (per-layer materials moved to
             // SymbolRenderLayer) — this suite tests build/pump/atlas behaviour only, none of which touches
             // materials.
             _subsystem = new SymbolSubsystem(mapCamera);
@@ -138,7 +138,7 @@ namespace MapRenderer.Tests.Text
 
         private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
 
-        /// <summary>A5b drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
+        /// <summary>Drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
         /// thread, then <c>RunWorkerAndHandoff</c> fire-and-forget on the pool (so
         /// <c>SymbolDecodeAndExtract_RunOffTheMainThread</c> still observes the decode/extract marker off
         /// main). Replaces the retired <c>OnTileBytesReady</c> push.</summary>
@@ -158,9 +158,9 @@ namespace MapRenderer.Tests.Text
             }).Forget();
         }
 
-        // E1 D10: production SetStyle no longer walks style.Layers itself (RenderLayerFactory is the sole
+        // Production SetStyle no longer walks style.Layers itself (RenderLayerFactory is the sole
         // registry, MapView derives the list). Tests that call the subsystem directly need the equivalent
-        // extraction — kept local to the test assembly (outside the D10 grep tooth's scope).
+        // extraction — kept local to the test assembly (outside the grep tooth's scope).
         private static List<Symbol.StyleLayer> ExtractSymbolLayers(StyleDocument style)
         {
             var result = new List<Symbol.StyleLayer>();
@@ -169,7 +169,7 @@ namespace MapRenderer.Tests.Text
             return result;
         }
 
-        // ── Tooth 1 (bounded worker-phase starts) RETIRED at A5b: the build-start throttle + QueuedBuildCount
+        // ── Tooth 1 (bounded worker-phase starts) RETIRED: the build-start throttle + QueuedBuildCount
         //    moved to TileManager's kick cap (MaxMeshBuildsPerTick) — see TileSymbolKickTests' F-2/kick-cap
         //    coverage. This subsystem no longer owns a build-start queue to bound.
 
@@ -178,12 +178,12 @@ namespace MapRenderer.Tests.Text
         //    genuinely off-main symbol work, which starves deterministically in EditMode (a yielded frame is
         //    instantaneous there) — see MapRenderer.Tests.PlayMode.Text.SymbolSubsystemPumpTests.
 
-        // ── Tooth 3 (stale-drop before build start) RETIRED at A5b: a queued-but-departed tile can no longer
+        // ── Tooth 3 (stale-drop before build start) RETIRED: a queued-but-departed tile can no longer
         //    occur here — the kick itself never fires for a condemned/departed tile (TileManager's
         //    _releaseQueued check, ahead of TryBeginBuild). Replaced by TileSymbolKickTests' F-6
         //    (departed-before-kick tile: no TryBeginBuild).
 
-        // ── Telemetry provider (docs/telemetry-design.md §3): the subsystem OWNS the store's levels as a struct
+        // ── Telemetry provider (docs/telemetry-design.md): the subsystem OWNS the store's levels as a struct
         //    field, refreshes it at the end of CurrentBatch, and hands it out BY REFERENCE — nothing assembles
         //    them for it, and nothing subscribes. ──
         [Test]
@@ -233,7 +233,7 @@ namespace MapRenderer.Tests.Text
             var frame = SceneFrame.Mercator(new double2(0.0, 0.0));
             const double keepAllButRunFilter = 1e-9;
 
-            // Stage 4b: the alloc measurement must run on a FULLY quiescent frame — symbols committed, no pending
+            // The alloc measurement must run on a FULLY quiescent frame — symbols committed, no pending
             // tail, no reconcile in flight, and the schedule generation caught up (CollectRecomputeCount stable for
             // 2 frames). A dirty frame legitimately allocates (it captures + kicks a worker), so measuring one would
             // be a false positive; genuine quiescence is what the steady-state alloc guarantee is about.
@@ -264,13 +264,13 @@ namespace MapRenderer.Tests.Text
                 "a steady-state CurrentBatch (coverage cull + native winner-plan build) must allocate ZERO managed garbage");
         }
 
-        // ═══ Stage 4a (symbols-async-reconcile): memoized clean-frame reuse of the collected set ═══
+        // ═══ Memoized clean-frame reuse of the collected set ═══════════════════════════════════════
 
         // ── Test 2/4: on frames with no tile event, CurrentBatch REUSES the collected buffers byte-identically and
         //    does NOT recompute the ~11 ms cross-tile dedup (CollectRecomputeCount held flat), allocating zero GC.
         //    minCoverage = 0.0 so ClassifyActive early-returns — the full plan is then collect-derived and
         //    frame-independent, isolating the reconcile-governed fields (BlockId/LocalIndex/Departing/WinnerCount).
-        //    Stage 4b: the plan comes from the picked-up FRONT reconcile result; a clean frame neither schedules nor
+        //    The plan comes from the picked-up FRONT reconcile result; a clean frame neither schedules nor
         //    picks up, so the front is reused byte-identically. RED-verify: delete the
         //    `_store.CollectGeneration == _reconcileScheduledGen` guard in ScheduleReconcileIfDirty → it reschedules
         //    every clean frame → CollectRecomputeCount climbs (and the reschedule allocates) → both the counter and
@@ -282,7 +282,7 @@ namespace MapRenderer.Tests.Text
             var tile = new TileId { Z = 3, X = 0, Y = 0 };
             var loaded = new List<LoadedTileKey> { Key(tile) };
 
-            // Stage 4b: drive to FULL reconcile quiescence — symbols committed (WinnerCount > 0), no straggler tail
+            // Drive to FULL reconcile quiescence — symbols committed (WinnerCount > 0), no straggler tail
             // pending (ReadyTailCount == 0), NO reconcile in flight, and the schedule generation caught up
             // (CollectRecomputeCount stable for 2 frames). Only then is a subsequent frame genuinely "clean" (neither
             // schedules nor picks up), the precondition for the byte-identical-reuse + zero-GC assertions below.
@@ -844,9 +844,9 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Epic A / A5a-A5b: the acceptance teeth for the worker-phase / tail
+    /// The acceptance teeth for the worker-phase / tail
     /// split — the worker phase (<see cref="SymbolSubsystem.TryBeginBuild"/>'s returned pass) stops
-    /// after the pool-side extract and hands a ready tail (via the A5b pool→main handoff) to
+    /// after the pool-side extract and hands a ready tail (via the pool→main handoff) to
     /// <see cref="SymbolSubsystem.PumpBuilds"/>' budgeted tail-start loop (<c>RunTailAsync</c>), rather
     /// than shaping + committing inline. These teeth fail a shallow split — a rename that leaves the tail
     /// running inline, an unbudgeted tail loop, or a split that breaks the partial-commit guard. Both teeth
@@ -857,9 +857,9 @@ namespace MapRenderer.Tests.Text
     [TestFixture]
     public class SymbolTailPumpTests
     {
-        // ── F-1: the split is real (structural) — re-expressed at A5b (BuildTileAsync no longer exists;
+        // ── The split is real (structural) — re-expressed (BuildTileAsync no longer exists;
         //    the worker-pass call now lives in SymbolTileWorkerPass.RunWorkerAndHandoff, not a coroutine
-        //    method this grep-narrow tool can anchor on by signature). Genuinely RED pre-A5a: both call
+        //    method this grep-narrow tool can anchor on by signature). Genuinely RED before the change: both call
         //    forms lived inside one method's body, and RunTailAsync did not exist. ───────────────────────
         [Test]
         public void RunWorkerAndHandoff_NeverShapesOrCommits_RunTailAsync_DoesBothExactlyOnce()
@@ -889,11 +889,11 @@ namespace MapRenderer.Tests.Text
                 $"RunTailAsync must call '{commitCallForm}' exactly once — the sole commit site after the split.");
         }
 
-        // ── A3 merge-step follow-up: the commit-gating ORDER in RunTailAsync — the sole CompleteBuild commit
+        // ── The commit-gating ORDER in RunTailAsync — the sole CompleteBuild commit
         //    is reached only AFTER the whole per-layer CompleteOnMain loop AND a trailing ct check, so a
         //    cancel landing mid-loop (between processor tails k and k+1, or after the last one) never commits
         //    partial symbols. F-1 pins the call COUNTS (each exactly once); this pins their ORDER — the actual
-        //    partial-commit guard the A3 review flagged as covered only indirectly. Complements the behavioural
+        //    partial-commit guard review flagged as covered only indirectly. Complements the behavioural
         //    F-3(b) (cancel OBSERVED inside a shape await); this pins the guard structurally + deterministically.
         //    Glyph-fetch hoist: RunTailAsync now ALSO has a ct check right after its EnsureGlyphRangesAsync
         //    await, BEFORE the shape loop — so ".ThrowIfCancellationRequested(" now occurs TWICE in the tail
@@ -923,7 +923,7 @@ namespace MapRenderer.Tests.Text
             Assert.Less(lastShapeIdx, ctCheckIdx,
                 "the trailing ct check must come AFTER the whole per-layer shape loop (its LAST CompleteOnMain) " +
                 "— the commit is gated behind the WHOLE loop clearing cancellation first, so a mid-loop cancel " +
-                "never commits partial labels (A3 follow-up).");
+                "never commits partial labels (follow-up).");
             Assert.Less(ctCheckIdx, commitIdx,
                 "CompleteBuild must come AFTER the ct check — partial labels never reach the commit on a cancel.");
 
@@ -1080,7 +1080,7 @@ namespace MapRenderer.Tests.Text
     /// while a truly-evicted tile drops them. Also covers the async race — a tile released WHILE its build is in
     /// flight must still get its symbols (into the cached side), and a superseded build must be discarded.
     ///
-    /// <para><b>Reader cutover (4.2).</b> The reconciler now reads a tile's baked <see cref="SymbolTileBlock"/>,
+    /// <para><b>Reader cutover.</b> The reconciler now reads a tile's baked <see cref="SymbolTileBlock"/>,
     /// not a managed symbol list — <see cref="SymbolTileStore.CaptureSnapshot"/> skips any entry whose
     /// <c>Block</c> is null, so every commit a test wants <see cref="Collect"/>/<c>CollectInto</c> to see now goes
     /// through <see cref="Commit"/>, which bakes a REAL block. <see cref="_blockSources"/> maps a baked block back
@@ -1133,7 +1133,7 @@ namespace MapRenderer.Tests.Text
 
         // Bakes a REAL block for `buffer` and commits it — the reconciler cutover means every commit a test wants
         // CaptureSnapshot/CollectInto to see needs a real SymbolTileBlock (a block-less entry is no longer
-        // collected — SymbolTileStore.CaptureSnapshot's `Block == null` guard). UMR-87: Bake no longer interns
+        // collected — SymbolTileStore.CaptureSnapshot's `Block == null` guard). Bake does not intern
         // (it copies the ids ShapedSymbol already carries), so there is no table to share here any more.
         private bool Commit(SymbolTileStore store, SymbolTileStore.Key key, int gen, SymbolTileBuffer buffer)
         {
@@ -1275,7 +1275,7 @@ namespace MapRenderer.Tests.Text
             store.Clear();
         }
 
-        // ═══ A-1: the PULL/reconcile model (replaces the release/restore push-callbacks) ═══
+        // ═══ The PULL/reconcile model (replaces the release/restore push-callbacks) ════════
 
         private static List<SymbolTileStore.Key> Loaded(params SymbolTileStore.Key[] keys)
             => new List<SymbolTileStore.Key>(keys);
@@ -1486,7 +1486,7 @@ namespace MapRenderer.Tests.Text
             store.Clear();
         }
 
-        // ═══ Stage 3: the SEAMLESS same-cell HOLD across a zoom step (the fixed-grid pivot) ═══
+        // ═══ The SEAMLESS same-cell HOLD across a zoom step (the fixed-grid pivot) ════════════
 
         // ── THE pivot-defining tooth: an ACTIVE point symbol at z=9 and a DEPARTING point symbol with the SAME text
         //    and IDENTICAL AnchorRender at z=8 key on the SAME fixed CanonicalGridMeters cell — so the departing
@@ -1555,7 +1555,7 @@ namespace MapRenderer.Tests.Text
             store.Clear();
         }
 
-        // ═══ I6: icon cross-tile identity dedup (the I5b-deferred gap this stage closes) ═══
+        // ═══ Icon cross-tile identity dedup ═══
 
         // A point symbol pinned to a fixed co-located anchor (double3.zero for every call — "co-located" needs no
         // coordinate math since every test here only varies text/iconImage/tile) — mirrors CrossTileIdentityTests'
@@ -1572,7 +1572,7 @@ namespace MapRenderer.Tests.Text
             => CollectWithActiveCount(store, q, out _);
 
         // ── ★ RED pre-fix: two co-located icons (same anchor cell + layer, text=null, DISTINCT icon-image) used
-        //    to collide into one (symbol.Text == null for both ⇒ the pre-I6 4-arg key ignored the icon). Now both
+        //    to collide into one (symbol.Text == null for both ⇒ the old 4-arg key ignored the icon). Now both
         //    survive CollectInto. ──
         [Test]
         public void IconDedup_DistinctIconImage_SameCellAndLayer_BothSurvive()
@@ -1617,7 +1617,7 @@ namespace MapRenderer.Tests.Text
             store.Clear();
         }
 
-        // ── Byte-identical control: the pre-I6 text-dedup case, unaffected by the icon change — a text symbol at
+        // ── Byte-identical control: the old text-dedup case, unaffected by the icon change — a text symbol at
         //    the same cell/layer in a parent+child tile still dedups to one, finest-zoom wins. ──
         [Test]
         public void TextDedup_SameTextAndCell_ParentAndChildTile_DedupsToOne_Unaffected()
@@ -1637,12 +1637,12 @@ namespace MapRenderer.Tests.Text
             Commit(store, kChild, store.BeginBuild(kChild), childBuffer);
 
             List<ShapedSymbol> output = CollectQuantized(store, q);
-            Assert.AreEqual(1, output.Count, "text dedup is unchanged by I6");
+            Assert.AreEqual(1, output.Count, "text dedup is unchanged");
             Assert.AreEqual(2, output[0].FeatureIndex, "the finest (child) tile's label wins");
             store.Clear();
         }
 
-        // ═══ Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B): Block dispose lifecycle ═══
+        // ═══ Block dispose lifecycle ══════════════════════════════════════════════════════════
         //
         // SymbolTileStore.Entry.Block is held as plain System.IDisposable (pure dispose-once lifetime
         // bookkeeping — see SymbolTileStore's Entry doc); a fake counter stands in for the real
@@ -1788,7 +1788,7 @@ namespace MapRenderer.Tests.Text
             store.Clear();
         }
 
-        // ── Resident-graph shed (4.4b): a structural guard, not a behavioural one — Entry must never re-root a
+        // ── Resident-graph shed: a structural guard, not a behavioural one — Entry must never re-root a
         //    managed symbol graph. Reflects the private nested Entry type (there is no production seam for this;
         //    reflection into this assembly's internals is the house instrument for a private-type structural
         //    check) and fails the gate if a future edit adds back a List/array-typed field, catching a re-root
@@ -1814,7 +1814,7 @@ namespace MapRenderer.Tests.Text
             }
         }
 
-        // ═══ Stage 2 (symbols-async-reconcile): interned-id dedup key parity vs an independent STRING oracle ═══
+        // ═══ Interned-id dedup key parity vs an independent STRING oracle ══════════════════════════════════════
         //
         // The invariant tooth: swapping the dedup key from a string CrossTileSymbolKey to an integer DedupKey
         // (via the store's SymbolStringTable) must produce BYTE-IDENTICAL winners AND emission ORDER (and the
@@ -1824,7 +1824,7 @@ namespace MapRenderer.Tests.Text
 
         private const double ParityQ = 50.0;
 
-        // UMR-87: ShapedSymbol carries only the INTERNED TextId/IconImageId now — the oracle below must stay
+        // ShapedSymbol carries only the INTERNED TextId/IconImageId — the oracle below must stay
         // string-keyed (independent of SymbolStringTable.Intern, which is exactly what its RED-verification
         // targets), so ParityPoint/ParityCurved stash each symbol's raw text/icon here for Oracle() to read
         // back, instead of a now-nonexistent symbol.Text/.IconImage.
@@ -1862,10 +1862,10 @@ namespace MapRenderer.Tests.Text
         // Independent string-keyed reimplementation of the store's dedup — the same scan order, the same
         // finest-zoom rule, the same per-tile blockId assignment — but keyed on the STRING CrossTileSymbolKey.
         // activeTiles/departingTiles are in the SAME order the store enumerates _active / _departing.
-        // Stage 3: the oracle grids on the fixed CrossTileSymbolKey.CanonicalGridMeters (mirroring the store, which
+        // The oracle grids on the fixed CrossTileSymbolKey.CanonicalGridMeters (mirroring the store, which
         // no longer takes a caller grid) — so parity holds by construction, still proving interned-key ==
         // string-key under the SAME grid. `q` is passed through unchanged as the store's dedup GATE (magnitude
-        // irrelevant now); it is not the oracle grid. UMR-87: reads `_parityText`/`_parityIcon` (ParityPoint/
+        // irrelevant now); it is not the oracle grid. Reads `_parityText`/`_parityIcon` (ParityPoint/
         // ParityCurved's side table), never symbol.TextId/IconImageId — see the field doc above.
         private OracleResult Oracle(
             List<List<ShapedSymbol>> activeTiles, List<List<ShapedSymbol>> departingTiles, double q)
@@ -1993,7 +1993,7 @@ namespace MapRenderer.Tests.Text
             Assert.IsTrue(oracle.Output.Contains(bAlpha) && oracle.Output.Contains(bBeta), "distinct text both survive");
             Assert.IsTrue(oracle.Output.Contains(icoA) && oracle.Output.Contains(icoB), "distinct icons both survive");
 
-            // Reader cutover (4.2): the only surviving CollectInto overload is the plan-aware one, and it has no
+            // Reader cutover: the only surviving CollectInto overload is the plan-aware one, and it has no
             // managed symbol list to hand back — winner identity is (BlockId, LocalIndex). Comparing these
             // element-by-element against the INDEPENDENT string oracle's own (blockId, localIndex) arrays IS the
             // parity check (both assign blockId in the SAME per-tile scan order, localIndex == raw list position
@@ -2013,7 +2013,7 @@ namespace MapRenderer.Tests.Text
             store.Clear();
         }
 
-        // ═══ Stage 4a (symbols-async-reconcile): collect-generation invalidation completeness + purity ═══
+        // ═══ Collect-generation invalidation completeness + purity ═══════════════════════════════════════
         //
         // The memo (SymbolSubsystem.CurrentBatch reuses its collected buffers when CollectGeneration is
         // unchanged) is only correct if EVERY collect-relevant mutation bumps the generation (a missed bump = stale
@@ -2021,18 +2021,18 @@ namespace MapRenderer.Tests.Text
         // both directions + the purity premise the reuse rests on. Each Y case is its own assertion — omit that one
         // MarkCollectDirty() and the case goes RED (the parameterized completeness test IS the RED harness).
 
-        // The Y rows of the invalidation map (§1) — each MUST bump the collect generation.
+        // The Y rows of the invalidation map — each MUST bump the collect generation.
         public enum BumpCase
         {
-            BeginBuildNew,               // §1 #1 — first-seen tile pulled active
-            BeginBuildRefetchCached,     // §1 #1 — re-fetch of a cached/departing tile (symbols move to active)
-            CompleteBuildCommit,         // §1 #2 — symbol content lands
-            ReleaseTrue,                 // §1 #3 — active tile released to warm cache
-            ReleaseFalseTrueEvict,       // §1 #3b — active tile true-evicted (cache disabled)
-            ReleaseFalseStaleCachedDrop, // §1 #3c — a stale cached copy dropped
-            RestoreReal,                 // §1 #4 — cached → active (cache hit)
-            PurgeExpiredDeparting,       // §1 #7 — an expired departing key removed
-            Clear,                       // §1 #8 — whole set → empty
+            BeginBuildNew,               // #1 — first-seen tile pulled active
+            BeginBuildRefetchCached,     // #1 — re-fetch of a cached/departing tile (symbols move to active)
+            CompleteBuildCommit,         // #2 — symbol content lands
+            ReleaseTrue,                 // #3 — active tile released to warm cache
+            ReleaseFalseTrueEvict,       // #3b — active tile true-evicted (cache disabled)
+            ReleaseFalseStaleCachedDrop, // #3c — a stale cached copy dropped
+            RestoreReal,                 // #4 — cached → active (cache hit)
+            PurgeExpiredDeparting,       // #7 — an expired departing key removed
+            Clear,                       // #8 — whole set → empty
         }
 
         [Test]
@@ -2103,13 +2103,13 @@ namespace MapRenderer.Tests.Text
             store.Clear(); // some BumpCase branches leave a real block committed/cached — always safe to Clear
         }
 
-        // The N rows of §1 — a no-op / superseded mutation must NOT bump (else a stable cover dirties every frame and
+        // The N rows — a no-op / superseded mutation must NOT bump (else a stable cover dirties every frame and
         // the memo never fires). ReconcileActiveSet idempotency is elevated to its own headline tooth below.
         public enum NoBumpCase
         {
-            CompleteBuildSuperseded, // §1 #2b — a stale build's commit is discarded, no state change
-            RestoreNoOp,             // §1 #4b — nothing cached to restore
-            ReleaseNoOpEdge,         // §1 #3d — key neither active nor cached, transferredToCache=true
+            CompleteBuildSuperseded, // #2b — a stale build's commit is discarded, no state change
+            RestoreNoOp,             // #4b — nothing cached to restore
+            ReleaseNoOpEdge,         // #3d — key neither active nor cached, transferredToCache=true
         }
 
         [Test]
@@ -2162,7 +2162,7 @@ namespace MapRenderer.Tests.Text
             store.Clear();
         }
 
-        // ── CollectInto is a PURE function of the tile set (Stage 3): two back-to-back collects with no mutation
+        // ── CollectInto is a PURE function of the tile set: two back-to-back collects with no mutation
         //    between produce element-identical outputs (+ reference-identical OrderedBlocks) — the premise the memo's
         //    clean-frame reuse rests on (gen-unchanged ⇒ state-unchanged ⇒ collect-identical ⇒ safe to reuse). ──
         // Reader cutover: this test calls the plan-aware CollectInto, which runs CaptureSnapshot — a FakeDisposableBlock

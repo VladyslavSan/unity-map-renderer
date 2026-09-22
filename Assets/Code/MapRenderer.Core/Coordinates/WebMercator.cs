@@ -8,10 +8,10 @@ namespace MapRenderer.Core.Geo
     /// WGS84 geodetic lon/lat — eccentricity is intentionally ignored. Units: meters.
     ///
     /// <para><b>Single source of the Mercator forward formula.</b> The literal
-    /// <c>math.log(math.tan(π/4 + lat/2))</c> appears ONLY in <see cref="Forward(GeoCoordinate3D)"/>
-    /// (T2). All other callers delegate to it.</para>
+    /// <c>math.log(math.tan(π/4 + lat/2))</c> appears ONLY in <see cref="Forward(GeoCoordinate3D)"/>.
+    /// All other callers delegate to it.</para>
     ///
-    /// <para><b>Render-space axis convention (D6):</b> east=+X, altitude=+Y, north=+Z.
+    /// <para><b>Render-space axis convention:</b> east=+X, altitude=+Y, north=+Z.
     /// <c>Forward</c> returns <c>double3(mercX, altitude, mercY)</c>.</para>
     /// </summary>
     public static class WebMercator
@@ -34,9 +34,8 @@ namespace MapRenderer.Core.Geo
         public const double MaxLatitude = 85.05112878;
 
         /// <summary>
-        /// Tile size in pixels (Web Mercator slippy tiles). Planar/tiling-only — lives on WebMercator.
-        /// Single source of truth: replaces the old private CameraPoseMath.TilePixelSize and
-        /// the old public ViewInput.TilePixelSize (removed in S62).
+        /// Tile size in pixels (Web Mercator slippy tiles). Planar/tiling-only — lives on WebMercator,
+        /// the single source of truth.
         /// </summary>
         public const double TilePixelSize = 512.0;
 
@@ -44,7 +43,7 @@ namespace MapRenderer.Core.Geo
 
         /// <summary>
         /// Projects a geodetic point to render-space coordinates.
-        /// Render axes (D6): east=+X, altitude=+Y, north=+Z.
+        /// Render axes: east=+X, altitude=+Y, north=+Z.
         /// Returns <c>double3(mercX, altitude, mercY)</c>.
         ///
         /// <para>This is the ONLY method in the codebase that may contain the Mercator forward
@@ -76,7 +75,7 @@ namespace MapRenderer.Core.Geo
         }
 
         /// <summary>
-        /// Returns the constant ENU tangent basis for Web Mercator in render space (D6).
+        /// Returns the constant ENU tangent basis for Web Mercator in render space.
         /// <para>East=(1,0,0), Up=(0,1,0), North=(0,0,1) — constant for all surface points
         /// (planar projection, no curvature).</para>
         /// <para>Column convention: c0=East, c1=Up, c2=North.</para>

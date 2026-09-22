@@ -10,17 +10,16 @@ namespace MapRenderer.Unity.Rendering.Meshing
     public static partial class StyledFillExtrusionTileBuilder
     {
         /// <summary>
-        /// The write graph's stream-write node for one fill-extrusion layer (job-scheduling-design.md §3.1/
-        /// §3.2, §8 stage 4): one instance per layer, writing the roof at <c>[0, Vr)</c> then the walls at
+        /// The write graph's stream-write node for one fill-extrusion layer (job-scheduling-design.md):
+        /// one instance per layer, writing the roof at <c>[0, Vr)</c> then the walls at
         /// <c>[Vr, Vr+Vw)</c> — <see cref="ScheduleStreamWrite"/> is its only caller (itself called from
-        /// both a test-assembly caller (via <c>InternalsVisibleTo</c>) and <see cref="ScheduleWrite"/> —
-        /// job-scheduling-design.md §8 stage 4 Group B). Nested here (not a top-level type) so it can read this class's private
+        /// both a test-assembly caller (via <c>InternalsVisibleTo</c>) and <see cref="ScheduleWrite"/>).
+        /// Nested here (not a top-level type) so it can read this class's private
         /// vertex-stream layout (<see cref="PositionNormal"/>,
         /// <see cref="ExtrudeAndBake"/>) directly, mirroring <see cref="StyledFillTileBuilder.FillStreamWriteJob"/>'s
         /// shape.
         ///
-        /// <para><b>Roof</b> is computed here, per vertex — the same sec-φ bake the retired managed
-        /// flat/globe roof writers used to apply. <b>Walls</b> are a straight
+        /// <para><b>Roof</b> is computed here, per vertex — the sec-φ bake. <b>Walls</b> are a straight
         /// COPY: <see cref="FillExtrusionMeshGraph.Schedule"/> already computed every wall stream value
         /// (position, extrude, tangent, colour) via <c>WallQuadJob</c>, so this job's wall half only relocates
         /// those bytes into the mesh buffer at the roof-rebased offset — nothing about a wall vertex is
@@ -33,7 +32,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
         private struct FillExtrusionStreamWriteJob : IJob
         {
-            // ── Roof inputs — the graph's one column set (job-scheduling-design.md §3.7). ──────────────────
+            // ── Roof inputs — the graph's one column set (job-scheduling-design.md). ───────────────────────
             [ReadOnly] public NativeList<double3> WorldPositions;
             [ReadOnly] public NativeList<double3> VertexUp;
             [ReadOnly] public NativeList<double3> VertexEast;
@@ -127,15 +126,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     }
 
                     // (VertexEast, 1) on both arms: the flat arm's east is the constant (1,0,0), written by
-                    // AggregateJob — the retired managed roof writer's constant +X tangent, byte for
-                    // byte — same argument as FillStreamWriteJob's own doc; no arm branch needed here either.
+                    // AggregateJob — the constant +X tangent; same argument as FillStreamWriteJob's
+                    // own doc, no arm branch needed here either.
                     float3 east = (float3)vertexEast[i];
                     s2[i] = new Vector4(east.x, east.y, east.z, 1f);
 
                     s3[i] = FeatureColors[vertexFeatureIdx[i]];
                 }
 
-                // Reverse triangle winding at this GPU-index boundary (docs §7.1) — roof indices land at
+                // Reverse triangle winding at this GPU-index boundary — roof indices land at
                 // [0, triangleIndices.Length), no base offset (the roof is always vertex 0..vr-1).
                 for (int i = 0; i + 2 < triangleIndices.Length; i += 3)
                 {

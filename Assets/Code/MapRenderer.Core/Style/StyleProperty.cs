@@ -20,9 +20,8 @@ namespace MapRenderer.Core.Style
     ///     <see cref="DependsOnFeature"/> / <see cref="IsZoomDependent"/> derive from <see cref="Kind"/>.
     ///   </description></item>
     ///   <item><description>
-    ///     <see cref="Evaluate(double)"/> (uniform path) throws the same
-    ///     "Data-driven paint expressions … deferred to S12" <see cref="ArgumentException"/> that
-    ///     <c>PaintPropertyEvaluator</c> used to throw — the render pipeline's uniformity guard.
+    ///     <see cref="Evaluate(double)"/> (uniform path) throws <see cref="ArgumentException"/> for a
+    ///     Feature- or Composite-kind property — the render pipeline's uniformity guard.
     ///   </description></item>
     ///   <item><description>
     ///     <see cref="Evaluate(double,IFeature)"/> (bake path) passes zoom + feature and is safe for all
@@ -104,15 +103,15 @@ namespace MapRenderer.Core.Style
         /// </summary>
         /// <exception cref="ArgumentException">
         /// If this property is Feature- or Composite-kind — it cannot be evaluated as a material uniform.
-        /// Per-feature styling is deferred to S12; the caller must use
-        /// <see cref="Evaluate(double,IFeature)"/> or <see cref="TryEvaluate(double,IFeature,out T)"/>.
+        /// The caller must use <see cref="Evaluate(double,IFeature)"/> or
+        /// <see cref="TryEvaluate(double,IFeature,out T)"/> instead.
         /// </exception>
         public T Evaluate(double zoom)
         {
             if (DependsOnFeature)
                 throw new ArgumentException(
                     "Data-driven paint expressions (Feature / Composite kind) are not supported by " +
-                    "StyleProperty<T>.Evaluate(zoom) — per-feature styling is deferred to S12. " +
+                    "StyleProperty<T>.Evaluate(zoom) — per-feature styling is not supported here. " +
                     "Supply only Constant or Zoom expressions.");
             if (_isConstant) return _cached;
             return EvalProjected(zoom, null);

@@ -1,6 +1,6 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
 // (Tools/core-tests). Do NOT add any UnityEngine reference.
-// Tests B-CLASSIFY / B-CLAMP / B-PANPIN / T-FAKESOURCE for the S74 touch gesture recognizer.
+// Tests classification, clamping, pan pinning and the fake source for the touch gesture recognizer.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -29,7 +29,7 @@ namespace MapRenderer.Tests.Cameras
         private static ViewContext MakeView(CameraProperties cam)
             => new ViewContext { Camera = cam, ViewportPx = Vp, Projection = Proj };
 
-        // Config with explicit far-from-boundary thresholds (thresholds are logical px; no DpiScale — S92).
+        // Config with explicit far-from-boundary thresholds (thresholds are logical px; no DpiScale).
         private static TouchGestureConfig Cfg(double maxPitch = 60)
             => new TouchGestureConfig
             {
@@ -418,7 +418,7 @@ namespace MapRenderer.Tests.Cameras
             GestureIntent headingIntent = headingIntents[0];
             var patch = ViewInput.Apply(headingIntent, view);
             Assert.AreEqual(10.0, patch.Heading.Value, 1e-9,
-                "B-CLAMP: 350 + 20 wraps to 10.0 (S68 Wrap)");
+                "B-CLAMP: 350 + 20 wraps to 10.0 (Wrap)");
             Assert.IsNull(patch.Tilt, "B-CLAMP: HeadingBy leaves Tilt null");
         }
 

@@ -6,42 +6,32 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Lines
 {
     /// <summary>
-    /// The line graph's ribbon sizing node (job-scheduling-design.md §8 stage 6, E.2): per ring, sizes
-    /// <see cref="RibbonJob.MaxVertexCount"/>/<see cref="RibbonJob.MaxIndexCount"/> off THAT ring's
-    /// own point count — tighter than the shared scratch the retired serial <see cref="RibbonBatchJob"/>
-    /// sized to the corpus's global max — and prefix-sums into <see cref="RibbonBuffers.RingVertexOffsets"/>/
-    /// <see cref="RibbonBuffers.RingIndexOffsets"/>, resizing the flat oversized-per-ring output columns
-    /// and the per-ring real-count columns to match.
+    /// The line graph's ribbon sizing node: per ring, sizes
+    /// <see cref="RibbonJob.MaxVertexCount"/>/<see cref="RibbonJob.MaxIndexCount"/> off THAT ring's own
+    /// point count, and prefix-sums into <see cref="RibbonBuffers.RingVertexOffsets"/>/
+    /// <see cref="RibbonBuffers.RingIndexOffsets"/>, resizing the flat output columns and the per-ring
+    /// real-count columns to match.
     ///
-    /// <para><b>Ring-to-ring disjointness is structural</b> (job-scheduling-design.md §1), for the identical
-    /// reason it is in the earcut: <see cref="RibbonBatchJob.Execute"/> takes consecutive-entry slices
-    /// over a monotonic table. <b>Floors each ring's capacity at 1</b>, matching the retired serial code's own
-    /// <c>math.max(1, maxV)</c>/<c>math.max(1, maxI)</c> scratch-array sizing (<see cref="RibbonJob.MaxVertexCount"/>
-    /// returns 0 for a degenerate ring with fewer than 2 points) — without the floor, a degenerate ring would
-    /// contribute zero growth to its offset-table entry, which the monotonicity assertion below would then
-    /// (correctly) flag as non-disjoint for a case that is actually just an empty ring, not a capacity
-    /// defect.</para>
+    /// <para><b>Ring-to-ring disjointness is structural</b>, as it is in the earcut:
+    /// <see cref="RibbonBatchJob.Execute"/> takes consecutive-entry slices over a monotonic table.
+    /// <b>Each ring's capacity is floored at 1</b>, because <see cref="RibbonJob.MaxVertexCount"/> returns 0
+    /// for a ring with fewer than 2 points. Without the floor such a ring contributes zero growth to its
+    /// offset-table entry, which the monotonicity check below would flag as non-disjoint for what is only an
+    /// empty ring.</para>
     ///
-    /// <para><b>Monotonicity assertion — defence-in-depth, NOT the parallel ribbon's bit-exactness
-    /// precondition</b> (mirrors <see cref="SizingJob"/>'s own C.2 assertion and its doc, word for word):
-    /// disjointness is structural and no edit here can make two rings' slices overlap. What this catches
-    /// instead: a non-monotonic table surfacing as a player-build error code instead of an Editor-only
-    /// <c>GetSubArray</c> bounds throw. Strictly increasing holds here because every entry's growth is
-    /// floored at 1, above.
+    /// <para><b>The monotonicity check is defence-in-depth, not the parallel ribbon's precondition</b> —
+    /// the line twin of <see cref="SizingJob"/>'s. It turns a non-monotonic table into a player-build error
+    /// code instead of an Editor-only <c>GetSubArray</c> bounds throw.
     ///
-    /// <b>This early return protects the WHOLE downstream chain, not only <see cref="RibbonBatchJob"/>'s
-    /// own <c>GetSubArray</c> call.</b> It returns before any of its four <c>Resize</c> calls, so
-    /// <see cref="RibbonBuffers.PerRingVertexCount"/>/<c>PerRingIndexCount</c> stay at length 0.
-    /// <see cref="RibbonBatchJob"/> is deferred over that same list, so it correctly runs zero batches —
-    /// but that alone does not protect <see cref="RibbonAggregateJob"/>, one node further downstream,
-    /// unless IT ALSO bounds its own loop by that list's length rather than a borrowed ring count the early
-    /// return never touches (a real bug this stage shipped and fixed — see
-    /// <see cref="RibbonAggregateJob"/>'s own doc). Both must hold for this sentence to be true.</para>
+    /// <b>Its early return protects the WHOLE downstream chain.</b> It returns before all four
+    /// <c>Resize</c> calls, so <see cref="RibbonBuffers.PerRingVertexCount"/>/<c>PerRingIndexCount</c> stay
+    /// at length 0. <see cref="RibbonBatchJob"/> is deferred over that same list and runs zero batches, but
+    /// that alone does not protect <see cref="RibbonAggregateJob"/> one node further downstream, which must
+    /// also bound its own loop by that list's length rather than a borrowed ring count.</para>
     ///
-    /// <para><b>RoundSegments floor at 1 moves here</b> from the retired serial <see cref="RibbonBatchJob"/>
-    /// — sizing needs the floored value to size correctly, and the parallel ribbon node re-derives the
-    /// identical floor from the same <see cref="RoundSegments"/> input independently (a pure, side-effect-free
-    /// recomputation, not a second source of truth).</para>
+    /// <para><b>The <see cref="RoundSegments"/> floor at 1 lives here</b>, because sizing needs the floored
+    /// value. <see cref="RibbonBatchJob"/> re-derives the identical floor from the same input, a pure
+    /// recomputation rather than a second source of truth.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct RibbonSizingJob : IJob

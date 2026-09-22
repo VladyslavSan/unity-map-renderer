@@ -10,7 +10,7 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// Symbol-label perf Phase 1 / Stage 1 (design doc §4, §5 B): bakes one tile's build-time
+    /// Bakes one tile's build-time
     /// <see cref="SymbolTileBuffer"/> into a fresh native <see cref="SymbolTileBlock"/>. The per-symbol
     /// field math lives in the <see cref="BuildPointInput"/>/<see cref="BuildCurvedInput"/> helpers, shared by
     /// this bake and by the baker's golden test — the test states its expected per-symbol values by calling the
@@ -36,7 +36,7 @@ namespace MapRenderer.Unity.Text.Placement
         /// mid-bake (allocation or fill), the partially-built block is disposed (frees whatever
         /// <see cref="NativeArray{T}.IsCreated"/>) before the exception is rethrown — never a partial-allocation
         /// leak.</para></summary>
-        /// <summary>Drift-guard (design §5 B): the per-symbol POINT field math used by <see cref="Bake"/> (the
+        /// <summary>Drift-guard: the per-symbol POINT field math used by <see cref="Bake"/> (the
         /// production build-time bake) and by the baker's golden test (which states its expected per-symbol
         /// values by calling this SAME helper rather than re-deriving them) — ONE implementation, so the test's
         /// expectation cannot diverge from what the bake produces. Resolves everything stable about
@@ -48,8 +48,8 @@ namespace MapRenderer.Unity.Text.Placement
         {
             float4 color  = SymbolPlacementSystem.LinearColor(symbol.Paint);
             float4 halo   = SymbolPlacementSystem.LinearHaloColor(symbol.Paint);
-            // I6: icon FadeId identity now rides symbol.IconImageId (interned, 0 for text — a text
-            // symbol's FadeId is unchanged, PointFadeId's guard-skip fold). §10 D9: UNCONDITIONAL on pairRole — a pair's
+            // Icon FadeId identity rides symbol.IconImageId (interned, 0 for text — a text symbol's FadeId
+            // is unchanged, PointFadeId's guard-skip fold). UNCONDITIONAL on pairRole — a pair's
             // identity IS the owner's existing icon identity; a rider's FadeId is never read by a candidate
             // (StageJob skips staging a Rider symbol entirely) but is left correctly resolved so
             // the gather Compact pass's per-symbol fade-alive probe stays well-defined.
@@ -76,19 +76,19 @@ namespace MapRenderer.Unity.Text.Placement
                 HaloColor = halo, HaloWidthPx = symbol.Paint.HaloWidthPx, HaloBlurPx = symbol.Paint.HaloBlurPx,
                 IconRotateRadians = symbol.IconRotateRadians,
                 FadeId = fadeId,
-                // I5a: thread the icon/text discriminator through — NOT yet consumed by the draw side (I5b).
+                // Thread the icon/text discriminator through.
                 AtlasKind = symbol.Kind == SymbolKind.Icon ? SymbolKind.Icon : SymbolKind.Text,
                 AnchorLocal = anchorLocal, TileOriginRender = tileOriginRender,
-                // §10 D8/D10: RESOLVED role (SymbolPairing already decided whether the proposal holds) — the
-                // stage job needs nothing else; a paired owner's rider is the next point symbol.
+                // RESOLVED role (SymbolPairing already decided whether the proposal holds) — the stage job
+                // needs nothing else; a paired owner's rider is the next point symbol.
                 PairRole = pairRole,
-                // Stage C: read by StagePointPair only — a half whose role did not resolve carries it
-                // harmlessly (nothing outside the pair arm looks at it).
+                // Read by StagePointPair only — a half whose role did not resolve carries it harmlessly
+                // (nothing outside the pair arm looks at it).
                 PairOptional = symbol.PairOptional,
             };
         }
 
-        /// <summary>Drift-guard (design §5 B): the per-symbol CURVED field math used by <see cref="Bake"/> (the
+        /// <summary>Drift-guard: the per-symbol CURVED field math used by <see cref="Bake"/> (the
         /// production build-time bake) and by the baker's golden test (which states its expected per-symbol
         /// values by calling this SAME helper rather than re-deriving them) — ONE implementation, so the test's
         /// expectation cannot diverge from what the bake produces. Resolves everything stable about
@@ -108,11 +108,11 @@ namespace MapRenderer.Unity.Text.Placement
                 HaloColor = SymbolPlacementSystem.LinearHaloColor(symbol.Paint),
                 HaloWidthPx = symbol.Paint.HaloWidthPx, HaloBlurPx = symbol.Paint.HaloBlurPx,
                 TileOriginRender = tileOriginRender,
-                // P-B: the icon/text discriminator, textually identical to BuildPointInput's above — a
+                // The icon/text discriminator, textually identical to BuildPointInput's above — a
                 // map-aligned line icon is a one-glyph curved symbol sampling the SPRITE sheet.
                 AtlasKind = symbol.Kind == SymbolKind.Icon ? SymbolKind.Icon : SymbolKind.Text,
                 IconRotateRadians = symbol.IconRotateRadians,
-                // W1: the resolved pitch alignment — StageCurved's world-arc predicate. MetresPerLogicalPixel
+                // The resolved pitch alignment — StageCurved's world-arc predicate. MetresPerLogicalPixel
                 // is deliberately absent: it is this frame's camera ruler, patched per frame by
                 // StageJob, not a stable baked field.
                 PitchAlignment = symbol.PitchAlignment,
@@ -218,7 +218,7 @@ namespace MapRenderer.Unity.Text.Placement
                     int quadStart = quadIdx;
                     for (int q = 0; q < symbol.QuadCount; q++) block.Quads[quadIdx++] = buffer.Quads[symbol.QuadStart + q];
 
-                    // §10 D10: SymbolPairing resolves the PROPOSAL (a rider can go missing to per-symbol
+                    // SymbolPairing resolves the PROPOSAL (a rider can go missing to per-symbol
                     // shaping isolation) against the TILE list — this loop's own `buffer.Symbols` — so a
                     // half-built pair dissolves back into two None-role symbols.
                     SymbolPairRole pairRole = SymbolPairRole.None;
@@ -245,8 +245,8 @@ namespace MapRenderer.Unity.Text.Placement
                     block.RepAnchor[i] = symbol.AnchorRender;
 
                     // Mirrors SymbolBatch.AddPoint: one AABB box + its quads, one candidate.
-                    // §10 D8: UNCHANGED even for a paired half. A pair still spans TWO symbols here (icon +
-                    // text), each contributing 1 to MaxBoxes/MaxCandidates as before — but at stage time it
+                    // UNCHANGED even for a paired half. A pair still spans TWO symbols here (icon +
+                    // text), each contributing 1 to MaxBoxes/MaxCandidates — but at stage time it
                     // collapses to ONE real SymbolCandidate with BoxCount/EmitCount up to 2. So MaxBoxes covers
                     // a pair's two boxes EXACTLY, and MaxCandidates (the emit pool's size, SymbolPlacementSystem
                     // PreSizeStageOutputs) covers its two emits EXACTLY too, with one candidate slot of slack.
@@ -290,7 +290,7 @@ namespace MapRenderer.Unity.Text.Placement
                     block.WorldStart[i] = worldStart;
                     block.WorldCount[i] = pathLen;
                     block.RepAnchor[i] = rep;
-                    block.PairRoles[i] = SymbolPairRole.None; // §10 fence: a curved symbol is never a pair half
+                    block.PairRoles[i] = SymbolPairRole.None; // fence: a curved symbol is never a pair half
 
                     // Mirrors SymbolBatch.AddCurved: worst case every anchor + the centred fallback stages.
                     int placements = anchorLen + 1;
@@ -305,7 +305,7 @@ namespace MapRenderer.Unity.Text.Placement
             // rather than silently leaving a count short of Length — which is the point of not carrying one.
         }
 
-        // P2: manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
+        // Manual per-component narrow (convention — no assumed double3→float3 cast operator; mirrors
         // BuildPointInput's anchorLocal narrowing above). Up is a DIRECTION (pre-RTC render-space), so unlike
         // AnchorRender it needs no tile-origin subtraction — narrow only. Internal (not private): the baker's
         // golden test reuses it verbatim to state its expected world-ups rather than duplicating the cast, so
@@ -314,7 +314,7 @@ namespace MapRenderer.Unity.Text.Placement
 
         // Every symbol in one build's list shares the same physical tile (one (source, tile) build) — the
         // first symbol's TileKey identifies the whole block; an empty build (every symbol failed and was
-        // skipped) has no tile identity to report, so it stays 0 (nothing downstream keys off it in Stage 1).
+        // skipped) has no tile identity to report, so it stays 0 (nothing downstream keys off it).
         private static long ResolveTileKey(SymbolTileBuffer buffer, int rawCount)
             => rawCount > 0 ? buffer.Symbols[0].TileKey : 0;
     }

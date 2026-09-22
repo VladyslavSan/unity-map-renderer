@@ -184,7 +184,7 @@ namespace MapRenderer.Tests.Filters
     /// Load-bearing equivalence acceptance tooth: for each legacy filter and its hand-written
     /// expression equivalent, assert IDENTICAL selected subsets over the same feature set.
     /// This confirms that translate-then-parse produces the same result as writing the expression directly,
-    /// and that the S09 expression engine backs both paths.
+    /// and that one expression engine backs both paths.
     /// </summary>
     [TestFixture]
     internal class FilterEquivalenceTests

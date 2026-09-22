@@ -17,7 +17,7 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// I4 — the Unity-side sprite sheet: decodes a MapLibre sprite PNG into a single <see cref="Texture2D"/>
+    /// The Unity-side sprite sheet: decodes a MapLibre sprite PNG into a single <see cref="Texture2D"/>
     /// and pairs it with the already-parsed <see cref="SpriteIndex"/>. Immutable (a sheet is a single
     /// pre-baked image, unlike <see cref="GlyphAtlasTexture"/>'s grow-and-reupload atlas) — built once from
     /// a fetched <see cref="SpriteResponse"/> and disposed as a unit.
@@ -28,7 +28,7 @@ namespace MapRenderer.Unity.Text
     /// no flip (see <see cref="GlyphAtlasTexture"/>). <see cref="Texture2D.LoadImage"/> does the OPPOSITE —
     /// it decodes a PNG's top row to <c>GetPixel</c> row <c>height-1</c> (Unity's bottom-left-origin
     /// <c>GetPixel</c> convention). To make this sheet obey the SAME contract as the glyph atlas — so the
-    /// icon-quad-layout / SDF-glyph shader path (I5) can bind either texture unchanged — this constructor
+    /// icon-quad-layout / SDF-glyph shader path can bind either texture unchanged — this constructor
     /// reads the decode into a top-left-origin buffer and writes the repacked result back row-reversed, so
     /// the sprite JSON's top-left-origin <c>(x,y)</c> rect also equals <c>GetPixel(x,y)</c> here. This
     /// renders icons UPRIGHT (matching text on screen), pinned end-to-end by

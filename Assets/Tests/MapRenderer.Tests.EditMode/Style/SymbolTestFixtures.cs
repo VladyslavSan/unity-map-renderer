@@ -74,7 +74,7 @@ namespace MapRenderer.Tests
         /// <summary>The real shipped Liberty style, parsed once per test run.</summary>
         public static StyleDocument LibertyDoc() => _libertyDoc ??= StyleParser.Parse(LoadLibertyJson());
 
-        /// <summary>The real shipped Liberty-night style (the day/night pair UMR-147 turns on), parsed once
+        /// <summary>The real shipped Liberty-night style (the day/night pair), parsed once
         /// per test run.</summary>
         public static StyleDocument LibertyNightDoc() => _libertyNightDoc ??= StyleParser.Parse(LoadLibertyNightJson());
 
@@ -103,7 +103,7 @@ namespace MapRenderer.Tests
                 TranslatePx = symbol.TranslatePx, TranslateAnchor = symbol.TranslateAnchor,
                 RotationAlignment = symbol.RotationAlignment, Color = new float4(1, 1, 1, 1),
                 AtlasKind = atlasKind,
-                PairOptional = symbol.PairOptional, // stage C — mirrors BuildPointInput's own carry
+                PairOptional = symbol.PairOptional, // mirrors BuildPointInput's own carry
             };
     }
 }

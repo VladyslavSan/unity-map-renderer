@@ -7,9 +7,9 @@ namespace MapRenderer.Core.Geo
 {
     /// <summary>
     /// Earth-Centered, Earth-Fixed (ECEF) coordinate system — WGS-84 ellipsoid.
-    /// Backs the Globe projection mode. MATH ONLY in S61 (no globe rendering here).
+    /// Backs the Globe projection mode. Math only — no globe rendering here.
     ///
-    /// <para><b>Render-space axis convention (D6 / docs §7):</b>
+    /// <para><b>Render-space axis convention</b> (<c>docs/coordinates-and-projections.md</c>):
     /// ECEF (X,Y,Z) is axis-swapped to render space as (X_ecef, Z_ecef, Y_ecef),
     /// i.e. render = <c>double3(X_ecef, Z_ecef, Y_ecef)</c>.</para>
     ///
@@ -35,15 +35,12 @@ namespace MapRenderer.Core.Geo
         /// Projects a geodetic point (WGS-84 lon, lat degrees + altitude metres) to
         /// render-space ECEF coordinates.
         ///
-        /// <para>ECEF forward formula (docs §3):
+        /// <para>ECEF forward formula:
         /// <c>N = A / sqrt(1 − E2·sin²φ)</c><br/>
         /// <c>X = (N+h)·cosφ·cosλ ; Y = (N+h)·cosφ·sinλ ; Z = (N(1−E2)+h)·sinφ</c></para>
         ///
-        /// <para>Render-space axis-swap (D6 / docs §7):
+        /// <para>Render-space axis-swap:
         /// <c>render = double3(X_ecef, Z_ecef, Y_ecef)</c></para>
-        ///
-        /// <para>Verification (T3): North pole (lat=90) → render ≈ (0, b, 0)
-        /// where b = EarthConstants.B = A*(1−F) ≈ 6356752.314…</para>
         /// </summary>
         public static double3 Forward(GeoCoordinate3D geo)
         {
@@ -81,19 +78,16 @@ namespace MapRenderer.Core.Geo
 
         /// <summary>
         /// Returns the ENU (East-North-Up) tangent basis at the given surface position,
-        /// axis-swapped to render space (D6 / docs §3).
+        /// axis-swapped to render space.
         ///
         /// <para>ECEF ENU unit vectors before axis-swap:<br/>
         /// <c>up   = (cosφ·cosλ, cosφ·sinλ, sinφ)</c><br/>
         /// <c>east = (−sinλ, cosλ, 0)</c><br/>
-        /// <c>north = cross(up, east)</c> — computed manually (no math.cross required)</para>
+        /// <c>north = cross(up, east)</c></para>
         ///
         /// <para>Render-space axis-swap applied to each: (X_ecef, Z_ecef, Y_ecef).</para>
         ///
         /// <para>Column convention: c0=East, c1=Up, c2=North.</para>
-        ///
-        /// <para>Verification (T3d): <c>TangentBasis(0,0)</c> Up≈(1,0,0);
-        /// <c>TangentBasis(0,90)</c> Up≈(0,1,0). Both bases orthonormal.</para>
         /// </summary>
         public static float3x3 TangentBasis(GeoCoordinate geo)
         {
@@ -105,7 +99,7 @@ namespace MapRenderer.Core.Geo
             double sinLam = math.sin(lambda);
             double cosLam = math.cos(lambda);
 
-            // ENU unit vectors in ECEF (docs §3).
+            // ENU unit vectors in ECEF.
             double3 up   = new double3(cosPhi * cosLam, cosPhi * sinLam, sinPhi);
             double3 east = new double3(-sinLam, cosLam, 0.0);
             double3 north = math.cross(up, east);

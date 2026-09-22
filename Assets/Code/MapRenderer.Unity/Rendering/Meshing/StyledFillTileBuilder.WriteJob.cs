@@ -10,18 +10,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
     {
 
         /// <summary>
-        /// The write graph's stream-write node (job-scheduling-design.md §3.1/§3.2, §8 stage 2): one
-        /// instance per layer, reproducing this class's managed stream-copy loop as a Burst job over the
-        /// graph's output lists. Nested here (not a top-level type) so it can read this class's private
+        /// The write graph's stream-write node (job-scheduling-design.md): one
+        /// instance per layer, writing the graph's output lists into the mesh buffers as a Burst job.
+        /// Nested here (not a top-level type) so it can read this class's private
         /// vertex-stream layout (<see cref="FillPositionNormal"/>, <see cref="PatternCoord"/>) directly —
         /// <see cref="ScheduleStreamWrite"/> is its only caller (itself called from both a test-assembly
-        /// caller, reached via <c>InternalsVisibleTo</c>, and <see cref="ScheduleWrite"/> —
-        /// job-scheduling-design.md §8 stage 4 Group B).
+        /// caller, reached via <c>InternalsVisibleTo</c>, and <see cref="ScheduleWrite"/>).
         ///
-        /// <para>One job, both projections. After the §3.7 output reshape the graph hands this job ONE
-        /// column set regardless of arm, and the tangent is <c>(VertexEast[i], 1)</c> on both: the flat
-        /// arm's east is the constant <c>(1,0,0)</c> (<c>AggregateJob</c>'s write — see its own doc) —
-        /// the retired managed writer's constant +X tangent, byte for byte; there is no curved twin here.</para>
+        /// <para>One job, both projections. The graph hands this job ONE column set regardless of arm, and
+        /// the tangent is <c>(VertexEast[i], 1)</c> on both: the flat arm's east is the constant
+        /// <c>(1,0,0)</c> (<c>AggregateJob</c>'s write — see its own doc); there is no curved twin
+        /// here.</para>
         ///
         /// <para><b>Holds the whole <see cref="Md"/>, not four separate stream <c>NativeArray</c> fields</b>
         /// — see docs/lessons-learned.md for the MeshData-aliasing fault this shape avoids.</para>
@@ -32,7 +31,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
         private struct FillStreamWriteJob : IJob
         {
-            // ── Inputs (the graph's one column set, job-scheduling-design.md §3.7) ───────────────────────
+            // ── Inputs (the graph's one column set, job-scheduling-design.md) ───────────────────────────
             [ReadOnly] public NativeList<double3> WorldPositions;
             [ReadOnly] public NativeList<double3> VertexUp;
             [ReadOnly] public NativeList<double3> VertexEast;
@@ -105,8 +104,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                 OutBounds[0] = new float3x2(bMin, bMax);
 
-                // Reverse triangle winding at this GPU-index boundary (docs §7.1) — same rule as
-                // WriteGeometry.
+                // Reverse triangle winding at this GPU-index boundary
+                // (docs/coordinates-and-projections.md).
                 for (int i = 0; i + 2 < triangleIndices.Length; i += 3)
                 {
                     indices[i + 0] = triangleIndices[i + 0];

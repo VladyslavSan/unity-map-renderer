@@ -6,22 +6,18 @@ using MapRenderer.Core.Rendering;
 namespace MapRenderer.Tests.Rendering
 {
     /// <summary>
-    /// S07 — painter's-algorithm queue-assignment tests for <see cref="LayerDrawOrder"/>.
+    /// Painter's-algorithm queue-assignment tests for <see cref="LayerDrawOrder"/>.
     ///
     /// Engine-free (pure C#) so it runs in BOTH the Unity EditMode runner and the fast
     /// dotnet core-tests project. Proves the MECHANISM owns the order: queues are strictly
     /// monotonic with declared index, distinct, all inside the transparent band.
     ///
-    /// <para><b>Stage 2 (G7/D7, road-shields):</b> <see cref="LayerDrawOrder"/> grew a sub-slot BAND per
-    /// declared layer (a symbol layer's icon = <see cref="LayerSubSlot.Base"/>, text =
+    /// <para><b>Sub-slot bands.</b> <see cref="LayerDrawOrder"/> gives each declared layer a sub-slot
+    /// BAND (a symbol layer's icon = <see cref="LayerSubSlot.Base"/>, text =
     /// <see cref="LayerSubSlot.Above"/>, so the badge never paints over its own number).
-    /// <c>Queues_AreExactly_BasePlusIndex_{DefaultBase,CustomBase}</c> pinned exact values under the OLD
-    /// stride-1 formula (<c>3000,3001,3002…</c>) — they are REPLACED here by
-    /// <see cref="BandStart_AndUniformStride_AreCorrect"/> (N5), which reads the stride off the named
-    /// <see cref="LayerDrawOrder.SubSlotsPerLayer"/> constant rather than a literal. Restating the old pair
-    /// at the new stride-2 values would be a pure re-bake with no added falsifying power; N5 additionally
-    /// catches a NON-UNIFORM stride, which an exact-value list cannot distinguish from a deliberate change.
-    /// N1/N2/N3/N4/N6 are new, pinning the sub-slot band itself.</para>
+    /// <see cref="BandStart_AndUniformStride_AreCorrect"/> reads the stride off the named
+    /// <see cref="LayerDrawOrder.SubSlotsPerLayer"/> constant rather than a literal, so it also catches a
+    /// NON-UNIFORM stride, which an exact-value list cannot distinguish from an intended change.</para>
     /// </summary>
     [TestFixture]
     public class LayerDrawOrderTests
@@ -55,7 +51,7 @@ namespace MapRenderer.Tests.Rendering
                     LayerDrawOrder.QueueFor(i, LayerSubSlot.Base),
                     Is.LessThan(LayerDrawOrder.QueueFor(i, LayerSubSlot.Above)),
                     $"layer {i}'s Base (icon) sub-slot must be strictly below its own Above (text) sub-slot " +
-                    "(G7/D7) — otherwise the badge can paint over the number it frames.");
+                    "— otherwise the badge can paint over the number it frames.");
         }
 
         // N2 — the tooth that kills the naive "text = queue + 1" fix (SubSlotsPerLayer left at 1).
@@ -172,8 +168,7 @@ namespace MapRenderer.Tests.Rendering
         }
 
         // N7 — the ceiling must cover the BAND'S TOP (the last layer's Above sub-slot), not just its Base.
-        // Verified RED against TODAY'S code with NO injection at all (the pre-D7 stride-1 formula accepts
-        // 1001 layers here) — see the dev report for the recorded failure text.
+        // Verified RED against a stride-1 formula, which accepts 1001 layers here.
         [Test]
         public void LayerCountExceedingQueueCeiling_Throws()
         {

@@ -1,4 +1,4 @@
-// Rendering-backend GPU/visual acceptance tests, part 1 of 2 (UMR-176 pack: backends topic).
+// Rendering-backend GPU/visual acceptance tests, part 1 of 2.
 //
 // Split by a using collision, not the line cap: `MapRenderer.Core.Geo.CameraProperties` vs
 // `UnityEngine.Rendering.CameraProperties` (CS0104) — this file's members import
@@ -7,11 +7,11 @@
 // resolved by NOT merging, never by qualifying the test's own reference).
 //
 // Contents:
-//   EntitiesGraphicsSpikeTests  — S53a — ECS render spike (the de-risking GATE for the S53 ECS epic).
-//   GlobeSnapshotTests          — Renders the z=0 "countries" fixture tile projected onto a sphere and writes a PNG — first visible proof the pipeline renders a spherical earth (S91-C).
-//   EntitiesTileRendererTests   — S53b increment 1 — EntitiesTileRenderer engine tests.
-//   GlobeBackendSnapshotTests   — S91-C Slice 2 — proves the globe places correctly through a REAL render backend, not just the hand-wired snapshot.
-//   BrgLinePropReadbackTests    — S76 CPU-buffer readback acceptance tests: line props must be packed at the correct SoA slots.
+//   EntitiesGraphicsSpikeTests  — ECS render spike: an Entities-Graphics entity renders in the headless snapshot path.
+//   GlobeSnapshotTests          — Renders the z=0 "countries" fixture tile projected onto a sphere and writes a PNG — visible proof the pipeline renders a spherical earth.
+//   EntitiesTileRendererTests   — EntitiesTileRenderer engine tests.
+//   GlobeBackendSnapshotTests   — proves the globe places correctly through a REAL render backend, not just the hand-wired snapshot.
+//   BrgLinePropReadbackTests    — CPU-buffer readback acceptance tests: line props must be packed at the correct SoA slots.
 
 using NUnit.Framework;
 using UnityEngine;
@@ -34,7 +34,7 @@ using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Tests.Visual
 {
-    // S53a — ECS render spike (the de-risking GATE for the S53 ECS epic).
+    // ECS render spike.
     //
     // Proves the single fact the whole epic hinges on: an Entities-Graphics entity drawing the live
     // Map/Fill material renders NON-EMPTY pixels in the existing headless EditMode SnapshotRenderer
@@ -53,7 +53,7 @@ namespace MapRenderer.Tests.Visual
     // found its honest-stop result.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // EntitiesGraphicsSpikeTests — S53a — ECS render spike (the de-risking GATE for the S53 ECS epic).
+    // EntitiesGraphicsSpikeTests — ECS render spike
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -206,7 +206,7 @@ namespace MapRenderer.Tests.Visual
 
     // GlobeSnapshotTests — renders the z=0 "countries" fixture tile projected onto a SPHERE (SphericalProjection)
     // and writes a PNG. The z=0 tile is the whole world in one tile, so this is a full globe of countries in one
-    // mesh — the first visible proof that the projection pipeline renders a spherical earth (S91-C).
+    // mesh — visible proof that the projection pipeline renders a spherical earth.
     //
     // Fills already bake the per-vertex radial normal (from the projection's Up), so the Lit material shades the
     // sphere correctly. Positions are ECEF (origin-relative to the tile corner); FitToView frames the 3D bounds.
@@ -330,7 +330,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── Stall #3: ID route — no per-entity RenderMeshArray, and balanced mesh register/unregister ──
+        // ── ID route — no per-entity RenderMeshArray, and balanced mesh register/unregister ────────────
 
         [Test]
         public void AddTileLayer_IdRoute_NoPerEntityArray_BalancedMeshRegistration()
@@ -367,7 +367,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── Stall #2: batched removal — one DestroyEntity(NativeArray) structural change per record ──
+        // ── Batched removal — one DestroyEntity(NativeArray) structural change per record ─────────────
 
         [Test]
         public void RemoveItems_DestroysWholeRecord_InOneBatchedStructuralChange()
@@ -568,11 +568,10 @@ namespace MapRenderer.Tests.Visual
 
         // ── Frustum-cull bounds (GPU-independent) ───────────────────────────────────────────────
         // Regression: at low zoom (Mercator z3–4, globe z0–1) render units are ECEF metres, so a single
-        // tile mesh spans several 1e6 m. The backend used to stamp every entity a fixed
-        // { Center=0, Extents=1e6 } RenderBounds; that box is both undersized AND off-centre from such a
-        // mesh, so EG frustum-culled the whole tile whenever the tile's origin corner left the Game
-        // frustum — tiles vanished in the Game view but not the (wider) Scene view. RenderBounds must
-        // ENCLOSE the mesh. Asserting enclosure (not "≠ 1e6") encodes the actual violated invariant.
+        // tile mesh spans several 1e6 m. A fixed { Center=0, Extents=1e6 } RenderBounds is both undersized
+        // AND off-centre from such a mesh, so EG frustum-culls the whole tile whenever the tile's origin
+        // corner leaves the Game frustum — tiles vanish in the Game view but not the (wider) Scene view.
+        // RenderBounds must ENCLOSE the mesh; asserting enclosure, not "≠ 1e6", encodes that invariant.
 
         [Test]
         public void AddTileLayer_RenderBounds_EncloseLargeMesh_NotFixed1e6Box()
@@ -758,10 +757,9 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // GlobeBackendSnapshotTests (S91-C, Slice 2) — proves the globe places correctly through a REAL render
-    // backend, not just the hand-wired snapshot. This is the coverage the Slice-1 review flagged as missing:
-    // the per-tile rebase-rotation branch (backends set rotation = quaternion(rebase) + position =
-    // TileToSceneRebased) is exercised in production code but no test drove a NON-identity rebase.
+    // GlobeBackendSnapshotTests — proves the globe places correctly through a REAL render backend, not just
+    // the hand-wired snapshot. It is what drives the per-tile rebase-rotation branch (backends set
+    // rotation = quaternion(rebase) + position = TileToSceneRebased) with a NON-identity rebase.
     //
     // Drives the GameObjects backend (its transform hierarchy is GPU-independent, so the placement is asserted
     // numerically even headless), then renders it through the SAME CameraPoseMath.ComputeRelativePose orbit the live
@@ -769,7 +767,7 @@ namespace MapRenderer.Tests.Visual
     // GlobePlacementTests.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // GlobeBackendSnapshotTests — S91-C Slice 2 — proves the globe places correctly through a REAL render backend
+    // GlobeBackendSnapshotTests — proves the globe places correctly through a REAL render backend
     // ───────────────────────────────────────────────────────────────────────────────────
 
     public class GlobeBackendSnapshotTests : BaseTestFixture
@@ -856,7 +854,7 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // S76 BRG line-prop readback tests — THE CPU-BUFFER CI GATE (GPU-independent, always green headless).
+    // BRG line-prop readback tests — THE CPU-BUFFER CI GATE (GPU-independent, always green headless).
     //
     // Directly constructs a BrgTileRenderer from a line-only RenderLayerSet (no MapView) and asserts that:
     //   1. FloatsPerInstance == 82 and MetadataEntryCount == 33 (exact plan-count tooth).
@@ -870,11 +868,11 @@ namespace MapRenderer.Tests.Visual
     // Pattern: mirrors BrgTileRendererEvictionTests (direct BrgTileRenderer construction, no MapView).
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // BrgLinePropReadbackTests — S76 CPU-buffer readback acceptance tests
+    // BrgLinePropReadbackTests — CPU-buffer readback acceptance tests
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S76 CPU-buffer readback acceptance tests: line props must be packed at the correct SoA slots.
+    /// CPU-buffer readback acceptance tests: line props must be packed at the correct SoA slots.
     /// All assertions are GPU-independent (read the CPU float[] buffer via <see cref="BrgTileRenderer.GetInstancePropValue"/>).
     /// </summary>
     [TestFixture]
@@ -947,7 +945,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(packedWidth, Is.Not.NaN,
                     "GetInstancePropValue(_Width) returned NaN — no plan entry for _Width. " +
                     "This is the original bug: _Width has no SoA slot → reads garbage (byte 0 = transform). " +
-                    "S76: MapInstanceData must declare _Width as a field so InstancePropPlan creates its entry.");
+                    "MapInstanceData must declare _Width as a field so InstancePropPlan creates its entry.");
 
                 Assert.That(packedWidth, Is.EqualTo(matWidth).Within(1e-3f),
                     $"Packed _Width ({packedWidth}) must equal mat.GetFloat(_Width) ({matWidth}). " +
@@ -957,11 +955,11 @@ namespace MapRenderer.Tests.Visual
                     $"Packed _Width must be 40.0 (the style's line-width). Got {packedWidth}.");
 
                 // ── _Opacity byte-identical-wire spot check ───────────────────────────────────
-                // _Opacity was at SoA float offset 46 before S76 and must remain there so the fill
-                // wire layout is byte-identical (no offset shift for existing 19 props).
+                // _Opacity sits at SoA float offset 46 and must stay there, so the fill wire layout is
+                // byte-identical (no offset shift for the existing 19 props).
                 int opacitySoaOffset = brg.GetPropSoaOffset(opacityId);
                 Assert.That(opacitySoaOffset, Is.EqualTo(46),
-                    $"_Opacity SoA float offset must be 46 (unchanged from pre-S76). " +
+                    $"_Opacity SoA float offset must be 46. " +
                     $"Got {opacitySoaOffset}. If shifted, the fill wire layout changed and existing " +
                     "fill-rendered tiles would misread per-instance properties.");
             }

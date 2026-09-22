@@ -1,6 +1,6 @@
 // Unity EditMode only — NativeArray, Burst jobs, UnityEngine.Application. NOT registered in core-tests.csproj.
 //
-// The compile checkpoint (job-scheduling-design.md §8 stage 1): three Burst behaviours the fill graph's
+// The compile checkpoint (job-scheduling-design.md): three Burst behaviours the fill graph's
 // shape depends on, none previously exercised in this repo:
 //   (i)   GetSubArray + a nested `new EarcutJob{...}.Execute()` call, inside another job's Execute — EarcutBatchJob.
 //   (ii)  NativeSortExtension.Sort<int, TComparer> over a generic comparer holding two NativeArray fields,
@@ -9,7 +9,7 @@
 //         Execute(int index)) — TileToGeoJob / ProjectPointsJob<TProj>.
 // A green numeric assertion here is NOT the verdict: CompileSynchronously=true falls back to managed IL on a
 // Burst compile failure, so these tests can pass while Burst never compiled the job. The verdict is the log
-// grep job-scheduling-design.md §7 Safety mandates (run-tests.sh's own log, greped for Burst errors) — this
+// grep job-scheduling-design.md's Safety section mandates (run-tests.sh's own log, greped for Burst errors) — this
 // file only supplies the numeric correctness half.
 
 using System.IO;
@@ -41,7 +41,7 @@ namespace MapRenderer.Tests.Jobs
             return File.ReadAllBytes(path);
         }
 
-        // ── Shared setup moved to EarcutJobGatherHarness.BuildGatherState (A0) — the real per-polygon ────
+        // ── Shared setup moved to EarcutJobGatherHarness.BuildGatherState — the real per-polygon ─────────
         // ── gather chain, now also driving the re-homed corpus and full-pipeline teeth. ───────────────────
 
         // ── (1) EarcutBatchJob — unknown (i): GetSubArray + nested EarcutJob.Execute() inside a job ────────
@@ -50,7 +50,7 @@ namespace MapRenderer.Tests.Jobs
         /// itself, so a defect inside <c>EarcutJob</c> reproduces identically on both sides and this test
         /// cannot see it (RED-verified: a transposed vertex here stayed green). Kernel correctness is
         /// pinned by <c>WaterTriangulationTests</c>' 8-tile corpus sweep instead (property coverage against
-        /// geometric ground truth, not arm agreement with a managed twin — see A0 stage report).</summary>
+        /// geometric ground truth, not arm agreement with a managed twin).</summary>
         [Test]
         public void EarcutBatchJob_MatchesPerPolygonEarcutJobRun()
         {
@@ -154,8 +154,8 @@ namespace MapRenderer.Tests.Jobs
 
                 for (int pi = 0; pi < polyCount; pi++)
                 {
-                    // The capacity backstop this job used to write moved to AggregateJob (job-scheduling-
-                    // design.md §8 stage 6, C.1) — checked here directly instead, against the same bound
+                    // The capacity backstop this job used to write lives in AggregateJob — checked here directly
+                    // instead, against the same bound
                     // (WorkOffsets[pi+1] - WorkOffsets[pi]) AggregateJob now compares against.
                     int sLen = s.Buffers.WorkOffsets[pi + 1] - s.Buffers.WorkOffsets[pi];
                     Assert.LessOrEqual(batchMergedVC[pi], sLen, $"polygon {pi}: the earcut batch must not overrun buffers on real corpus input");

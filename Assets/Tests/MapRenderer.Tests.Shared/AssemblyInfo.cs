@@ -1,9 +1,8 @@
 using System.Runtime.CompilerServices;
 
-// Shared test-support assembly (cross-platform: includePlatforms empty) holding the engine-touching
-// helpers the EditMode, PlayMode and Visual test assemblies need. Its internal helpers are reached
-// from those test assemblies via these grants; the production-internals it touches are granted to THIS
-// assembly by MapRenderer.{Core,Jobs,Unity}'s own InternalsVisibleTo files.
+// Shared test-support assembly (cross-platform: includePlatforms empty) for the engine-touching helpers
+// EditMode, PlayMode and Visual need. MapRenderer.{Core,Jobs,Unity} grant their own internals to this
+// assembly through their InternalsVisibleTo files.
 [assembly: InternalsVisibleTo("MapRenderer.Tests.EditMode")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.PlayMode")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.Visual")]

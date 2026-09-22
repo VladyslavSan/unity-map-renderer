@@ -5,7 +5,7 @@ using MapRenderer.Core.Text.Sprites;
 namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
-    /// I4: the seam that builds a sprite <see cref="ISpriteSource"/> from a style document's root
+    /// The seam that builds a sprite <see cref="ISpriteSource"/> from a style document's root
     /// <c>sprite</c> URL (<see cref="StyleDocument.Sprite"/>) — mirrors <see cref="GlyphSourceFactory"/>
     /// for glyphs. DIVERGES from <see cref="GlyphSourceFactory"/> on the missing-URL case: a style with no
     /// <c>sprite</c> is common (icons are optional, unlike glyphs), so a null/absent URL returns
@@ -15,7 +15,7 @@ namespace MapRenderer.Unity.Rendering.Source
     internal static class SpriteSourceFactory
     {
         // Process-wide "warn once" latch. INTERNAL rather than private so a test can clear it in setup:
-        // P2 made this reachable from far more styles (the sprite fetch is no longer gated on a style having
+        // This is reachable from far more styles now (the sprite fetch is no longer gated on a style having
         // symbol layers — fill-pattern resolves against the same sheet), so whether the latch is still unset
         // by the time any one test runs now depends on test ORDER. Broadening private → internal is the
         // conventions' sanctioned test footprint; the alternative was a test that passes or fails according

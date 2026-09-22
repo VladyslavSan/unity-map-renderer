@@ -6,7 +6,7 @@ namespace MapRenderer.Unity.Rendering.Materials
     /// <summary>
     /// Fill material tweaker — the runtime render-state contract for a fill material (styling keyword sync is
     /// editor-side, in <c>FillShaderGUI</c>). STATIC. The painter contract adds the fill's ALPHA blend and
-    /// transparent surface type on top of the shared base contract. (S58)
+    /// transparent surface type on top of the shared base contract.
     /// </summary>
     public static class FillTweaker
     {
@@ -17,10 +17,9 @@ namespace MapRenderer.Unity.Rendering.Materials
 
 
         /// <summary>
-        /// Re-asserts the fill compositing contract after cloning a base <c>.mat</c> (replaces S57's
-        /// magic-string <c>SetFloat</c> calls): shared base contract (no depth write, LEqual test, white
-        /// identity) + straight ALPHA blend (each fill layer composites in painter's order — code-owned,
-        /// overriding any stale blend a base .mat may carry).
+        /// Re-asserts the fill compositing contract after cloning a base <c>.mat</c>: shared base contract
+        /// (no depth write, LEqual test, white identity) + straight ALPHA blend (each fill layer composites
+        /// in painter's order — code-owned, overriding any stale blend a base .mat may carry).
         ///
         /// <para>Also enables <c>_SURFACE_TYPE_TRANSPARENT</c>. That is a keyword, and this class otherwise
         /// leaves keywords to the import-baked ones — but this one is not styling, it is the other half of

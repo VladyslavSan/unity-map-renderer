@@ -22,19 +22,19 @@ namespace MapRenderer.Core.Style.Line
     {
         /// <summary>
         /// line-color: stroke fill color. Default opaque black rgba(0,0,0,1).
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<Color> Color { get; init; }
 
         /// <summary>
         /// line-opacity: stroke alpha multiplier [0,1]. Default 1.0.
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<float> Opacity { get; init; }
 
         /// <summary>
         /// line-width: stroke half-width in pixels. Default 1.0 px.
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<float> Width { get; init; }
 
@@ -87,7 +87,7 @@ namespace MapRenderer.Core.Style.Line
         /// <summary>Classification of <see cref="DashArray"/> (Constant when absent).</summary>
         public ExpressionKind DashArrayKind => DashArray?.Kind ?? ExpressionKind.Constant;
 
-        /// <summary>The line-pattern value (sprite name), or null when absent. Solid fallback until S17.</summary>
+        /// <summary>The line-pattern value (sprite name), or null when absent. Falls back to solid.</summary>
         public string PatternName { get; init; }
 
         /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>
@@ -203,7 +203,7 @@ namespace MapRenderer.Core.Style.Line
                 dashArray  = LineDash.ParseDashArray(dashArrayJson);
             }
 
-            // line-pattern: solid fallback until S17
+            // line-pattern: solid fallback
             JsonValue patternJson = paint?.Get(PropertyNames.LinePattern);
             if (patternJson != null) anyPresent = true;
             string patternName = patternJson?.AsString(null);

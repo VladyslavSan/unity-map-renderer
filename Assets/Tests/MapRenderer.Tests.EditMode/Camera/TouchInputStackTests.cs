@@ -1,4 +1,4 @@
-// Unity EditMode only — S74 T-TOUCHSTACK structural guard.
+// Unity EditMode only — T-TOUCHSTACK structural guard.
 // Mirrors MapControllerInputTests: reads TouchController.cs as text and asserts
 // the presence/absence of required strings, so structural correctness is a runnable test.
 
@@ -27,7 +27,7 @@ namespace MapRenderer.Tests.Cameras
         // ── T-TOUCHSTACK-A: uses EnhancedTouch + Enable ──────────────────────────────────────────
 
         /// <summary>
-        /// S74 T-TOUCHSTACK: TouchController.cs must use EnhancedTouchSupport.Enable() — without it,
+        /// T-TOUCHSTACK: TouchController.cs must use EnhancedTouchSupport.Enable() — without it,
         /// Touch.activeTouches is always empty and touch silently does nothing.
         /// </summary>
         [Test]
@@ -40,7 +40,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// S74 T-TOUCHSTACK: EnhancedTouch namespace must be used (not legacy touch).
+        /// T-TOUCHSTACK: EnhancedTouch namespace must be used (not legacy touch).
         /// </summary>
         [Test]
         public void TouchController_Uses_EnhancedTouch_Namespace()
@@ -50,7 +50,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// S74 T-TOUCHSTACK: Touch.activeTouches must be present and greppable.
+        /// T-TOUCHSTACK: Touch.activeTouches must be present and greppable.
         /// </summary>
         [Test]
         public void TouchController_Uses_Touch_activeTouches()
@@ -62,7 +62,7 @@ namespace MapRenderer.Tests.Cameras
         // ── T-TOUCHSTACK-B: no legacy UnityEngine.Input ──────────────────────────────────────────
 
         /// <summary>
-        /// S74 T-TOUCHSTACK: TouchController.cs must NOT use legacy UnityEngine.Input touch API.
+        /// T-TOUCHSTACK: TouchController.cs must NOT use legacy UnityEngine.Input touch API.
         /// The project uses the new Input System exclusively (activeInputHandler = 1).
         /// </summary>
         [Test]
@@ -96,7 +96,7 @@ namespace MapRenderer.Tests.Cameras
         // ── T-TOUCHSTACK-C: delegates to recognizer + ViewInput.Apply (no re-impl) ────────────────
 
         /// <summary>
-        /// S74 T-TOUCHSTACK: TouchController.cs must delegate to ViewInput.Apply (the seam dispatch)
+        /// T-TOUCHSTACK: TouchController.cs must delegate to ViewInput.Apply (the seam dispatch)
         /// — it must not re-implement camera/gesture math.
         /// </summary>
         [Test]
@@ -107,7 +107,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// S74 T-TOUCHSTACK: TouchController.cs must delegate to TouchGestureRecognizer.Recognize.
+        /// T-TOUCHSTACK: TouchController.cs must delegate to TouchGestureRecognizer.Recognize.
         /// </summary>
         [Test]
         public void TouchController_DelegatesTo_Recognizer_Recognize()
@@ -150,16 +150,15 @@ namespace MapRenderer.Tests.Cameras
                 "TouchController.cs must not contain 'math.log2' — pinch-to-zoom lives in TouchGestureRecognizer (T-TOUCHSTACK).");
         }
 
-        // ── S92 touch-DPI closure — the seam runs in LOGICAL px ──────────────────────────────────
+        // ── Touch-DPI closure — the seam runs in LOGICAL px ──────────────────────────────────────
 
         /// <summary>
-        /// S92 (touch-DPI closure) / S108 T3-5: the touch interaction seam must be DPI-normalized like the
+        /// The touch interaction seam must be DPI-normalized like the
         /// mouse seam — <see cref="TouchController"/> converts the viewport + finger positions with
         /// <c>DeviceScaling.DeviceToLogicalPx</c> so anchors share the render camera's logical basis (no
         /// retina pan/pinch drift). This is the one regression point the headless gate can't exercise (DPR=1,
         /// no synthetic touches), so guard it structurally. Its twin for the mouse seam lives in
-        /// <c>MapControllerInputTests</c> — added in S108, which is when this comment's claim to mirror it
-        /// first became true.
+        /// <c>MapControllerInputTests</c>.
         /// </summary>
         [Test]
         public void TouchController_ConvertsSeamThroughTheDeviceToLogicalConversion()
@@ -167,19 +166,19 @@ namespace MapRenderer.Tests.Cameras
             string src = TouchControllerSource;
             Assert.IsTrue(src.Contains("DevicePixelRatio"),
                 "TouchController.cs must read Config.DevicePixelRatio to run the interaction seam in logical px " +
-                "(S92 touch-DPI closure — else retina pan/pinch drifts off the fingers).");
+                "(the touch-DPI closure — else retina pan/pinch drifts off the fingers).");
             // BOTH the viewport AND the finger positions must be converted. A partial fix that normalizes only
             // one still drifts the anchor — and this structural guard is the only durable protection (the
             // functional path is DPR=1 / no-synthetic-touch and can't be exercised headless).
             int conversions = DeviceScalingSeam.ConversionCallCount(src);
             Assert.GreaterOrEqual(conversions, 2,
                 $"TouchController.cs must convert BOTH the viewport AND the finger positions — found " +
-                $"{conversions} DeviceToLogicalPx call(s), expected ≥2 (S92 touch-DPI closure / S108 T3-5).");
+                $"{conversions} DeviceToLogicalPx call(s), expected ≥2 (touch-DPI closure / T3-5).");
         }
 
 
         /// <summary>
-        /// S92: density normalization lives ONCE, at the position basis — NOT re-applied in the recognizer.
+        /// Density normalization lives ONCE, at the position basis — NOT re-applied in the recognizer.
         /// The vestigial (and mis-scaled) <c>DpiScale</c> knob is gone; its presence would signal a
         /// double-normalization regression.
         /// </summary>
@@ -188,12 +187,12 @@ namespace MapRenderer.Tests.Cameras
         {
             Assert.IsFalse(TouchControllerSource.Contains("DpiScale"),
                 "TouchController.cs must not set DpiScale — density is normalized once by the ÷DevicePixelRatio " +
-                "seam; a DpiScale multiply would double-apply it (S92 touch-DPI closure).");
+                "seam; a DpiScale multiply would double-apply it (the touch-DPI closure).");
         }
     }
 
     /// <summary>
-    /// Shared by the two S108 T3-5 teeth — the touch seam's (above) and the mouse seam's twin in
+    /// Shared by the two T3-5 teeth — the touch seam's (above) and the mouse seam's twin in
     /// <see cref="MapControllerInputTests"/>. One helper so the two can only be weakened together.
     /// </summary>
     internal static class DeviceScalingSeam

@@ -1,5 +1,5 @@
 // Engine-free (NUnit + Core only) → runs in BOTH the Unity EditMode runner and the fast core-tests project.
-// Locks the first-cut globe visible-tile cover (S91-C Slice 3): near-hemisphere cap around the look-at,
+// Locks the first-cut globe visible-tile cover: near-hemisphere cap around the look-at,
 // bounded loop, antimeridian wrap, pole → all columns.
 
 using System.Collections.Generic;

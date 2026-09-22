@@ -5,19 +5,17 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>
-    /// Epic A / A6 (design §B-3): the tile-decode seam — <c>(TileId, bytes) → IDecodedTile</c>, selected by
-    /// <see cref="TileEncoding"/> rather than hardcoded to MVT. This is the real structural change A6
-    /// makes: <c>TileDecodeDispatch</c> (Unity) is handed an <see cref="ITileDecoder"/>
-    /// resolved from the fetch's <see cref="TileResponse.Encoding"/> instead of calling
-    /// <see cref="MvtDecoder.Decode"/> directly.
+    /// The tile-decode seam — <c>(TileId, bytes) → IDecodedTile</c>, selected by
+    /// <see cref="TileEncoding"/> rather than hardcoded to MVT. <c>TileDecodeDispatch</c> (Unity) is handed
+    /// an <see cref="ITileDecoder"/> resolved from the fetch's <see cref="TileResponse.Encoding"/> instead
+    /// of calling <see cref="MvtDecoder.Decode"/> directly.
     ///
-    /// <para><b>IR C1 P3: the <see cref="TileId"/> is a parameter, and that is the load-bearing part.</b> The
-    /// decoded tile owns its geometry, so the buffers' tile address is stamped HERE, once, from the id the
-    /// fetch already had (<c>MvtTileFeatureSource.GetTile</c>). Before P3 the address was supplied later by
-    /// whichever consumer wanted geometry, which is exactly what let a buffer be paired with the wrong tile.
-    /// The returned tile owns <c>Allocator.Persistent</c> memory and is <c>IDisposable</c>; its owner is the
-    /// <c>SharedDisposable{IDecodedTile}</c> minted around it, which frees it at the last reference — never a
-    /// consumer.</para>
+    /// <para><b>The <see cref="TileId"/> is a parameter, and that is the load-bearing part.</b> The decoded
+    /// tile owns its geometry, so the buffers' tile address is stamped HERE, once, from the id the fetch
+    /// already had. An address supplied later, by whichever consumer wanted geometry, is what lets a buffer
+    /// be paired with the wrong tile. The returned tile owns <c>Allocator.Persistent</c> memory and is
+    /// <c>IDisposable</c>; its owner is the <c>SharedDisposable{IDecodedTile}</c> minted around it, which
+    /// frees it at the last reference — never a consumer.</para>
     /// </summary>
     public interface ITileDecoder
     {
@@ -34,7 +32,7 @@ namespace MapRenderer.Jobs.Tiles
     }
 
     /// <summary>The MVT decoder, wrapped behind <see cref="ITileDecoder"/>. This is the SOLE production
-    /// <c>MvtDecoder.Decode(</c> call site after A6 (structurally asserted).</summary>
+    /// <c>MvtDecoder.Decode(</c> call site, asserted structurally.</summary>
     public sealed class MvtTileDecoder : ITileDecoder
     {
         public IDecodedTile Decode(TileId id, byte[] bytes) =>
@@ -42,8 +40,9 @@ namespace MapRenderer.Jobs.Tiles
     }
 
     /// <summary>Resolves the <see cref="ITileDecoder"/> for a <see cref="TileEncoding"/>. No production
-    /// dead branch: today only <see cref="TileEncoding.Mvt"/> exists (a non-MVT decoder is exercised by
-    /// tests injecting a fake <see cref="ITileDecoder"/> directly, not a new enum member — design §B-3).</summary>
+    /// dead branch: today only <see cref="TileEncoding.Mvt"/> exists, and a non-MVT decoder is exercised
+    /// by tests injecting a fake <see cref="ITileDecoder"/> directly rather than by a new enum
+    /// member.</summary>
     public static class Decoders
     {
         /// <param name="encoding">Selects which decoder to build.</param>

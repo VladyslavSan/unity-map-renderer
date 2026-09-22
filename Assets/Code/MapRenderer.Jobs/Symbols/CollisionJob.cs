@@ -7,7 +7,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
-    /// B-4a: the Burst-compiled, grid-accelerated greedy survivor selection — sorts
+    /// The Burst-compiled, grid-accelerated greedy survivor selection — sorts
     /// <see cref="Candidates"/> into placement order (<see cref="SymbolCollision.ComparePlacementOrder(in SymbolCandidate,in SymbolCandidate)"/>),
     /// then places each candidate iff none of its boxes overlaps (<see cref="SymbolCollision.Overlaps"/>) an
     /// already-placed blocker, run as a single <see cref="IJob"/> over NATIVE data. It is ONE job, not a
@@ -58,7 +58,7 @@ namespace MapRenderer.Jobs.Symbols
 
                 // Place if it ignores collision, OR none of its REQUIRED boxes overlaps an already-placed
                 // blocker. Test ALL boxes first (all-or-nothing) — no box is inserted until the whole candidate
-                // wins. This SHAPE is load-bearing for Stage C's per-box optional mask too: a centred pair's two
+                // wins. This SHAPE is load-bearing for the per-box optional mask too: a centred pair's two
                 // boxes overlap by construction, so testing one half before inserting the other would make the
                 // pair block itself.
                 bool place = c.AllowOverlap;
@@ -128,9 +128,9 @@ namespace MapRenderer.Jobs.Symbols
                     // Last-resort bounds guard: the pool is pre-sized on the MAIN thread by
                     // CollisionGridSizing (managed float) while THIS insert runs in Burst — the two can
                     // truncate a cell-boundary coordinate differently, so a box may map one cell wider here
-                    // than the sizing counted. NodeUpperBound now carries a ±1-cell margin that makes this
+                    // than the sizing counted. NodeUpperBound carries a ±1-cell margin that makes this
                     // branch unreachable in practice; keep it as a hard floor because a Burst job CANNOT grow
-                    // its NativeArray (unlike the retired managed grid), and an overflow write is a crash.
+                    // its NativeArray, and an overflow write is a crash.
                     // Skipping a node only drops a blocker prefilter entry (a slightly-permissive survivor),
                     // never a crash. nodeCount still advances so the pass stays deterministic.
                     if (nodeCount < NodeBox.Length)
@@ -242,8 +242,8 @@ namespace MapRenderer.Jobs.Symbols
         /// while <see cref="CollisionJob.Insert"/> maps the SAME coords in Burst — a coordinate sitting
         /// on a cell boundary can truncate one cell either way between the two, so the job may cover up to one
         /// extra cell per side that a tight bound would miss. A Burst job CANNOT grow its pre-sized
-        /// <see cref="NativeArray{T}"/> mid-run (the retired managed grid could, so it never overflowed — this
-        /// margin restores that safety), and an under-count is an out-of-range write. Widening each cell span
+        /// <see cref="NativeArray{T}"/> mid-run, and an under-count is an out-of-range write. Widening each
+        /// cell span
         /// by 2 (one cell per side) provably covers a ±1-cell truncation drift; the cost is a few extra ints
         /// per box. <see cref="CollisionJob.Insert"/>'s bounds guard is the last-resort floor beneath
         /// this.</para></summary>

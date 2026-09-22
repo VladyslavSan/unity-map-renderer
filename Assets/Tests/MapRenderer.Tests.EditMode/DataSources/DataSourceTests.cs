@@ -1,4 +1,4 @@
-// DataSources/DataSourceTests.cs — A7 tile-feature source, render-path, HTTP and scheduler teeth (EditMode).
+// DataSources/DataSourceTests.cs — tile-feature source, render-path, HTTP and scheduler teeth (EditMode).
 //
 // TileSchedulerOrderingTests.cs stays its own file (fast lane, csproj-registered). No using/alias
 // collision found across the four EditMode files merged here.
@@ -119,14 +119,14 @@ namespace MapRenderer.Tests.DataSources
         [Test]
         public async Task GetTile_AbsentTile_ReturnsNullHandle()
         {
-            // Byte-equivalent to today's TileResponse.HasData == false branch (§G risk 4).
+            // Byte-equivalent to today's TileResponse.HasData == false branch.
             var byteSource = TestDataSource.Absent();
             using var source = new MvtTileFeatureSource(byteSource, Scheduler);
 
             SharedDisposable<IDecodedTile> handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
 
             Assert.IsNull(handle, "an absent tile (HasData == false) must map to a null handle — the " +
-                "coordinator's null-for-absent contract (Epic A / A7 §G-4).");
+                "coordinator's null-for-absent contract.");
         }
     }
 
@@ -135,7 +135,7 @@ namespace MapRenderer.Tests.DataSources
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S51 review fix — acceptance tests for <see cref="UnityWebRequestDataSource"/>.
+    /// Acceptance tests for <see cref="UnityWebRequestDataSource"/>.
     ///
     /// Closes the coverage gap: previously no test exercised the 404→Absent mapping, which
     /// was unreachable dead code (the vendored ToUniTask throws for ProtocolError before
@@ -202,7 +202,7 @@ namespace MapRenderer.Tests.DataSources
 
         /// <summary>
         /// A 404 response from the tile server must yield <c>HasData == false</c> (TileResponse.Absent)
-        /// instead of throwing. This is the primary regression test for the S51 dead-code fix:
+        /// instead of throwing. This is the primary regression test for the dead-code fix:
         /// the previous code had the responseCode check AFTER the await, but ToUniTask throws
         /// UnityWebRequestException for ProtocolError (any non-2xx), so the check was never reached.
         ///
@@ -291,13 +291,13 @@ namespace MapRenderer.Tests.DataSources
     /// decode→assemble→project pipeline.
     ///
     /// This is an A-vs-A comparison — the same bytes through two sources must produce identical render
-    /// input — so triangulation contributes nothing to what it proves (A0: dropped; the hash covers
+    /// input — so triangulation contributes nothing to what it proves (dropped; the hash covers
     /// the assembled ring vertices, outer then holes, projected through the existing
     /// TileToGeoJob → ProjectPointsJob chain, which is the projection coverage this test actually
     /// carries). A count-only comparison would be blind to divergent vertex positions; content hash
     /// guards against any regression in decode / assembly / projection across sources.
     ///
-    /// S51: HttpDataSource deleted from Core; HTTP is now UnityWebRequestDataSource (Unity layer).
+    /// HTTP lives in UnityWebRequestDataSource (the Unity layer), not in Core.
     /// </summary>
     [TestFixture]
     public class DataSourceRenderPathTests
@@ -319,7 +319,7 @@ namespace MapRenderer.Tests.DataSources
             try
             {
                 using var fileSource = new FileDataSource(tempRoot);
-                // S51: FetchAsync is async (SwitchToThreadPool pattern). It does NOT complete
+                // FetchAsync is async (SwitchToThreadPool pattern). It does NOT complete
                 // synchronously, so calling .GetAwaiter().GetResult() immediately throws
                 // "Not yet completed". Parks until the ThreadPool fetch completes.
                 var fetchTask = fileSource.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 });
@@ -440,15 +440,15 @@ namespace MapRenderer.Tests.DataSources
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S03 acceptance tests: BYO data-source interface, LRU cache, scheduler deduplication,
-    /// byte-identity (FileDataSource only — HttpDataSource moved to Unity layer in S51),
+    /// Acceptance tests: BYO data-source interface, LRU cache, scheduler deduplication,
+    /// byte-identity (FileDataSource only — HTTP lives in the Unity layer),
     /// absent-vs-error, and cancellation.
     ///
     /// All tests are deterministic and offline (no public endpoints, no Thread.Sleep).
     /// Timing is controlled via <see cref="UniTaskCompletionSource{T}"/>.
     ///
-    /// S51: UniTask replaces Task throughout. Tests that called scheduler.Request().GetAwaiter().GetResult()
-    /// are now async Task + await (UniTask.GetAwaiter().GetResult() is NOT a blocking wait).
+    /// UniTask is used throughout; a test awaits rather than blocking on GetAwaiter().GetResult(), which
+    /// is NOT a blocking wait on a UniTask.
     /// </summary>
     [TestFixture]
     public class DataSourceTests
@@ -487,7 +487,7 @@ namespace MapRenderer.Tests.DataSources
 
         // -----------------------------------------------------------------------------------------
         // 1. Byte identity: FileDataSource serves correct bytes
-        //    (HttpDataSource removed from Core in S51 — HTTP moved to UnityWebRequestDataSource)
+        //    (HTTP lives in UnityWebRequestDataSource, not in Core)
         // -----------------------------------------------------------------------------------------
 
         [Test]
@@ -755,7 +755,7 @@ namespace MapRenderer.Tests.DataSources
         }
 
         // -----------------------------------------------------------------------------------------
-        // S04 Batch A additions: per-tile cancellation, sync-completion guard
+        // Per-tile cancellation, sync-completion guard
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
@@ -879,7 +879,7 @@ namespace MapRenderer.Tests.DataSources
         }
 
         // -----------------------------------------------------------------------------------------
-        // S06 Batch A: negative-caching policy (item b) — fake clock, no wall-clock sleeps
+        // Negative-caching policy — fake clock, no wall-clock sleeps
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
@@ -978,7 +978,7 @@ namespace MapRenderer.Tests.DataSources
         }
 
         // -----------------------------------------------------------------------------------------
-        // S06 Batch A: Dispose ownership (item c)
+        // Dispose ownership
         // -----------------------------------------------------------------------------------------
 
         /// <summary>

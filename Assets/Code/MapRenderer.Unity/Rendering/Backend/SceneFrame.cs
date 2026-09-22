@@ -3,7 +3,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Unity.Rendering.Backend
 {
     /// <summary>
-    /// The per-frame scene frame the render backends place tiles relative to (S91-C, Level-2 of the two-level
+    /// The per-frame scene frame the render backends place tiles relative to (Level-2 of the two-level
     /// RTC — see <see cref="MapRenderer.Unity.View.FloatingOrigin"/>). It bundles the two projection-derived
     /// quantities a backend's per-frame <c>Rebuild</c> needs so ONE camera-orbit pose works for BOTH the plane
     /// and the globe: the look-at projected into render space, and the render→look-at-local-ENU rotation.
@@ -18,7 +18,7 @@ namespace MapRenderer.Unity.Rendering.Backend
     ///
     /// <para>A backend places each tile at <c>FloatingOrigin.TileToSceneRebased(tileOriginRender,
     /// SceneOriginRender, Rebase)</c> with orientation <c>Rebase</c>. For Mercator this reduces bit-for-bit to
-    /// the pre-S91 translation-only placement (identity rebase ⇒ identity rotation). Passed by <c>in</c>
+    /// a translation-only placement (identity rebase ⇒ identity rotation). Passed by <c>in</c>
     /// (readonly struct &gt; 16 bytes) per the large-read-only-struct convention.</para>
     ///
     /// <para>A plain data carrier: <c>init</c>-only auto-properties, built with named members per the
@@ -46,7 +46,7 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// <summary>
         /// The identity-rebase frame for a planar Web-Mercator scene origin: render origin
         /// <c>(mercX, 0, mercZ)</c>, <c>Rebase = float3x3.identity</c>. This is the frame that makes the
-        /// backends' rebased placement collapse to the pre-S91 <c>TileLocalToScene</c> translation.
+        /// backends' rebased placement collapse to the <c>TileLocalToScene</c> translation.
         /// </summary>
         public static SceneFrame Mercator(double2 sceneOriginMerc)
             => new SceneFrame

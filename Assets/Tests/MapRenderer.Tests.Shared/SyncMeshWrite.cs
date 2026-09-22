@@ -1,13 +1,7 @@
-// job-scheduling-design.md §8 stage 4/5 Group B, vestige sweep Block A: the retired synchronous
-// convenience surface, moved out of production. These had ZERO production callers when they were
-// deleted from StyledFillTileBuilder/StyledFillExtrusionTileBuilder/StyledLineTileBuilder — the
-// production write path is Styled*TileBuilder.ScheduleWrite, reached asynchronously through
-// TileBuildGraph, and never called any of the four methods below. Each body is a VERBATIM LIFT of the
-// method it replaces (same statements, same order, same locals, same comments) and must stay one —
-// do not "clean up" a body here without re-deriving it from production first. Two sanctioned deviations,
-// both in Fill: the PmWriteMeshData.Auto() profiler-marker line (and its explanatory comment) is dropped,
-// because that marker was deleted along with the method it opened in — do NOT restore it; and the
-// WriteGeometry( receiver became FillGeometry(, since both now live in this class.
+// The synchronous convenience surface, held in the test assembly. Production writes a mesh through
+// Styled*TileBuilder.ScheduleWrite, reached asynchronously through TileBuildGraph, and calls none of the
+// four methods below. Each body MIRRORS its production counterpart statement for statement and must stay
+// that way — do not "clean up" a body here without re-deriving it from production first.
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -29,16 +23,15 @@ using Line = MapRenderer.Core.Style.Line;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// The synchronous "one call in, a written <see cref="Mesh.MeshData"/> out" convenience the graph-arm
-    /// migration left behind — schedules the same Burst measure/write graphs production reaches through
-    /// <c>Styled*TileBuilder.ScheduleWrite</c> (driven by <c>TileBuildGraph</c>), but completes them right
-    /// here instead of returning an uncompleted handle. Four methods, one per moved production body.
+    /// The synchronous "one call in, a written <see cref="Mesh.MeshData"/> out" convenience: schedules the
+    /// same Burst measure/write graphs production reaches through <c>Styled*TileBuilder.ScheduleWrite</c>
+    /// (driven by <c>TileBuildGraph</c>), but completes them here instead of returning an uncompleted
+    /// handle.
     /// </summary>
     internal static class SyncMeshWrite
     {
-        /// <summary>Verbatim lift of <c>StyledFillTileBuilder.WriteMeshData</c> — composes
-        /// <see cref="StyledFillTileBuilder.BuildLayerInput"/> and <see cref="FillGeometry"/> (this class's
-        /// own lift of the fill builder's <c>WriteGeometry</c>).</summary>
+        /// <summary>Composes <see cref="StyledFillTileBuilder.BuildLayerInput"/> and
+        /// <see cref="FillGeometry"/>.</summary>
         internal static void Fill(
             Mesh.MeshData                      md,
             IReadOnlyList<SelectedTileFeature> selectedFeatures,
@@ -76,9 +69,9 @@ namespace MapRenderer.Tests
                 suppressBoundaryBand || input.SuppressBoundaryBand);
         }
 
-        /// <summary>Verbatim lift of <c>StyledFillTileBuilder.WriteGeometry</c> — the geometry half
-        /// <see cref="Fill"/> hands off to; schedules <see cref="FillMeshGraph.Schedule"/> and streams the
-        /// result into <paramref name="md"/> via <see cref="StyledFillTileBuilder.ScheduleStreamWrite"/>.</summary>
+        /// <summary>The geometry half <see cref="Fill"/> hands off to: schedules
+        /// <see cref="FillMeshGraph.Schedule"/> and streams the result into <paramref name="md"/> via
+        /// <see cref="StyledFillTileBuilder.ScheduleStreamWrite"/>.</summary>
         internal static void FillGeometry(
             Mesh.MeshData               md,
             TileGeometryBuffers         geometry,
@@ -104,12 +97,9 @@ namespace MapRenderer.Tests
                 SuppressBoundaryBand = suppressBoundaryBand,
             };
 
-            // job-scheduling-design.md §8 stage 4 Group B: the graph is the only mesher — schedule it and
-            // complete synchronously right here. Every caller of THIS method is off the production path
-            // today (production, background quad included, reaches the graph asynchronously through
-            // ScheduleWrite, driven by TileBuildGraph — see TileManager.cs's BackgroundQuad.BuildLayerInput
-            // call) — WriteGeometry keeps its old synchronous shape only for tests that still want one call
-            // in, a written MeshData out.
+            // The graph is the only mesher — schedule it and complete synchronously right here. Every
+            // caller of THIS method is off the production path; production, background quad included,
+            // reaches the graph asynchronously through ScheduleWrite, driven by TileBuildGraph.
             FillGraphOutput output = FillMeshGraph.Schedule(input);
             output.Handle.Complete();
             try
@@ -137,8 +127,7 @@ namespace MapRenderer.Tests
             }
         }
 
-        /// <summary>Verbatim lift of <c>StyledFillExtrusionTileBuilder.WriteMeshData</c> — composes
-        /// <see cref="StyledFillExtrusionTileBuilder.BuildLayerInput"/>,
+        /// <summary>Composes <see cref="StyledFillExtrusionTileBuilder.BuildLayerInput"/>,
         /// <see cref="FillExtrusionMeshGraph.Schedule"/> and
         /// <see cref="StyledFillExtrusionTileBuilder.ScheduleStreamWrite"/>.</summary>
         internal static void FillExtrusion(
@@ -171,10 +160,9 @@ namespace MapRenderer.Tests
 
             IProjection proj = projection ?? StyledFillExtrusionTileBuilder.DefaultProjection;
 
-            // job-scheduling-design.md §8 stage 5 (wall-job stage): the graph now schedules BOTH the roof
-            // measure AND the wall chain — schedule and complete synchronously right here, then hand the
-            // combined output to ScheduleStreamWrite. Every caller of THIS method is off the production path
-            // today (production reaches the graph asynchronously through ScheduleWrite, driven by TileBuildGraph).
+            // The graph schedules BOTH the roof measure AND the wall chain — complete it synchronously
+            // here, then hand the combined output to ScheduleStreamWrite. Every caller of THIS method is off
+            // the production path, which reaches the graph asynchronously through ScheduleWrite.
             FillExtrusionGraphOutput ext = FillExtrusionMeshGraph.Schedule(input, colors, bake);
             ext.Handle.Complete();
             try
@@ -200,8 +188,8 @@ namespace MapRenderer.Tests
             }
         }
 
-        /// <summary>Verbatim lift of <c>StyledLineTileBuilder.WriteMeshData</c> — composes
-        /// <see cref="StyledLineTileBuilder.BuildLayerInput"/>, <see cref="LineMeshGraph.Schedule"/> and
+        /// <summary>Composes <see cref="StyledLineTileBuilder.BuildLayerInput"/>,
+        /// <see cref="LineMeshGraph.Schedule"/> and
         /// <see cref="StyledLineTileBuilder.ScheduleStreamWrite"/>.</summary>
         internal static void Line(
             Mesh.MeshData                      md,
@@ -229,10 +217,9 @@ namespace MapRenderer.Tests
             using var featColors   = featureColors;
             using var featWidths   = featureWidths;
 
-            // job-scheduling-design.md §8 stage 5 Group B: the graph is the only mesher — schedule it and
-            // complete synchronously right here, mirroring StyledFillTileBuilder.WriteGeometry. `using var`
-            // disposes in REVERSE declaration order (boundsArr, then output) — same order the old nested
-            // try/finally freed them in — so a mid-method throw still can't strand either.
+            // The graph is the only mesher — schedule it and complete synchronously right here. `using var`
+            // disposes in REVERSE declaration order (boundsArr, then output), so a mid-method throw cannot
+            // strand either.
             using var output = LineMeshGraph.Schedule(input);
             output.Handle.Complete();
 
@@ -251,14 +238,12 @@ namespace MapRenderer.Tests
             bounds      = new Bounds(new Vector3(c3.x, c3.y, c3.z), new Vector3(sz.x, sz.y, sz.z));
             vertexCount = output.Vertices.Length;
 
-            // IR C1 P2/P3: `geometry` is NEVER disposed here (see the BORROWED note on the parameter above).
-            // It is lent by the decoded LAYER to every style layer naming this source-layer — and to the
-            // symbol pass of the same kick — so freeing it here would free geometry a sibling consumer is
-            // still reading. On this path that second free is LOUD, not quiet: the store hands back an
-            // array-backed buffer whose Dispose frees three real NativeArrays, and P2's R6 sweep measured the
-            // double free as 32 failures across 19 fixtures — two of them with no line involvement at all, the
-            // heap-corruption signature. The rule is also pinned structurally (StyledLineBuilderStructureTests)
-            // so it fails on the offending LINE rather than as a scatter of unrelated red fixtures.
+            // `geometry` is NEVER disposed here (see the BORROWED note on the parameter above). The decoded
+            // LAYER lends it to every style layer naming this source-layer, and to the symbol pass of the
+            // same kick, so freeing it here frees geometry a sibling consumer is still reading. The second
+            // free corrupts the heap: the store hands back an array-backed buffer whose Dispose frees three
+            // real NativeArrays. StyledLineBuilderStructureTests pins the rule structurally, so a breach
+            // fails on the offending LINE rather than as a scatter of unrelated red fixtures.
         }
     }
 }

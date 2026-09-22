@@ -94,7 +94,7 @@ namespace MapRenderer.Core.Style.Fill
         ///
         /// <para>What this does NOT address: each tile's pattern still starts at that tile's own origin, so
         /// unless the period divides the tile's span there is a phase step at tile edges. Removing it needs
-        /// each tile's GLOBAL origin in the shader — see docs/fill-parity-design.md §6b.</para>
+        /// each tile's GLOBAL origin in the shader — see docs/fill-parity-design.md.</para>
         /// </summary>
         /// <param name="worldPeriodMetres">
         /// WorldAbsolute only. The tiling period: the world distance one full repetition spans, along the

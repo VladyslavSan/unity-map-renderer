@@ -82,7 +82,7 @@ namespace MapRenderer.Core.Expressions
         {
             const double delta = 6.0 / 29.0;
             return t > delta * delta * delta
-                ? math.pow(t, 1.0 / 3.0)   // S62: cbrt(t) → math.pow(t, 1/3) (same result for t>0)
+                ? math.pow(t, 1.0 / 3.0)   // cbrt(t), written as pow(t, 1/3) — same result for t>0
                 : t / (3.0 * delta * delta) + 4.0 / 29.0;
         }
 

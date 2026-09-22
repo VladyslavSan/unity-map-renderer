@@ -280,7 +280,7 @@ namespace MapRenderer.Unity.Text.Placement
 
         private SymbolPlacementTelemetrySnapshot _telemetry;
 
-        /// <summary>This provider's levels, handed out by reference (see <c>docs/telemetry-design.md</c> §3).
+        /// <summary>This provider's levels, handed out by reference (see <c>docs/telemetry-design.md</c>).
         /// Refreshed at the end of <see cref="Tick"/>, so the numbers are this pass's, not last frame's.</summary>
         internal ref readonly SymbolPlacementTelemetrySnapshot Telemetry => ref _telemetry;
 
@@ -364,7 +364,7 @@ namespace MapRenderer.Unity.Text.Placement
             _gridNodeNext     = new NativeList<int>(Allocator.Persistent);
             _survivorCountOut = new NativeArray<int>(1, Allocator.Persistent);
 
-            // Burst-gather Stage 1: the reusable block-view table + SymbolGatherJob's output counts.
+            // Burst-gather: the reusable block-view table + SymbolGatherJob's output counts.
             _gatherBlockViews = new NativeList<BlockView>(Allocator.Persistent);
             _gatherCounts = new NativeArray<int>(SymbolGatherJob.CountLength, Allocator.Persistent);
 
@@ -1242,7 +1242,7 @@ namespace MapRenderer.Unity.Text.Placement
             _gridNodeNext.Dispose();
             _survivorCountOut.Dispose();
 
-            _gatherBlockViews.Dispose(); _gatherCounts.Dispose();                    // Burst-gather Stage 1 buffers
+            _gatherBlockViews.Dispose(); _gatherCounts.Dispose();                    // Burst-gather buffers
             _mirrorKinds.Dispose(); _mirrorDetail.Dispose(); _mirrorWorldCount.Dispose();          // Burst stage job's native buffers
             _mirrorPointQuadStart.Dispose(); _mirrorPointQuadCount.Dispose();
             _mirrorCurvedGlyphStart.Dispose(); _mirrorCurvedGlyphCount.Dispose();

@@ -9,7 +9,7 @@ namespace MapRenderer.Unity.Rendering.Materials
     /// (<c>_ZWrite</c>/<c>_ZTest</c>/<c>_Cull</c>/<c>_SrcBlend</c>/<c>_DstBlend</c>/<c>_BlendOp</c>).
     ///
     /// <para>Together with <see cref="ShaderProperties.PropertyId"/> this is the ONLY place the render-state
-    /// property ids are touched — the tweakers compose these, the GUI calls the tweakers (S58). All
+    /// property ids are touched — the tweakers compose these, the GUI calls the tweakers. All
     /// setters guard with <see cref="Material.HasProperty(int)"/> so they are no-ops on a material
     /// whose shader lacks the knob.</para>
     /// </summary>

@@ -19,7 +19,7 @@ namespace MapRenderer.Core.Data
     /// A missing file returns <c>HasData=false</c>; an I/O error (permission denied, etc.) throws.
     /// </para>
     ///
-    /// S51: FetchAsync returns UniTask&lt;TileResponse&gt; (was Task). On desktop/editor it switches to the
+    /// FetchAsync returns UniTask&lt;TileResponse&gt;. On desktop/editor it switches to the
     /// ThreadPool via UniTask.SwitchToThreadPool(), then does the synchronous File.ReadAllBytes work,
     /// then returns WITHOUT switching back to the main thread (no UniTask.SwitchToMainThread).
     ///

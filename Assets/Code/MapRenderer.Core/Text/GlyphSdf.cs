@@ -26,14 +26,14 @@ namespace MapRenderer.Core.Text
         /// glyph-PBF ranges (Arabic, Arabic presentation forms, variation selectors; no CJK/Cyrillic ships
         /// here) modally measure 27, one baked px off. The glyph PBF carries no font-level metrics, so
         /// every consumer must assume a baking convention; deriving this per font stack is deferred
-        /// (<c>docs/road-shields-design.md</c> §11).
+        /// (<c>docs/road-shields-design.md</c>).
         /// </summary>
         public const float BaselineBelowReferencePx = 26f;
 
         /// <summary>
         /// Latin cap height, in ems, of the baked fonts: Noto Sans measures a 17 baked-px cap over a 24 px
         /// em, and the literal is written as that division so it carries its own derivation. Used only to
-        /// place a centred text block's optical centre (<c>docs/road-shields-design.md</c> §11 D12), never
+        /// place a centred text block's optical centre (<c>docs/road-shields-design.md</c>), never
         /// to size or position an individual glyph.
         /// </summary>
         public const float NominalCapHeightEm = 17f / 24f;

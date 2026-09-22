@@ -11,7 +11,7 @@ using MapRenderer.Core.GeoJson;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Shared, engine-free plumbing for the GeoJSON S1 teeth: JSON text builders (invariant-culture, so a
+    /// Shared, engine-free plumbing for the GeoJSON teeth: JSON text builders (invariant-culture, so a
     /// comma-decimal locale cannot silently produce different JSON), the parse→project→slice one-liner, and
     /// shoelace helpers over the slicer's <c>IReadOnlyList&lt;double2&gt;</c> output.
     /// </summary>

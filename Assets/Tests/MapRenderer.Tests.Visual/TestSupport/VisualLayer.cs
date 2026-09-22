@@ -1,11 +1,8 @@
-// Unity EditMode only — Stage G-V0 (fill), extended by G-V1 (symbol text). The declarative visual-test
-// authoring kit.
+// Unity EditMode only — the declarative visual-test authoring kit.
 // NOT registered in Tools/core-tests/core-tests.csproj.
 //
-// The LAYER half of the kit. G-V0 shipped fill-only (plan §1 decision 5, §10 scope fence); G-V1 adds
-// SymbolTextVisualLayer (point symbols only) as a sibling VisualLayer subclass — no VisualScene JSON-assembly
-// change (VisualScene's glyph wiring + readiness spin ARE new, but the "layers" array assembly itself did
-// not change shape). A line layer kind is still a future VisualLayer subclass.
+// The LAYER half of the kit: a fill layer and a point-symbol text layer, each a VisualLayer subclass.
+// A line layer kind would be another subclass, and needs no change to VisualScene's JSON assembly.
 
 #if UNITY_EDITOR
 using System.Collections.Generic;
@@ -15,8 +12,8 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// A style layer bound to a source BY ID — the composer never resolves the binding itself; a dangling
-    /// id is left for production <c>MapView.SetStyle</c> to skip, exactly as it resolves a real style
-    /// (<c>MapView.cs:303-313</c>) — that is what makes T-Binding an executable seam.
+    /// id is left for production <c>MapView.SetStyle</c> to skip, exactly as it resolves a real style. That
+    /// is what makes the binding an executable seam rather than a fixture convention.
     /// </summary>
     internal abstract class VisualLayer
     {
@@ -66,8 +63,8 @@ namespace MapRenderer.Tests
         }
 
         /// <summary><c>fill-color</c> as a Style-Spec expression, e.g. <c>["rgba",255,0,0,1]</c> (pass the
-        /// raw JSON array text verbatim — the T-Parse falsifier arm's whole point is routing this through
-        /// the REAL expression evaluator rather than a hex-only shortcut, plan §6/§8.6).</summary>
+        /// raw JSON array text verbatim — the falsifier arm's whole point is routing this through the REAL
+        /// expression evaluator rather than a hex-only shortcut).</summary>
         public FillVisualLayer ColorExpression(string rawExpressionJson)
         {
             _colorJson = rawExpressionJson;
@@ -93,8 +90,8 @@ namespace MapRenderer.Tests
         }
     }
 
-    /// <summary>A <c>type: "symbol"</c> text <see cref="VisualLayer"/> — point symbols only (G-V1 scope
-    /// fence; no icons, no line/curved placement). No <c>"source-layer"</c> is emitted: an inline-geojson
+    /// <summary>A <c>type: "symbol"</c> text <see cref="VisualLayer"/> — point symbols only: no icons, no
+    /// line or curved placement. No <c>"source-layer"</c> is emitted: an inline-geojson
     /// source resolves its implicit layer the same way the fill layer does
     /// (<c>SourceLayerResolver.ResolveTileLayer</c>), so binding is <see cref="Source"/> alone.</summary>
     internal sealed class SymbolTextVisualLayer : VisualLayer
@@ -103,9 +100,9 @@ namespace MapRenderer.Tests
         private double _textSizePx = 16.0;
         private string _textFontJson = "[\"Fixture Font\"]";
         private string _textColorJson;
-        // Style-Spec default `text-color` is `#000000`, invisible on this kit's dark background (docs
-        // Risk R2) — always emitted so a caller that forgets Color() still gets a background-discriminable
-        // frame, rather than a silently vacuous positive control.
+        // Style-Spec default `text-color` is `#000000`, invisible on this kit's dark background — always
+        // emitted so a caller that forgets Color() still gets a background-discriminable frame, rather than
+        // a silently vacuous positive control.
         private const string DefaultTextColorJson = "\"#ffffff\"";
 
         /// <param name="id">The style-JSON layer id (forwarded to the base).</param>
@@ -160,8 +157,8 @@ namespace MapRenderer.Tests
                 $"\"text-field\":{_textFieldJson}",
                 $"\"text-size\":{_textSizePx.ToString(CultureInfo.InvariantCulture)}",
                 $"\"text-font\":{_textFontJson}",
-                // Always on (plan Risk/lessons `flaky-tilesymbolkick-settle`): the dedup/collision machinery
-                // at coarse zoom silently drops symbols a fixture needs both of to render.
+                // Always on: the dedup/collision machinery at coarse zoom silently drops symbols a fixture
+                // needs both of to render.
                 "\"text-allow-overlap\":true",
             };
             string paintColorJson = _textColorJson ?? DefaultTextColorJson;

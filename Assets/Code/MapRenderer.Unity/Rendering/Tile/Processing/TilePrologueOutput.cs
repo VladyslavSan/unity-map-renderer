@@ -5,7 +5,7 @@ using MapRenderer.Unity.Rendering.Meshing;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// job-scheduling-design.md §8 stage 3: <see cref="TileLayerProcessorRunner.RunWorkerPass"/>'s return —
+    /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/>'s return —
     /// the prologue's hand-off into <see cref="TileBuildGraph.ScheduleMeasureFromDecode"/>. Named in the
     /// <see cref="FillGraphOutput"/> /
     /// <see cref="Meshing.MeshWriteOutput"/> family — a per-step output struct returned uncompleted-or-owned

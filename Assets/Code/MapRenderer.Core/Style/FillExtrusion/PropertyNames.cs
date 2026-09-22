@@ -20,7 +20,7 @@ namespace MapRenderer.Core.Style.FillExtrusion
         public const string FillExtrusionOpacity          = "fill-extrusion-opacity";
 
         /// <summary>Pixel-space [x, y] translation offset. Parsed through the expression engine
-        /// (<see cref="PaintProperties.Translate"/>, I2b) so a zoom/interpolate expression classifies
+        /// (<see cref="PaintProperties.Translate"/>) so a zoom/interpolate expression classifies
         /// instead of collapsing to [0,0]; rendered via the shared <c>PixelsToWorld</c> px→world
         /// measurement.</summary>
         public const string FillExtrusionTranslate        = "fill-extrusion-translate";

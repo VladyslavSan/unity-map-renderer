@@ -4,8 +4,7 @@
 // FillMeshBuildBuffersPoolTests). NOT registered in core-tests.csproj (FillMeshPipeline lives in Jobs, which
 // core-tests does not compile).
 //
-// SCOPE OF THIS TOOTH: FillMeshGraph.Schedule (job-scheduling-design.md §8 stage 4 Group B retired the
-// synchronous FillMeshPipeline.Schedule this comment used to name) cannot be measured at zero either — it
+// SCOPE OF THIS TOOTH: FillMeshGraph.Schedule cannot be measured at zero either — it
 // still allocates schedule-time managed work per call (the boxed IProjection dispatch switch,
 // JobHandle.CombineDependencies, a ScheduleDispose call per graph node/buffer). So this pins the
 // per-POLYGON win directly at the mechanism: the hole-ring sort now runs in a REUSED NativeArray (off the GC

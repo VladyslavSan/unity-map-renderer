@@ -14,8 +14,8 @@ namespace MapRenderer.Core.Style
     /// valid-JSON document (e.g. an unexpected type for a field) is tolerated by falling back to a
     /// default rather than throwing.
     ///
-    /// <para><b>Exception:</b> a paint/layout key that parses eagerly through the expression engine (UMR-108
-    /// — every typed <c>Paint</c>/<c>Layout</c> view parses at construction, not lazily on first access) can
+    /// <para><b>Exception:</b> a paint/layout key that parses eagerly through the expression engine (every
+    /// typed <c>Paint</c>/<c>Layout</c> view parses at construction, not lazily on first access) can
     /// throw <see cref="MapRenderer.Core.Expressions.ExpressionParseException"/> when its VALUE is a malformed
     /// expression (bad interpolate/step stops, wrong arity, unknown operator) — that is not the "unexpected
     /// type for a field" case above, and THIS method does not catch it. <c>MapView.SetStyle(string,

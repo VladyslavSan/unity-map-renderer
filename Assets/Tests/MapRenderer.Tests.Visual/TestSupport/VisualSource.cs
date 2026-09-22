@@ -1,10 +1,9 @@
-// Unity EditMode only — Stage G-V0, the declarative visual-test authoring kit.
+// Unity EditMode only — the declarative visual-test authoring kit.
 // NOT registered in Tools/core-tests/core-tests.csproj (engine-bound: the composer this feeds drives a
 // real MapViewComponent).
 //
 // The extensible SOURCE half of the kit. Shaped so an MVT/URL source kind can slot in later (a new
-// VisualSource subclass) without touching VisualScene — v1 implements only the inline-geojson kind
-// (the geojson-visual-kit plan §1 decision 2).
+// VisualSource subclass) without touching VisualScene. Only the inline-geojson kind exists today.
 
 #if UNITY_EDITOR
 namespace MapRenderer.Tests
@@ -25,8 +24,8 @@ namespace MapRenderer.Tests
         public abstract string ToSourceJson();
     }
 
-    /// <summary>An inline-GeoJSON <see cref="VisualSource"/> — the only source kind G-V0 implements
-    /// (Source scope v1, plan §1 decision 2). Emits <c>{"type":"geojson","data":&lt;dataJson&gt;}</c>, exactly
+    /// <summary>An inline-GeoJSON <see cref="VisualSource"/> — the only source kind the kit implements.
+    /// Emits <c>{"type":"geojson","data":&lt;dataJson&gt;}</c>, exactly
     /// the shape <c>MapView.BuildSourceSpecs</c>' geojson branch requires (an inline JSON OBJECT, never a URL
     /// string).</summary>
     internal sealed class GeoJsonInlineSource : VisualSource

@@ -17,17 +17,14 @@ namespace MapRenderer.Unity.Rendering.Style
     /// Fill-extrusion <see cref="ITileMeshRenderLayer"/>: a MapLibre <c>fill-extrusion</c> layer as a
     /// runtime render object.
     ///
-    /// <para><b>S23 I2b — roof + wall mesh, dedicated shader.</b> Replaces I1's flat 2D placeholder
-    /// (which reused <see cref="Meshing.StyledFillTileBuilder"/> and the FILL base material):
-    /// <see cref="BuildGraphRequest"/> now delegates to <see cref="Meshing.StyledFillExtrusionTileBuilder"/>
-    /// (roof cap + side walls, VS height extrusion along a per-vertex <c>sec φ</c>-baked extrude-up), and
-    /// <see cref="TryCreate"/> clones the dedicated <c>Map/FillExtrusion</c> base material
+    /// <para><b>Roof + wall mesh, dedicated shader.</b> <see cref="BuildGraphRequest"/> delegates to
+    /// <see cref="Meshing.StyledFillExtrusionTileBuilder"/> (roof cap + side walls, VS height extrusion
+    /// along a per-vertex <c>sec φ</c>-baked extrude-up), and <see cref="TryCreate"/> clones the dedicated
+    /// <c>Map/FillExtrusion</c> base material
     /// (<see cref="Materials.MapMaterialSet.FillExtrusionMaterial"/>) via
-    /// <see cref="Materials.MaterialFactory.CreateFillExtrusionMaterial"/> instead of the flat FILL base.</para>
+    /// <see cref="Materials.MaterialFactory.CreateFillExtrusionMaterial"/>.</para>
     ///
-    /// <para><b>job-scheduling-design.md §8 stage 4:</b> the roof+walls mesh on the job graph.</para>
-    ///
-    /// Axes (design §"Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> /
+    /// Axes (design "Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> /
     /// <see cref="DrawPersistence.Persistent"/>.
     /// </summary>
     internal sealed class FillExtrusionRenderLayer : ITileMeshRenderLayer, IFadeableRenderLayer
@@ -63,7 +60,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <param name="layer">The parsed fill-extrusion style layer.</param>
         /// <param name="settings">The material set to clone the FILL-EXTRUSION base material from.</param>
         /// <param name="initialZoom">The zoom to seed the first uniform push at.</param>
-        /// <param name="drawIndex">This layer's global SLOT (D7), threaded straight into the instance.</param>
+        /// <param name="drawIndex">This layer's global SLOT, threaded straight into the instance.</param>
         /// <returns>The new render layer, or <c>null</c> when the material set is unconfigured.</returns>
         public static FillExtrusionRenderLayer TryCreate(
             FillExtrusion.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)
@@ -117,8 +114,7 @@ namespace MapRenderer.Unity.Rendering.Style
                 Material.renderQueue = LayerDrawOrder.QueueFor(declaredOrder, MaterialSubSlot);
         }
 
-        // job-scheduling-design.md §8 stage 4: mirrors FillRenderLayer.BuildGraphRequest's shape — the
-        // graph's write step does the mesh write.
+        // Mirrors FillRenderLayer.BuildGraphRequest's shape — the graph's write step does the mesh write.
         public Meshing.ILayerMeshBuild BuildGraphRequest(
             IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
             in TileLayerProcessContext context, int materialIndex, string payloadName)

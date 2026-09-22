@@ -16,15 +16,10 @@ namespace MapRenderer.Jobs.Mvt
     /// Properties are stored as <see cref="Value"/> using the Expressions type system so the filter
     /// and expression layers can consume them directly without an extra conversion step.
     ///
-    /// Epic A / A6: implements <see cref="IFeature"/> explicitly — the fold of the retired
-    /// <c>MvtFeatureAdapter</c>, verbatim (design §B-2). (IR C1 collapsed the zero-member
-    /// <c>ITileFeature</c> that used to sit between the two.)
-    ///
-    /// <para><b>IR C1 P3: a feature carries NO geometry at all.</b> The <c>uint[] Geometry</c> command
-    /// stream and the <c>IMvtGeometryCarrier</c> sidecar it hung off are both gone. Coordinates belong to
-    /// the LAYER (<see cref="MvtLayer.Geometry"/>, materialized eagerly inside the decode), and a feature is
-    /// purely an evaluation surface — filters and expressions, nothing else. The command words are consumed
-    /// inside <c>MvtDecoder</c> and never outlive it.</para>
+    /// <para><b>A feature carries NO geometry at all.</b> Coordinates belong to the LAYER
+    /// (<see cref="MvtLayer.Geometry"/>, materialized eagerly inside the decode), and a feature is purely an
+    /// evaluation surface — filters and expressions, nothing else. The command words are consumed inside
+    /// <c>MvtDecoder</c> and never outlive it.</para>
     /// </summary>
     public sealed class MvtFeature : IFeature, IIndexedFeature
     {
@@ -70,7 +65,7 @@ namespace MapRenderer.Jobs.Mvt
     /// <summary>
     /// A decoded MVT layer. Carries the layer name, extent, version, the decoded key table
     /// (field 3, ordered), the decoded value table (field 4, ordered), the feature list, this layer's
-    /// decoded geometry (<see cref="Geometry"/>, since IR C1 P3) and its flattened tag words
+    /// decoded geometry (<see cref="Geometry"/>) and its flattened tag words
     /// (<see cref="FeatureTagWords"/>).
     /// </summary>
     public sealed class MvtLayer : ITileLayer, IIndexedFeatureSource, INativeFilterSource, IDisposable
@@ -80,10 +75,9 @@ namespace MapRenderer.Jobs.Mvt
         public uint Version = 1;
         public readonly List<MvtFeature> Features = new List<MvtFeature>();
 
-        /// <summary>IR C1 P3: this layer's rings, materialized EAGERLY by <see cref="MvtDecoder"/> from its
+        /// <summary>This layer's rings, materialized EAGERLY by <see cref="MvtDecoder"/> from its
         /// features' command streams and owned by this layer for its whole life. One buffer per source-layer
-        /// per DECODE — not per pass and not per consumer — which is what retired <c>TileGeometryStore</c>:
-        /// the memo the store kept is now the field it memoized into.
+        /// per DECODE — not per pass and not per consumer.
         ///
         /// <para><b>BORROWED by every consumer.</b> A consumer must never dispose it, never mutate it, and
         /// never retain it past the decode's scope; the layer frees it in <see cref="Dispose"/>, which
@@ -95,10 +89,9 @@ namespace MapRenderer.Jobs.Mvt
         /// <para><c>default</c> (<c>IsCreated == false</c>) for a layer with no features, allocating
         /// nothing — the same "empty layer allocated nothing" result every consumer already handles.</para>
         ///
-        /// <para><b>Set once, through <see cref="AdoptGeometry"/> — IR C1 fix stage.</b> This used to be a
-        /// public mutable field, so <c>FeatureCount == Features.Count</c> — the lockstep three consumers size
-        /// their per-feature columns from and index by <c>SelectedTileFeature.Ordinal</c> — was enforced by
-        /// one writer's discipline and by nothing structural.</para></summary>
+        /// <para><b>Set once, through <see cref="AdoptGeometry"/></b>, which is what makes
+        /// <c>FeatureCount == Features.Count</c> structural. Three consumers size their per-feature columns
+        /// from that lockstep and index them by <c>SelectedTileFeature.Ordinal</c>.</para></summary>
         public TileGeometryBuffers Geometry { get; private set; }
 
         private bool _geometryAdopted;
@@ -309,7 +302,7 @@ namespace MapRenderer.Jobs.Mvt
 
         ITileLayer IDecodedTile.GetLayer(string name) => GetLayer(name);
 
-        /// <summary>IR C1 P3: frees every layer's geometry. The tile owns its layers, the layers own their
+        /// <summary>Frees every layer's geometry. The tile owns its layers, the layers own their
         /// buffers, and this is the one place the chain is released — driven by the decode-provisioning
         /// reference count at its last reference (<c>SharedDisposable{IDecodedTile}.Release</c>), never by a
         /// consumer. Idempotent.</summary>

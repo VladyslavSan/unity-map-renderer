@@ -8,7 +8,7 @@ namespace MapRenderer.Jobs.Projection
 {
     /// <summary>
     /// Converts tile-space <c>double2</c> coordinates to geodetic SURFACE points (<see cref="GeoCoordinate"/>,
-    /// lat/lon degrees, no elevation). Projection-INDEPENDENT — pure tile math (docs §4), the same for every
+    /// lat/lon degrees, no elevation). Projection-INDEPENDENT — pure tile math, the same for every
     /// projection. It feeds the projection job (<c>ProjectPointsJob&lt;TProj&gt;</c>), which does ONLY the projection.
     ///
     /// <para>Splitting tile→geo out of the projection keeps the projection job reusable for any geodetic input
@@ -32,13 +32,9 @@ namespace MapRenderer.Jobs.Projection
 
         /// <summary>
         /// This job's formula, as a standalone Burst-compatible static function — shared with
-        /// <see cref="Execute"/> above so there is exactly one copy of the tile→geo math (S23 I2b:
-        /// <c>StyledFillExtrusionTileBuilder</c>'s per-vertex sec φ bake needs a geodetic point at an
-        /// individual tile-local vertex, in a loop that already walks vertices one at a time rather than a
-        /// <see cref="NativeArray{T}"/> batch worth scheduling a job over. The wall job's own boundary-vertex
-        /// projection was the other per-point caller until the wall-job stage moved it onto this job's own
-        /// batched <see cref="Execute"/>, scheduled via <c>.Run(count)</c> over the flat ring column
-        /// — <c>WallQuadJob</c> now reads the already-projected column instead of calling <c>GeoAt</c> itself).
+        /// <see cref="Execute"/> above so there is exactly one copy of the tile→geo math. It serves a caller
+        /// that needs a geodetic point at an individual tile-local vertex, in a loop that walks vertices one
+        /// at a time rather than a <see cref="NativeArray{T}"/> batch worth scheduling a job over.
         /// </summary>
         /// <param name="tile">The tile whose local space <paramref name="tileVertex"/> is in.</param>
         /// <param name="extent">The tile's quantization range (MVT extent).</param>

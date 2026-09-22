@@ -6,15 +6,15 @@
 // only import the MapRenderer.Jobs.Fill namespace never write a bare Fill.X.
 //
 // Contents:
-//   GlobeCameraInteractionTests              — SphericalProjection ScreenToGround/GroundToScreen against Unity's own camera, plus the anchored-pan pin over a simulated drag (S91-C).
+//   GlobeCameraInteractionTests              — SphericalProjection ScreenToGround/GroundToScreen against Unity's own camera, plus the anchored-pan pin over a simulated drag.
 //   GlobeFillBandTests                       — the boundary band through curvature subdivision: band quads conform to the interior they border.
-//   GlobeFillSubdividerTests                 — the globe fill subdivider Burst job refines flat earcut triangles onto the sphere and passes flat Mercator straight through (S91-C).
-//   GlobeFillTangentTests                    — the fill Tangent stream carries the projection's per-vertex surface east, not a constant +X (S91-C).
+//   GlobeFillSubdividerTests                 — the globe fill subdivider Burst job refines flat earcut triangles onto the sphere and passes flat Mercator straight through.
+//   GlobeFillTangentTests                    — the fill Tangent stream carries the projection's per-vertex surface east, not a constant +X.
 //   GlobeFillWindingTests                    — the fill front face points out of the surface on both globe and Mercator, so one Cull Back mode fits both.
-//   GlobeLineSubdivisionTests                — falsifiable teeth for globe line curvature subdivision: arc-proportional densification, chord fidelity (S91-C).
+//   GlobeLineSubdivisionTests                — falsifiable teeth for globe line curvature subdivision: arc-proportional densification, chord fidelity.
 //   GlobeLineWindingTests                    — the line ribbon's front face points out of the surface on both globe and Mercator builds.
-//   GlobePlacementTests                      — numerical handedness teeth for camera-relative globe placement via the ENU-rebased camera orbit (S91-C).
-//   RightHandedSphereProjectionWindingTests  — a throwaway right-handed sphere projection's line ribbon still winds the same as flat Mercator (S100).
+//   GlobePlacementTests                      — numerical handedness teeth for camera-relative globe placement via the ENU-rebased camera orbit.
+//   RightHandedSphereProjectionWindingTests  — a throwaway right-handed sphere projection's line ribbon still winds the same as flat Mercator.
 
 using NUnit.Framework;
 using UnityEngine;
@@ -170,12 +170,12 @@ namespace MapRenderer.Tests.Globe
         [Test]
         public void GlobePin_UnderDpr2_HoldsWithLogicalSeam_DriftsWithPhysical()
         {
-            // S92 T-GLOBE-PIN-DPI (D3): under DPR=2 the render camera frames the LOGICAL viewport (vp ÷ DPR,
-            // MapCamera D1), so GroundToScreen(·, vpLogical) IS the render (that primitive is pinned against
-            // Unity's own camera by GroundToScreen_MatchesUnityCameraProjection). The interaction seam
-            // (Controller S92 D3) divides BOTH cursor and viewport by DPR before calling the projection, so the
-            // grabbed point re-renders exactly under the cursor. A version that reconstructs with the PHYSICAL
-            // viewport (skipping the ÷DPR) puts the camera at 2× the render altitude → the point drifts off.
+            // T-GLOBE-PIN-DPI: under DPR=2 the render camera frames the LOGICAL viewport (vp ÷ DPR), so
+            // GroundToScreen(·, vpLogical) IS the render (pinned against Unity's own camera by
+            // GroundToScreen_MatchesUnityCameraProjection). The interaction seam divides BOTH cursor and
+            // viewport by DPR before calling the projection, so the grabbed point re-renders under the cursor.
+            // Reconstructing with the PHYSICAL viewport (skipping the ÷DPR) puts the camera at 2× the render
+            // altitude → the point drifts off.
             const double dpr = 2.0;
             double2 vpPhysical = new double2(800, 600);
             double2 vpLogical  = vpPhysical / dpr; // 400×300 — what the render frames and the seam uses
@@ -185,7 +185,7 @@ namespace MapRenderer.Tests.Globe
             // An off-centre physical cursor (drift is zero at the exact centre — the discriminator needs offset).
             double2 cursorPhysical = new double2(520, 400);
 
-            // CORRECT seam (D3): convert cursor + viewport to logical, so reconstruction shares the render's
+            // CORRECT seam: convert cursor + viewport to logical, so reconstruction shares the render's
             // basis. Grab the ground under the cursor, then re-render it — it must land back under the cursor.
             double2         cursorLogical = cursorPhysical / dpr;
             GeoCoordinate3D grabbed       = proj.ScreenToGround(cursorLogical, vpLogical, c);
@@ -652,7 +652,7 @@ namespace MapRenderer.Tests.Globe
         /// cost of 95% over a tighter 90%, stated so the number does not read as arbitrary and so the next
         /// reader moves it deliberately or not at all.</para>
         ///
-        /// <para>Getting 164 535 down is <b>UMR-103</b>'s job, not this fence's — this one only stops it
+        /// <para>Getting 164 535 down is separate work — this fence only stops it
         /// getting worse. The claim used to live as prose in <c>DefaultMaxInteriorVertices</c>' own doc
         /// ("never reached in production"), where it was already 18% from false and nothing was measuring
         /// it.</para>
@@ -671,7 +671,7 @@ namespace MapRenderer.Tests.Globe
                 "164535 (82.3%) when this fence was written, so it has grown since. Past the budget " +
                 "itself the subdivider emits flat and the globe's fills facet, silently. Raising the budget " +
                 "to clear this fence is only correct if the extra peak allocation is affordable — it is not " +
-                "a way to make the fence pass. Bringing the count itself down is tracked as UMR-103.");
+                "a way to make the fence pass. Bringing the count itself down is tracked separately.");
         }
 
         // ── The attribute survives the lerp, and stays a displacement times a coverage coordinate ──────
@@ -814,7 +814,7 @@ namespace MapRenderer.Tests.Globe
     public class GlobeFillTangentTests : BaseTestFixture
     {
 
-        /// <summary>IR C1 P3: a decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
+        /// <summary>A decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
         protected override void OnTearDown()
         {
             try { TestDecodedTiles.DisposeAll(); }
@@ -827,7 +827,7 @@ namespace MapRenderer.Tests.Globe
                 ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
         }");
 
-        /// <summary>IR C1 P3: the fixture is decoded at the SAME z0 address every test builds at, and the
+        /// <summary>The fixture is decoded at the SAME z0 address every test builds at, and the
         /// layer (which owns its buffer) is returned instead of a detached feature list.</summary>
         private static readonly TileId FixtureTile = new TileId { Z = 0, X = 0, Y = 0 };
 
@@ -874,7 +874,7 @@ namespace MapRenderer.Tests.Globe
         [Test]
         public void GlobeFill_IsSubdivided_ForCurvature_MercatorIsNot()
         {
-            var (layer, selection, paint) = Setup(); // z0 tile spans the globe → heavy chording without C-3
+            var (layer, selection, paint) = Setup(); // z0 tile spans the globe → heavy chording without subdivision
 
             // Band-free on BOTH arms: this comparison is about SUBDIVISION, and both arms now emit an
             // outward boundary band whose vertex counts would otherwise contribute to the ratio below.
@@ -884,7 +884,7 @@ namespace MapRenderer.Tests.Globe
                 layer, selection, paint, 0.0, FixtureTile, new SphericalProjection(), suppressBoundaryBand: true));
             Assert.IsNotNull(flat); Assert.IsNotNull(globe);
 
-            // C-3 refines flat earcut triangles onto the sphere → strictly more TRIANGLES than the flat
+            // Subdivision refines flat earcut triangles onto the sphere → strictly more TRIANGLES than the flat
             // build, while Mercator stays exactly the un-subdivided earcut output.
             // vertex sharing: was asserted on vertexCount, which sharing now shrinks
             // (fewer unique vertices for the same triangle set) — triangle/index count is what subdivision
@@ -915,7 +915,7 @@ namespace MapRenderer.Tests.Globe
     public class GlobeFillWindingTests : BaseTestFixture
     {
 
-        /// <summary>IR C1 P3: a decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
+        /// <summary>A decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
         protected override void OnTearDown()
         {
             try { TestDecodedTiles.DisposeAll(); }
@@ -928,7 +928,7 @@ namespace MapRenderer.Tests.Globe
                 ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
         }");
 
-        /// <summary>IR C1 P3: the fixture is decoded at the SAME z0 address every test builds at, and the
+        /// <summary>The fixture is decoded at the SAME z0 address every test builds at, and the
         /// layer (which owns its buffer) is returned instead of a detached feature list.</summary>
         private static readonly TileId FixtureTile = new TileId { Z = 0, X = 0, Y = 0 };
 
@@ -1481,7 +1481,7 @@ namespace MapRenderer.Tests.Globe
             Assert.Greater(rUnif, 0.99, "right-handed curved ribbon winding is not uniform");
             Assert.AreEqual(mSign, rSign,
                 $"{fixture}: a RIGHT-handed curved projection winds OPPOSITE to Mercator — winding is being decided " +
-                "by curvature/handedness, not derived from cross(along, up). This is the S100 shortcut the tooth forbids.");
+                "by curvature/handedness, not derived from cross(along, up). This is the shortcut the tooth forbids.");
         }
     }
 }

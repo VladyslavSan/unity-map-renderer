@@ -1,4 +1,4 @@
-// Line-paint and vertex-layout GPU/visual acceptance tests (UMR-176 pack: meshing topic).
+// Line-paint and vertex-layout GPU/visual acceptance tests.
 //
 // Split by TWO using collisions, not the line cap: `CameraProperties` (MapRenderer.Core.Geo
 // vs UnityEngine.Rendering) and bare `Object` (System.Object vs UnityEngine.Object) —
@@ -7,8 +7,8 @@
 // neutral, System-importing LineProbeSymmetrySnapshotTests.
 //
 // Contents:
-//   LineStreamLayoutTests           — S54 — canonical vertex layout + LineWidthColor flip teeth.
-//   LinePaintSnapshotTests          — S14 acceptance snapshot tests for line paint GPU behavior (Teeth #3, #4, #5).
+//   LineStreamLayoutTests           — canonical vertex layout + LineWidthColor flip teeth.
+//   LinePaintSnapshotTests          — acceptance snapshot tests for line paint GPU behavior (Teeth #3, #4, #5).
 //   LineProbeSymmetrySnapshotTests  — Same load-bearing production-seam fixture shape as LineDashSnapshotTests, for _Width/_LineOffset arriving in device px via MaterialFactory.BindDevicePixelFloat.
 
 using System;
@@ -29,15 +29,15 @@ using MapRenderer.Unity.Rendering.Style;
 
 namespace MapRenderer.Tests.Visual
 {
-    // Unity-only: render + Mesh-upload tests for the S54 canonical vertex layout.
+    // Unity-only: render + Mesh-upload tests for the canonical vertex layout.
     // NOT included in Tools/core-tests/core-tests.csproj.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // LineStreamLayoutTests — S54 — canonical vertex layout + LineWidthColor flip teeth.
+    // LineStreamLayoutTests — canonical vertex layout + LineWidthColor flip teeth.
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S54 — canonical vertex layout + LineWidthColor flip teeth.
+    /// Canonical vertex layout + LineWidthColor flip teeth.
     ///
     /// Tooth A — LineWidthColor flip is FALSIFIABLE through the REAL stream-3 interleave:
     ///   • Color sub-tooth: a non-white per-vertex colour baked into <c>LineWidthColor.Color</c> shows
@@ -222,7 +222,7 @@ namespace MapRenderer.Tests.Visual
 
                 Assert.That(offenders.Length, Is.EqualTo(0),
                     "Mesh upload must NOT emit the 'vertex buffer attributes supplied in non-standard order' " +
-                    "warning — both descriptor arrays are in ascending VertexAttribute order (S54). " +
+                    "warning — both descriptor arrays are in ascending VertexAttribute order. " +
                     "Captured offenders:\n" + offenders);
             }
             finally
@@ -317,11 +317,11 @@ namespace MapRenderer.Tests.Visual
     // NOT included in Tools/core-tests/core-tests.csproj.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // LinePaintSnapshotTests — S14 acceptance snapshot tests for line paint GPU behavior (Teeth #3
+    // LinePaintSnapshotTests — acceptance snapshot tests for line paint GPU behavior (Teeth #3
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S14 acceptance snapshot tests for line paint GPU behavior (Teeth #3, #4, #5).
+    /// Acceptance snapshot tests for line paint GPU behavior (Teeth #3, #4, #5).
     ///
     /// Tooth #3 (gap-width casing): line-gap-width > 0 via <c>_GapWidth</c> uniform produces a
     ///   hollow / cased line (background visible at center column) while gap-width=0 gives a solid
@@ -396,7 +396,7 @@ namespace MapRenderer.Tests.Visual
         /// Build a single horizontal line with the Map/Line shader.
         /// The line runs along world X from -40m to +40m, centered at world origin.
         /// _WidthIsPixels=1, so the shader MEASURES px→world per vertex (there is no _MetersPerPixel uniform
-        /// any more — S104 removed it; this fixture kept setting it into nothing until the line-translate work).
+        /// any more).
         /// Returns (GameObject, live material). Caller must DestroyImmediate both.
         /// </summary>
         private static (GameObject go, Material mat) BuildHorizontalLine(
@@ -559,17 +559,15 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void LineTranslate_NonZero_ShiftsRibbonSouthByExpectedPixels()
         {
-            // DIRECTION IS PART OF THE ASSERTION (it did not used to be — see below).
+            // DIRECTION IS PART OF THE ASSERTION.
             //
             // Spec: _LineTranslate.y is screen pixels and "negatives indicate up", so +y is SOUTH. The camera
             // looks straight down with screen-up = world +Z = north, and SnapshotRenderer.Pixels is
             // BOTTOM-left origin, so north is INCREASING row. A southward shift therefore DECREASES the row
             // index: expected delta = −TranslatePx.
             //
-            // The previous version of this test asserted Math.Abs(shifted − base), i.e. magnitude only, and
-            // so passed against a shader whose +y pointed NORTH. It also justified itself in terms of
-            // _MetersPerPixel, a uniform S104 deleted. Both are why the inverted sign survived so long; see
-            // docs/line-translate-parity-design.md §2.
+            // Assert the SIGNED delta, never Math.Abs(shifted − base): a magnitude-only assertion passes
+            // against a shader whose +y points NORTH. See docs/line-translate-parity-design.md.
             const float TranslatePx = 30f; // pixels to shift (large enough to measure clearly)
 
             var (cameraGo, camera) = BuildCamera();
@@ -754,7 +752,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void LinePattern_HookActive_LineStillRendersNonBlank()
         {
-            // With _LinePattern=1 the S14 hook is "active" (pattern layer flagged).
+            // With _LinePattern=1 the pattern hook is "active" (pattern layer flagged).
             // The fallback must still render solid _BaseColor — the line must NOT vanish.
 
             var (cameraGo, camera) = BuildCamera();
@@ -798,8 +796,8 @@ namespace MapRenderer.Tests.Visual
                 // patternBandWidth here is actually the CENTER ROW of the band (reusing FindLineCenterRow).
                 Assert.GreaterOrEqual(patternBandWidth, 0,
                     "_LinePattern=1 must NOT blank the line. FindLineCenterRow returned -1 " +
-                    "(no visible band detected). The S14 hook must fall back to solid line-color " +
-                    "(no sprite sampling until S17). If this fails, the hook is incorrectly " +
+                    "(no visible band detected). The hook must fall back to solid line-color " +
+                    "(no sprite sampling yet). If this fails, the hook is incorrectly " +
                     "discarding all pixels instead of rendering solid _BaseColor.");
 
                 // Secondary: filled fraction must be greater than a minimal threshold.
@@ -814,7 +812,7 @@ namespace MapRenderer.Tests.Visual
     // Unity EditMode only — real MapCamera + Camera/RenderTexture, off-screen GPU render + CPU readback.
     // NOT registered in Tools/core-tests/core-tests.csproj.
     //
-    // S111 — the RENDERED teeth for MapPixelsToWorld's DIRECTION SYMMETRY, measured at the source.
+    // The RENDERED teeth for MapPixelsToWorld's DIRECTION SYMMETRY, measured at the source.
     //
     // THE DEFECT, IN ONE LINE: MapPixelsToWorld probes ONE-SIDED — it steps refMag metres along the SIGNED
     // dirWS and measures the pixel span — so the probe travels to a different depth and the span it measures
@@ -834,7 +832,7 @@ namespace MapRenderer.Tests.Visual
     // the PRODUCTION seam — a style JSON parsed into a RenderLayerSet, then set.ApplyZoom(zoom, dpr) — so
     // _Width and _LineOffset arrive in DEVICE px by the real MaterialFactory.BindDevicePixelFloat path. Setting
     // the properties on a hand-made material would test the shader while leaving the wiring unmeasured. The
-    // frame constant the widths convert with comes from the real MapCamera (S116), which BuildScene constructs.
+    // frame constant the widths convert with comes from the real MapCamera, which BuildScene constructs.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // LineProbeSymmetrySnapshotTests — Same load-bearing production-seam fixture shape as LineDashSnapshotTests
@@ -906,7 +904,7 @@ namespace MapRenderer.Tests.Visual
         /// this method with no <c>try</c>/<c>finally</c> in scope and leak that global state for the REST OF
         /// THE BATCH — every lit snapshot fixture after this one would render under Flat 0.9 ambient at
         /// quality 0 and fail pointing nowhere near the cause (exactly the stale-shader-global genre
-        /// <c>docs/line-rendering-design.md</c> §1.1 already recorded once). None of these preconditions
+        /// <c>docs/line-rendering-design.md</c> records). None of these preconditions
         /// read <c>scene</c>, so ordering `Create` last removes the window instead of handling it.</summary>
         private static ProbeScene BuildScene(double tiltDeg, double styledWidthPx, double lineOffsetPx)
         {
@@ -926,7 +924,7 @@ namespace MapRenderer.Tests.Visual
                 "integral below would sum a dash boundary as if it were the ribbon edge.");
             Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.Width),
                 Is.EqualTo((float)(styledWidthPx * Dpr)).Within(1e-3f),
-                $"precondition: _Width must reach the shader in DEVICE px ({styledWidthPx}×dpr, S107).");
+                $"precondition: _Width must reach the shader in DEVICE px ({styledWidthPx}×dpr).");
             Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.LineOffset),
                 Is.EqualTo((float)(lineOffsetPx * Dpr)).Within(1e-3f),
                 $"precondition: _LineOffset must reach the shader in DEVICE px ({lineOffsetPx}×dpr).");
@@ -934,7 +932,7 @@ namespace MapRenderer.Tests.Visual
                 "precondition: _WidthIsPixels must be 1, or pxToWorld is a literal 1.0 and MapPixelsToWorld " +
                 "is never called for the width family — the whole measurement would be inert.");
 
-            // The AA straddle must be LIVE: §5.2's estimator is exact for a clamped ONE-DEVICE-PIXEL linear
+            // The AA straddle must be LIVE: the half-sum estimator is exact for a clamped ONE-DEVICE-PIXEL linear
             // ramp. With AA off the edge is a step and the coverage integral recovers a different surface;
             // with a hairline keyword the ramp is re-shaped or the band is clamped.
             Assert.That(mat.IsKeywordEnabled("_EDGE_ANTIALIASING_OFF"), Is.False,
@@ -956,11 +954,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>Builds the east–west road, renders it once, and hands the caller the scene and the raw
         /// pixels. Everything the measurement needs is read off that one render.
         ///
-        /// <para>ORDERING NOTE (Stage T extraction): before Stage T, the lit ambient was set up BEFORE
-        /// <see cref="BuildScene"/> ran; <see cref="TiltedGroundScene.Create"/> now sets it up INSIDE the
-        /// scene construction that <c>BuildScene</c> calls. Nothing between the two reads ambient state, so
-        /// this reordering is behaviour-preserving — noted because it is the one non-mechanical part of the
-        /// extraction.</para></summary>
+        /// <para>ORDERING: <see cref="TiltedGroundScene.Create"/> sets the lit ambient up INSIDE the scene
+        /// construction <c>BuildScene</c> calls. Nothing between the two reads ambient state.</para></summary>
         private static void WithRenderedRoad(
             double tiltDeg, double styledWidthPx, double lineOffsetPx, string pngName,
             Action<ProbeScene, Frame> measure)
@@ -1066,7 +1061,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>Default anchor inset — inside / outer sample outside, from the detected edge.
         ///
-        /// <para>NOT a free parameter, and NOT the same for every arm since S116. The two half-sums must not
+        /// <para>NOT a free parameter, and NOT the same for every arm. The two half-sums must not
         /// share a row, so the band has to be thicker than <c>2·inset</c>; under the world-width model a band
         /// running across the view azimuth renders <c>cos θ</c> thinner than its styled width, and T-S2's
         /// offset band is now 8 rows, which 4 cannot inset. Each arm derives its own from the band it
@@ -1250,7 +1245,7 @@ namespace MapRenderer.Tests.Visual
         private const double TS1WidthPx = 120.0;
 
         /// <summary>
-        /// <b>T-S1 (REQUIRED) — the SIGN term, at its source.</b> An unoffset ribbon's two padded
+        /// <b>T-S1 — the SIGN term, at its source.</b> An unoffset ribbon's two padded
         /// silhouettes must sit at equal WORLD distance either side of the centreline:
         /// <c>R = zFar / |zNear| == 1</c>.
         ///
@@ -1268,10 +1263,10 @@ namespace MapRenderer.Tests.Visual
         /// <para>RED at 1.019098 against a ±0.005 tolerance — a 3.8× margin — with the four step-5
         /// injections reading 1.019098 / 0.981260 / 1.038561 / 1.000000.</para>
         ///
-        /// <para><b>THE ORIGINAL INVARIANT IS RETIRED (S116). Everything above describes what this arm USED
-        /// to catch; read it as history.</b> The styled WIDTH no longer calls <c>MapPixelsToWorld</c> at all —
-        /// both edges take the one frame constant — so <c>R == 1</c> now holds for the width BY CONSTRUCTION
-        /// and cannot fail for the reason the arm was written.</para>
+        /// <para><b>THE ORIGINAL INVARIANT IS RETIRED. Everything above describes what this arm USED
+        /// to catch.</b> The styled WIDTH does not call <c>MapPixelsToWorld</c> at all — both edges take the
+        /// one frame constant — so <c>R == 1</c> holds for the width unconditionally and cannot fail for the
+        /// reason the arm was written.</para>
         ///
         /// <para><b>And the survivor is weak — stated with the arithmetic, because "it still guards the AA
         /// pad" would be over-claiming.</b> The pad is legitimately per-vertex and is still handed the two
@@ -1297,8 +1292,8 @@ namespace MapRenderer.Tests.Visual
         /// </list>
         /// Direction symmetry at pad amplitude is currently pinned NOWHERE in a render —
         /// <c>Estimator_…_TopDown</c> is a control with <c>e ≡ 0</c> by construction, so it cannot see it
-        /// either. Recorded as a gap rather than papered over; closing it needs a fixture that can resolve a
-        /// pad-sized effect, which is not this one.</para>
+        /// either. Closing that gap needs a fixture that can resolve a pad-sized effect, which is not
+        /// this one.</para>
         /// </summary>
         [Test]
         public void RibbonEdges_AreEquidistantFromTheCentreline_UnderTilt()
@@ -1322,9 +1317,9 @@ namespace MapRenderer.Tests.Visual
                         $"{centre.NearScreenY:F4} (separation {centre.SeparationPx:F4} px); world z " +
                         $"{zFar:F1} / {zNear:F1} m; local scale {farMetresPerPx:F1} / {nearMetresPerPx:F1} m/px");
 
-                    // RE-DERIVED for the world-width model (S116). It used to read [122, 129] — i.e. the
-                    // styled 120 px plus the pad, the CONSTANT-DEVICE-WIDTH premise this epic deleted. A
-                    // styled px width now fixes a WORLD width at the look-at, and this road runs ACROSS the
+                    // DERIVED for the world-width model — NOT the styled 120 px plus the pad, which assumes
+                    // a constant DEVICE width. A styled px width fixes a WORLD width at the look-at, and
+                    // this road runs ACROSS the
                     // view azimuth, so its across-axis lies in the ground plane along the tilt direction and
                     // picks up that plane's foreshortening: 120·cos 55° + 1 = 69.83 px to first order.
                     // Measured 70.73, ~0.9 px over, and that residual is expected rather than slack: the two
@@ -1335,7 +1330,7 @@ namespace MapRenderer.Tests.Visual
                         $"T-S1 framing: the padded band renders {centre.SeparationPx:F2} px thick, expected " +
                         "in [68, 73] (120·cos 55° + 1 = 69.83 to first order, 70.73 measured). A reading " +
                         "near 121 would mean the band is holding a constant DEVICE width under tilt — the " +
-                        "compensation this epic reverted. If the fixture will not frame, RE-DERIVE from the " +
+                        "compensation that was reverted. If the fixture will not frame, RE-DERIVE from the " +
                         "pose; never widen the window to reach it.");
 
                     // Only ±10 columns about the screen centre — see TiltedSweepHalfWidth for why the frame
@@ -1404,7 +1399,7 @@ namespace MapRenderer.Tests.Visual
         /// on one render.
         ///
         /// <para><b>Clause 1, CALIBRATION</b> — the load-bearing one, because it settles by measurement which
-        /// of three candidate surfaces §5.2's half-sum recovers. At tilt 0 the ground is parallel to the
+        /// of three candidate surfaces the half-sum recovers. At tilt 0 the ground is parallel to the
         /// image plane, so the scale is uniform and the two padded silhouettes sit at exactly ±(W/2 + 0.5)
         /// device px. Three readings, three different meanings:
         /// <c>121.0</c> — the estimator recovers the PADDED SILHOUETTE (correct);
@@ -1413,7 +1408,7 @@ namespace MapRenderer.Tests.Visual
         /// Both wrong readings are RED-verified.</para>
         ///
         /// <para><b>Clause 2, THIS ARM IS THE CONTROL.</b> <c>across ⊥ fwd</c> top-down, so e ≡ 0 and the
-        /// S111 correction is exactly 1.0 — R reads 1.000 before AND after the fix. CAVEAT, stated so the
+        /// direction-symmetry correction is exactly 1.0 — R reads 1.000 either way. CAVEAT, stated so the
         /// arm is not over-read: at tilt 0 both edges sit at equal depth, so a COMMON error — the
         /// index→screen-y +0.5 included — cancels in both clauses. Clause 2 pins that the fix is inert where
         /// e ≡ 0; clause 1 pins the surface and the partition; neither pins the +0.5, which is pinned by
@@ -1474,7 +1469,7 @@ namespace MapRenderer.Tests.Visual
 
                     Assert.That(ratio, Is.EqualTo(1.0).Within(0.005),
                         $"THIS ARM IS THE CONTROL: top-down, across ⊥ fwd, so e ≡ 0, the w-ratio is exactly " +
-                        $"1.0 and the ribbon is symmetric before AND after S111. R = {ratio:F6}. A move here " +
+                        $"1.0 and the ribbon is symmetric before AND after the ruler change. R = {ratio:F6}. A move here " +
                         "means the fix is not inert where it must be.");
                 });
         }
@@ -1485,7 +1480,7 @@ namespace MapRenderer.Tests.Visual
         private const double TS2OffsetPx = 160.0;
 
         /// <summary>
-        /// <b>T-S2 (REQUIRED) — the UNBOUNDED consumer.</b> <c>_LineOffset</c> is the one consumer of
+        /// <b>T-S2 — the UNBOUNDED consumer.</b> <c>_LineOffset</c> is the one consumer of
         /// <c>pxToWorld</c> that is NOT paired across the ribbon: both station vertices take the SAME common
         /// offset, each measured with its OWN ruler, so the sign asymmetry lands in the ribbon's HALF-WIDTH
         /// instead of cancelling there.
@@ -1497,8 +1492,8 @@ namespace MapRenderer.Tests.Visual
         /// <c>e·L</c> leaking into it was 12.11 % at L = 160, and UNBOUNDED in L, because nothing bounds
         /// it by the styled width — while the centre errs only <c>e·H/L</c> = 0.074 %.</para>
         ///
-        /// <para><b>S116 — the expectation moves from L/(W/2 + 0.5) to L/(W/2), and why that is a
-        /// re-derivation and not a re-bake.</b> Width and offset now convert with the frame constant while the
+        /// <para><b>The expectation is L/(W/2), not L/(W/2 + 0.5), and that is a
+        /// derivation rather than a re-bake.</b> Width and offset convert with the frame constant while the
         /// AA pad keeps its per-vertex measurement, so the two no longer share one <c>k</c> and the pad stops
         /// cancelling: the recovered PADDED half-width is <c>K·W/2 + 0.5·k</c>, mixing rulers that differ by
         /// <c>1/cos θ</c> under tilt (~7 % of the half-width on a 24 px band). The measurement subtracts the
@@ -1506,15 +1501,15 @@ namespace MapRenderer.Tests.Visual
         /// and the assertion is then on the STYLED half-width, which is what the claim was always about. The
         /// dimensionless form survives; only the pad term leaves it.</para>
         ///
-        /// <para>NAME AND SCOPE, deliberately narrow: this tooth measures a WORLD-space coupling about the
+        /// <para>NAME AND SCOPE, narrow on purpose: this tooth measures a WORLD-space coupling about the
         /// original centreline. It neither claims nor delivers screen-width preservation — the band is at a
         /// different depth from the centreline the width was fixed at, so its rendered device width is
         /// smaller and MOVES with the offset by construction. Whether line-offset should re-measure at the
         /// SHIFTED position is a spec question about what line-offset means under perspective, filed and out
         /// of scope.</para>
         ///
-        /// <para>RED at 11.426080 against 12.800 ± 2.5 % — a 4.3× margin — under the pre-S116 formulation.
-        /// The same injection against the current formulation is larger, not smaller: the leak adds
+        /// <para>Discriminates at 11.426080 against 12.800 ± 2.5 % — a 4.3× margin — under the padded
+        /// formulation. The same injection against the current one is larger, not smaller: the leak adds
         /// <c>e·L·K</c> to a half-width that no longer carries the pad, ~29 %.</para>
         /// </summary>
         [Test]
@@ -1555,7 +1550,7 @@ namespace MapRenderer.Tests.Visual
                     var (zFarCentre,  farMetresPerPx)  = SolveEdge(scene.UnityCamera, centre.FarScreenY,  Lo, Hi);
                     var (zNearCentre, nearMetresPerPx) = SolveEdge(scene.UnityCamera, centre.NearScreenY, Lo, Hi);
 
-                    // ── The AA pad is no longer on the width's ruler, so it must be subtracted (S116) ──
+                    // ── The AA pad is not on the width's ruler, so it must be subtracted ──
                     // The estimator recovers the PADDED silhouette (T-S1c pins that), and the pad is half a
                     // device pixel measured PER VERTEX by MapPixelsToWorld at the UNSHIFTED centreline —
                     // whereas the styled half-width is now W/2 × the frame constant. Under tilt those two
@@ -1579,7 +1574,7 @@ namespace MapRenderer.Tests.Visual
 
                     Assert.That(centre.SeparationPx, Is.InRange(6.5, 11.0),
                         $"T-S2 framing: the padded band renders {centre.SeparationPx:F2} px thick, expected " +
-                        "in [6.5, 11]. RE-DERIVED, with the arithmetic, for the world-width model (S116): " +
+                        "in [6.5, 11]. RE-DERIVED, with the arithmetic, for the world-width model: " +
                         "the styled half-width is a fixed 24/2 × K = 12 K metres (K = 305.75 m/device px at " +
                         "this pose) and the pad ~0.5 × K/cos 55° , so the band is ~3.93 km wide in the world " +
                         "wherever it sits. It is offset 160 K = 48.9 km NORTH, which at tilt 55° puts it at " +

@@ -3,16 +3,13 @@ using System.Threading;
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// Process-wide debug counters shared by every <see cref="ILayerMeshBuild"/> implementer — the renamed,
-    /// relocated form of the retired <c>TileBuildGraph.LayerRequest</c>'s own
-    /// <c>DebugLiveRequests</c>/<c>DebugTotalRequestsCreated</c> (job-scheduling-design.md §3.2). A DELTA
-    /// meter for teeth: absolute values are meaningless — this is a process-wide static and an EditMode
-    /// batch run is one process.
+    /// Process-wide debug counters shared by every <see cref="ILayerMeshBuild"/> implementer
+    /// (job-scheduling-design.md). A DELTA meter for teeth: absolute values are meaningless — this is a
+    /// process-wide static and an EditMode batch run is one process.
     ///
-    /// <para>Unlike the struct it replaces, every build funnels through
-    /// <see cref="LayerMeshBuildPool{T}.Rent"/> — a pooled class has no object-initializer bypass — so this
-    /// counter has no excluded construction path: a background tile's build
-    /// (<c>TileManager.KickSourcelessBackground</c>) counts exactly like a source tile's.</para>
+    /// <para>Every build funnels through <see cref="LayerMeshBuildPool{T}.Rent"/> — a pooled class has no
+    /// object-initializer bypass — so this counter has no excluded construction path: a background tile's
+    /// build (<c>TileManager.KickSourcelessBackground</c>) counts like a source tile's.</para>
     /// </summary>
     internal static class LayerMeshBuildCounters
     {
@@ -29,7 +26,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         internal static long DebugTotalBuildsCreated => Interlocked.Read(ref _totalBuildsCreated);
 
         /// <summary>Non-zero iff <see cref="RecordDisposed"/>'s decrement ever took <see cref="DebugLiveBuilds"/>
-        /// below zero — a hazard pooling adds that the retired struct did not have: each instance's own
+        /// below zero — the hazard pooling adds: each instance's own
         /// <c>_disposed</c> flag only guards a SECOND dispose of the SAME lease, not a stale reference
         /// disposing an instance the pool has since re-rented to someone else (that lease's own
         /// <c>_disposed</c> was already reset to <c>false</c> by <c>Reset</c>). Mirrors

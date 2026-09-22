@@ -2,7 +2,7 @@ namespace MapRenderer.Core.Geometry
 {
     /// <summary>
     /// Join type for polyline corners. Baked at mesh build time — changing join type requires
-    /// a mesh rebuild (per ARCHITECTURE §2 styling model).
+    /// a mesh rebuild (per the styling model in <c>ARCHITECTURE.md</c>).
     /// </summary>
     public enum JoinType
     {

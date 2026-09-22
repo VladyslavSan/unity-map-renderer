@@ -8,10 +8,10 @@ namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
     /// The blittable, order-preserving Structure-of-Arrays for one collected symbol set — the per-frame placement
-    /// source of truth (Lever C step 2). Built ONCE per collected-set change (keyed on
+    /// source of truth. Built ONCE per collected-set change (keyed on
     /// <c>SymbolTileStore.Version</c>) by converting the collected per-symbol records at the
     /// aggregation seam; every per-frame pass (gather → project → stage) then reads these arrays with no managed
-    /// iteration and no per-frame conversion. All fields are blittable so Lever C step 3 can mirror them into
+    /// iteration and no per-frame conversion. All fields are blittable so a later step can mirror them into
     /// <c>NativeArray</c>s for a Burst staging job.
     ///
     /// <para><b>Ordering.</b> Records are in the exact collected order the old per-frame loop processed symbols in,
@@ -29,7 +29,7 @@ namespace MapRenderer.Core.Text.Placement
         public int[]     Detail     = Array.Empty<int>();   // index into Points[] or Curveds[]
         public int[]     WorldStart = Array.Empty<int>();   // start of this symbol's world points in WorldPoints
         public int[]     WorldCount = Array.Empty<int>();   // 1 (point anchor) or path length (curved)
-        public double3[] RepAnchor  = Array.Empty<double3>(); // the B-3 distance-cull point (RepresentativeAnchor)
+        public double3[] RepAnchor  = Array.Empty<double3>(); // the distance-cull point (RepresentativeAnchor)
         public bool[]    SymbolDeparting = Array.Empty<bool>(); // per record → its tile is leaving cover (fade OUT, don't pop)
         // A SEPARATE flag from SymbolDeparting: a coverage-fading tile is still ACTIVE (loaded, in cover) — only
         // its on-screen coverage crossed below threshold. Conflating it with SymbolDeparting (bound to "tile
@@ -61,7 +61,7 @@ namespace MapRenderer.Core.Text.Placement
         public int           AnchorCount;
         public double3[]     WorldPoints  = Array.Empty<double3>();          // anchor (point) / path verts (curved) — for projection
         public int           WorldPointCount;
-        // P2: the unit surface normal at each WorldPoints entry — index-parallel, same WorldStart/WorldCount
+        // The unit surface normal at each WorldPoints entry — index-parallel, same WorldStart/WorldCount
         // pair (no second index pair). float3 (a direction; narrowed at the same site WorldPoints would be if
         // it were narrowed): a unit vector at float precision carries ~1e-7 rad of angular error, well below
         // what any consumer needs, so narrowing at the source (the baker) rather than carrying double3 all

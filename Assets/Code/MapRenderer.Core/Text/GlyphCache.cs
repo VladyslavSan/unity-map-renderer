@@ -5,7 +5,7 @@ using System.Collections.Generic;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Keep-all-per-session glyph-range cache (S18 §6.4a, locked): a decoded <see cref="FontStackGlyphs"/>
+    /// Keep-all-per-session glyph-range cache: a decoded <see cref="FontStackGlyphs"/>
     /// range is fetched once and reused for the rest of the session. No eviction — a basemap uses few
     /// ranges in practice; revisit only if memory shows up.
     /// </summary>

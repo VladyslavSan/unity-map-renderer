@@ -78,7 +78,8 @@ namespace MapRenderer.Core.Geo
             => new ConstrainedAngle(degrees, 0.0, 360.0, AngleConstraint.Wrap);
 
         /// <summary>
-        /// Camera tilt — clamps to <c>[0, 90]</c> per the §7 locked definition:
+        /// Camera tilt — clamps to <c>[0, 90]</c> per the locked definition in
+        /// <c>docs/coordinates-and-projections.md</c>:
         /// <c>tilt=0</c> is top-down (camera forward = inverse of earth normal at LookAt),
         /// <c>tilt=90</c> is parallel to the surface (horizon).
         /// </summary>

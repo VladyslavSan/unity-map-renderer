@@ -1,7 +1,7 @@
-// Shadow-receive bisection GPU/visual acceptance test (UMR-176 pack: shaders topic).
+// Shadow-receive bisection GPU/visual acceptance test.
 //
-// Stays its own file regardless of size or topic — docs/test-conventions.md §4's
-// already-documented fixture that reds under -testFilter and passes only in a full run.
+// Stays its own file regardless of size or topic — docs/test-conventions.md records it as the fixture
+// that reds under -testFilter and passes only in a full run.
 //
 // Contents:
 //   ShadowReceiveBisectTests  — Localises "buildings cast into the shadow map but nothing on screen darkens" by rendering the same shadow scene through five configurations, each one step closer to the map's real one — see the file header for the ladder, the oracle and why each rung is…
@@ -1180,8 +1180,7 @@ namespace MapRenderer.Tests.Visual
             public readonly SnapshotVerdict OnVerdict;
 
             /// <summary>Global shadow keyword state sampled immediately after the shadows-ENABLED render.
-            /// Reading it any later reports leftover state from the shadows-disabled render instead, which
-            /// is what the first version of this fixture did.</summary>
+            /// Reading it any later reports leftover state from the shadows-disabled render instead.</summary>
             public readonly string ShadowKeywords;
 
             /// <param name="shadowBoxOn">Shadow box, shadows enabled.</param>
@@ -1277,12 +1276,10 @@ namespace MapRenderer.Tests.Visual
                 light.shadowStrength = 1f;
                 lightGo.transform.rotation = layout.LightRotation;
 
-                // The skybox probe is baked LAST, and only here: it needs both the skybox material and the
-                // sun, and the sun is this light, which does not exist until now. Neither was ever set
-                // before, so every "Skybox ambient" rung baked whatever the EditMode runner's own scene
-                // carried — a probe measured at ~0.074 irradiance, roughly 5x darker than the demo scene's
-                // Default-Skybox at intensity 1. That is the same class of error as the 0.62 albedo: it
-                // gave the shadow contrast the app does not have.
+                // The skybox probe is baked LAST, and only here: it needs both the skybox material and
+                // the sun, and the sun is this light, which does not exist until now. Without both, a
+                // "Skybox ambient" rung bakes whatever scene the EditMode runner carries — far darker
+                // than the demo scene, which gives the shadow contrast the app does not have.
                 if (layout.Ambient == AmbientMode.Skybox)
                 {
                     RenderSettings.skybox = AssetDatabase.GetBuiltinExtraResource<Material>(
@@ -1676,8 +1673,8 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Screen rectangle covered by an axis-aligned ground-plane box, from the camera's own view and
-        /// projection matrices. Replaces the closed-form top-down mapping the first version used, which
-        /// only held for an orthographic camera looking straight down.
+        /// projection matrices, so it holds for a tilted perspective rung and not only a top-down
+        /// orthographic one.
         /// </summary>
         /// <param name="camera">The camera the frame was rendered through.</param>
         /// <param name="centre">Box centre on the ground plane.</param>
@@ -1875,8 +1872,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// Rec.709 luminance the ambient probe delivers to a ground-facing (up) normal. The ambient axis of
         /// the sweep is an INTENSITY multiplier, which says nothing about what it multiplies — so without
-        /// this number a near-black probe and the app's own sky are indistinguishable in the table, and an
-        /// earlier pass reported ambient rows measured against a probe roughly 5x too dark.
+        /// this number a near-black probe and the app's own sky are indistinguishable in the table.
         /// </summary>
         /// <returns>Probe luminance for an up-facing normal.</returns>
         private static double AmbientIrradianceUp()

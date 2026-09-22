@@ -1,8 +1,6 @@
-// Unity touch source (S74): thin EnhancedTouch adapter over the S73 GestureIntent seam.
+// Unity touch source: thin EnhancedTouch adapter over the GestureIntent seam.
 // Sits alongside Controller.cs (the desktop source). Delegates ALL disambiguation to
 // TouchGestureRecognizer (Core) and ALL camera math to ViewInput.Apply — re-implements neither.
-//
-// T-TOUCHSTACK guard: see TouchInputStackTests.cs (mirrors MapControllerInputTests).
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -23,7 +21,7 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// S74: thin Unity EnhancedTouch adapter — the touch sibling of <see cref="Controller"/>.
+    /// A thin Unity EnhancedTouch adapter — the touch sibling of <see cref="Controller"/>.
     ///
     /// <para>Reads <see cref="Touch.activeTouches"/> each frame, converts them to engine-free
     /// <see cref="TouchSample"/>s, feeds them to <see cref="TouchGestureRecognizer.Recognize"/>,
@@ -37,7 +35,7 @@ namespace MapRenderer.App
     /// <see cref="EnhancedTouchSupport.Enable()"/> is called in <see cref="OnEnable"/> —
     /// without this, <c>Touch.activeTouches</c> is always empty and touch silently does nothing.</para>
     ///
-    /// <para><b>Zero seam edits (T-NOSEAM):</b> this class references
+    /// <para><b>Zero seam edits:</b> this class references
     /// <see cref="GestureIntent"/>, <see cref="ViewInput.Apply"/>, and <see cref="ViewContext"/>
     /// verbatim; it does not redefine them, add intent kinds, or re-implement gesture math.</para>
     ///
@@ -73,7 +71,7 @@ namespace MapRenderer.App
                  "finite Mercator sheet, which fills the viewport at margin 0. Mirrors Controller.MinZoomMargin.")]
         public float MinZoomMargin = 0.5f;
 
-        // ── Disambiguation thresholds (LOGICAL px — constant physical size, S92 touch-DPI closure) ────
+        // ── Disambiguation thresholds (LOGICAL px — constant physical size) ──────────────────────────
         [Header("Disambiguation thresholds (logical px)")]
         [Tooltip("Inter-finger distance change (logical px) needed to classify as a pinch.")]
         public float PinchDistanceThresholdPx = 10f;
@@ -111,9 +109,8 @@ namespace MapRenderer.App
         // during play are picked up on next enable cycle).
         private void RebuildRecognizer()
         {
-            // The seam is fed LOGICAL px (Update divides by DevicePixelRatio), so thresholds and pitch
-            // sensitivity are already density-independent — normalization happens ONCE, at the position basis,
-            // mirroring the mouse seam (S92 touch-DPI closure). No per-density threshold scaling here.
+            // The seam is fed LOGICAL px, so thresholds and pitch sensitivity are already
+            // density-independent: normalization happens ONCE, at the position basis.
             var cfg = new TouchGestureConfig
             {
                 ZoomSensitivity            = ZoomSensitivity,
@@ -135,13 +132,11 @@ namespace MapRenderer.App
         {
             if (Map == null || Map.Camera == null) return;
 
-            // Build per-frame view context (same pattern as Controller.Update). The interaction seam runs in
-            // LOGICAL pixels (S92 D3): convert the viewport AND every touch contact so anchors and the render
-            // camera (MapCamera D1 frames vp/DPR) share one basis — else pinch/pan drifts off the fingers on a
-            // high-DPI panel. Density normalization lives ONLY here now; the recognizer's thresholds are plain
-            // logical px, mirroring the mouse seam. Since S108 the division and its unusable-ratio fallback
-            // live in DeviceScaling.DeviceToLogicalPx, the same definition MapCamera.ViewportLogicalPx frames
-            // from — one definition, so the touch basis and the render basis cannot diverge.
+            // Build the per-frame view context, as Controller.Update does. The interaction seam runs in
+            // LOGICAL pixels: convert the viewport AND every touch contact so anchors and the render camera
+            // share one basis, or pinch and pan drift off the fingers on a high-DPI panel. The division and
+            // its unusable-ratio fallback live in DeviceScaling.DeviceToLogicalPx, the same definition
+            // MapCamera.ViewportLogicalPx frames from, so the two bases cannot diverge.
             // As on the mouse seam, the viewport is this component's own serialized camera (nullable, hence
             // the Screen.width/height fallback), NOT MapCamera's ctor-enforced non-null one.
             double dpr = Map.Config.DevicePixelRatio;
@@ -180,7 +175,7 @@ namespace MapRenderer.App
                 _samples.Add(new TouchSample
                 {
                     FingerId   = t.finger.index,
-                    PositionPx = DeviceScaling.DeviceToLogicalPx(new double2(pos.x, pos.y), dpr), // logical px (S92 D3 seam)
+                    PositionPx = DeviceScaling.DeviceToLogicalPx(new double2(pos.x, pos.y), dpr), // logical px
                     Phase      = corePh,
                 });
             }

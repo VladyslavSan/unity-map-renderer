@@ -2,7 +2,7 @@
 // allocation meter on Unity Mono, see MapRenderer.Tests.EditMode/Meshing/LineBuildAllocTests.cs). NOT
 // registered in core-tests.csproj (MeshDataPayload/Mesh.MeshDataArray are Unity types).
 //
-// perf/gc-elimination, meshing follow-ups Stage A: TileMeshLayerProcessor and MeshDataPayload — the
+// perf/gc-elimination: TileMeshLayerProcessor and MeshDataPayload — the
 // per-dense-layer kick-time objects — used to be `new`d fresh on every AllocateForKick/Complete() call
 // (~208 alloc events / ~16.5 KB per tile-build on a liberty-shaped style). They are now rented from
 // TileMeshLayerProcessorPool/MeshDataPayloadPool (ConcurrentBag-backed, mirroring TileBuildBuffersPool —
@@ -31,7 +31,7 @@ using MapRenderer.Unity.Rendering.Tile.Processing;
 namespace MapRenderer.Tests.Tiles
 {
     /// <summary>
-    /// Acceptance teeth for meshing follow-ups Stage A: pooling <see cref="TileMeshLayerProcessor"/> and
+    /// Acceptance teeth for pooling <see cref="TileMeshLayerProcessor"/> and
     /// <see cref="MeshDataPayload"/>. See <see cref="TileLayerProcessorRunnerTests"/>'s
     /// <c>FaultingGraphRequest_StillReturnsItsProcessor_AndLeaksNoRequest</c> for the
     /// sibling degenerate-path pool-return tooth (extended there, next to the existing fault-settlement
@@ -97,13 +97,9 @@ namespace MapRenderer.Tests.Tiles
         /// its pool instead of `new`d. RED-verified by reverting <c>AllocateForKick</c> back to
         /// `new TileMeshLayerProcessor(...)` — must fail.
         ///
-        /// <para>job-scheduling-design.md §8 stage 5 Group B: this tooth's cycle used to run through
-        /// <c>Complete()</c> → <see cref="MeshDataPayload.Upload"/>/<see cref="MeshDataPayload.Dispose"/> —
-        /// the seam-arm's kick-time <c>MeshDataPayload</c> pooling, which retired with the last seam-arm
-        /// kind: after B.3 nothing is allocated at kick, so there is no payload for THIS cycle to Upload or
-        /// Dispose any more. What survives, unaffected by B.1-B.5, is <see cref="TileMeshLayerProcessor"/>'s
-        /// OWN object pooling (<see cref="TileMeshLayerProcessorPool"/>) — the property this narrowed tooth
-        /// still observes.</para>
+        /// <para>Nothing is allocated at kick, so there is no <see cref="MeshDataPayload"/> for this cycle to
+        /// Upload or Dispose. What this tooth observes is <see cref="TileMeshLayerProcessor"/>'s OWN object
+        /// pooling (<see cref="TileMeshLayerProcessorPool"/>).</para>
         /// </summary>
         [Test]
         public void KickProcessRelease_OverTwoLayers_WarmedRepeat_AllocatesNoGCMemory()
@@ -161,7 +157,7 @@ namespace MapRenderer.Tests.Tiles
         // ── Tooth 2: cross-build isolation — Upload() must not itself return to the pool ────────────
 
         /// <summary>
-        /// The regression tooth for Correction 2 (meshing-follow-up plan, Stage A): <see cref="MeshDataPayload.Dispose"/>,
+        /// The regression tooth: <see cref="MeshDataPayload.Dispose"/>,
         /// not <see cref="MeshDataPayload.Upload"/>, is the sole pool-return point. <c>TileManager.ConsumeMeshBuild</c>
         /// calls <c>payload.Upload(); payload.Dispose();</c> back-to-back on the same reference — if
         /// <c>Upload()</c>'s success path also returned <c>this</c> to the pool, a concurrent build's
@@ -172,18 +168,16 @@ namespace MapRenderer.Tests.Tiles
         /// one just uploaded.
         ///
         /// <para>RED-verified by temporarily adding <c>MeshDataPayloadPool.Return(this);</c> to <c>Upload</c>'s
-        /// success path (the exact bug Correction 2 forbids) — the very next <c>Rent()</c> then returns the
+        /// success path — the very next <c>Rent()</c> then returns the
         /// same instance, failing this assertion.</para>
         /// </summary>
         [Test]
         public void Upload_DoesNotReturnThePayloadToThePool_OnlyDisposeDoes()
         {
-            // job-scheduling-design.md §8 stage 5 Group B (§3.6): this tooth's subject is MeshDataPayload's
-            // OWN pool contract — it never needed the runner, only a vehicle to obtain a real,
-            // vertex-bearing payload. Post-migration (no more seam-arm processor to route one through), get
-            // one directly: allocate a tracked writable MeshDataArray, write real geometry into it with the
-            // still-kept (E2 ruling) StyledFillTileBuilder.WriteMeshData, then wrap it exactly the way the
-            // (retired) seam-arm settlement used to — MeshDataPayloadPool.Rent() + Reset(...).
+            // This tooth's subject is MeshDataPayload's OWN pool contract — it never needed the runner, only a
+            // vehicle to obtain a real, vertex-bearing payload. Get one directly: allocate a tracked writable
+            // MeshDataArray, write real geometry into it with StyledFillTileBuilder.WriteMeshData, then wrap it
+            // with MeshDataPayloadPool.Rent() + Reset(...).
             var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Polygon, hasId: false, geometry: FullExtentRingCommandStream.Commands);
             var tileId = new TileId { Z = 0, X = 0, Y = 0 };
             const string sourceLayerName = "isolation-fixture-layer";
@@ -219,7 +213,7 @@ namespace MapRenderer.Tests.Tiles
                 {
                     Assert.AreNotSame(payload, other,
                         "Upload() must not return the payload to the pool — only Dispose() may, per Correction 2 " +
-                        "(meshing-follow-up plan, Stage A): returning it from Upload() opens a window where a " +
+                        "returning it from Upload() opens a window where a " +
                         "concurrent build's Rent()+Reset() races the original caller's own still-pending Dispose().");
                 }
                 finally

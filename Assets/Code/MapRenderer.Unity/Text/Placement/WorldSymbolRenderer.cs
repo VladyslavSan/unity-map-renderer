@@ -21,8 +21,7 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// Epic A / A1 (design §3.3, §11 A1 D1) + the symbol-draw-backend-rework corrective (design §5, §7): the
-    /// dedicated world-anchored symbol renderer — NOT an <see cref="Backend.ITileRenderBackend"/> (no
+    /// The dedicated world-anchored symbol renderer — NOT an <see cref="Backend.ITileRenderBackend"/> (no
     /// mesh-update op, no per-instance registration a symbol's per-frame Opacity rewrite would fit). Owns a
     /// persistent <c>Dictionary&lt;WorldSymbolKey, Slot&gt;</c> keyed by <c>(TileKey, Slot, Kind)</c> — one
     /// mesh per (tile, material slot, text/icon) — plus its OWN <see cref="SceneTileTree"/> ("Map Symbols"
@@ -38,7 +37,7 @@ namespace MapRenderer.Unity.Text.Placement
     /// per-symbol-layer node, hides the rest, refreshes the tree's per-tile transform ONCE (not per slot),
     /// and reclaims a slot idle for <see cref="IdleReclaimFrames"/> consecutive frames (self-contained —
     /// reads only what <see cref="Emit"/> handed it, never a batch tile array, so the coverage cull's
-    /// <c>-1</c> degenerate can never reach here — D2's BLOCKER fix).</para>
+    /// <c>-1</c> degenerate can never reach here).</para>
     ///
     /// <para>Main-thread only (touches <see cref="Mesh"/>/<see cref="GameObject"/>, mirrors every other
     /// GPU-resource boundary in this codebase).</para>
@@ -46,18 +45,18 @@ namespace MapRenderer.Unity.Text.Placement
     internal sealed class WorldSymbolRenderer : VerifiedDisposable
     {
         // A slot idle for this many consecutive EndFrames (no content, nothing presented) is torn down —
-        // roughly a second of frames at 60fps. A reappearing key just lazily re-creates its slot (D1).
+        // roughly a second of frames at 60fps. A reappearing key just lazily re-creates its slot.
         private const int IdleReclaimFrames = 60;
 
-        // Stage AC (curved-world) D-I: WorldBillboardVertex.AlignFlags bit1 — "rotate Offset by the
-        // projected Tangent." Point/icon leave bit0 (map-bearing, A3) as their only bit; curved sets ONLY
+        // WorldBillboardVertex.AlignFlags bit1 — "rotate Offset by the projected Tangent."
+        // Point/icon leave bit0 (map-bearing) as their only bit; curved sets ONLY
         // this one (bit1 set ⇒ the shader ignores bit0 — MapLibre line placement ignores
         // text-rotation-alignment).
         private const float AlongLineAlignFlag = 2f;
 
-        // W2: WorldBillboardVertex.AlignFlags bit2 — "Offset is WORLD METRES; displace the anchor in its
-        // own ground plane BEFORE projection" (Shaders/Map/Symbol/SymbolWorldPitchAlign.hlsl). bit0 is A3's
-        // map-bearing and bit1 is Stage AC's along-line, so bit2 is the next free one.
+        // WorldBillboardVertex.AlignFlags bit2 — "Offset is WORLD METRES; displace the anchor in its
+        // own ground plane BEFORE projection" (Shaders/Map/Symbol/SymbolWorldPitchAlign.hlsl). bit0 is
+        // map-bearing and bit1 is along-line, so bit2 is the next free one.
         private const float MapPitchAlignFlag = 4f;
 
         private sealed class Slot
@@ -111,7 +110,7 @@ namespace MapRenderer.Unity.Text.Placement
         private const string LayerNodeFallbackName = "symbol-";
 
         // The symbol path's own root→tile-container tree (mirrors the GameObjects tile backend's
-        // "MapTiles (GameObject backend)" tree, §5 of the rework design: symbols always maintain their own
+        // "MapTiles (GameObject backend)" tree: symbols always maintain their own
         // tree so the organization is identical no matter which backend draws tile fills).
         // internal (not private): SymbolPlacementSystemTestExtensions reads NodeCount off it — the LIVE
         // tile-container count, which _tree.Root.childCount is no longer (it also holds the pool node).
@@ -201,7 +200,7 @@ namespace MapRenderer.Unity.Text.Placement
                 defaultCapacity: 32,
                 maxSize: 512);
 
-        // Reused reclaim-sweep scratch (cleared each EndFrame, never reallocated in steady state — T4).
+        // Reused reclaim-sweep scratch (cleared each EndFrame, never reallocated in steady state).
         private readonly List<WorldSymbolKey> _reclaimKeys = new();
 
         /// <summary>Profiler marker name constants (SSOT) for this type's per-frame work — referenced by the
@@ -230,11 +229,11 @@ namespace MapRenderer.Unity.Text.Placement
 
         /// <summary>
         /// Appends <paramref name="emit"/>'s already-staged glyph quads (<paramref name="quads"/>, the SAME
-        /// pool <c>SymbolPlacementSystem</c>'s screen path reads — D6, no new staged-quad stream) into the
+        /// pool <c>SymbolPlacementSystem</c>'s screen path reads — no new staged-quad stream) into the
         /// slot for <c>(emit.TileKey, emit.Slot, emit.AtlasKind)</c>, creating it lazily on first use.
         /// Returns the quad count emitted (for <c>LastQuadCount</c>) — the LABEL's quad count, which a halo
         /// run does not change. Reads the world payload ONLY from <paramref name="emit"/> — never a batch
-        /// tile array (D2).
+        /// tile array.
         ///
         /// <para><b>A visible <c>text-halo-*</c> emits this label's glyph run twice</b> — the halo copy
         /// first, then the text copy. The two runs are contiguous blocks of ONE index buffer, so the whole
@@ -299,41 +298,38 @@ namespace MapRenderer.Unity.Text.Placement
             for (int k = 0; k < quadCount; k++)
             {
                 PlacedQuad q = quads[emit.QuadStart + k];
-                // Stage AC D2/D6: a curved candidate's world anchor/tangent are PER-GLYPH (on the quad
-                // itself), not per-candidate (emit.AnchorLocal is a point symbol's single shared anchor) —
-                // and its corners carry no per-quad screen rotation, being rotated instead by the shader
-                // from the projected Tangent (D-E). Point/icon keep the existing per-candidate anchor +
-                // baked screen rotation + tangentLocal=0/alignFlags=0 (byte-identical — the shader's
-                // tangent branch is never taken for them).
-                // P-B: the along-line arm is no longer a hardcoded 0 — it carries icon-rotate, the one
-                // constant the shader's tangent rotation must compose ON TOP of. Curved text leaves
-                // ExtraRotationRadians at 0, which is exactly the value that used to be written here.
+                // A curved candidate's world anchor/tangent are PER-GLYPH (on the quad itself), not
+                // per-candidate (emit.AnchorLocal is a point symbol's single shared anchor) — and its
+                // corners carry no per-quad screen rotation, being rotated instead by the shader from the
+                // projected Tangent. Point/icon keep the per-candidate anchor + baked screen rotation +
+                // tangentLocal=0/alignFlags=0; the shader's tangent branch is never taken for them.
+                // The along-line arm carries icon-rotate, the one constant the shader's tangent rotation
+                // must compose ON TOP of. Curved text leaves ExtraRotationRadians at 0.
                 float3 anchorLocal     = emit.AlongLine ? q.AnchorLocal : emit.AnchorLocal;
                 float  rotationRadians = emit.AlongLine ? emit.ExtraRotationRadians : q.RotationRadians;
                 float3 tangentLocal    = emit.AlongLine ? q.Tangent : float3.zero;
-                // P2: same per-glyph-vs-per-candidate selector as tangentLocal above — a curved candidate's
+                // Same per-glyph-vs-per-candidate selector as tangentLocal above — a curved candidate's
                 // up rides the quad (per-glyph, sampled along the path); point/icon carry the candidate's
                 // single anchor up.
                 float3 surfaceUp       = emit.AlongLine ? q.SurfaceUp : emit.SurfaceUp;
 
-                // W2: ONE local decides BOTH the corner unit and the shader bit, so a state where the offsets
+                // ONE local decides BOTH the corner unit and the shader bit, so a state where the offsets
                 // are metres while the shader believes they are pixels — or the reverse — is not expressible.
                 // The emit.AlongLine conjunct is a SCOPE FENCE, not a defensive check: SymbolStagingMath writes
                 // CornerMetresPerLogicalPixel only in StageCurvedAnchor, so it is already 0 on every point
-                // emit. It states, at the one place a later stage would cross it, that point/icon map-pitch is
-                // not W2's scope.
+                // emit. It marks the one place a later change would cross into point/icon map-pitch.
                 bool  mapPitchCorners  = emit.AlongLine && emit.CornerMetresPerLogicalPixel > 0f;
                 // On every non-map path this is the literal 1f, and `x * 1f` is bitwise identity for every
-                // finite float and for ±0/±Inf/NaN payloads alike — so the vertex stream is bit-for-bit what
-                // it was before W2, and `alignFlags` is textually the pre-W2 expression. Pinned by W2-T7.
+                // finite float and for ±0/±Inf/NaN payloads alike, so the non-map vertex stream is
+                // unchanged.
                 float cornerScale      = mapPitchCorners ? emit.CornerMetresPerLogicalPixel : 1f;
                 float  alignFlags      = emit.AlongLine
                     ? (mapPitchCorners ? AlongLineAlignFlag + MapPitchAlignFlag : AlongLineAlignFlag)
                     : 0f;
                 // ONE unit for the whole `off`: the shader has a single displacement path, so the corners and
-                // the translate delta must share whichever unit is in force. Consequence, recorded as
-                // followUp F-W2-2 and observed by W2-T8: under map pitch `text-translate` becomes a WORLD
-                // translate rather than a screen one. The spec's proper control for that is
+                // the translate delta must share whichever unit is in force. The consequence: under map pitch
+                // `text-translate` becomes a WORLD translate rather than a screen one. The spec's proper
+                // control for that is
                 // `text-translate-anchor`, not `text-pitch-alignment`, so this is a recorded limitation and
                 // not a design position; it is inert on all 7 shipped line-symbol layers, none of which set
                 // a translate (the delta is exactly float2.zero there, and 0 · k == 0).
@@ -350,7 +346,7 @@ namespace MapRenderer.Unity.Text.Placement
                 vView[v + 2] = br;
                 vView[v + 3] = bl;
 
-                float opacity = q.Color.w * fadeOpacity; // stream 1 — the A-4 fade × the quad's own alpha
+                float opacity = q.Color.w * fadeOpacity; // stream 1 — the fade × the quad's own alpha
                 oView[v + 0] = opacity;
                 oView[v + 1] = opacity;
                 oView[v + 2] = opacity;
@@ -407,18 +403,18 @@ namespace MapRenderer.Unity.Text.Placement
         /// <summary>
         /// Builds every non-empty slot's mesh and lazily attaches it to a text/icon child under its tile's
         /// per-symbol-layer node in the shared <see cref="_tree"/> (root → tile container → layer node →
-        /// text/icon sibling children — design §3/§5/§6), resolving its draw material from
-        /// <paramref name="symbolLayers"/> (D5) or the <paramref name="fallbackTextMaterial"/>/
+        /// text/icon sibling children), resolving its draw material from
+        /// <paramref name="symbolLayers"/> or the <paramref name="fallbackTextMaterial"/>/
         /// <paramref name="fallbackIconMaterial"/> pair; hides every other live slot (idle-frame
         /// reclamation destroys one idle <see cref="IdleReclaimFrames"/> consecutive frames). A
-        /// resolved-null material (Codex #1b — an icon slot with no <c>WorldIconMaterial</c> configured)
+        /// resolved-null material (an icon slot with no <c>WorldIconMaterial</c> configured)
         /// hides that slot instead of throwing. Refreshes the tree's per-tile transform exactly ONCE per
-        /// call via <see cref="SceneTileTree.Rebuild"/> — not once per slot (the A1 defect this corrects).
+        /// call via <see cref="SceneTileTree.Rebuild"/> — not once per slot.
         /// </summary>
         /// <param name="frame">This frame's floating-origin scene frame — the ONE
         /// <see cref="SceneTileTree.Rebuild"/> below rebases every tile container against it.</param>
         /// <param name="symbolLayers">Per-symbol-layer render layers, indexed by a slot's layer index; each
-        /// may own its own world text/icon material (D5). Null / empty → every slot resolves to the
+        /// may own its own world text/icon material. Null / empty → every slot resolves to the
         /// fallback pair below.</param>
         /// <param name="fallbackTextMaterial">The world TEXT material used for any slot whose layer supplies
         /// none (and for every slot when <paramref name="symbolLayers"/> is null/empty). Null ⇒ that slot
@@ -441,7 +437,7 @@ namespace MapRenderer.Unity.Text.Placement
                 WorldSymbolKey key  = kv.Key;
                 Slot          slot = kv.Value;
 
-                // Idle-reclaim tracks whether this key was EMITTED to this frame (D1's "self-contained"
+                // Idle-reclaim tracks whether this key was EMITTED to this frame (self-contained
                 // reclamation), NOT whether it ended up presented — an emitted-but-unrenderable slot (no
                 // resolved material: e.g. an icon slot with no WorldIconMaterial configured, or the demo path
                 // with a null worldTextBase) is a legitimate steady-state case that must stay resident
@@ -485,7 +481,7 @@ namespace MapRenderer.Unity.Text.Placement
                 }
             }
 
-            // ONE transform write per tile container per frame — not per slot (the A1 defect this corrects).
+            // ONE transform write per tile container per frame — not per slot.
             _tree.Rebuild(in frame);
 
             for (int i = 0; i < _reclaimKeys.Count; i++)
@@ -582,11 +578,11 @@ namespace MapRenderer.Unity.Text.Placement
             }
         }
 
-        // D5: the per-layer world material (WorldTextMaterial/WorldIconMaterial), else the demo fallback —
+        // The per-layer world material (WorldTextMaterial/WorldIconMaterial), else the demo fallback —
         // mirrors SymbolPlacementSystem.ResolveSlotMaterial/ResolveIconMaterial. A slot index out of range
         // (or no symbolLayers — the demo path) resolves straight to the fallback, never throws. Both world
-        // materials' renderQueue are now written at Build/Create time (RenderLayerSet.Build for text via
-        // SymbolRenderLayer.Material, SymbolRenderLayer.Create for icon — §0.1), so this is pure selection —
+        // materials' renderQueue are written at Build/Create time (RenderLayerSet.Build for text via
+        // SymbolRenderLayer.Material, SymbolRenderLayer.Create for icon), so this is pure selection —
         // no per-frame queue sync.
         private static Material ResolveMaterial(in WorldSymbolKey key, IReadOnlyList<SymbolRenderLayer> symbolLayers,
             Material                                             fallbackTextMaterial, Material fallbackIconMaterial)
@@ -600,7 +596,7 @@ namespace MapRenderer.Unity.Text.Placement
                 : (layer?.WorldTextMaterial ?? fallbackTextMaterial);
         }
 
-        // ── Test surface (D9 §E-flip; also used to read fade opacity off the world mesh — see
+        // ── Test surface (also used to read fade opacity off the world mesh — see
         //    WorldMeshReadback) ──────────────────────────────────────────────────────────────────────────
 
         /// <summary>The mesh bound to <c>(tileKey, slot, kind)</c>'s slot, or null if no such slot exists yet.
@@ -672,7 +668,7 @@ namespace MapRenderer.Unity.Text.Placement
         }
     }
 
-    /// <summary>D1's slot dictionary key: <c>(TileKey, Slot, Kind)</c>. <c>TileKey</c> is the tile dimension
+    /// <summary>The slot dictionary key: <c>(TileKey, Slot, Kind)</c>. <c>TileKey</c> is the tile dimension
     /// (stable across batch rebuilds); <c>Slot</c> is the <c>SymbolRenderLayer</c> material slot (== the
     /// layer's <c>DrawIndex</c>); <c>Kind</c> discriminates text vs icon (two separate meshes/materials per
     /// tile+slot). A struct (not a tuple) so <see cref="Dictionary{TKey,TValue}"/> hashing avoids boxing.</summary>

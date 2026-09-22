@@ -8,12 +8,10 @@ using MapRenderer.Core.Style;
 namespace MapRenderer.Tests.Style
 {
     /// <summary>
-    /// S60 acceptance criterion 1: raw JSON fields are encapsulated, with one deliberate exception.
-    /// <see cref="StyleLayer.Raw"/> was widened to public in the style-transitions epic (Stage 2): the
-    /// restyle survivor gate lives outside <c>MapRenderer.Core</c> and must compare the whole raw layer
-    /// object, including unknown/forward-compat keys the typed <c>Paint</c>/<c>Layout</c> views drop.
-    /// <see cref="StyleLayer.Filter"/> remains public for the same pre-existing reason (S10).
-    /// <c>PaintJson</c>/<c>LayoutJson</c> no longer exist (UMR-108) — nothing left to assert for them.
+    /// Raw JSON fields are encapsulated, with one exception. <see cref="StyleLayer.Raw"/> is public
+    /// because the restyle survivor gate lives outside <c>MapRenderer.Core</c> and must compare the
+    /// whole raw layer object, including unknown/forward-compat keys the typed <c>Paint</c>/<c>Layout</c>
+    /// views drop. <see cref="StyleLayer.Filter"/> is public for the same reason.
     /// </summary>
     [TestFixture]
     public class StyleLayerEncapsulationTests
@@ -26,7 +24,7 @@ namespace MapRenderer.Tests.Style
             var fi = typeof(StyleLayer).GetField("Raw", AnyInstance);
             Assert.IsNotNull(fi, "Raw field must exist on StyleLayer.");
             Assert.IsTrue(fi.IsPublic,
-                "Raw must be public (Stage 2: SurvivingLayerGate compares it from outside Core).");
+                "Raw must be public (SurvivingLayerGate compares it from outside Core).");
         }
 
         [Test]
@@ -35,7 +33,7 @@ namespace MapRenderer.Tests.Style
             var fi = typeof(StyleLayer).GetField("Filter", AnyInstance);
             Assert.IsNotNull(fi, "Filter field must exist on StyleLayer.");
             Assert.IsTrue(fi.IsPublic,
-                "Filter MUST remain public (S10 owns its parse; FeatureSelector reads it directly).");
+                "Filter MUST remain public (the style layer owns its parse; FeatureSelector reads it directly).");
         }
     }
 }

@@ -13,7 +13,7 @@
 //   FillBandAttributeTests                 — fill-band forward/depth pass vertex-attribute parity.
 //   CoreAssemblyBoundaryTests               — MapRenderer.Core stays engine-free; no UnityEngine/Unity.* crosses in.
 //   MdCitationFenceTests                   — every *.md citation in source resolves to a tracked file.
-//   PreparedKeyShapeStructureTests         — PreparedKey's recorded field-count shape (UMR-95 fence F1).
+//   PreparedKeyShapeStructureTests         — PreparedKey's recorded field-count shape.
 //   RenderLayerRegistryStructureTests      — RenderLayerFactory is the sole StyleLayer-subtype dispatch point.
 
 using System;
@@ -92,7 +92,7 @@ namespace MapRenderer.Tests.Structure
         /// <summary>
         /// Struct must have exactly 31 material-prop fields (excludes unity_* transforms).
         /// Breakdown: 21 non-line (14 common Lit+Opacity + 7 fill-only) + 10 line-only = 31 (was 12
-        /// line-only before _MetersPerPixel (S104) and _AaEdgeWidth (line-AA removal) were retired).
+        /// line-only before _MetersPerPixel and _AaEdgeWidth were retired).
         /// A vacuous regex (matches nothing) fails this immediately.
         /// </summary>
         [Test]
@@ -208,7 +208,7 @@ namespace MapRenderer.Tests.Structure
     // MaterialPropertyRegistryParityTests — the ShaderProperties registry vs shader Properties/CBUFFER/DOTS
     // ───────────────────────────────────────────────────────────────────────────────────
 
-// S78/S79 Material Property Registry Parity Tests — runs in the Unity EditMode test assembly
+// Material Property Registry Parity Tests — runs in the Unity EditMode test assembly
 // (moved from Tools/core-tests, which used test-binary-relative path arithmetic that broke on the
 // Assets/Code/ folder move). Paths are now resolved via ShaderPropertyParser's
 // AssetDatabase-anchored helpers — move-proof.
@@ -219,13 +219,12 @@ namespace MapRenderer.Tests.Structure
 //     ShaderProperties/Fill/PropertyNames.cs (7 fill-only)
 //   • Line_LitInput.hlsl CBUFFER (24 after stripping companions)
 //   • Fill_LitInput.hlsl CBUFFER (21 after stripping companions)
-//   (line counts dropped by 2 — _MetersPerPixel (S104) + _AaEdgeWidth (line-AA removal) retired)
+//   (line counts dropped by 2 — _MetersPerPixel + _AaEdgeWidth retired)
 //   • Line/Fill DOTS blocks (must equal their respective CBUFFER sets)
 //   • Line.shader / Fill.shader Properties{} blocks (must be supersets of the registry)
 //
 // Exact counts: assert exact, never >. Fail loud if a regex silently matches nothing.
 //
-// History: introduced S78 to lock the registry against both omissions and duplications.
 
     [TestFixture]
     public class MaterialPropertyRegistryParityTests
@@ -532,7 +531,7 @@ namespace MapRenderer.Tests.Structure
     // NoRawStringMaterialAccessGuardTests — no raw-string Material property access anywhere in the repo
     // ───────────────────────────────────────────────────────────────────────────────────
 
-// S79 No-Raw-String Material Access Guard — runs in the Unity EditMode test assembly (moved from
+// No-Raw-String Material Access Guard — runs in the Unity EditMode test assembly (moved from
 // Tools/core-tests, which used test-binary-relative path arithmetic that broke on the Assets/Code/
 // folder move). Paths are now resolved via ShaderPropertyParser's AssetDatabase-anchored helpers.
 //
@@ -568,7 +567,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void ShaderPropertiesCompatCs_DoesNotExist()
         {
-            // The transitional compat shim must be gone after S79.
+            // The transitional compat shim must be gone.
             string compatFile = Path.Combine(RenderingDir, "ShaderPropertiesCompat.cs");
             FileAssert.DoesNotExist(compatFile, $"ShaderPropertiesCompat.cs still exists at {compatFile}. Delete it after BaseShaderGUI is migrated.");
         }
@@ -596,7 +595,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void NoOldPrefixedClassNames_InUnityAssembly()
         {
-            // After S79, the prefixed class names are gone: LinePropertyId, FillPropertyId,
+            // The prefixed class names are gone: LinePropertyId, FillPropertyId,
             // LinePropertyNames, FillPropertyNames. The namespace-carries-category pattern is used instead.
             var oldNames = new[] { @"\bLinePropertyId\b", @"\bFillPropertyId\b", @"\bLinePropertyNames\b", @"\bFillPropertyNames\b" };
             var badPattern = new Regex(string.Join("|", oldNames));
@@ -632,7 +631,7 @@ namespace MapRenderer.Tests.Structure
             }
 
             Assert.That(offenders, Is.Empty,
-                $"These files declare 'class ShaderProperties'. After S79, ShaderProperties is a namespace " +
+                $"These files declare 'class ShaderProperties'. ShaderProperties is now a namespace " +
                 $"segment, not a type. Delete the class declaration:\n" +
                 string.Join("\n", offenders));
         }
@@ -652,7 +651,7 @@ namespace MapRenderer.Tests.Structure
             }
 
             Assert.That(offenders, Is.Empty,
-                $"These files reference ShaderPropertiesToken. It should no longer exist after S79:\n" +
+                $"These files reference ShaderPropertiesToken. It should no longer exist:\n" +
                 string.Join("\n", offenders));
         }
 
@@ -665,15 +664,15 @@ namespace MapRenderer.Tests.Structure
             //   • .SetFloat("   .SetColor("   .SetVector("   .SetInt("   .SetTexture("
             //   • .GetFloat("   .GetColor("   .GetVector("   .GetInt("   .GetTexture("
             //   • .HasProperty("
-            // …and their Shader.Set/GetGlobal* counterparts (S110). The global forms went uncovered until
+            // …and their Shader.Set/GetGlobal* counterparts. The global forms went uncovered until
             // this stage simply because nothing wrote a shader global; the frame constant
-            // _MapFrameMetersPerDevicePixel is the first, and S17's line-pattern will add a second. A
+            // _MapFrameMetersPerDevicePixel is the first, and line-pattern will add a second. A
             // global's name is exactly as easy to typo as a material property's, and a typo'd global reads
             // back 0 in silence.
-            // After S79 migration every call site uses a cached int id from ShaderProperties.PropertyId /
+            // Every call site uses a cached int id from ShaderProperties.PropertyId /
             // ShaderProperties.Line.PropertyId / ShaderProperties.Fill.PropertyId (or, for globals,
             // ShaderProperties.FrameGlobalIds), so there should be ZERO matching lines. No whole-file
-            // exclusions (BaseShaderGUI is fully migrated in S79).
+            // exclusions (BaseShaderGUI is fully migrated).
             var badPattern = new Regex(
                 @"\.(Set|Get)(Global)?(Float|Color|Vector|Int|Texture)\s*\(\s*""|\.HasProperty\s*\(\s*""");
 
@@ -748,7 +747,7 @@ namespace MapRenderer.Tests.Structure
         private static string MapLineDir => ShaderPropertyParser.MapLineDir;
         private static string MapExtrusionDir => ShaderPropertyParser.MapExtrusionDir;
 
-        // ── File existence (S66 layout) ───────────────────────────────────────
+        // ── File existence ────────────────────────────────────────────────────
 
         [Test]
         public void ShaderFiles_AllRequiredFilesExist()
@@ -768,7 +767,7 @@ namespace MapRenderer.Tests.Structure
                 "Line.shader", "Line_LitInput.hlsl", "Line_LitForwardPass.hlsl",
                 // Line — unlit twin
                 "LineUnlit.shader", "Line_UnlitInput.hlsl", "Line_UnlitForwardPass.hlsl",
-                // FillExtrusion (S23 I2b) — lit + shared
+                // FillExtrusion — lit + shared
                 "FillExtrusion.shader", "FillExtrusion_LitInput.hlsl", "FillExtrusion_VertexModify.hlsl",
                 "FillExtrusion_LitForwardPass.hlsl", "FillExtrusion_LitGBufferPass.hlsl",
                 "FillExtrusion_ShadowCasterPass.hlsl", "FillExtrusion_DepthOnlyPass.hlsl",
@@ -788,7 +787,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void ShaderFiles_OldCommonFilesAreGone()
         {
-            // S66: the old Common/ framework (used by Fill only) was moved into Map/Fill/.
+            // The old Common/ framework (used by Fill only) lives in Map/Fill/.
             // Confirm the old paths no longer exist.
             (string dir, string name)[] gone = new[]
             {
@@ -804,34 +803,34 @@ namespace MapRenderer.Tests.Structure
             foreach (var (dir, name) in gone)
             {
                 string path = Path.Combine(dir, name);
-                FileAssert.DoesNotExist(path, $"Old pre-S66 shader file still present (should have been moved): {Path.GetFileName(dir)}/{name}");
+                FileAssert.DoesNotExist(path, $"Old shader file still present (should have been moved): {Path.GetFileName(dir)}/{name}");
             }
         }
 
         [Test]
         public void ShaderFiles_OldLineFilesAreGone()
         {
-            // S66: Line files renamed to Line_LitInput.hlsl / Line_LitForwardPass.hlsl.
-            FileAssert.DoesNotExist(Path.Combine(MapLineDir, "MapLineInput.hlsl"), "Old pre-S66 MapLineInput.hlsl still present (should be Line_LitInput.hlsl).");
-            FileAssert.DoesNotExist(Path.Combine(MapLineDir, "MapLineForwardPass.hlsl"), "Old pre-S66 MapLineForwardPass.hlsl still present (should be Line_LitForwardPass.hlsl).");
+            // Line files are Line_LitInput.hlsl / Line_LitForwardPass.hlsl.
+            FileAssert.DoesNotExist(Path.Combine(MapLineDir, "MapLineInput.hlsl"), "Old MapLineInput.hlsl still present (should be Line_LitInput.hlsl).");
+            FileAssert.DoesNotExist(Path.Combine(MapLineDir, "MapLineForwardPass.hlsl"), "Old MapLineForwardPass.hlsl still present (should be Line_LitForwardPass.hlsl).");
         }
 
         [Test]
         public void ShaderFiles_FillAndLineLiveUnderMapLayer()
         {
-            // S56 requires per-layer shaders under Shaders/Map/<Layer>/, not the flat Shaders/ root. Asserted
+            // Per-layer shaders live under Shaders/Map/<Layer>/, not the flat Shaders/ root. Asserted
             // on the resolved path so the Lit/Unlit leaf (Map/Fill/Lit/Fill.shader) still counts as "under
             // the Fill layer" — the layer is pinned, the mode subfolder is not.
             Assert.That(ShaderPropertyParser.MapShaderPath("Fill.shader").Replace('\\', '/'),
-                Does.Contain("/Map/Fill/"), "Fill.shader must live under Shaders/Map/Fill/ (S56 layout).");
+                Does.Contain("/Map/Fill/"), "Fill.shader must live under Shaders/Map/Fill/.");
             Assert.That(ShaderPropertyParser.MapShaderPath("Line.shader").Replace('\\', '/'),
-                Does.Contain("/Map/Line/"), "Line.shader must live under Shaders/Map/Line/ (S56 layout).");
+                Does.Contain("/Map/Line/"), "Line.shader must live under Shaders/Map/Line/.");
         }
 
         [Test]
         public void MapKindRoots_HoldOnlyGenuinelySharedIncludes()
         {
-            // The unlit epic's Lit/Unlit split: the two .shader entry points and their mode-specific .hlsl
+            // The Lit/Unlit split: the two .shader entry points and their mode-specific .hlsl
             // moved into Lit/ and Unlit/; the kind ROOT (Map/<Kind>/, top level only) must hold EXACTLY the
             // includes BOTH twins reuse — the vertex hook + the two depth passes, plus whatever else a kind
             // genuinely shares (Fill also shares its boundary-band coverage between the Lit and Unlit
@@ -870,7 +869,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void ShaderFiles_FlatRootHoldsNoShaderSources()
         {
-            // S56 tooth: after the reorg, no .shader/.hlsl may remain loose at the Shaders/ root —
+            // No .shader/.hlsl may remain loose at the Shaders/ root —
             // they all live under Common/ or Map/<Layer>/.
             var loose = Directory.EnumerateFiles(ShadersDir)
                 .Where(p => p.EndsWith(".shader", StringComparison.Ordinal)
@@ -878,14 +877,14 @@ namespace MapRenderer.Tests.Structure
                 .Select(Path.GetFileName)
                 .ToArray();
             Assert.That(loose, Is.Empty,
-                "Shaders/ root must contain no loose .shader/.hlsl after S56 (found: "
+                "Shaders/ root must contain no loose .shader/.hlsl (found: "
                 + string.Join(", ", loose) + "). They belong under Common/ or Map/<Layer>/.");
         }
 
         [Test]
         public void ShaderFiles_CommonHoldsNoLiveShaderFiles()
         {
-            // S66: Common/ holds only LitInput.Template.hlsl (a reference template, included by nobody).
+            // Common/ holds only LitInput.Template.hlsl (a reference template, included by nobody).
             // No .shader file and no non-template .hlsl file belongs there.
             var liveInCommon = Directory.EnumerateFiles(CommonDir)
                 .Where(p => (p.EndsWith(".shader", StringComparison.Ordinal)
@@ -894,7 +893,7 @@ namespace MapRenderer.Tests.Structure
                 .Select(Path.GetFileName)
                 .ToArray();
             Assert.That(liveInCommon, Is.Empty,
-                "Common/ must hold only .Template.hlsl files (reference templates, not compiled) after S66. " +
+                "Common/ must hold only .Template.hlsl files (reference templates, not compiled). " +
                 "Found live shader files: " + string.Join(", ", liveInCommon));
         }
 
@@ -1036,7 +1035,7 @@ namespace MapRenderer.Tests.Structure
             string text = ReadShaderFile("Fill_LitForwardPass.hlsl");
             Assert.That(text, Does.Contain("InitializeStandardLitSurfaceData("),
                 "Fill_LitForwardPass.hlsl fragment must call InitializeStandardLitSurfaceData — " +
-                "NEVER hand-assembled SurfaceData field-by-field (S34 acceptance tooth #4).");
+                "NEVER hand-assembled SurfaceData field-by-field.");
         }
 
         [Test]
@@ -1045,7 +1044,7 @@ namespace MapRenderer.Tests.Structure
             string text = ReadShaderFile("Fill_LitGBufferPass.hlsl");
             Assert.That(text, Does.Contain("InitializeStandardLitSurfaceData("),
                 "Fill_LitGBufferPass.hlsl fragment must call InitializeStandardLitSurfaceData — " +
-                "NEVER hand-assembled SurfaceData field-by-field (S34 acceptance tooth #4).");
+                "NEVER hand-assembled SurfaceData field-by-field.");
         }
 
         [Test]
@@ -1055,7 +1054,7 @@ namespace MapRenderer.Tests.Structure
             // The init-then-modulate pattern: call init first, then multiply.
             int initIdx    = text.IndexOf("InitializeStandardLitSurfaceData(", StringComparison.Ordinal);
 
-            // Post-S58: per-vertex color (vColor) drives albedo/alpha; the _BaseColor tint is applied
+            // Per-vertex color (vColor) drives albedo/alpha; the _BaseColor tint is applied
             // inside InitializeStandardLitSurfaceData (the redundant _MapColor tint was removed).
             int albedoIdx  = text.IndexOf("surfaceData.albedo *= ", StringComparison.Ordinal);
             int alphaIdx   = text.IndexOf("surfaceData.alpha  *= ", StringComparison.Ordinal);
@@ -1099,7 +1098,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void FillExtrusionShader_WiresCustomEditor()
         {
-            // I5: the material editor must be WIRED, not just authored — the shader's CustomEditor is what
+            // The material editor must be WIRED, not just authored — the shader's CustomEditor is what
             // makes LitShaderGUI.ValidateMaterial run in the inspector (deriving _EMISSION/_NORMALMAP/… from
             // material properties). Without this line the GUI class exists but never drives keyword sync.
             // RED-verify by deleting the CustomEditor directive.
@@ -1129,7 +1128,7 @@ namespace MapRenderer.Tests.Structure
                 "_BaseMap_ST", "_BaseColor", "_SpecColor", "_EmissionColor",
                 "_Cutoff", "_Smoothness", "_Metallic", "_BumpScale", "_OcclusionStrength",
                 "_DetailAlbedoMapScale", "_DetailNormalMapScale",
-                // Map addition (post-S58: _MapColor was collapsed into _BaseColor):
+                // Map addition (_MapColor is collapsed into _BaseColor):
                 "_Opacity"
             };
             foreach (var prop in required)
@@ -1140,15 +1139,15 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void CommonDir_DoesNotContainMapLitCore()
         {
-            // S66: MapLitCore.hlsl was dissolved (its CBUFFER moved to Fill_LitInput.hlsl in S34;
+            // MapLitCore.hlsl is dissolved (its CBUFFER lives in Fill_LitInput.hlsl;
             // the MapVertexModify forward declaration is no longer needed; MapEdgeAA was dead).
             string path = Path.Combine(CommonDir, "MapLitCore.hlsl");
-            FileAssert.DoesNotExist(path, "Common/MapLitCore.hlsl must not exist after S66 (dissolved: CBUFFER moved to " +
+            FileAssert.DoesNotExist(path, "Common/MapLitCore.hlsl must not exist (dissolved: CBUFFER moved to " +
                 "Fill_LitInput.hlsl, forward-declaration hack removed, MapEdgeAA deleted as dead).");
         }
 
         // ── No stale includes in pass bodies ──────────────────────────────────
-        // S66: pass bodies must NOT self-include their layer input (the .shader provides it).
+        // Pass bodies must NOT self-include their layer input (the .shader provides it).
 
         [Test]
         public void FillPassBodies_DoNotSelfIncludeLayerInput()
@@ -1165,11 +1164,11 @@ namespace MapRenderer.Tests.Structure
             {
                 string text = ReadShaderFile(file);
                 Assert.That(text, Does.Not.Contain("#include \"Fill_LitInput.hlsl\""),
-                    $"{file} must NOT self-include Fill_LitInput.hlsl — Fill.shader provides it (S66 rule).");
+                    $"{file} must NOT self-include Fill_LitInput.hlsl — Fill.shader provides it.");
                 Assert.That(text, Does.Not.Contain("MapLitInput.hlsl"),
-                    $"{file} must not reference old MapLitInput.hlsl (stale after S66 rename).");
+                    $"{file} must not reference old MapLitInput.hlsl (stale after the rename).");
                 Assert.That(text, Does.Not.Contain("MapLitCore.hlsl"),
-                    $"{file} must not reference deleted MapLitCore.hlsl (dissolved in S66).");
+                    $"{file} must not reference deleted MapLitCore.hlsl (dissolved).");
             }
         }
 
@@ -1178,9 +1177,9 @@ namespace MapRenderer.Tests.Structure
         {
             string text = ReadShaderFile("Line_LitForwardPass.hlsl");
             Assert.That(text, Does.Not.Contain("#include \"Line_LitInput.hlsl\""),
-                "Line_LitForwardPass.hlsl must NOT self-include Line_LitInput.hlsl — Line.shader provides it (S66 rule).");
+                "Line_LitForwardPass.hlsl must NOT self-include Line_LitInput.hlsl — Line.shader provides it.");
             Assert.That(text, Does.Not.Contain("MapLineInput.hlsl"),
-                "Line_LitForwardPass.hlsl must not reference old MapLineInput.hlsl (stale after S66 rename).");
+                "Line_LitForwardPass.hlsl must not reference old MapLineInput.hlsl (stale after the rename).");
         }
 
         // ── Cross-folder includes from Map/ are self-containment's one sanctioned exception ────
@@ -1188,12 +1187,12 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void MapLayerFiles_ShareOnlyViaSanctionedInclude()
         {
-            // S66: each layer folder is self-contained (no reach into Common/). There are exactly two
+            // Each layer folder is self-contained (no reach into Common/). There are exactly two
             // KINDS of sanctioned cross-folder `../` reach, both validated STRUCTURALLY (resolve on disk),
             // not by a string allow-list:
-            //   (1) the ONE sanctioned Map-root shared include — PixelsToWorld.hlsl (S23 I2a, the shared
+            //   (1) the ONE sanctioned Map-root shared include — PixelsToWorld.hlsl (the shared
             //       px→world, reached from each kind's vertex file); and
-            //   (2) the unlit epic's Lit/Unlit split — a .shader / mode-specific .hlsl in Map/<Kind>/{Lit,
+            //   (2) the Lit/Unlit split — a .shader / mode-specific .hlsl in Map/<Kind>/{Lit,
             //       Unlit}/ reaches ONE level up to its OWN kind root for the three shared includes
             //       (<Kind>_VertexModify/VertexExtrude, _DepthOnlyPass, _DepthNormalsPass).
             // Every `../` include must resolve to a real file that is EITHER the Map-root shared include OR
@@ -1213,7 +1212,7 @@ namespace MapRenderer.Tests.Structure
             {
                 string text = File.ReadAllText(file, Encoding.UTF8);
                 Assert.That(text, Does.Not.Contain("Common/"),
-                    $"{Path.GetFileName(file)} must not reach into Common/ (S66: each layer is self-contained).");
+                    $"{Path.GetFileName(file)} must not reach into Common/ (each layer is self-contained).");
 
                 string fileDir = Path.GetDirectoryName(file);
                 // #include_with_pragmas is a distinct directive (ShaderLab keyword-conditional include) —
@@ -1318,11 +1317,11 @@ namespace MapRenderer.Tests.Structure
             return full.StartsWith(root, StringComparison.Ordinal);
         }
 
-        // ── Shared px→world include (S23 I2a) ─────────────────────────────────
+        // ── Shared px→world include ───────────────────────────────────────────
 
         /// <summary>
         /// <c>MapPixelsToWorld</c> is genuinely shared by every layer that converts a screen-pixel offset to
-        /// world metres in the vertex shader. S66 forbade reaching into <c>Common/</c>, so before S23 I2a
+        /// world metres in the vertex shader. Reaching into <c>Common/</c> is forbidden, so before this include existed
         /// this was DUPLICATED per layer instead — sentinel-pinned copies verified byte-identical by the
         /// (now-retired) <c>SharedShaderBlocks_AreIdenticalAcrossLayers</c>. That test only ever caught
         /// drift between existing copies; it said nothing if a copy came back after the hoist. This is the
@@ -1333,12 +1332,12 @@ namespace MapRenderer.Tests.Structure
         public void SharedPixelsToWorldInclude_ReferencedByEveryCarrier()
         {
             string sharedPath = Path.Combine(MapDir, "PixelsToWorld.hlsl");
-            FileAssert.Exists(sharedPath, "Shaders/Map/PixelsToWorld.hlsl must exist — the S23 I2a shared px→world include.");
+            FileAssert.Exists(sharedPath, "Shaders/Map/PixelsToWorld.hlsl must exist — the shared px→world include.");
             string sharedText = File.ReadAllText(sharedPath, Encoding.UTF8);
             Assert.That(sharedText, Does.Contain("float MapPixelsToWorld("),
                 "Shaders/Map/PixelsToWorld.hlsl must define MapPixelsToWorld — that is the point of the hoist.");
 
-            // Carriers, not a hardcoded count — I2b appends FillExtrusion/FillExtrusion_VertexModify.hlsl.
+            // Carriers, not a hardcoded count — translate appends FillExtrusion/FillExtrusion_VertexModify.hlsl.
             string[] carriers =
             {
                 "Fill_VertexModify.hlsl",
@@ -1350,7 +1349,7 @@ namespace MapRenderer.Tests.Structure
             {
                 string text = ReadShaderFile(file);
                 Assert.That(text, Does.Contain("#include \"../PixelsToWorld.hlsl\""),
-                    $"{file} must include ../PixelsToWorld.hlsl (the sanctioned S23 I2a shared px→world include).");
+                    $"{file} must include ../PixelsToWorld.hlsl (the sanctioned shared px→world include).");
                 Assert.That(text, Does.Not.Contain("float MapPixelsToWorld("),
                     $"{file} must NOT locally re-define MapPixelsToWorld — it is shared via " +
                     "../PixelsToWorld.hlsl now; a local re-definition would silently re-duplicate it.");
@@ -1382,13 +1381,13 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void Shaders_NoMapEdgeAAReferences()
         {
-            // S66: MapEdgeAA was confirmed dead (zero call sites) and deleted with MapLitCore.hlsl.
+            // MapEdgeAA was dead (zero call sites) and is deleted along with MapLitCore.hlsl.
             foreach (var file in Directory.EnumerateFiles(ShadersDir, "*.hlsl", SearchOption.AllDirectories)
                 .Concat(Directory.EnumerateFiles(ShadersDir, "*.shader", SearchOption.AllDirectories)))
             {
                 string text = File.ReadAllText(file, Encoding.UTF8);
                 Assert.That(text, Does.Not.Contain("MapEdgeAA"),
-                    $"{Path.GetFileName(file)} references MapEdgeAA — it was deleted as a dead helper in S66.");
+                    $"{Path.GetFileName(file)} references MapEdgeAA — it was deleted as a dead helper.");
             }
         }
 
@@ -1424,17 +1423,17 @@ namespace MapRenderer.Tests.Structure
                 "Fill.shader GBuffer pass must also have _NORMALMAP pragma.");
         }
 
-        // ── Shader declaration names (S56 rename: MapRenderer/<Layer> → Map/<Layer>) ──
+        // ── Shader declaration names (Map/<Layer>) ────────────────────────────────────
 
         [Test]
         public void Shaders_DeclareMapLayerNames()
         {
             Assert.That(ReadShaderFile("Fill.shader"), Does.Contain("Shader \"Map/Fill\""),
-                "Fill.shader must declare Shader \"Map/Fill\" (S56 rename).");
+                "Fill.shader must declare Shader \"Map/Fill\".");
             Assert.That(ReadShaderFile("Line.shader"), Does.Contain("Shader \"Map/Line\""),
-                "Line.shader must declare Shader \"Map/Line\" (S56 rename).");
+                "Line.shader must declare Shader \"Map/Line\".");
             Assert.That(ReadShaderFile("FillExtrusion.shader"), Does.Contain("Shader \"Map/FillExtrusion\""),
-                "FillExtrusion.shader must declare Shader \"Map/FillExtrusion\" (S23 I2b).");
+                "FillExtrusion.shader must declare Shader \"Map/FillExtrusion\".");
         }
 
         // ── License files ─────────────────────────────────────────────────────
@@ -1446,11 +1445,11 @@ namespace MapRenderer.Tests.Structure
             FileAssert.Exists(path);
             string text = File.ReadAllText(path, Encoding.UTF8);
             Assert.That(text, Does.Contain("Unity Companion License"),
-                "THIRD-PARTY-NOTICES.txt must have a UCL entry (S34 license requirement).");
+                "THIRD-PARTY-NOTICES.txt must have a UCL entry (license requirement).");
             Assert.That(text, Does.Contain("Fill_LitInput.hlsl"),
                 "THIRD-PARTY-NOTICES.txt UCL entry must list the mirrored files (e.g. Fill_LitInput.hlsl).");
             Assert.That(text, Does.Contain("FillExtrusion_LitInput.hlsl"),
-                "THIRD-PARTY-NOTICES.txt UCL entry must list the FillExtrusion mirrored files (S23 I2b).");
+                "THIRD-PARTY-NOTICES.txt UCL entry must list the FillExtrusion mirrored files.");
         }
 
         [Test]
@@ -1803,15 +1802,15 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR stage B4: the fence that makes the Core/Jobs split enforceable rather than remembered.
+    /// The fence that makes the Core/Jobs split enforceable rather than remembered.
     ///
     /// <para><b>This is a fence, not a migration target.</b> <c>MapRenderer.Core</c> references only
     /// <c>Unity.Mathematics</c> and <c>UniTask</c> today and has zero <c>NativeArray</c> uses, so nothing here
-    /// had to be cleaned up. What this tooth guards is the <b>naive fix</b> B4 declined: adding
+    /// had to be cleaned up. What this tooth guards is the <b>naive fix</b> that was declined: adding
     /// <c>"Unity.Collections"</c> to <c>MapRenderer.Core.asmdef</c> so <c>SymbolFeatureExtractor</c> could read
     /// a <c>TileGeometryBuffers</c> without leaving Core. That one-line edit compiles, passes every existing
-    /// test, and silently erases the split the epic's design section states — <i>Core keeps the managed
-    /// evaluation surface and never reads coordinates; Jobs owns the blittable geometry</i>. B4 paid for the
+    /// test, and silently erases the split the design states — <i>Core keeps the managed
+    /// evaluation surface and never reads coordinates; Jobs owns the blittable geometry</i>. The move paid for the
     /// split by moving the extractor into <c>MapRenderer.Unity</c> instead (and 75 tests out of the fast
     /// <c>dotnet</c> loop); without this tooth that cost could be quietly refunded.</para>
     ///
@@ -1853,7 +1852,7 @@ namespace MapRenderer.Tests.Structure
                 Assert.IsFalse(reference.Contains("Unity.Collections", StringComparison.Ordinal),
                     "MapRenderer.Core.asmdef must NOT reference Unity.Collections. Adding it is the one-line " +
                     "edit that would let coordinate-reading code stay in Core and erase the Core/Jobs split " +
-                    "(Core keeps the managed evaluation surface; Jobs owns the blittable geometry). B4 moved " +
+                    "(Core keeps the managed evaluation surface; Jobs owns the blittable geometry). The move " +
                     $"SymbolFeatureExtractor to MapRenderer.Unity rather than take it. Found: '{reference}'.");
             }
 
@@ -1861,7 +1860,7 @@ namespace MapRenderer.Tests.Structure
             string coreRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Core");
             string[] coreFiles = Directory.GetFiles(coreRoot, "*.cs", SearchOption.AllDirectories);
             // Not a file-count floor: Core is a legacy assembly the roadmap is deliberately shrinking
-            // (ARCHITECTURE.md §2), so a threshold here would eventually fail a SUCCESSFUL migration and
+            // (ARCHITECTURE.md's module boundaries), so a threshold here would eventually fail a SUCCESSFUL migration and
             // invite lowering the number, which quietly weakens this fence. Non-vacuity only needs "the
             // scan actually visited files" — the Jobs positive control below already proves the matcher
             // can see Unity.Collections when it's really there; this precondition covers the one hazard
@@ -1945,7 +1944,7 @@ namespace MapRenderer.Tests.Structure
 // Unity EditMode only — shells out to git and reads source files via ShaderPropertyParser.RepoRoot.
 // NOT registered in core-tests.csproj.
 //
-// UMR-128 prevention tooth. Block reconstruction is ported from the census script that found the
+// Prevention tooth. Block reconstruction is ported from the census script that found the
 // original 21 phantom names / 51 sites: this repo hard-wraps comments — a real path can split across
 // two `//` lines, which a line-bound scan both invents phantoms from (by splitting a real path) and
 // hides real ones behind (by never rejoining them).
@@ -2081,11 +2080,11 @@ namespace MapRenderer.Tests.Structure
 
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // PreparedKeyShapeStructureTests — PreparedKey's recorded field-count shape (UMR-95 fence F1)
+    // PreparedKeyShapeStructureTests — PreparedKey's recorded field-count shape
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// UMR-95 fence F1: a speed bump, not a ban. Pins the recorded 3-field shape of
+    /// A speed bump, not a ban. Pins the recorded 3-field shape of
     /// <see cref="PreparedKey"/> — <c>Style</c> already partitions the cache, so a second discriminator
     /// would change no outcome at a data-plane cost. A deliberate fourth field
     /// (<c>park/umr-113-bake-revision</c>'s <c>Revision</c> is the known candidate) updates this tooth
@@ -2102,7 +2101,7 @@ namespace MapRenderer.Tests.Structure
             int count = typeof(PreparedKey)
                 .GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance).Length;
             Assert.AreEqual(3, count,
-                "PreparedKey must stay a 3-field key (Style, Tile, LayerId) — a recorded UMR-95 decision: " +
+                "PreparedKey must stay a 3-field key (Style, Tile, LayerId) — a recorded decision: " +
                 "Style already partitions the cache, so a second discriminator would change no outcome at " +
                 "a data-plane cost. Landing a fourth field on purpose (park/umr-113-bake-revision's " +
                 "Revision is the known candidate)? Update this tooth together with that decision, not " +
@@ -2144,13 +2143,13 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// E1 D10 (the render-layer model): <c>RenderLayerFactory</c> is
+    /// E1 (the render-layer model): <c>RenderLayerFactory</c> is
     /// the ONE registry mapping a <see cref="MapRenderer.Core.Style.StyleLayer"/> subtype to its runtime
     /// render layer. This is a grep guard, modeled on
     /// <see cref="MapRenderer.Tests.Text.Placement.SymbolPlacementStructureTests"/>'s <c>AddTileLayer</c>
     /// guard: neither <c>MapView</c> nor <c>SymbolSubsystem</c> may re-dispatch on a
     /// <c>Fill</c>/<c>Line</c>/<c>Symbol</c> <c>StyleLayer</c> subtype — they derive "which sources to
-    /// fetch" / "which layers are mine" from the already-built <c>RenderLayerSet</c> instead (§1.6's three
+    /// fetch" / "which layers are mine" from the already-built <c>RenderLayerSet</c> instead (the three
     /// scattered switches, now killed to one).
     /// </summary>
     [TestFixture]
@@ -2185,11 +2184,11 @@ namespace MapRenderer.Tests.Structure
             Assert.AreEqual(0, offenders.Count,
                 $"'{Path.GetFileName(file)}' must derive its layer-kind decisions from the built " +
                 "RenderLayerSet, not re-dispatch on a Fill/Line/Symbol.StyleLayer subtype " +
-                "(RenderLayerFactory is the sole registry, D10). Offending text: " +
+                "(RenderLayerFactory is the sole registry). Offending text: " +
                 (offenders.Count > 0 ? offenders[0].Value : string.Empty));
         }
 
-        /// <summary>Epic A / A2 (plan §F tooth 5): <c>RenderLayerBuild.ViewGeometry</c> is REMOVED, not left
+        /// <summary><c>RenderLayerBuild.ViewGeometry</c> is REMOVED, not left
         /// dead. Compile-enforced (the enum member no longer exists, so any surviving reference is a compile
         /// error) — this grep is a redundant, documentation-grade guard over the production assembly.</summary>
         [Test]
@@ -2200,12 +2199,12 @@ namespace MapRenderer.Tests.Structure
             {
                 string text = File.ReadAllText(file);
                 Assert.IsFalse(text.Contains("RenderLayerBuild.ViewGeometry"),
-                    $"'{file}' references the REMOVED RenderLayerBuild.ViewGeometry member (Epic A / A2 — " +
+                    $"'{file}' references the REMOVED RenderLayerBuild.ViewGeometry member (" +
                     "background's build kind collapsed to TileMesh).");
             }
         }
 
-        /// <summary>Epic A / A2 (plan §F tooth 6): the Mercator-only background gate — a <c>SetVisible</c>
+        /// <summary>The Mercator-only background gate — a <c>SetVisible</c>
         /// method on <c>BackgroundRenderLayer</c> that <c>MapView</c> toggled via
         /// <c>b.SetVisible(!curvedGround)</c> — is DELETED; background is now a per-covered-tile TileMesh
         /// layer projected through the same IProjection fill/line use, so the globe renders a correctly
@@ -2214,7 +2213,7 @@ namespace MapRenderer.Tests.Structure
         /// <para>Scoped to <c>BackgroundRenderLayer.cs</c> (the gate's own file), not a grep of
         /// <c>MapView.cs</c> for ANY <c>SetVisible(</c>: the method being gone is compile-backed (a MapView
         /// call could not resolve without it), and this narrow scope can't be falsely tripped by an unrelated
-        /// future <c>SetVisible</c> call elsewhere in <c>MapView</c> (the A2 merge-step follow-up).</para></summary>
+        /// future <c>SetVisible</c> call elsewhere in <c>MapView</c>.</para></summary>
         [Test]
         public void BackgroundRenderLayer_HasNoMercatorVisibilityGate()
         {
@@ -2224,7 +2223,7 @@ namespace MapRenderer.Tests.Structure
             string text = File.ReadAllText(file);
             Assert.IsFalse(text.Contains("SetVisible("),
                 "BackgroundRenderLayer.cs must contain ZERO 'SetVisible(' — the Mercator-only background " +
-                "gate method is deleted (Epic A / A2); background is a backend-owned per-tile TileMesh layer now.");
+                "gate method is deleted; background is a backend-owned per-tile TileMesh layer now.");
         }
     }
 }

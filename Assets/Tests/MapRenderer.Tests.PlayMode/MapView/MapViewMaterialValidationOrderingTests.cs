@@ -1,8 +1,7 @@
-// Epic A / A2 acceptance — plan §F tooth 14 (round-4 HIGH, TOCTOU-safe validation ordering): MapMaterialSet's
-// base-material fields are live-mutable, and MapView.SetStyle awaits BuildSourceSpecs before its commit —
-// validating at SetStyle ENTRY (round-3 placement) would pass, then a concurrent mutation during the await
-// could still let a null base reach Layers.Build (the exact crash/leak DECISION 2 exists to prevent). The
-// fix validates a CAPTURED MapMaterialSet reference immediately before the synchronous commit, with no await
+// TOCTOU-safe validation ordering. MapMaterialSet's base-material fields are live-mutable, and
+// MapView.SetStyle awaits BuildSourceSpecs before its commit, so validating at SetStyle ENTRY would pass
+// and a mutation during the await could still let a null base reach Layers.Build. SetStyle therefore
+// validates a CAPTURED MapMaterialSet reference immediately before the synchronous commit, with no await
 // between validate and use. PlayMode: the settle-poll yields real frames (never Thread.Sleep).
 
 using System;
@@ -30,8 +29,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             var set  = ScriptableObject.CreateInstance<MapMaterialSet>();
             set.FillMaterial    = prod.FillMaterial;
             set.LineMaterial    = prod.LineMaterial;
-            // Epic A / A1: SymbolTextWorld is REQUIRED (Codex #2) — else Validate() throws on it instead
-            // of the FillMaterial null this test's commit-ordering tooth actually targets.
+            // SymbolTextWorld is REQUIRED — else Validate() throws on it instead of the FillMaterial null
+            // this test's commit-ordering tooth targets.
             set.SymbolTextWorld = prod.SymbolTextWorld;
             return set;
         }
@@ -82,10 +81,9 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.View.DocumentLoaderOverride = gate.Load;
                 UniTask restyleTask = view.SetStyle(StyleParser.Parse(BackgroundPlusUrlSourceStyle), "B").Preserve();
 
-                // Null FillMaterial mid-resolution — AFTER BuildSourceSpecs started, BEFORE it completes.
-                // round-3's "validate at SetStyle entry" would have already passed by this point; the
-                // captured-set validate (round-4 fix) runs AFTER this await, on a freshly-read reference, so
-                // it must still catch this.
+                // Null FillMaterial mid-resolution — AFTER BuildSourceSpecs started, BEFORE it completes. A
+                // "validate at SetStyle entry" would have already passed by now; the captured-set validate
+                // runs AFTER this await, on a freshly-read reference, so it must still catch this.
                 materialSet.FillMaterial = null;
                 gate.Release();
                 yield return SpinToCompleted(restyleTask);

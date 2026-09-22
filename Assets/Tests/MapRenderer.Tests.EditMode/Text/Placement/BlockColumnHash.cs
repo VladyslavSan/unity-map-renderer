@@ -15,16 +15,15 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Symbol-label perf Phase 1 (block-byte-identity golden, design §5 B): a shared column-by-column
-    /// digest + equality helper over a baked <see cref="SymbolTileBlock"/> — the single place every
-    /// bake-invariant test (the 4.4a golden here; the 4.4b prod-vs-oracle block compare) reads the block's
-    /// arrays from, so the two cannot drift into checking different columns.
+    /// A shared column-by-column digest and equality helper over a baked
+    /// <see cref="SymbolTileBlock"/> — the single place every bake-invariant test reads the block's
+    /// arrays from, so they cannot drift into checking different columns.
     ///
     /// <para><b>Two different jobs, two different methods.</b> <see cref="Hash"/> folds every column into a
     /// compact per-column digest — cheap to pin as a handful of committed <c>int</c> constants, but a
     /// mismatch only says WHICH COLUMN moved, not which element. <see cref="AssertColumnsEqual"/> is the
     /// diagnosable counterpart: element-wise equality between two blocks with the column name and the first
-    /// differing index in the failure message — the shape a prod-vs-oracle compare (4.4b) needs to localize
+    /// differing index in the failure message — the shape a prod-vs-oracle compare needs to localize
     /// a divergence.</para>
     ///
     /// <para><b>TextIds/IconImageIds are deliberately EXCLUDED from <see cref="Hash"/></b> and compared by

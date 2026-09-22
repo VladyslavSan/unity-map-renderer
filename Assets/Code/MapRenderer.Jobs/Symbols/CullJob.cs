@@ -71,7 +71,7 @@ namespace MapRenderer.Jobs.Symbols
         public void Execute(int index)
         {
             GatherTrigger t;
-            if (SymbolDropped[index] != 0) t = GatherTrigger.Dropped; // D1 — never on screen, no fade
+            if (SymbolDropped[index] != 0) t = GatherTrigger.Dropped; // never on screen, no fade
             else if (SymbolDeparting[index] != 0) t = GatherTrigger.Departing;
             else if (SymbolCoverageFading[index] != 0) t = GatherTrigger.Coverage;
             else if (IsOutOfLiveZoom(index)) t = GatherTrigger.Zoom;

@@ -10,7 +10,7 @@ using MapRenderer.Core.Data;
 namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
-    /// S51: Production HTTP tile data source using <see cref="UnityWebRequest"/> and UniTask.
+    /// Production HTTP tile data source using <see cref="UnityWebRequest"/> and UniTask.
     /// Zero <c>Task</c> / <c>Task.Run</c> — fetches are fully async via <c>.ToUniTask()</c>.
     ///
     /// <para>
@@ -36,7 +36,7 @@ namespace MapRenderer.Unity.Rendering.Source
 
         public TileEncoding Encoding => TileEncoding.Mvt;
 
-        // S83b test observability: how many of these (the network source) have been constructed process-wide.
+        // Test observability: how many of these (the network source) have been constructed process-wide.
         // The offline tooth asserts this stays unchanged across a file:// SetStyle + settle — a "zero network"
         // proof (mirrors the DebugLiveAllocCount counter pattern). Interlocked: ctor may run off-main.
         private static int _debugConstructedCount;
@@ -76,7 +76,7 @@ namespace MapRenderer.Unity.Rendering.Source
             }
             catch (UnityWebRequestException) when (ct.IsCancellationRequested)
             {
-                // S84: a fetch cancelled mid-flight (tile released by cover churn) aborts the
+                // A fetch cancelled mid-flight (tile released by cover churn) aborts the
                 // UnityWebRequest, which can surface as a generic "Unknown Error" UnityWebRequestException
                 // rather than OperationCanceledException. Re-map it to a cancellation so the scheduler /
                 // TileManager treat it as benign (swallowed) instead of a logged error / unobserved fault.

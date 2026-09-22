@@ -1,4 +1,4 @@
-// Unity EditMode only — proves the S72 CameraControlPanel shuttle actually wires its serialized floats
+// Unity EditMode only — proves the CameraControlPanel shuttle wires its serialized floats
 // through CameraSliderBinding.Reconcile to the live camera's write seam. Cannot live in Tools/core-tests
 // (needs the MonoBehaviour + MapView + CameraSystem rig). The reconcile *logic* is pinned headless by
 // CameraSliderBindingTests; this asserts the MonoBehaviour glue (field → patch → Apply → field write-back).

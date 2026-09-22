@@ -3,18 +3,18 @@
 // Roughly pipeline order: glyph atlas allocation/texture/fetch-hoist, then the symbol buffer/reconcile fixtures (address, parity, dedup, material, processor parity, async reconcile, reconciler, shared buffer), then sprite readiness.
 //
 // Contents:
-//   GlyphAtlasAllocTests            — T4 (S18 §4, Slice 5): appending an already-decoded glyph to the atlas, and shaping a cached run into a caller-owned buffer, must allocate ZERO managed garbage on the steady path.
-//   GlyphAtlasTextureTests          — S18 Unity-side batch — T3 texel-from-texture: uploads a decoded glyph's atlas region via GlyphAtlasTexture and reads a texel on the glyph's edge back from the uploaded Texture2DArray's CPU-side buffer, confirming it matches the source Pixels byte exactly…
+//   GlyphAtlasAllocTests            — Appending an already-decoded glyph to the atlas, and shaping a cached run into a caller-owned buffer, must allocate ZERO managed garbage on the steady path.
+//   GlyphAtlasTextureTests          — T3 texel-from-texture: uploads a decoded glyph's atlas region via GlyphAtlasTexture and reads a texel on the glyph's edge back from the uploaded Texture2DArray's CPU-side buffer, confirming it matches the source Pixels byte exactly…
 //   GlyphPrepareBeforeShapeTests    — Glyph-fetch hoist T1–T4 (T5 lives in SymbolTailPumpTests — its two structural halves need SOURCE FILES this fixture-driven suite has no reason to touch, and its behavioural half needs the subsystem harness in SymbolSubsystemWorkSchedulerTests).
-//   SymbolBufferAddressTests        — IR C1 fix stage, B2/B3: the symbol consumer reads its tile address, its extent and its feature count off the BUFFER, not off a caller-supplied argument and not off the layer's feature list.
-//   SymbolBufferParityTests         — IR stage B4: the teeth on moving SymbolFeatureExtractor off its own managed MvtGeometry.Decode and onto the shared TileGeometryBuffers.
-//   SymbolDedupZoomInvarianceTests  — Stage 3 headline tooth: the cross-tile dedup winner set is now a pure function of the tile set — INVARIANT across display zoom.
-//   SymbolLayerMaterialTests        — S105 Slice 4 (A5b) → E2 (D11): each symbol style layer gets its OWN material — a distinct SymbolTextWorld clone (NOT one shared material) — with its text-halo-* bound by name.
-//   SymbolProcessorParityTests      — Epic A / A3 acceptance tooth #3 (the PRIMARY semantic tooth): the differential — production SymbolSubsystem output, driven through the A3 processor machinery, deep-equals a single-pass BuildAsync ORACLE fed the same bytes/style/camera-zoom/projection over…
-//   SymbolReconcileAsyncTests       — Stage 4b (symbols-async-reconcile) — the OFF-MAIN reconcile state machine, driven end-to-end through the production SymbolSubsystem: T6 off-main, T7 one-in-flight + apply-stale + stale-front-held, T8 fault → no swap + reschedule, T10 restyle drains +…
-//   SymbolReconcilerTests           — Stage 4b (symbols-async-reconcile): the off-main SymbolReconciler + the store's native pin guard (SPEC A).
-//   SymbolSharedBufferTests         — IR C1 P2 — tooth E3: the symbol extractor's ring bucketing re-based from the selected feature list onto the source layer's own feature ordinals.
-//   SymbolSpriteReadinessTests      — D6 (road-shields, docs/road-shields-design.md §3 D6) — the sprite-atlas readiness race.
+//   SymbolBufferAddressTests        — the symbol consumer reads its tile address, its extent and its feature count off the BUFFER, not off a caller-supplied argument and not off the layer's feature list.
+//   SymbolBufferParityTests         — the teeth on moving SymbolFeatureExtractor off its own managed MvtGeometry.Decode and onto the shared TileGeometryBuffers.
+//   SymbolDedupZoomInvarianceTests  — Headline tooth: the cross-tile dedup winner set is a pure function of the tile set — INVARIANT across display zoom.
+//   SymbolLayerMaterialTests        — Each symbol style layer gets its OWN material — a distinct SymbolTextWorld clone (NOT one shared material) — with its text-halo-* bound by name.
+//   SymbolProcessorParityTests      — the PRIMARY semantic tooth: the differential — production SymbolSubsystem output, driven through the processor machinery, deep-equals a single-pass BuildAsync ORACLE fed the same bytes/style/camera-zoom/projection over…
+//   SymbolReconcileAsyncTests       — The OFF-MAIN reconcile state machine, driven end-to-end through the production SymbolSubsystem: T6 off-main, T7 one-in-flight + apply-stale + stale-front-held, T8 fault → no swap + reschedule, T10 restyle drains +…
+//   SymbolReconcilerTests           — The off-main SymbolReconciler + the store's native pin guard.
+//   SymbolSharedBufferTests         — tooth E3: the symbol extractor's ring bucketing re-based from the selected feature list onto the source layer's own feature ordinals.
+//   SymbolSpriteReadinessTests      — Road-shields (docs/road-shields-design.md) — the sprite-atlas readiness race.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -154,7 +154,7 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S18 Unity-side batch — T3 texel-from-texture: uploads a decoded glyph's atlas region via
+    /// T3 texel-from-texture: uploads a decoded glyph's atlas region via
     /// <see cref="GlyphAtlasTexture"/> and reads a texel on the glyph's edge back from the uploaded
     /// <see cref="Texture2DArray"/>'s CPU-side buffer, confirming it matches the source
     /// <see cref="GlyphAtlas.Pixels"/> byte exactly AND is graded (mid-range), not flat 0/255 — the
@@ -214,7 +214,7 @@ namespace MapRenderer.Tests.Text
                 byte expected = a.Bitmap[local.y * entry.CellSize.x + local.x];
 
                 // GetPixelData<byte> reads the texture's CPU-side buffer directly (1 byte/texel for
-                // R8, no float round-trip, no channel ambiguity if the format ever falls back to
+                // No float round-trip, no channel ambiguity if the format ever falls back to
                 // Alpha8 — unlike GetPixel().r, which would silently read 0 from an Alpha8 texture).
                 var raw = texture.GetPixelData<byte>(0, entry.Page);
                 int px = entry.AtlasOrigin.x + local.x;
@@ -550,10 +550,10 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR C1 fix stage, B2/B3: <b>the symbol consumer reads its tile address, its extent and its feature
+    /// <b>The symbol consumer reads its tile address, its extent and its feature
     /// count off the BUFFER</b>, not off a caller-supplied argument and not off the layer's feature list.
     ///
-    /// <para>P2/P3 removed the second address copy from the mesh consumers —
+    /// <para>The second address copy is gone from the mesh consumers —
     /// <c>ITileMeshRenderLayer.WriteInto</c> lost its <c>TileId</c> parameter and fill/line read
     /// <c>geometry.Tile</c> — but symbol kept taking one, so <c>MvtDecoder</c>'s claim that the address
     /// "enters the pipeline exactly ONCE, at the fetch" was false for exactly one consumer. These are the
@@ -602,7 +602,7 @@ namespace MapRenderer.Tests.Text
             return symbols;
         }
 
-        // ── B2 · the ADDRESS, in the production configuration ─────────────────────────────────────────
+        // ── The ADDRESS, in the production configuration ──────────────────────────────────────────────
 
         /// <summary>
         /// A real <c>MvtTile</c>, decoded at one address and then extracted with a DIFFERENT address handed
@@ -645,7 +645,7 @@ namespace MapRenderer.Tests.Text
             }
         }
 
-        // ── B2 · the EXTENT ───────────────────────────────────────────────────────────────────────────
+        // ── The EXTENT ────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>An <see cref="ITileLayer"/> that forwards everything except <see cref="Extent"/>, which
         /// it misreports. <b>Synthetic by necessity</b>: for MVT the layer's extent and its buffer's extent
@@ -721,7 +721,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(honestSymbols[0].AnchorRender.z, symbols[0].AnchorRender.z, "anchor z must not move");
         }
 
-        // ── B3 · the FEATURE COUNT the ring buckets are sized from ────────────────────────────────────
+        // ── The FEATURE COUNT the ring buckets are sized from ─────────────────────────────────────────
 
         /// <summary>An <see cref="ITileLayer"/> exposing a PREFIX of the wrapped layer's features while
         /// forwarding the whole buffer — the mispairing shape <c>MvtLayer</c>'s lockstep rules out for MVT
@@ -795,22 +795,22 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR stage B4: the teeth on moving <c>SymbolFeatureExtractor</c> off its own managed
+    /// The teeth on moving <c>SymbolFeatureExtractor</c> off its own managed
     /// <c>MvtGeometry.Decode</c> and onto the shared <see cref="TileGeometryBuffers"/>.
     ///
     /// <para><b>Why a differential oracle, and why NOT <c>SymbolProcessorParityTests</c>.</b> That suite's two
     /// arms BOTH run through <c>StyledSymbolTileBuilder.ExtractLayers</c> → <c>SymbolFeatureExtractor.Extract</c>
-    /// — the exact code B4 changes — so B4's rewire lands identically in both and the tooth cannot disagree
-    /// about it, whatever it breaks. (Its own doc states the premise: "only ExtractLayers/Shape, <i>which
-    /// A3 does not modify</i>, are shared." B4 modifies them; that premise expires with this stage.) It stays a
-    /// valuable REGRESSION tooth and stays green unedited, but it is not B4's acceptance tooth. T1 below is:
-    /// arm A is <c>MvtGeometry.Decode</c> — the OLD implementation, running live, in code B4 does not touch —
+    /// — the exact code the shared-buffer move changes — so that rewire lands identically in both and
+    /// the tooth cannot disagree about it, whatever it breaks. It stays a valuable REGRESSION tooth and
+    /// stays green unedited, but it is not the acceptance tooth. T1 below is:
+    /// arm A is <c>MvtGeometry.Decode</c> — the OLD implementation, running live, in untouched code —
+    /// and arm B is the materializer plus a span read. The two arms share no helper, so the oracle can
     /// and arm B is the materializer plus a span read. The two arms share no helper, so the oracle can
     /// genuinely disagree: at feature f, path p, point i.</para>
     ///
-    /// <para><b>Landmine #2 — symbol is the consumer that finally OBSERVES the unfiltered buffer.</b> B1
+    /// <para><b>Symbol is the consumer that finally OBSERVES the unfiltered buffer.</b> Fill
     /// measured that a short-ring filter in the shared decode stage reds NOTHING for fill (ring assembly
-    /// re-filters); B3 measured the same for line (<c>RibbonJob</c> returns early below 2 points). Symbol's
+    /// re-filters); the same holds for line (<c>RibbonJob</c> returns early below 2 points). Symbol's
     /// point branch has <b>no length filter at all</b>, so a 1-point path is a real, rendered symbol — T2 is the
     /// instrument those two stages could not build.</para>
     /// </summary>
@@ -818,9 +818,9 @@ namespace MapRenderer.Tests.Text
     public class SymbolBufferParityTests
     {
 
-        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// <summary>A synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
         /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
-        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        /// leak would be invisible, which is the failure class this guard exists to catch.</summary>
         [TearDown]
         public void ReleaseFixtureTiles()
         {
@@ -890,7 +890,7 @@ namespace MapRenderer.Tests.Text
                         oracle.Add((fi, path.ToArray()));
                 }
 
-                // ── Arm B — the production path: the DECODED LAYER's own buffer (IR C1 P3 — the object a
+                // ── Arm B — the production path: the DECODED LAYER's own buffer (the object a
                 //    real consumer borrows), the production bucketing, and a span read. Borrowed, so nothing
                 //    is disposed here.
                 var actual = new List<(int featureIdx, double2[] points)>();
@@ -972,7 +972,7 @@ namespace MapRenderer.Tests.Text
                 "precondition: the fixture must carry real geometry, not a handful of points");
             Assert.Greater(sawLengthOne, 0,
                 "precondition: at least one path of length EXACTLY 1 must be compared — the Point case line's " +
-                "oracle could not have, and the case landmine #2 is about");
+                "oracle could not have, and the case the unfiltered-buffer landmine is about");
             Assert.Greater(sawMultiPathFeature, 0,
                 "precondition: at least one feature must contribute MORE THAN ONE path, or path ordering " +
                 "WITHIN a feature is not pinned — only ordering across features would be");
@@ -993,7 +993,7 @@ namespace MapRenderer.Tests.Text
         /// into production leaves it green. Added after the RED sweep measured that blind spot rather than
         /// predicted it.
         /// <para>Path order is observable OUTPUT, not an implementation detail: the extractor's per-tile
-        /// <c>ordinal</c> becomes <c>SymbolFeature.FeatureIndex</c>, the stable S20 tiebreak, so a reordering
+        /// <c>ordinal</c> becomes <c>SymbolFeature.FeatureIndex</c>, the stable tiebreak, so a reordering
         /// silently changes which symbol wins a collision.</para>
         /// <para>Also pins <c>RingCapacity == RingCount</c> for an MVT-materialized buffer. That identity is
         /// why substituting one for the other in the bucketing is currently an arithmetic no-op
@@ -1046,7 +1046,7 @@ namespace MapRenderer.Tests.Text
                 Assert.AreEqual(expected.x, symbols[i].AnchorRender.x, 1e-6,
                     $"label {i} must be the {i}th AUTHORED path, in decode order — the bucketing is a stable " +
                     "counting sort precisely so a feature's paths keep the order the decoder produced them in, " +
-                    "and FeatureIndex (the S20 collision tiebreak) is stamped from that order");
+                    "and FeatureIndex (the collision tiebreak) is stamped from that order");
                 Assert.AreEqual(expected.y, symbols[i].AnchorRender.y, 1e-6, $"label {i} anchor.y");
                 // NOT a second pin on path order: `ordinal++` is stamped at each emit site and symbols are
                 // appended in emission order, so this holds for ANY path ordering. It pins emission order
@@ -1056,11 +1056,11 @@ namespace MapRenderer.Tests.Text
             }
         }
 
-        // ── T2: landmine #2, the observer line could not build ──────────────────────────────────────
+        // ── T2: the observer line could not build ──────────────────────────────────────
 
         /// <summary>
         /// T2 — a Point feature whose command stream is a single <c>MoveTo</c> of ONE point still emits
-        /// exactly one symbol, at that point's projection. This is the instrument B1 and B3 both recorded as
+        /// exactly one symbol, at that point's projection. This is the instrument the fill and line teeth both recorded as
         /// missing: fill re-filters short rings downstream and line returns early below 2 points, so a
         /// <c>&lt; 2</c>-point filter fused into the shared decode stage was invisible in both. Here it deletes
         /// a rendered symbol.
@@ -1164,7 +1164,7 @@ namespace MapRenderer.Tests.Text
         /// <item>one Polygon feature with a genuine multi-point ring ⇒ the buffer IS created with
         /// <c>RingCount &gt; 0</c>, so the zero symbols provably came from <b>symbol's kind gate</b>;</item>
         /// <item>one feature whose <c>Geometry</c> is <c>null</c> ⇒ the buffer IS created (feature count ≥ 1)
-        /// with <c>RingCount == 0</c>. B3's dev report recorded its plan claiming <c>IsCreated == false</c>
+        /// with <c>RingCount == 0</c>. An earlier plan claimed <c>IsCreated == false</c>
         /// here and being wrong; this asserts what actually holds.</item>
         /// </list>
         /// </summary>
@@ -1209,7 +1209,7 @@ namespace MapRenderer.Tests.Text
             Assert.DoesNotThrow(() => SymbolFeatureExtractor.Extract(
                 PointSymbolLayer(), TileOf(polygon), SyntheticTileId, 0.0, new WebMercatorProjection(),
                 polygonSymbols));
-            Assert.AreEqual(0, polygonSymbols.Count, "Polygon is never accepted at any placement (the D2 fence)");
+            Assert.AreEqual(0, polygonSymbols.Count, "Polygon is never accepted at any placement (the fence)");
 
             // (3) a feature whose Geometry is null.
             IFeature nullGeometry = new DictionaryFeature(
@@ -1269,7 +1269,7 @@ namespace MapRenderer.Tests.Text
                 PointSymbolLayer(sourceLayer: sourceLayer), DecodedFixture(), 0.0);
 
         /// <summary>Arm B's buffer, minted through the REAL producer from synthetic features' command
-        /// streams — the same thing the decoder does for a real layer (IR C1 P3).</summary>
+        /// streams — the same thing the decoder does for a real layer.</summary>
         private static TileGeometryBuffers Materialize(
             IReadOnlyList<IFeature> features, TileId tile, double extent)
             => TestTileMeshBuilder.Materialize(features, tile, extent);
@@ -1375,7 +1375,7 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Stage 3 headline tooth: the cross-tile dedup winner set is now a pure function of the tile set —
+    /// Headline tooth: the cross-tile dedup winner set is a pure function of the tile set —
     /// INVARIANT across display zoom. The store keys on the fixed <see cref="CrossTileSymbolKey.CanonicalGridMeters"/>,
     /// so the <c>quantizeMeters</c> argument only GATES dedup on/off; its magnitude no longer sets the grid.
     /// Sweeping the gate across a wide zoom range (its old per-frame <see cref="CameraPoseMath.MetersPerPixel"/>
@@ -1386,7 +1386,7 @@ namespace MapRenderer.Tests.Text
     /// <c>quantizeMeters</c>: the winner set then varies across the sweep (a coarse gate merges the split pair,
     /// a fine gate splits it) → the cross-gate assertion fails.</para>
     ///
-    /// <para><b>Reader cutover (4.2).</b> Winner identity is <c>(BlockId, LocalIndex)</c> — there is no more
+    /// <para><b>Reader cutover.</b> Winner identity is <c>(BlockId, LocalIndex)</c> — there is no more
     /// managed symbol list to compare by reference. Comparing the SAME two arrays (blockId/localIndex/isDeparting)
     /// across two DIFFERENT gate values is still a genuine, non-vacuous invariance check: it is not a restatement
     /// of anything a single run computed, it is proof that TWO INDEPENDENT runs (different gate) produced the
@@ -1514,15 +1514,15 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S105 Slice 4 (A5b) → E2 (D11): each symbol style layer gets its OWN material — a distinct
+    /// Each symbol style layer gets its OWN material — a distinct
     /// <see cref="MapMaterialSet.SymbolTextWorld"/> clone (NOT one shared material) — with its
-    /// <c>text-halo-*</c> bound by name. This is what makes per-layer halo variation possible (F1).
+    /// <c>text-halo-*</c> bound by name. This is what makes per-layer halo variation possible.
     /// Ownership migrated from <c>SymbolSubsystem</c> into <see cref="SymbolRenderLayer"/> in E2
-    /// (D11: "per-layer materials live on the layer object, one owner") — the tooth is unchanged
+    /// ("per-layer materials live on the layer object, one owner") — the tooth is unchanged
     /// (per-layer halo), only the owner under test is: this now builds the render layers directly via
     /// <see cref="RenderLayerSet.Build"/> (the same production path <c>MapView.SetStyle</c> drives) instead
     /// of going through the subsystem. <see cref="IRenderLayer.Material"/> IS
-    /// <see cref="SymbolRenderLayer.WorldTextMaterial"/> (§0.2 — the screen material is retired), so the two
+    /// <see cref="SymbolRenderLayer.WorldTextMaterial"/> (the screen material is retired), so the two
     /// used to be asserted separately are now the same object; asserted here as a single identity.
     /// </summary>
     [TestFixture]
@@ -1574,26 +1574,26 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Epic A / A3 acceptance tooth #3 (the PRIMARY semantic
+    /// The PRIMARY semantic
     /// tooth): the differential — production <see cref="SymbolSubsystem"/> output, driven through the
-    /// A3 processor machinery, deep-equals a single-pass <see cref="StyledSymbolTileBuilder.BuildAsync"/>
+    /// production processor machinery, deep-equals a single-pass <see cref="StyledSymbolTileBuilder.BuildAsync"/>
     /// ORACLE fed the same bytes/style/camera-zoom/projection over a SECOND, independent builder/glyph
     /// pipeline. THREE symbol layers — one on a different source (so the "s"-source layers' GLOBAL indices
-    /// {1,2} diverge from their within-build ordinals {0,1}, §F-3(ii)) and two "s"-source layers with a
-    /// ZOOM-INTERPOLATED text-size (so the tile's integer zoom vs the captured camera zoom, §F-3(i), yield
+    /// {1,2} diverge from their within-build ordinals {0,1}) and two "s"-source layers with a
+    /// ZOOM-INTERPOLATED text-size (so the tile's integer zoom vs the captured camera zoom yield
     /// observably different sizes) — so the per-layer processor split, material-index stamping, and
-    /// cross-layer symbol order are all exercised, and EACH §F-3 falsifier is a genuine (non-coincidental)
+    /// cross-layer symbol order are all exercised, and EACH falsifier is a genuine (non-coincidental)
     /// divergence, not just a hypothetical one. See <c>SetUp</c>'s comment for the layout.
     ///
-    /// <para>RED-verified against the un-rewired (pre-A3) subsystem for the STRUCTURAL delegation teeth
-    /// (see the A3 stage report). Empirically, THIS differential passes unmodified against a structurally
-    /// faithful pre-A3 <c>BuildTileAsync</c> too — pre-A3 already calls
+    /// <para>RED-verified against the un-rewired subsystem for the STRUCTURAL delegation teeth
+    /// Empirically, THIS differential passes unmodified against a structurally
+    /// faithful un-rewired <c>BuildTileAsync</c> too — it already calls
     /// <c>ExtractLayers</c>/<c>Shape</c> with the same zoom/projection/global-material-indices the
-    /// oracle uses, so it computes IDENTICAL values. Its proven role (RED-verified by injecting each §F-3
-    /// falsifier into a scratch copy of the post-A3 <c>BuildTileAsync</c> — see the A3 stage report) is a
-    /// WRONG-A3-REWIRE falsifier, not a pre/post-A3 discriminator.</para>
+    /// oracle uses, so it computes IDENTICAL values. Its proven role (RED-verified by injecting each
+    /// falsifier into a scratch copy of the rewired <c>BuildTileAsync</c>) is a
+    /// WRONG-REWIRE falsifier, not a before/after discriminator.</para>
     ///
-    /// <para>Falsifiers this tooth catches (§F-3): (i) <c>ctx.Zoom</c> fed the tile's integer zoom instead of
+    /// <para>Falsifiers this tooth catches: (i) <c>ctx.Zoom</c> fed the tile's integer zoom instead of
     /// the captured camera zoom; (ii) material indices remapped to per-build ordinals instead of global
     /// <c>layerIndices</c>; (iii) per-layer split reordering or a dropped/collapsed layer; (iv) the main
     /// tail skipped entirely (zero symbols).</para>
@@ -1607,14 +1607,14 @@ namespace MapRenderer.Tests.Text
 
         // THREE symbol layers, declared in an order that makes both falsifiers this differential exists to
         // catch actually falsifiable (dev-side strengthening after the advisor flagged the original
-        // two-layer/constant-text-size style as hollow for exactly the two plumbing bugs §F-3(i)/(ii) name):
+        // two-layer/constant-text-size style as hollow for exactly the two plumbing bugs (i)/(ii) name):
         //  - "symbols-other" (a DIFFERENT source, "other") occupies GLOBAL index 0, so the two "s"-source
         //    layers get GLOBAL indices {1, 2} while their WITHIN-BUILD ordinals (k in BuildTileAsync's loop)
-        //    are {0, 1} — global-index ≠ ordinal, so a material-index-remap bug (§F-3(ii): stamping `k`
+        //    are {0, 1} — global-index ≠ ordinal, so a material-index-remap bug ((ii): stamping `k`
         //    instead of the global `layerIndices[k]`) produces an observably different MaterialIndex.
         //  - "symbols-a"/"symbols-b" (source "s", over the fixture's "centroids") use a ZOOM-INTERPOLATED
         //    text-size, so evaluating at the tile's INTEGER zoom (3) instead of the captured CAMERA zoom
-        //    (5.0, §F-3(i)) yields an observably different TextSizePx/glyph-quad geometry, not an
+        //    (5.0) yields an observably different TextSizePx/glyph-quad geometry, not an
         //    identical value by coincidence.
         private static readonly string StyleJson = @"{
             'version': 8,
@@ -1696,7 +1696,7 @@ namespace MapRenderer.Tests.Text
             return result;
         }
 
-        /// <summary>A5b drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
+        /// <summary>Drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
         /// thread, then <c>RunWorkerAndHandoff</c> fire-and-forget on the pool. Replaces the retired
         /// <c>OnTileBytesReady</c> push.</summary>
         private void DriveTileBytesReady(TileId tile)
@@ -1715,7 +1715,7 @@ namespace MapRenderer.Tests.Text
             }).Forget();
         }
 
-        // Reader cutover (4.2) / resident-graph shed (4.4b): the retired subsystem.CollectInto managed-list overload
+        // Reader cutover / resident-graph shed: the retired subsystem.CollectInto managed-list overload
         // deduped ACROSS tiles — this fixture only ever commits ONE tile (SourceId/Tile), so the replacement reads
         // that tile's baked native block directly (DebugBlockFor — Entry.SymbolPlacementSystem itself is gone as of 4.4b) rather
         // than routing through the cross-tile winner plan the deep block-vs-block compare below needs.
@@ -1724,7 +1724,7 @@ namespace MapRenderer.Tests.Text
         /// <summary>Drives the REAL production subsystem until it commits a baked block — same bytes, same
         /// style, same glyph fixture as the oracle below. Only "s"-source bytes are pushed — "symbols-other"
         /// (a different source) is never built; it exists solely to make the "s" layers' GLOBAL indices
-        /// {1,2} diverge from their within-build ordinals {0,1} (§F-3(ii) falsifier).</summary>
+        /// {1,2} diverge from their within-build ordinals {0,1} (falsifier (ii)).</summary>
         private IEnumerator DriveProductionBuild()
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
@@ -1743,23 +1743,23 @@ namespace MapRenderer.Tests.Text
             Assert.Fail("production build did not commit labels within 200 pumped frames");
         }
 
-        /// <summary>Builds the ORACLE symbol set: the pre-A3-shaped single pass
+        /// <summary>Builds the ORACLE symbol set: the un-rewired single pass
         /// (<see cref="StyledSymbolTileBuilder.BuildAsync"/>) over a SECOND, independent glyph pipeline fed
         /// the SAME ranges — atlas state is equivalent but independent, so this is not self-referential with
-        /// the processor machinery A3 changes (only <c>ExtractLayers</c>/<c>Shape</c>, which A3 does not
+        /// the processor machinery the rewire changes (only <c>ExtractLayers</c>/<c>Shape</c>, which it does not
         /// modify, are shared).
-        /// <para><b>That independence premise EXPIRED at IR stage B4</b>, which modifies exactly
+        /// <para><b>That independence premise has EXPIRED</b>: the shared-buffer move modifies exactly
         /// <c>ExtractLayers</c>/<c>Shape</c>. This fixture is therefore no longer independent of the
         /// symbol geometry path, and must not be cited as the oracle for a change to it —
         /// <c>SymbolBufferParityTests</c> is that oracle. Recorded here rather than only in the newer file
-        /// because a stale independence claim left where a reader finds it is precisely how this epic
+        /// because a stale independence claim left where a reader finds it is how this suite
         /// disarmed a structural tooth once already.</para></summary>
         private SymbolTileBuffer BuildOracle()
         {
             var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = _latinGlyphs };
             // Match SymbolSubsystem.SetStyle's atlas dimension EXACTLY (its AtlasDimension = 4096,
             // clamped to the GPU max) — a different atlas size packs glyphs at different cells, so their
-            // normalized UVs would differ from production for a reason that has NOTHING to do with A3
+            // normalized UVs would differ from production for a reason that has NOTHING to do with the rewire
             // (a test-harness artifact, not a real divergence).
             int dim = math.min(SystemInfo.maxTextureSize, 4096);
             using var oracleGlyphManager = new GlyphManager(TestGlyphSource.FromRanges(ranges), new GlyphAtlas(dim, dim));
@@ -1801,7 +1801,7 @@ namespace MapRenderer.Tests.Text
             finally { oracle.Dispose(); }
         }
 
-        /// <summary>Epic A / A3 acceptance tooth #4 (§F — "the tail actually runs" tooth): a glyph-fetch
+        /// <summary>The "tail actually runs" tooth: a glyph-fetch
         /// delegate reachable ONLY from <see cref="StyledSymbolTileBuilder.Shape"/> (the tail) records
         /// the thread it runs on; together with the existing, unmodified
         /// <c>SymbolDecodeAndExtract_RunOffTheMainThread</c> recorder (which pins the WORKER half off main),
@@ -1860,7 +1860,7 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Stage 4b (symbols-async-reconcile) — the OFF-MAIN reconcile state machine, driven end-to-end through the
+    /// The OFF-MAIN reconcile state machine, driven end-to-end through the
     /// production <see cref="SymbolSubsystem"/>: T6 off-main, T7 one-in-flight + apply-stale + stale-front-held,
     /// T8 fault → no swap + reschedule, T10 restyle drains + releases front/back pins, T11 async-front == inline-collect
     /// oracle. T9 (store + gather) proves the pin prevents a native use-after-free. T7/T8/T9 are RED-verified.
@@ -2365,14 +2365,14 @@ namespace MapRenderer.Tests.Text
             }
         }
 
-        // ═══ R1 T2b: a REAL front swap through the production subsystem must invalidate the gather memo — the
+        // ═══ T2b: a REAL front swap through the production subsystem must invalidate the gather memo — the
         //      stage's only end-to-end guard (T2a in SymbolGatherMemoTests only proves the version-consulted UNIT
         //      behaviour; only this proves the key is wired to a real reconcile swap). Three required properties
         //      (Codex SHOULD-FIX 1 — the original construction, kept as-is, was missing all three):
         //        (a) EVENT vs SWAP keying: immediately after the store event (BeginBuild/CompleteBuild), before
         //            the reconcile completes, the mirror must stay a memo HIT and still serve the OLD content —
         //            an implementation keyed on the tile EVENT (e.g. _store.CollectGeneration, the key the
-        //            plan's design note originally proposed and the plan itself corrected — §"Key choice") would
+        //            design note originally proposed and later corrected) would
         //            wrongly rebuild HERE instead of waiting for the swap.
         //        (b) The rebuild must land specifically on the frame PickupCompletedReconcile's swap actually
         //            happens (ReconcileInFlight() observed true, THEN the pickup call flips it false), not
@@ -2513,7 +2513,7 @@ namespace MapRenderer.Tests.Text
             finally { harness.Dispose(); }
         }
 
-        // ═══ R1 T5: a restyle (SetStyle) between two production gathers on the SAME plan object must invalidate
+        // ═══ T5: a restyle (SetStyle) between two production gathers on the SAME plan object must invalidate
         //      the memo, even though the front content collapses to EMPTY. Step 2.3's `_frontSetVersion++` is
         //      defense-in-depth (3.3's `plan.WinnerCount == _mirrorCount` predicate term is the actual crash-prevention
         //      for a release player) — with the bump present this test observes no throw and a clean rebuild; the
@@ -2679,12 +2679,12 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Stage 4b (symbols-async-reconcile): the off-main <see cref="SymbolReconciler"/> + the store's native
+    /// The off-main <see cref="SymbolReconciler"/> + the store's native
     /// pin guard (SPEC A). T1 proves the extracted worker is BYTE-IDENTICAL to an independent string oracle; T2
     /// pins the disposal-bumps-generation edge; T3 the reused-result SHRINK; T4 the per-site defer/flush TIMING;
     /// T5 the cross-snapshot refcount OVERLAP. T3/T4/T5 are RED-verified against the un-guarded code.
     ///
-    /// <para><b>Reader cutover (4.2).</b> Every commit that participates in a <c>CaptureSnapshot</c>/<c>Run</c>
+    /// <para><b>Reader cutover.</b> Every commit that participates in a <c>CaptureSnapshot</c>/<c>Run</c>
     /// call now bakes and commits a REAL <see cref="SymbolTileBlock"/> (via <see cref="Commit"/>) — the
     /// reconciler reads the block, so a block-less (<c>Block == null</c>) entry is no longer collected at all
     /// (see <c>SymbolTileStore.CaptureSnapshot</c>'s guard). Winner identity is <c>(BlockId, LocalIndex)</c>;
@@ -2731,12 +2731,12 @@ namespace MapRenderer.Tests.Text
 
         // Bakes a REAL block for `buffer` and commits it — the reconciler cutover means every commit a test wants
         // CaptureSnapshot/Run to see needs a real SymbolTileBlock (a block-less entry is no longer collected;
-        // see the type doc). UMR-87: Bake no longer interns (it copies the ids ShapedSymbol already carries),
+        // see the type doc). Bake does not intern (it copies the ids ShapedSymbol already carries),
         // so there is no table to share here any more.
         private static bool Commit(SymbolTileStore store, SymbolTileStore.Key key, int gen, SymbolTileBuffer buffer)
             => store.CompleteBuild(key, gen, SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero));
 
-        // UMR-87: ShapedSymbol carries only the INTERNED TextId/IconImageId, not the raw string — but Oracle()
+        // ShapedSymbol carries only the INTERNED TextId/IconImageId, not the raw string — but Oracle()
         // below must stay a genuinely STRING-keyed computation (independent of SymbolStringTable.Intern, which
         // is itself exactly what the RED-verification here targets — see Oracle's doc). So Point/Curved record
         // each returned symbol's raw text/icon in this side table, keyed by the (structurally-comparable)
@@ -2746,7 +2746,7 @@ namespace MapRenderer.Tests.Text
 
         // Appends one point (or icon, via `icon`) symbol into `buffer` and returns the resulting record — so a
         // caller can both group it into its tile's buffer AND hold it for a later assertion, mirroring the
-        // pre-migration per-symbol managed carrier local var it replaces. §10 D8/D9: pairRole/pairId default to None/0 —
+        // pre-migration per-symbol managed carrier local var it replaces. pairRole/pairId default to None/0 —
         // every existing call site (unpaired symbols) is unaffected.
         private ShapedSymbol Point(SymbolTileBuffer buffer, double3 anchor, int layer, string text, string icon,
             int feature, TileId tile, SymbolPairRole pairRole = SymbolPairRole.None, int pairId = 0)
@@ -2772,7 +2772,7 @@ namespace MapRenderer.Tests.Text
         // as the reconciler, but keyed on the string CrossTileSymbolKey (NOT the code under test), and walking the
         // fixture's OWN ShapedSymbol lists (NOT the block the reconciler reads) — a genuinely separate
         // computation. activeTiles / departingTiles are in the store's _active / _departing enumeration order.
-        // UMR-87: ShapedSymbol itself no longer carries the raw string (only the interned TextId/IconImageId,
+        // ShapedSymbol itself does not carry the raw string (only the interned TextId/IconImageId,
         // the SAME ints the reconciler's DedupKey reads) — reading those here would make this oracle blind to
         // exactly the bug class it RED-verifies (a broken SymbolStringTable.Intern, see the T1 note). So this
         // reads the raw text/icon back from `_rawText`/`_rawIcon` (populated by Point/Curved), never from
@@ -3161,9 +3161,9 @@ namespace MapRenderer.Tests.Text
                 "the re-capture must release what the snapshot previously held");
         }
 
-        // ═══ §10 D9 — P6: cross-tile identity, no Frankenstein pair ═══
+        // ═══ P6: cross-tile identity, no Frankenstein pair ════════════
         // Tile A (coarser) holds the COMPLETE pair; tile B (finer, SAME quantized cell) holds ONLY its icon
-        // (its text never resolved there — the window D6 closed). A rider has no DedupKey of its own (D9), so
+        // (its text never resolved there — the window that is now closed). A rider has no DedupKey of its own, so
         // it can only ride with ITS OWN winning owner: since B's finer icon beats A's icon at the shared
         // (cell, layer, iconImage) key, A's rider is never emitted — not "text from A, icon from B".
         // Pre-fix (independent icon/text keys), this would show TWO tile keys — icon from B, text from A.
@@ -3201,7 +3201,7 @@ namespace MapRenderer.Tests.Text
             store.Clear();
         }
 
-        // ═══ §10 D9 — P13: no orphan rider, the INTRA-tile departing case (reconciler step (b)) ═══
+        // ═══ P13: no orphan rider, the INTRA-tile departing case (reconciler step (b)) ════════════
 
         [Test]
         public void CentredPair_Departing_ClaimSkippedOwnerTakesRiderWithIt_NoOrphan()
@@ -3241,7 +3241,7 @@ namespace MapRenderer.Tests.Text
                     "no record may carry the claim-skipped departing tile's key");
 
             // (ii) the general structural invariant over the WHOLE output: every Rider is immediately preceded
-            // by its matching Owner (block-level PairRoles column — not Points[Detail], the §2 hazard), sharing
+            // by its matching Owner (block-level PairRoles column — not Points[Detail], the hazard), sharing
             // the same block and MaterialIndex. PairId itself is not a baked block column (no reader — deleted
             // in 4.1); block+adjacency is the identity check the block-based winner plan can offer.
             for (int i = 0; i < result.BlockId.Count; i++)
@@ -3301,11 +3301,11 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR C1 P2 — tooth <b>E3</b>: the symbol extractor's ring bucketing re-based from the <b>selected</b>
+    /// Tooth <b>E3</b>: the symbol extractor's ring bucketing re-based from the <b>selected</b>
     /// feature list onto the source layer's own feature ordinals.
     ///
     /// <para><b>Written BEFORE the conversion.</b> It drives the production entry point
-    /// (<see cref="SymbolFeatureExtractor.Extract"/>) with the signature P2 does not break, so it measures the
+    /// (<see cref="SymbolFeatureExtractor.Extract"/>) with the unbroken signature, so it measures the
     /// pre-conversion symbol sequence and re-measures the post-conversion one.</para>
     ///
     /// <para><b>Why a separate fixture from <c>SymbolBufferParityTests</c>.</b> That file's T1 states, in its
@@ -3327,9 +3327,9 @@ namespace MapRenderer.Tests.Text
     public class SymbolSharedBufferTests
     {
 
-        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// <summary>A synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
         /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
-        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        /// leak would be invisible, which is the failure class this guard exists to catch.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private const uint Extent = 4096;
@@ -3348,7 +3348,7 @@ namespace MapRenderer.Tests.Text
         /// is addressed — and a silent mis-bucket wherever it is not); driving the feature loop over
         /// selected-list positions while <c>RingFeatureIdx</c> names ordinals (paths land on the wrong
         /// features); and dropping or re-ordering the per-tile <c>FeatureIndex</c> counter, which is the
-        /// stable S20 placement tiebreak and therefore observable output.</para>
+        /// stable placement tiebreak and therefore observable output.</para>
         /// </summary>
         [Test]
         public void SymbolSharedLayerBuffer_BucketsPathsByOrdinal_MatchingTheSelectedOnlyControl()
@@ -3401,7 +3401,7 @@ namespace MapRenderer.Tests.Text
                 Assert.AreEqual(e.Text, a.Text,
                     $"label {i} TEXT — a mismatch is a path bucketed onto the wrong feature");
                 Assert.AreEqual(e.FeatureIndex, a.FeatureIndex,
-                    $"label {i} FeatureIndex — the per-tile ordinal counter is the stable S20 placement " +
+                    $"label {i} FeatureIndex — the per-tile ordinal counter is the stable placement " +
                     "tiebreak, so its sequence is observable output, not an implementation detail");
                 Assert.AreEqual(e.Placement, a.Placement, $"label {i} placement");
                 Assert.AreEqual(e.Kind, a.Kind, $"label {i} kind");
@@ -3498,9 +3498,9 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// D6 (road-shields, docs/road-shields-design.md §3 D6) — the sprite-atlas readiness race. Before D6, a
+    /// Road-shields (docs/road-shields-design.md) — the sprite-atlas readiness race. Without it, a
     /// symbol build kicked while the style's sprite fetch is still pending captures a null
-    /// <c>_spriteAtlas</c> and commits icon-starved forever (no invalidation path exists). D6 makes
+    /// <c>_spriteAtlas</c> and commits icon-starved forever (no invalidation path exists). The gate makes
     /// <see cref="SymbolSubsystem.TryBeginBuild"/> PARK such a build instead — it commits NOTHING while
     /// gated, then commits WITH icons once the fetch settles, with no restyle/pan/zoom/re-kick.
     /// </summary>
@@ -3536,7 +3536,7 @@ namespace MapRenderer.Tests.Text
         // frozen here rather than left on the real UnityEngine.Time.realtimeSinceStartup. T10/T11 never
         // advance it (they must never cross SpriteFetchDeadlineSeconds), so their "still gated" assertions
         // no longer race real wall-clock time against the 8s deadline on a slow/loaded CI machine — a
-        // deadline trip mid-test would otherwise fail looking exactly like a real D6 regression. Only the
+        // deadline trip mid-test would otherwise fail looking exactly like a real regression. Only the
         // deadline tooth itself advances this field.
         private double _simulatedNow;
 
@@ -3624,7 +3624,7 @@ namespace MapRenderer.Tests.Text
 
         private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
 
-        // Reader cutover (4.2) / resident-graph shed (4.4b): the retired subsystem.CollectInto managed-list overload
+        // Reader cutover / resident-graph shed: the retired subsystem.CollectInto managed-list overload
         // deduped ACROSS tiles — this suite only ever commits Tile0, so the replacement reads that tile's baked
         // native block directly (DebugBlockFor — Entry.SymbolPlacementSystem itself is gone as of 4.4b), giving back the same
         // per-point AtlasKind discriminator (Points[i].AtlasKind) the retired per-symbol carrier's Kind field did.
@@ -3644,14 +3644,14 @@ namespace MapRenderer.Tests.Text
             var loaded = new List<LoadedTileKey> { Key(Tile0) };
             DriveOnce(Tile0);
 
-            // Gate held: pump many frames — the tile must NOT commit anything (D6: no icon-starved commit).
+            // Gate held: pump many frames — the tile must NOT commit anything (no icon-starved commit).
             for (int f = 0; f < 60; f++)
             {
                 _subsystem.ReconcileLoadedTiles(loaded);
                 _subsystem.PumpBuilds();
                 yield return null;
             }
-            Assert.AreEqual(0, SymbolCount(), "D6: a build kicked before the sprite fetch settles must commit NOTHING while gated");
+            Assert.AreEqual(0, SymbolCount(), "A build kicked before the sprite fetch settles must commit NOTHING while gated");
             Assert.AreEqual(1, _tryBeginBuildCalls, "TryBeginBuild must be called exactly once — no restyle, no re-kick");
 
             // Release the gate with real fixture sprite data — pump frames so the parked build drains.
@@ -3676,7 +3676,7 @@ namespace MapRenderer.Tests.Text
                 if (p.AtlasKind == SymbolKind.Icon) anyIcon = true;
                 if (p.AtlasKind == SymbolKind.Text) anyText = true;
             }
-            Assert.IsTrue(anyIcon, "the committed tile must now contain icon labels (the whole point of D6)");
+            Assert.IsTrue(anyIcon, "the committed tile must now contain icon labels (the whole point of the gate)");
             Assert.IsTrue(anyText, "the committed tile must also contain its text labels");
         }
 
@@ -3724,7 +3724,7 @@ namespace MapRenderer.Tests.Text
             Assert.IsFalse(anyIcon, "no atlas ever resolved, so no icon can resolve either — text-only is the correct, inert outcome");
         }
 
-        // ── T16 (docs/road-shields-design.md §3 D6) — D6 review follow-up (REQUIRED 1): the deadline bound on
+        // ── T16 (docs/road-shields-design.md) — the deadline bound on
         //    a genuinely hung fetch ────────────────────────────────────────────────────────────────────
         // Distinct from T11: T11's gate resolves (absent), reaching a terminal Status quickly, so it never
         // exercises SpritesSettled's deadline branch at all. This tooth's gate is NEVER resolved — the

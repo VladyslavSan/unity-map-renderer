@@ -5,7 +5,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.FillExtrusion
     /// <summary>
     /// Cached <c>Shader.PropertyToID</c> integer ids for every property in <see cref="PropertyNames"/>.
     /// Use these for all <c>Material.SetFloat/SetColor/SetVector/HasProperty/GetFloat/…</c> calls that
-    /// target <c>Map/FillExtrusion</c>-specific properties. (S23 I2b, mirrors <c>Fill.PropertyId</c>.)
+    /// target <c>Map/FillExtrusion</c>-specific properties. Mirrors <c>Fill.PropertyId</c>.
     /// </summary>
     public static class PropertyId
     {

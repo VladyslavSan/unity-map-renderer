@@ -20,23 +20,23 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary><c>symbol-placement</c> — selects the point vs. curved along-line bake branch.</summary>
         public SymbolPlacement Placement { get; init; }
 
-        /// <summary>I5a: text vs. icon — the <c>AtlasKind</c> discriminator source.</summary>
+        /// <summary>Text vs. icon — the <c>AtlasKind</c> discriminator source.</summary>
         public SymbolKind Kind { get; init; }
 
-        /// <summary>S105 F1: the owning symbol style layer's index (per-layer material routing).</summary>
+        /// <summary>The owning symbol style layer's index (per-layer material routing).</summary>
         public int MaterialIndex { get; init; }
 
         /// <summary>The resolved symbol text, INTERNED (point/curved text only; <c>0</c> for an icon).
-        /// A-3 cross-tile identity. <see cref="MapRenderer.Core.Text.Placement.SymbolStringTable"/> assigns the id.</summary>
+        /// Part of the cross-tile identity. <see cref="MapRenderer.Core.Text.Placement.SymbolStringTable"/> assigns the id.</summary>
         public int TextId { get; init; }
 
-        /// <summary>I6's icon identity, INTERNED (<c>0</c> for text). Same table as <see cref="TextId"/>.</summary>
+        /// <summary>The icon identity, INTERNED (<c>0</c> for text). Same table as <see cref="TextId"/>.</summary>
         public int IconImageId { get; init; }
 
         /// <summary>Point placement only — the projected (pre-RTC) feature anchor.</summary>
         public double3 AnchorRender { get; init; }
 
-        /// <summary>Point placement only — P2's unit surface normal at <see cref="AnchorRender"/>.</summary>
+        /// <summary>Point placement only — the unit surface normal at <see cref="AnchorRender"/>.</summary>
         public double3 UpRender { get; init; }
 
         /// <summary>Point placement only — the laid-out block's anchor-relative bounding box min corner.</summary>
@@ -107,22 +107,22 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary><c>text-keep-upright</c> — curved placement only.</summary>
         public bool KeepUpright { get; init; }
 
-        /// <summary>P-B <c>icon-rotate</c> in radians (MapLibre's own sense).</summary>
+        /// <summary><c>icon-rotate</c> in radians (MapLibre's own sense).</summary>
         public float IconRotateRadians { get; init; }
 
-        /// <summary>W1: the resolved <c>*-pitch-alignment</c> — curved placement only.</summary>
+        /// <summary>The resolved <c>*-pitch-alignment</c> — curved placement only.</summary>
         public AlignmentMode PitchAlignment { get; init; }
 
         /// <summary>Resolved <c>text-*</c> paint.</summary>
         public SymbolPaint Paint { get; init; }
 
-        /// <summary>Road-shields §10 D8/D10 — the PROPOSED pair role (resolved by <see cref="SymbolPairing"/>).</summary>
+        /// <summary>The PROPOSED pair role (resolved by <see cref="SymbolPairing"/>).</summary>
         public SymbolPairRole PairRole { get; init; }
 
-        /// <summary>Road-shields §10 D10 — the owner's <c>FeatureIndex</c>, stamped on both halves.</summary>
+        /// <summary>The owner's <c>FeatureIndex</c>, stamped on both halves.</summary>
         public int PairId { get; init; }
 
-        /// <summary>Stage C — this half may be dropped while its partner places.</summary>
+        /// <summary>This half may be dropped while its partner places.</summary>
         public bool PairOptional { get; init; }
     }
 }

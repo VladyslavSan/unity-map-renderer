@@ -2,8 +2,8 @@
 // (Tools/core-tests). Do NOT add any UnityEngine reference.
 //
 // Tests CameraProperties, CameraPropertiesUpdate (patch semantics), CameraPoseMath (altitude formula +
-// inverse + pose + D6 fixes), and the shortest-angle heading lerp. (Camera animation was removed — smooth
-// control will be a separate CameraController; the instant patch path is CameraPropertiesUpdate.ApplyTo.)
+// inverse + pose), and the shortest-angle heading lerp. There is no animation path: the instant
+// patch path is CameraPropertiesUpdate.ApplyTo.
 
 
 using System;
@@ -23,7 +23,7 @@ namespace MapRenderer.Tests.Cameras
         private const double TestViewportHeight = 1080.0;
         private const double TestFovDeg         = 60.0;
 
-        // ── Patch semantics (S45 acceptance tooth 3) ─────────────────────────────────────────────
+        // ── Patch semantics ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// A patch with only Tilt set changes ONLY tilt; all other fields (Zoom, Heading, LookAt) hold.
@@ -76,10 +76,10 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(8.0, result.Zoom, 1e-9, "Zoom must be set immediately.");
         }
 
-        // ── Altitude formula (S45 non-regression, absorbed from CameraTransformTests) ─────────────
+        // ── Altitude formula ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// CameraPoseMath.AltitudeForZoom matches the hand-computed D2 value at zoom 10.
+        /// CameraPoseMath.AltitudeForZoom matches the hand-computed value at zoom 10.
         /// Hand: metersPerPixel = 40075016.686 / (512 * 2^10) ≈ 76.437; alt ≈ 71492.1
         /// </summary>
         [Test]
@@ -90,7 +90,7 @@ namespace MapRenderer.Tests.Cameras
             const double fov    = 60.0;
 
             const double earthCirc = 40075016.686;
-            const double tileSize  = 512.0; // S93: the 512 convention (was 256)
+            const double tileSize  = 512.0; // the 512 convention
             double mpp      = earthCirc / (tileSize * Math.Pow(2.0, zoom));
             double halfFov  = fov * 0.5 * Math.PI / 180.0;
             double expected = (height * mpp) / (2.0 * Math.Tan(halfFov));
@@ -129,7 +129,7 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── Pose math — overhead at pitch=0 (D6b degeneracy fix) ─────────────────────────────────
+        // ── Pose math — overhead at pitch=0 ──────────────────────────────────────────────────────
 
         /// <summary>
         /// At tilt=0: camera position is (0, altitude, 0) — directly above; forward is (0, -1, 0).
@@ -152,7 +152,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// D6b: at pitch=0, bearing changes the camera up-vector direction (deterministic north-up).
+        /// At pitch=0, bearing changes the camera up-vector direction (deterministic north-up).
         /// The up-vector at heading=0 must differ from that at heading=90.
         /// </summary>
         [Test]
@@ -192,7 +192,6 @@ namespace MapRenderer.Tests.Cameras
         /// REGRESSION (tilt vertical-flip): the camera up-vector must keep the sky up at every tilt —
         /// <c>up.y &gt; 0</c> across a tilt sweep. The pre-fix pose set <c>up.y = -sinT &lt; 0</c>, so as
         /// tilt → 90 the up-vector pointed straight down and the rendered world appeared on top. This was
-        /// invisible until S72 added a way to tilt in the demo (no pose test pinned up.y at tilt&gt;0).
         /// </summary>
         [Test]
         public void Pose_UpVector_KeepsSkyUp_AcrossTiltSweep()
@@ -253,7 +252,7 @@ namespace MapRenderer.Tests.Cameras
             Assert.Greater(pos.y, 0.0, "Camera stays above the ground at tilt=45.");
         }
 
-        // ── Heading interpolation: shortest-angle (D4) ────────────────────────────────────────────
+        // ── Heading interpolation: shortest-angle ─────────────────────────────────────────────────
 
         [Test]
         public void LerpHeading_ShortestPath_AcrossZero()
@@ -284,12 +283,12 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(10.0, q.Heading.Degrees, 1e-9, "Heading > 360 must wrap to [0,360).");
         }
 
-        // ── D6a pan Y-sign regression (S45 tooth 5, updated for S63 anchored pan) ────────────────
+        // ── Pan Y-sign regression ────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// D6a: pins the "content follows cursor" pan direction using the S63 anchored-pan API.
+        /// Pins the "content follows cursor" pan direction through the anchored-pan API.
         /// Screen convention: +x right, +y up, origin bottom-left (Unity mouse position).
-        /// MapController (S63) no longer negates delta.y — the anchored pan handles direction correctly.
+        /// MapController does not negate delta.y — the anchored pan handles direction.
         ///
         /// This test pins: cursor moves UP (+y in +y-up convention) → grabbed ground appears ABOVE centre
         /// → camera centre moves SOUTH (lat decreases) so the grabbed point follows the cursor.
@@ -310,12 +309,12 @@ namespace MapRenderer.Tests.Cameras
             var patch = MapRenderer.App.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
 
             Assert.Less(patch.Latitude.Value, v.LookAt.Latitude,
-                "D6a (S63): cursor UP in +y-up convention must move the LookAt centre SOUTH " +
+                "D6a: cursor UP in +y-up convention must move the LookAt centre SOUTH " +
                 "(grabbed point glues to cursor above centre; content follows cursor correctly).");
         }
 
         /// <summary>
-        /// D6a complementary: cursor moves DOWN (−y in +y-up convention) → centre moves NORTH.
+        /// Complementary: cursor moves DOWN (−y in +y-up convention) → centre moves NORTH.
         /// </summary>
         [Test]
         public void D6a_PanYSign_DragDown_NewIS_MovesCenterNorth()
@@ -332,18 +331,16 @@ namespace MapRenderer.Tests.Cameras
             var patch = MapRenderer.App.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
 
             Assert.Greater(patch.Latitude.Value, v.LookAt.Latitude,
-                "D6a (S63): cursor DOWN in +y-up convention must move the LookAt centre NORTH.");
+                "D6a: cursor DOWN in +y-up convention must move the LookAt centre NORTH.");
         }
 
-        // ── D6 tilt-Y sign convention (S50 tooth 6, migrated S73) ───────────────────────────────────
+        // ── Tilt-Y sign convention ──────────────────────────────────────────────────────────────────
         //
-        // Migrated from ApplyTilt (retired S73) to ApplyTiltDelta.
-        // The sensitivity multiply (pitchSensitivity = 0.3) is now applied by the caller before the
-        // delta reaches the seam — exactly as MapController does when building a TiltBy intent.
-        // All assertion values and sign direction are preserved verbatim.
+        // The sensitivity multiply (pitchSensitivity = 0.3) is applied by the caller before the delta
+        // reaches the seam, as MapController does when building a TiltBy intent.
 
         /// <summary>
-        /// D6 (S50/S73): pins the tilt-Y sign convention — drag-UP tilts the camera toward overhead
+        /// Pins the tilt-Y sign convention — drag-UP tilts the camera toward overhead
         /// (pitch DECREASES). The new Input System reports <c>delta.y &gt; 0</c> for an upward mouse
         /// move; <c>MapController</c> negates it before building the <see cref="MapRenderer.App.View.GestureIntent.TiltBy"/>
         /// intent, and <c>ApplyTiltDelta</c> adds <c>dy·sensitivity</c> to the current tilt.
@@ -377,7 +374,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// D6 complementary: drag DOWN (new IS: delta.y = -20) → tilt toward horizon (pitch increases).
+        /// Complementary: drag DOWN (delta.y = -20) → tilt toward horizon (pitch increases).
         /// Symmetric check for the same sign-flip convention.
         /// </summary>
         [Test]
@@ -400,7 +397,7 @@ namespace MapRenderer.Tests.Cameras
         // ── Test-local oracle ────────────────────────────────────────────────────────────────────
         /// <summary>
         /// Zoom from altitude — the inverse of <see cref="CameraPoseMath.AltitudeForZoom"/>, kept HERE
-        /// rather than in Core, where it had no production caller. D1 makes zoom canonical and altitude
+        /// rather than in Core, where it had no production caller. Zoom is canonical and altitude
         /// derived, so the reverse conversion is only ever a test's question. Written against
         /// EarthConstants/WebMercator directly rather than through the forward function's own constants:
         /// an inverse derived independently is a STRONGER oracle than one that could drift alongside it.
@@ -417,7 +414,7 @@ namespace MapRenderer.Tests.Cameras
     }
 
 // Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
-// (Tools/core-tests). Do NOT add any UnityEngine reference. Tests the S72 two-way slider reconcile.
+// (Tools/core-tests). Do NOT add any UnityEngine reference. Tests the two-way slider reconcile.
 
 
 
@@ -431,7 +428,7 @@ namespace MapRenderer.Tests.Cameras
         private static SliderValues Idle(CameraProperties c)
             => new SliderValues { Zoom = c.Zoom, Tilt = c.Tilt.Degrees, Heading = c.Heading.Degrees };
 
-        // ── B1 — oscillation stability under feedback ────────────────────────────────────────────────
+        // ── Oscillation stability under feedback ─────────────────────────────────────────────────────
         [Test]
         public void B1_NoOscillation_WhenCameraSteady()
         {
@@ -454,7 +451,7 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── B2 — THE decisive test: does NOT fight a self-moving camera ──────────────────────────────
+        // ── THE decisive test: does NOT fight a self-moving camera ───────────────────────────────────
         [Test]
         public void B2_DoesNotFightSelfMovingCamera()
         {
@@ -473,7 +470,7 @@ namespace MapRenderer.Tests.Cameras
             Assert.That(r.Display.Tilt,    Is.EqualTo(20.0).Within(1e-9), "Tilt unchanged → follows the camera");
         }
 
-        // ── B3 — slider→camera survives ConstrainedAngle Wrap exactly ────────────────────────────────
+        // ── Slider→camera survives ConstrainedAngle Wrap exactly ─────────────────────────────────────
         [Test]
         public void B3_HeadingEdit_WrapsExactly()
         {
@@ -491,7 +488,7 @@ namespace MapRenderer.Tests.Cameras
             Assert.That(r2.Display.Heading, Is.EqualTo(350.0), "-10 wraps to 350 exactly");
         }
 
-        // ── B4 — slider→camera survives ConstrainedAngle Clamp ───────────────────────────────────────
+        // ── Slider→camera survives ConstrainedAngle Clamp ────────────────────────────────────────────
         [Test]
         public void B4_TiltEdit_ClampsExactly()
         {
@@ -507,7 +504,7 @@ namespace MapRenderer.Tests.Cameras
             Assert.That(r2.Display.Tilt, Is.EqualTo(0.0), "-5 clamps to 0");
         }
 
-        // ── B5 — per-field isolation (no stomp) ──────────────────────────────────────────────────────
+        // ── Per-field isolation (no stomp) ───────────────────────────────────────────────────────────
         [Test]
         public void B5_PerFieldIsolation_OnlyEditedFieldEmitted()
         {
@@ -524,7 +521,7 @@ namespace MapRenderer.Tests.Cameras
             Assert.IsFalse(r.Patch.Tilt.HasValue, "the idle Tilt must NOT be emitted");
         }
 
-        // ── B6 — a Zoom edit is emitted as canonical zoom ────────────────────────────────────────────
+        // ── A Zoom edit is emitted as canonical zoom ─────────────────────────────────────────────────
         [Test]
         public void B6_ZoomEdit_EmittedAsCanonicalZoom()
         {

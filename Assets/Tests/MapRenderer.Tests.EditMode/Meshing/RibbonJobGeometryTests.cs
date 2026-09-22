@@ -3,13 +3,13 @@
 // The three Line fixtures first (paint bake, ribbon geometry, shared buffer), then the two standalone spike/geometry fixtures, then source-layer buffer sharing, then the two StyledFillExtrusion fixtures.
 //
 // Contents:
-//   LinePaintBuildMeshTests             — S14 acceptance Tooth #2: data-driven per-feature color baking end-to-end through BuildMeshData.
+//   LinePaintBuildMeshTests             — data-driven per-feature color baking end-to-end through BuildMeshData.
 //   LineRibbonJobTests                  — Direct teeth against RibbonJob (3D, Burst) over a flat centerline (points on the XZ plane, up = +Y, via FlatRibbon).
-//   LineSharedBufferTests               — IR C1 P2 — teeth E1 and E2: line reads a buffer it shares with the whole source layer, and joins its per-feature colour/width columns by the source-layer ordinal rather than by its own selected-list position.
+//   LineSharedBufferTests               — teeth E1 and E2: line reads a buffer it shares with the whole source layer, and joins its per-feature colour/width columns by the source-layer ordinal rather than by its own selected-list position.
 //   MeshDataThreadWriteSpikeTests       — (Established once as a spike: writing works off-thread, but AllocateWritableMeshData / ApplyAndDisposeWritableMeshData are main-thread only — "CreateNewMeshDatas can only be called from the main thread" — which is why allocation happens at kick and apply…
 //   RibbonJobGeometryTests              — First-principles geometry teeth for RibbonJob over a flat centerline (FlatRibbon): unit normals, exact per-join/per-cap vertex counts, the miter→bevel/round cascade, the round-cap pivot, winding, and the fold onset at the documented s_crit.
-//   SourceLayerBufferSharingTests       — IR C1 P3, tooth C — one materialization per source-layer per tile, shared across BOTH cadences of a kick.
-//   StyledFillExtrusionGraphWriteTests  — R3 (plan review): the naive bound "vertex count > N" does NOT discriminate a mis-wound hole ring (which silently reads as a SECOND EXTERIOR) from a real courtyard — both produce roughly the same total.
+//   SourceLayerBufferSharingTests       — one materialization per source-layer per tile, shared across BOTH cadences of a kick.
+//   StyledFillExtrusionGraphWriteTests  — the naive bound "vertex count > N" does NOT discriminate a mis-wound hole ring (which silently reads as a SECOND EXTERIOR) from a real courtyard — both produce roughly the same total.
 //   StyledFillExtrusionMeshTests        — Wall quad layout is a WHITE-BOX assumption these teeth rely on (StyledFillExtrusionTileBuilder.WriteWalls appends exactly 4 vertices per boundary edge, AFTER all roof vertices, in floorA/floorB/roofB/roofA order): a single hole-less convex N-gon footprint…
 
 using System;
@@ -57,10 +57,10 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S14 acceptance Tooth #2: data-driven per-feature color baking end-to-end through
+    /// Data-driven per-feature color baking end-to-end through
     /// <see cref="StyledLineTileBuilder.BuildMeshData"/>.
     ///
-    /// Proves the S12 bake path is wired end-to-end for line features:
+    /// Proves the bake path is wired end-to-end for line features:
     ///   - A match expression on a per-feature property produces ≥2 DISTINCT linearized colors
     ///     baked into Stream3 <see cref="StyledLineTileBuilder.LineWidthColor.Color"/> values.
     ///   - A constant-input expression (match on a non-existent key → default) produces exactly
@@ -97,7 +97,7 @@ namespace MapRenderer.Tests.Meshing
         /// Load geolines features from fixture, inject a discriminating string property.
         /// Reuses real MVT LineString geometry — no hand-encoding.
         /// </summary>
-        /// <remarks>IR C1 P3: a decoded <c>MvtFeature</c> no longer carries a command stream, so the
+        /// <remarks>A decoded <c>MvtFeature</c> carries no command stream, so the
         /// injected-property doubles are rebuilt as <c>DictionaryFeature</c>s over the fixture's REAL
         /// LineString streams, read from the bytes by <c>MvtFixtureStreams</c>. Same geometry, same order —
         /// only the property bag is synthetic, which is what this fixture was always doing.</remarks>
@@ -127,7 +127,7 @@ namespace MapRenderer.Tests.Meshing
 
         // Shared build parameters (tile 0/0/0, merc origin=(0,0)).
         private static readonly TileId TestTileId = new TileId { Z = 0, X = 0, Y = 0 };
-        // S91-C: WriteMeshData now takes a double3 render origin (Mercator: (mercX, 0, mercZ)); zero here.
+        // WriteMeshData takes a double3 render origin (Mercator: (mercX, 0, mercZ)); zero here.
         private static readonly double3 TestOriginMerc = new double3(0.0, 0.0, 0.0);
         private const double TestExtent = 4096.0;
         private const double TestZoom   = 0.0;
@@ -166,7 +166,7 @@ namespace MapRenderer.Tests.Meshing
             var layout = paintLayer.Layout;
 
             var mda = Mesh.AllocateWritableMeshData(1);
-            // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
+            // The builder BORROWS the source-layer buffer; the caller mints and frees it. The
             // feature list IS the layer here, so ordinals are 0..n-1.
             TileGeometryBuffers geometry =
                 TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
@@ -195,7 +195,7 @@ namespace MapRenderer.Tests.Meshing
                 Assert.GreaterOrEqual(distinctColors.Count, 2,
                     $"A match expression mapping ≥2 distinct feature categories must produce " +
                     $"≥2 distinct linearized colors in Stream3 (got {distinctColors.Count}). " +
-                    "This proves the S12 data-driven bake path is wired through WriteMeshData.");
+                    "This proves the data-driven bake path is wired through WriteMeshData.");
             }
             finally
             {
@@ -228,7 +228,7 @@ namespace MapRenderer.Tests.Meshing
             var layout = paintLayer.Layout;
 
             var mda = Mesh.AllocateWritableMeshData(1);
-            // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
+            // The builder BORROWS the source-layer buffer; the caller mints and frees it. The
             // feature list IS the layer here, so ordinals are 0..n-1.
             TileGeometryBuffers geometry =
                 TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
@@ -310,7 +310,7 @@ namespace MapRenderer.Tests.Meshing
                 "WidthKind must be Feature for a [\"get\",...] match expression.");
 
             var mda = Mesh.AllocateWritableMeshData(1);
-            // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
+            // The builder BORROWS the source-layer buffer; the caller mints and frees it. The
             // feature list IS the layer here, so ordinals are 0..n-1.
             TileGeometryBuffers geometry =
                 TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
@@ -336,7 +336,7 @@ namespace MapRenderer.Tests.Meshing
                 Assert.GreaterOrEqual(distinctWidths.Count, 2,
                     $"A match expression mapping ≥2 distinct feature widths must produce " +
                     $"≥2 distinct WidthScale values in Stream3 (got {distinctWidths.Count}). " +
-                    "This proves the S14 data-driven width bake path is wired through WriteMeshData.");
+                    "This proves the data-driven width bake path is wired through WriteMeshData.");
             }
             finally
             {
@@ -379,7 +379,7 @@ namespace MapRenderer.Tests.Meshing
                 "OpacityKind must be Feature for a [\"get\",...] match expression.");
 
             var mda = Mesh.AllocateWritableMeshData(1);
-            // IR C1 P2: the builder BORROWS the source-layer buffer; the caller mints and frees it. The
+            // The builder BORROWS the source-layer buffer; the caller mints and frees it. The
             // feature list IS the layer here, so ordinals are 0..n-1.
             TileGeometryBuffers geometry =
                 TestTileMeshBuilder.Materialize(features, TestTileId, TestExtent);
@@ -405,7 +405,7 @@ namespace MapRenderer.Tests.Meshing
                 Assert.GreaterOrEqual(distinctAlphas.Count, 2,
                     $"A match expression mapping ≥2 distinct feature opacities must produce " +
                     $"≥2 distinct alpha values in Stream3 Color.w (got {distinctAlphas.Count}). " +
-                    "This proves the S14 data-driven opacity bake path is wired through WriteMeshData.");
+                    "This proves the data-driven opacity bake path is wired through WriteMeshData.");
             }
             finally
             {
@@ -463,7 +463,7 @@ namespace MapRenderer.Tests.Meshing
         // ── Tooth #4: line-round-limit threaded ──────────────────────────────────
 
         /// <summary>
-        /// F2 review finding: hardcoding <c>RoundLimit</c> in <see cref="StyledLineTileBuilder"/> (instead of
+        /// Hardcoding <c>RoundLimit</c> in <see cref="StyledLineTileBuilder"/> (instead of
         /// reading <c>layout.RoundLimit</c>) passes the entire suite — the same latent-bug class T3 above
         /// exists to catch for <c>MiterLimit</c>. Reuses T3's 90° corner (f = 1/cos(45°) = √2 ≈ 1.414) with
         /// <c>line-join: round</c>: under <c>line-round-limit: 1.05</c> the corner is NOT shallow (√2 > 1.05)
@@ -520,9 +520,8 @@ namespace MapRenderer.Tests.Meshing
 
     /// <summary>
     /// Direct teeth against <see cref="RibbonJob"/> (3D, Burst) over a flat centerline (points on the XZ
-    /// plane, <c>up = +Y</c>, via <see cref="FlatRibbon"/>). Through UMR-173 this file held the
-    /// differential-parity oracle against a managed 2D reference tessellator; the reference is retired and
-    /// the first-principles properties it asserted moved to <c>RibbonJobGeometryTests</c>. What remains
+    /// plane, <c>up = +Y</c>, via <see cref="FlatRibbon"/>). The first-principles properties live in
+    /// <c>RibbonJobGeometryTests</c>; there is no managed reference tessellator. What remains
     /// here are the teeth that were always direct assertions on the job's own output, not comparisons —
     /// they name themselves as such in their own doc comments below.
     /// </summary>
@@ -630,7 +629,7 @@ namespace MapRenderer.Tests.Meshing
         public void Fixture_Geolines_RibbonJob_ProducesHealthyGeometry()
         {
             FileAssert.Exists(FixturePath);
-            // IR C1 P3: the command streams come from the bytes (MvtFixtureStreams), not off a decoded
+            // The command streams come from the bytes (MvtFixtureStreams), not off a decoded
             // feature — this must not share its input path with production's decoder.
             var layer = MvtFixtureStreams.ReadLayer(File.ReadAllBytes(FixturePath), "geolines");
             Assert.IsNotNull(layer, "geolines layer present in fixture");
@@ -672,7 +671,7 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR C1 P2 — teeth <b>E1</b> and <b>E2</b>: line reads a buffer it <b>shares</b> with the whole source
+    /// Teeth <b>E1</b> and <b>E2</b>: line reads a buffer it <b>shares</b> with the whole source
     /// layer, and joins its per-feature colour/width columns by the source-layer <b>ordinal</b> rather than by
     /// its own selected-list position.
     ///
@@ -696,7 +695,7 @@ namespace MapRenderer.Tests.Meshing
     public class LineSharedBufferTests : BaseTestFixture
     {
 
-        /// <summary>IR C1 P3: the synthetic layers built above own <c>Allocator.Persistent</c> buffers now.</summary>
+        /// <summary>The synthetic layers built above own <c>Allocator.Persistent</c> buffers.</summary>
         protected override void OnTearDown()
         {
             try { TestDecodedTiles.DisposeAll(); }
@@ -726,7 +725,7 @@ namespace MapRenderer.Tests.Meshing
         /// drawable features alone with an identity selection.
         ///
         /// <para><b>Catches:</b> indexing <c>featColors</c>/<c>featWidths</c> by the selected-list slot (or by
-        /// ring-order position) instead of by the layer ordinal — the exact re-base P2 performs. Under the
+        /// ring-order position) instead of by the layer ordinal — the exact re-base performed. Under the
         /// slot form, ordinal 3's colour is read out of slot 3 (which holds feature <c>c</c>'s value) and
         /// ordinal 5 reads past the selected features entirely; the geometry stays right and only the colours
         /// and widths permute, which no vertex-count assertion can see.</para>
@@ -806,7 +805,7 @@ namespace MapRenderer.Tests.Meshing
         /// rings in <b>decode order</b>: feature <c>a</c>'s ring, then <c>b</c>'s, then <c>c</c>'s two, and
         /// nothing else.
         ///
-        /// <para>The plan's ordering argument — <c>FeatureSelector</c> appends in <c>Features</c> order, so
+        /// <para>The ordering argument — <c>FeatureSelector</c> appends in <c>Features</c> order, so
         /// selected order IS decode order, so iterating the layer buffer with a selection gate reproduces it —
         /// <b>is an argument, not a measurement.</b> This is the measurement, and it pins WHICH ring is where
         /// rather than only how many there are: every ring in the fixture is authored HORIZONTAL, at a
@@ -863,7 +862,7 @@ namespace MapRenderer.Tests.Meshing
 
         /// <summary>
         /// The source layer, in decode order. Every LineString ring is HORIZONTAL and at its own tile
-        /// <c>y</c> — E2's run oracle depends on it; the polygons are deliberately NOT horizontal.
+        /// <c>y</c> — E2's run oracle depends on it; the polygons are NOT horizontal.
         /// </summary>
         private static IReadOnlyList<IFeature> SharedLayerFeatures() => new List<IFeature>
         {
@@ -1018,7 +1017,7 @@ namespace MapRenderer.Tests.Meshing
             if (workerEx != null)
             {
                 mda.Dispose(); // never applied — dispose to avoid a native leak
-                Assert.Fail("Writing MeshData from a RunOnThreadPool worker THREW — Stage B's off-thread write " +
+                Assert.Fail("Writing MeshData from a RunOnThreadPool worker THREW — the off-thread write " +
                             $"is broken (Unity upgrade?). Exception: {workerEx}");
                 return;
             }
@@ -2052,19 +2051,19 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR C1 P3, tooth <b>C</b> — <b>one materialization per source-layer per tile, shared across BOTH
+    /// Tooth <b>C</b> — <b>one materialization per source-layer per tile, shared across BOTH
     /// cadences of a kick</b>.
     ///
-    /// <para><b>What this is for.</b> P2's recorded finding 1 is that nothing observed the <i>point</i> of
+    /// <para><b>What this is for.</b> A recorded finding: nothing observed the <i>point</i> of
     /// the conversion: changing the symbol processor's store argument to <c>null</c> left all 2286 tests
     /// green while silently reverting one-buffer-per-source-layer, because the fallback minted a private
-    /// store and the OUTPUT was byte-identical. P3 deleted the store, so the P3 shape of that same silent
+    /// store and the OUTPUT was byte-identical. The store is gone, so the current shape of that same silent
     /// regression is a <c>Geometry</c> getter that re-materializes per read, or a consumer that mints its
     /// own. Both are output-neutral. This is the tooth that sees them.</para>
     ///
     /// <para><b>Production configuration — the standing check, taken seriously.</b> The fan-in is ≥ 2 on
     /// BOTH sides and it CROSSES the mesh/symbol boundary: <c>countries</c> is named by two fill layers,
-    /// <c>centroids</c> by <b>two symbol layers</b> (the half P2's finding says a mesh-only fixture would
+    /// <c>centroids</c> by <b>two symbol layers</b> (the half the finding says a mesh-only fixture would
     /// miss), and <c>geolines</c> by exactly one layer so the distinct-buffer count is not trivially
     /// satisfied by "everything is one buffer". Both passes run inside ONE decode scope — the shape
     /// <c>TileManager.KickMeshBuild</c> creates — and the real production processors run alongside the
@@ -2202,7 +2201,7 @@ namespace MapRenderer.Tests.Meshing
             // ── Clause 0: ONE decode for the whole kick. ─────────────────────────────────────────────
             Assert.AreEqual(1, decoder.DecodeCount,
                 "the mesh pass and the symbol pass of ONE kick share ONE decode — that is what the single " +
-                "kick reference buys, and what B7's per-PASS store could never give (it materialized a " +
+                "kick reference buys, and what a per-PASS store could never give (it materialized a " +
                 "shared source-layer once per pass, i.e. twice per kick).");
 
             // ── Non-vacuity: every probe really saw a live buffer. ───────────────────────────────────
@@ -2219,13 +2218,13 @@ namespace MapRenderer.Tests.Meshing
             Assert.IsTrue(meshLog[0].buffer.Equals(meshLog[1].buffer),
                 "two fill layers naming 'countries' must borrow the SAME buffer");
             Assert.IsTrue(symbolLog[0].buffer.Equals(symbolLog[1].buffer),
-                "two SYMBOL layers naming 'centroids' must borrow the SAME buffer — the half P2's recorded " +
-                "finding 1 says a mesh-only fixture cannot see");
+                "two SYMBOL layers naming 'centroids' must borrow the SAME buffer — the half a recorded " +
+                "finding says a mesh-only fixture cannot see");
 
             // Cross-cadence sharing is clause 0 + clause ii together: ONE decode served both passes, and
             // one decode holds exactly one buffer per layer — so a mesh consumer and a symbol consumer of
             // the same source-layer necessarily hold the same allocation. (There is no scope to re-open and
-            // no re-decode to provoke any more — D1 retired both. The tile is decoded ONCE, before any lease
+            // no re-decode to provoke any more — both are retired. The tile is decoded ONCE, before any lease
             // exists, and every reference reads that same instance; the sharing is a property of the
             // decoded tile now, not of who happens to hold a scope open.)
 
@@ -2397,16 +2396,16 @@ namespace MapRenderer.Tests.Meshing
                 "validated, and this is what would have caught it.");
         }
 
-        // Frozen goldens (B.7): captured from the managed StyledFillExtrusionTileBuilder.WriteMeshData arm —
+        // Frozen goldens: captured from the managed StyledFillExtrusionTileBuilder.WriteMeshData arm —
         // stream0 (PositionNormal), stream1 (ExtrudeAndBake), stream2 (tangent), stream3 (colour), indices,
-        // bounds — on commit f5e13c19 (stage 4 Group A), before Group B rewrote WriteMeshData to itself route
-        // through the graph. See docs/stage4-groupb-goldens-capture-f5e13c19.txt's SITE3 lines.
+        // bounds — captured before WriteMeshData was rewritten to route
+        // through the graph.
         // Stream0/Stream2 in these strings are used ONLY as the reconstruction-validation reference (see the
         // file header) — the live per-vertex comparison reads Assets/Fixtures/extrusion-graphwrite-golden-
         // *.json instead. Stream1/Stream3/Indices/Bounds are still compared against these strings directly.
         //
-        // Stream3 (colour) was re-captured 2026-09-07 (UMR-96) and is the ONLY digest here that has moved
-        // since f5e13c19. This fixture styles a CONSTANT fill-extrusion-color, which is no longer baked into
+        // Stream3 (colour) was re-captured 2026-09-07 and is the ONLY digest here that has moved
+        // since. This fixture styles a CONSTANT fill-extrusion-color, which is no longer baked into
         // the COLOR stream — it rides the _BaseColor uniform and the vertex carries the white identity. The
         // digest therefore pins the OPPOSITE fact it used to (see its assertion below). Stream0/1/2, Indices
         // and Bounds are untouched, which is what confines that change to the colour path.
@@ -2429,7 +2428,7 @@ namespace MapRenderer.Tests.Meshing
 
         // Measured 2026-09-04 (wall-job stage): per-component max ULP delta between the retired managed
         // WriteWalls loop and the new Burst WallQuadJob chain, on THIS fixture's wall tail, plus a stated +2
-        // margin for hardware/Burst-version headroom. job-scheduling-design.md §8 stage 5's opening invariant block bounds the
+        // margin for hardware/Burst-version headroom. job-scheduling-design.md bounds the
         // RAW double-precision projection output; Normal/Tangent here are NORMALIZED DIFFERENCES of two
         // nearby float32 positions — a different quantity, not safely inferred from that table, so measured
         // fresh rather than assumed. A regression that moves bytes (wrong index, wrong argument order, wrong
@@ -2443,7 +2442,7 @@ namespace MapRenderer.Tests.Meshing
         private static readonly int[] WallTangentMaxUlpSpherical  = { 4, 2, 3, 2 };
 
         /// <summary>
-        /// (a) Extrusion stream parity — job-scheduling-design.md §8 stage 4 §5(a) / B.7, split per the
+        /// (a) Extrusion stream parity — job-scheduling-design.md, split per the
         /// wall-job stage (2026-09-04, see the file header). Stream1/Stream3/Indices/Bounds still match the
         /// frozen whole-stream hashes exactly; Stream0/Stream2 compare per-vertex against the golden JSON —
         /// bit-exact on the roof prefix, within the measured ULP bound on the wall tail.
@@ -2629,7 +2628,7 @@ namespace MapRenderer.Tests.Meshing
                 ext.Handle.Complete();
                 Assert.AreEqual(FillGraphCounts.Ok, ext.Roof.Error.Value, "precondition: the measure must not fault.");
                 Assert.GreaterOrEqual(ext.Roof.Counts[0].HoleCount, 1,
-                    "precondition (R3): the hole-bridge path must have been entered — a mis-wound inner " +
+                    "precondition: the hole-bridge path must have been entered — a mis-wound inner " +
                     "ring reads as a second exterior and this stays 0, which is exactly the bug this fixture exists to catch.");
 
                 graphWrite = StyledFillExtrusionTileBuilder.ScheduleWrite(
@@ -2694,7 +2693,7 @@ namespace MapRenderer.Tests.Meshing
                 Dictionary<string, string> frozen = ParseGolden(spherical ? FrozenGoldensSpherical : FrozenGoldensFlat);
                 Assert.AreEqual(frozen["Stream1"], Sha256(s1), $"[spherical={spherical}] Stream1 (ExtrudeUpAndT+Bake) diverges — a real regression, not a re-bake candidate.");
                 // NOT "never a re-bake candidate" — that claim was written when a constant colour WAS baked
-                // into this stream, and UMR-96 retired that. The digest now encodes a white vertex, so what a
+                // into this stream; it no longer is. The digest now encodes a white vertex, so what a
                 // divergence means has flipped: reading a STYLED colour here means the constant-colour bake
                 // came back and the layer renders colour-squared. Any OTHER divergence is still a regression.
                 Assert.AreEqual(frozen["Stream3"], Sha256(s3), $"[spherical={spherical}] Stream3 (colour) diverges. This fixture's fill-extrusion-color is CONSTANT, so the stream must carry the WHITE identity and the colour must ride _BaseColor; a styled colour here means the vertex bake was re-introduced (colour-squared). Re-bake ONLY on a deliberate, stated change to which carrier holds a constant colour.");
@@ -2720,7 +2719,7 @@ namespace MapRenderer.Tests.Meshing
                     Vector4 tan = b2[i];
 
                     // Position: BIT-EXACT everywhere, roof AND wall tail — STRUCTURALLY, not by luck of this
-                    // fixture (docs/job-scheduling-design.md §8 stage 5's opening invariant block): the
+                    // fixture (docs/job-scheduling-design.md): the
                     // origin-relative double divergence this stage measured is ~9.3e-10 absolute at tile-local
                     // magnitude, six orders below a float32 ULP there (~9.8e-4) — the (float3) narrowing
                     // erases it for any tile-local geometry, not just this one. A red here is a formula error,
@@ -2986,7 +2985,7 @@ namespace MapRenderer.Tests.Meshing
         // z=0 (one tile spans the whole globe): a footprint near the north edge sits at high latitude
         // (sec φ ≫ 1); one straddling the equator sits at φ≈0 (sec φ = 1, the value a MISSING factor would
         // also produce — the equator is not a discriminating point on its own). Both builds share the SAME
-        // TileId, so a per-TILE-constant implementation (wrong: D3 pins PER-VERTEX) would answer identically
+        // TileId, so a per-TILE-constant implementation (wrong: the contract is PER-VERTEX) would answer identically
         // for both footprints; only a genuinely per-vertex sec φ tracks the different Y.
 
         [Test]
@@ -3041,7 +3040,7 @@ namespace MapRenderer.Tests.Meshing
         /// </summary>
         private static (int sign, double uniformity, int counted) WindingSign(Mesh mesh, int minVertex, int maxVertexExclusive)
         {
-            // Height is extruded in the VERTEX SHADER (D1: mesh built once), so a wall quad is degenerate in
+            // Height is extruded in the VERTEX SHADER (the mesh is built once), so a wall quad is degenerate in
             // stored object space — floor(t=0) and roof(t=1) coincide in Position. Measuring winding off raw
             // mesh.vertices gives a zero-area cross for every wall triangle (counted=0). Reconstruct the
             // post-shader position (footprint + extrudeUp·elevation) first. Winding sign is invariant to a

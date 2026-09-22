@@ -5,10 +5,9 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Epic A / A1: the per-<c>(tile, source)</c> worker-pass inputs shared by every
-    /// <see cref="ITileLayerProcessor"/> invoked for one mesh build kick — the values
-    /// <c>TileManager.KickMeshBuild</c> used to close over directly (<c>id</c>, the tile's integer zoom, its
-    /// projected render origin, and the active projection). Larger than 16 bytes and read-only, so callers
+    /// The per-<c>(tile, source)</c> worker-pass inputs shared by every
+    /// <see cref="ITileLayerProcessor"/> invoked for one mesh build kick: <c>id</c>, the tile's integer
+    /// zoom, its projected render origin, and the active projection. Larger than 16 bytes and read-only, so callers
     /// take it by <c>in</c> per the project's struct-passing convention.
     /// </summary>
     internal readonly struct TileLayerProcessContext
@@ -18,22 +17,21 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         /// <summary>The evaluation zoom for THIS worker pass — the source differs by cadence, not a single
         /// project-wide rule. The mesh pass (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) bakes at
-        /// the tile's INTEGER zoom (<c>id.Z</c> — S82 Decision 2, unchanged); a background tile's graph kick
-        /// (<c>TileManager.KickSourcelessBackground</c>, no worker pass since job-scheduling-design.md §8
-        /// stage 3) does the same. The symbol pass
-        /// (<see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/>) evaluates at the fractional CAMERA
-        /// zoom captured at build start (pre-A3 parity — symbol layout/paint always evaluated at display
-        /// zoom). A4 keeps BOTH meanings deliberately (design doc §B Q4): the shared decode feed
+        /// the tile's INTEGER zoom (<c>id.Z</c>); a background tile's graph kick
+        /// (<c>TileManager.KickSourcelessBackground</c>, which has no worker pass) does the same. The symbol
+        /// pass (<see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/>) evaluates at the fractional
+        /// CAMERA zoom captured at build start, because symbol layout/paint is evaluated at display
+        /// zoom. BOTH meanings are kept: the shared decode feed
         /// (<c>SharedDisposable{IDecodedTile}</c>) carries only <c>{bytes → IDecodedTile}</c>, no zoom, no context, so
         /// sharing the decoded tile across cadences cannot conflate their zoom sources — reconciling the
-        /// two belongs to the stage that merges the cadences themselves (A5+), not to the feed.</summary>
+        /// two belongs to whatever merges the cadences themselves, not to the feed.</summary>
         public double Zoom { get; init; }
 
-        /// <summary>S91-C: the tile's SW-corner projected render origin — shared by the mesh bake and the
+        /// <summary>The tile's SW-corner projected render origin — shared by the mesh bake and the
         /// tile transform.</summary>
         public double3 TileOriginRender { get; init; }
 
-        /// <summary>The active pixel↔ground projection for this worker pass (S91-C: cached once per Tick).</summary>
+        /// <summary>The active pixel↔ground projection for this worker pass, cached once per Tick.</summary>
         public IProjection Projection { get; init; }
 
         /// <summary>How much of the tile's MVT buffer the fill mesh keeps — the single global knob, read live

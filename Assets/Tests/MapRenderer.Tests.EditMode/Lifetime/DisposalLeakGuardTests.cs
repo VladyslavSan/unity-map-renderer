@@ -1,9 +1,9 @@
-// S51 Acceptance Tooth 5 — Disposal/leak guard (DECISIVE).
+// Disposal/leak guard (DECISIVE).
 //
 // Drives load→release of N tiles including the race (release a tile whose mesh build
 // completed but wasn't consumed) and asserts zero orphaned Mesh objects.
 //
-// S48 extension: a tile's mesh build settles into a dense MeshDataPayload[], each slot a
+// A tile's mesh build settles into a dense MeshDataPayload[], each slot a
 // NativeArray-backed payload.
 // The NativeArray leak guard is NON-VACUOUS:
 //   - MeshDataPayload.DebugLiveAllocCount tracks live allocations.
@@ -11,7 +11,7 @@
 //   - A deliberately-leaked NativeArray MUST produce a non-zero counter (positive control).
 //
 // Meaningful assertions:
-//   - Mesh delta: zero orphaned Mesh after load+release (carried over from S51).
+//   - Mesh delta: zero orphaned Mesh after load+release.
 //   - NativeArray balance: DebugLiveAllocCount == 0 after every load+release cycle.
 //   - Positive control: a deliberately-leaked LayerMeshData produces DebugLiveAllocCount > 0.
 //   - Race path: mid-flight-released tile's NativeArrays are disposed via PendingDisposalQueue.
@@ -46,7 +46,7 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.Lifetime
 {
     /// <summary>
-    /// S51 acceptance tooth 5: disposal/leak guard for load→release race.
+    /// Disposal/leak guard for the load→release race.
     ///
     /// Tests that:
     ///   (a) A tile built normally (fetch + build + consume) and then released destroys its Mesh.
@@ -271,16 +271,16 @@ namespace MapRenderer.Tests.Lifetime
         /// delay job, then pan far away so tiles are released while still held. After the delay job is
         /// released, no Meshes must be created for the evicted tiles.
         ///
-        /// This is the precise "race" described in S51 tooth 5: "release a tile whose mesh build
+        /// This is the "race": "release a tile whose mesh build
         /// result completed but wasn't consumed". ReleaseTile removes the tile from _loaded; the next
         /// PumpPending snapshot (foreach over _loaded) excludes the released tile, so
         /// ConsumeMeshBuild is never called for it — no Mesh is created.
         ///
-        /// <para><b>Before/after (job-scheduling-design.md §8 stage 3, R1a).</b> Before: mid-flight by
+        /// <para><b>Before/after.</b> Before: mid-flight by
         /// TIMING — a kick-count loop, then pan, racing however fast the seam's managed build happened to
         /// run. After: DETERMINISTIC. Source tiles now reach the graph's MEASURE step too (via the
         /// prologue-complete hand-off), so <see cref="TileManager.GraphDepsForTest"/> — the same
-        /// production-legitimate deps-parameter seam stage 2 introduced for background tiles — can hold a
+        /// production-legitimate deps-parameter seam for background tiles — can hold a
         /// SOURCE tile's measure step genuinely in-flight. The drive pumps <c>LateUpdate()</c> ONLY (no
         /// <c>Await</c> — it would <c>Complete()</c> the held graph and burn the whole spin bound, NIT 3)
         /// until <c>GraphMeasureInFlight &gt;= 1</c>, asserted as the drive precondition, THEN pans. Because
@@ -397,7 +397,7 @@ namespace MapRenderer.Tests.Lifetime
         // ── Tooth 5-NativeArray-Positive: deliberate leak produces non-zero counter ─────────────
 
         /// <summary>
-        /// S48 Non-vacuous positive control: deliberately allocate a <see cref="StyledFillTileBuilder.LayerMeshData"/>
+        /// Non-vacuous positive control: allocate a <see cref="StyledFillTileBuilder.LayerMeshData"/>
         /// (backed by NativeArrays) via <see cref="StyledFillTileBuilder.BuildMeshData"/> and do NOT
         /// dispose it. Asserts <see cref="MeshDataPayload.DebugLiveAllocCount"/> is
         /// non-zero, proving the counter has teeth — a deliberately-leaked NativeArray is detected.
@@ -426,7 +426,7 @@ namespace MapRenderer.Tests.Lifetime
 
             // Allocate a tracked writable array + write real geometry — deliberately do NOT apply/dispose.
             var mda = MeshDataPayload.AllocateTracked(1);
-            TileGeometryBuffers geometry = mvtLayer.Geometry; // BORROWED (IR C1 P3) — the tile owns it
+            TileGeometryBuffers geometry = mvtLayer.Geometry; // BORROWED — the tile owns it
             int vc; Bounds b;
             SyncMeshWrite.Fill(
                 mda[0], features, geometry, paint, 0.0,
@@ -442,7 +442,7 @@ namespace MapRenderer.Tests.Lifetime
 
             // Assert the counter reflects the un-disposed allocation.
             Assert.Greater(countAfterAlloc, countBefore,
-                $"S48 positive control FAILED: DebugLiveAllocCount did not increase after AllocateTracked " +
+                $"Positive control FAILED: DebugLiveAllocCount did not increase after AllocateTracked " +
                 $"(before={countBefore}, after={countAfterAlloc}). The leak guard is vacuous — a " +
                 "deliberately-leaked writable MeshDataArray must be detected. " +
                 "Check that Interlocked.Increment is called in MeshDataPayload.AllocateTracked.");
@@ -456,10 +456,10 @@ namespace MapRenderer.Tests.Lifetime
                 $"(baseline={countBefore}, after dispose={countAfterDispose}).");
         }
 
-        // ── perf/gc-elimination Stage A: pooling MeshDataPayload must not make this counter lie ──
+        // ── Pooling MeshDataPayload must not make this counter lie ───────────────────────────────
 
         /// <summary>
-        /// Leak-guard regression for meshing follow-ups Stage A (pooling the payload WRAPPER):
+        /// Leak-guard regression for pooling the payload WRAPPER:
         /// <see cref="MeshDataPayload.DebugLiveAllocCount"/> counts live NATIVE <c>MeshDataArray</c>s, not
         /// live wrapper instances — pooling the wrapper must not change that. Runs several rent→reset→dispose
         /// cycles (through <see cref="MeshDataPayloadPool"/> directly, so a reused — not freshly-minted —
@@ -541,14 +541,14 @@ namespace MapRenderer.Tests.Lifetime
         }");
 
         /// <summary>
-        /// perf/gc-elimination Stage A — the deterministic, single-threaded regression tooth for the
-        /// <c>TileManager.cs</c> fix discovered while pooling <see cref="MeshDataPayload"/> (outside the
-        /// original plan's file scope; see the Stage A dev report). Pooling means <see cref="MeshDataPayload.Dispose"/>
+        /// The deterministic, single-threaded regression tooth for the <c>TileManager.cs</c> fix found
+        /// while pooling <see cref="MeshDataPayload"/>. Pooling means <see cref="MeshDataPayload.Dispose"/>
         /// hands its instance back to a shared <see cref="MeshDataPayloadPool"/> the moment it runs — so once
+        /// <c>ConsumeMeshBuild</c>'s per-payload loop disposes a slot, that slot's OLD reference is no longer
         /// <c>ConsumeMeshBuild</c>'s per-payload loop disposes a slot, that slot's OLD reference is no longer
         /// safe for anything to touch again: a subsequent <c>Rent()</c> (by this test, standing in for a
         /// concurrent build) can receive and <c>Reset()</c> it before <c>DisposeWholePayloads</c>'s later
-        /// unconditional sweep — over the SAME dense payload array (job-scheduling-design.md §8 stage 3: the
+        /// unconditional sweep — over the SAME dense payload array (job-scheduling-design.md: the
         /// array <c>TileBuildGraph.CompleteWriteAndTakePayloads</c> hands back) — would otherwise reach
         /// it a second time. <c>TileManager.ConsumeMeshBuild</c> now nulls each slot the instant it disposes
         /// it, specifically so that sweep can never touch a recycled instance.
@@ -673,17 +673,17 @@ namespace MapRenderer.Tests.Lifetime
         // ── Tooth 5-NativeArray-Race: mid-flight release disposes NativeArrays ─────────────────
 
         /// <summary>
-        /// S48 DECISIVE race test: a tile released mid-flight (measure step genuinely held in-flight,
+        /// DECISIVE race test: a tile released mid-flight (measure step genuinely held in-flight,
         /// nothing consumed) must have every native resource it holds disposed via the pen after the held
         /// step completes.
         ///
-        /// <para><b>Before/after (job-scheduling-design.md §8 stage 3, R1a).</b> Before: mid-flight by
+        /// <para><b>Before/after.</b> Before: mid-flight by
         /// TIMING (kick-count loop then pan), and the single non-vacuity reading was
         /// <c>MeshDataPayload.DebugLiveAllocCount</c> — bumped synchronously at kick under the OLD seam
         /// model. After: DETERMINISTIC, via the same <c>GraphDepsForTest</c> gate as
         /// <see cref="ReleaseMidFlight_NoOrphanedMesh"/> (see that tooth's doc for why source tiles can be
         /// held this way now). The single-counter reading no longer works UNCHANGED: a fill layer allocates
-        /// NO <c>MeshDataArray</c> at kick any more (stall #5 — it is the graph arm), so for a fill-only
+        /// NO <c>MeshDataArray</c> at kick any more (it is the graph arm), so for a fill-only
         /// style <c>MeshDataPayload.DebugLiveAllocCount</c> alone would sit at baseline throughout and the
         /// old assertion would be vacuously true for the wrong reason. The non-vacuity reading is now the
         /// SUM of three deltas — <c>MeshDataPayload.DebugLiveAllocCount</c>, <c>FillGraphOutput.DebugLiveCount</c>,
@@ -744,7 +744,7 @@ namespace MapRenderer.Tests.Lifetime
                     "was still genuinely in-flight (the held delay job guarantees !IsStepComplete). If this " +
                     "is 0, no tile reached the graph before the pan.");
 
-                // ── Non-vacuous holding-pen assertion (DECISIVE — acceptance tooth #4) ────────────
+                // ── Non-vacuous holding-pen assertion (DECISIVE) ──────────────────────────────────
                 // Causal, not hopeful: read while the gate is STILL CLOSED, so the evicted tile's native
                 // resources provably cannot have been disposed yet — CRITICAL: do NOT call LateUpdate()
                 // here, it would drain the pen and defeat this assertion.
@@ -759,7 +759,7 @@ namespace MapRenderer.Tests.Lifetime
                     $"(payload {payloadHeld - payloadBefore}, FillGraphOutput {graphOutputHeld - graphOutputBefore}, " +
                     $"TileBuildGraph {buildGraphHeld - buildGraphBefore}) must be > 0 while the stashed tile's " +
                     "native resources sit undisposed in the pen — a fill layer allocates no MeshDataPayload at " +
-                    "kick any more (stall #5), so TileBuildGraph/FillGraphOutput are what a fill-only style's " +
+                    "kick any more, so TileBuildGraph/FillGraphOutput are what a fill-only style's " +
                     "held tile actually shows live.");
 
                 // Release the gate and restore budgets so the new cover can settle.
@@ -782,7 +782,7 @@ namespace MapRenderer.Tests.Lifetime
                 long graphOutputAfter = FillGraphOutput.DebugLiveCount;
                 long buildGraphAfter = TileBuildGraph.DebugLiveCount;
                 Assert.AreEqual(payloadBefore, payloadAfter,
-                    $"S48 DECISIVE: MeshDataPayload.DebugLiveAllocCount must return to baseline after " +
+                    $"DECISIVE: MeshDataPayload.DebugLiveAllocCount must return to baseline after " +
                     $"load+mid-flight-release cycle. Baseline: {payloadBefore}, after: {payloadAfter}.");
                 Assert.AreEqual(graphOutputBefore, graphOutputAfter,
                     $"FillGraphOutput.DebugLiveCount must return to baseline after load+mid-flight-release " +
@@ -811,7 +811,7 @@ namespace MapRenderer.Tests.Lifetime
         // ── Tooth 5-NativeArray-Consume: normal consume disposes NativeArrays ────────────────
 
         /// <summary>
-        /// S48 consume-path NativeArray balance: build tiles to completion (normal consume path),
+        /// Consume-path NativeArray balance: build tiles to completion (normal consume path),
         /// then teardown. Asserts <see cref="MeshDataPayload.DebugLiveAllocCount"/>
         /// returns to baseline after the full load+destroy cycle.
         /// </summary>

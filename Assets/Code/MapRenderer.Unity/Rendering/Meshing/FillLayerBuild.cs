@@ -30,7 +30,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         public FillLayerBuild() { }
 
         /// <summary>Rents a pooled instance and resets it to this build's own inputs — the only construction
-        /// path (§2.2): a pooled class has no object-initializer bypass, so <see cref="LayerMeshBuildCounters.RecordRented"/>
+        /// path: a pooled class has no object-initializer bypass, so <see cref="LayerMeshBuildCounters.RecordRented"/>
         /// is unconditional here — the caller (<see cref="Style.FillRenderLayer.BuildGraphRequest"/>) only
         /// reaches this once its own emptiness gate (<c>input.RingVisitOrder.IsCreated</c>) has already
         /// passed.</summary>
@@ -80,7 +80,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
             // StyledFillTileBuilder.ScheduleWrite is NOT self-guarding — it allocates and returns
             // IsCreated == true unconditionally, so this empty check must stay here (unlike
-            // FillExtrusionLayerBuild's own arm, self-guarding by design — DIV-A5).
+            // FillExtrusionLayerBuild's own arm, self-guarding by design).
             if (_measure.TileVertices.Length == 0 || _measure.TriangleIndices.Length == 0)
                 return false;
 

@@ -1,22 +1,22 @@
 // Unity EditMode only — reads a shader GLOBAL back with Shader.GetGlobalFloat, which has no engine-free
 // equivalent, and builds a real UnityEngine.Camera. NOT registered in Tools/core-tests/core-tests.csproj.
 //
-// S110 T3 / S116 T1-T2 — the VALUE the frame constant is pushed with, and where it comes from.
+// The VALUE the frame constant is pushed with, and where it comes from.
 //
 // _MapFrameMetersPerDevicePixel is the ruler the line shader converts EVERY px-valued width property with
 // (width, gap, line-offset) plus the dash parameterisation. Two things can be wrong with it and this file
 // pins both:
 //
-//   BASIS (S110). The shader's dash divisor is _Width (device px) × this global, so the global must be
+//   BASIS. The shader's dash divisor is _Width (device px) × this global, so the global must be
 //   metres per DEVICE pixel. CameraPoseMath.MetersPerPixel(zoom) is metres per LOGICAL pixel and owes a
 //   ÷ dpr. Getting that wrong is off by exactly dpr, i.e. the IDENTITY at dpr 1, which is the only ratio
 //   the rest of the suite runs at.
 //
-//   SOURCE (S116). It used to be pushed by RenderLayerSet.ApplyZoom, re-derived from a Web-Mercator zoom
-//   formula. That merely HAPPENED to equal the camera's own scale at AltitudeMultiplier 1, and any render
-//   path that never called ApplyZoom read whatever an earlier fixture had left in this PROCESS global —
-//   which is how DevicePixelRatioSnapshotTests came to render against a stale z5 ruler at z8, a clean
-//   factor of 8. The push now lives in MapCamera.SyncToCamera and is MEASURED off the camera.
+//   SOURCE. The push lives in MapCamera.SyncToCamera and is MEASURED off the camera. Derived
+//   instead from a Web-Mercator zoom formula it only HAPPENS to equal the camera's own scale at
+//   AltitudeMultiplier 1, and any render path that never called ApplyZoom reads whatever an earlier
+//   fixture left in this PROCESS global — which is how a z8 fixture rendered against a stale z5
+//   ruler, a clean factor of 8.
 //
 // A Core-only round trip is VACUOUS for the basis half, because the dash period in world metres is
 // (w_logical·dpr) × (mpp_logical/dpr) × Σ and the dpr cancels — only a tooth that reads the two halves from
@@ -100,17 +100,17 @@ namespace MapRenderer.Tests.Style
         /// <b>T1.</b> The pushed frame constant is metres per DEVICE pixel AND is the camera's own measured
         /// scale at the look-at — two independent readings of one number, asserted together.
         ///
-        /// <para>The device-px clause is S110's: expected values are computed from
+        /// <para>The device-px clause: expected values are computed from
         /// <see cref="CameraPoseMath.MetersPerPixel"/> rather than written as literals, so the tooth pins the
         /// RELATION (the ÷ dpr) and not a transcription of the zoom curve. The 1.5 row is there because a
         /// dyadic ratio can hide reciprocal-vs-divide drift; the 0.0 and 100.0 rows are there because the ÷
         /// must go through <see cref="DeviceScaling.PerLogicalPxToPerDevicePx"/>'s plausibility band — a raw
-        /// <c>/ dpr</c> reads +∞ and 3.06 on those two. Their expected values are UNCHANGED by S116's move to
+        /// <c>/ dpr</c> reads +∞ and 3.06 on those two. Their expected values are unaffected by the move to
         /// the camera, and not by luck: the same fallback is inherited through
         /// <see cref="MapCamera.ViewportLogicalPx"/> → <see cref="DeviceScaling.DeviceToLogicalPx"/>, which is
         /// the only place the ratio enters the altitude framing.</para>
         ///
-        /// <para>The camera clause is S116's, and it is the tooth that would have caught the 8×: a fixture
+        /// <para>The camera clause is the tooth that would have caught the 8×: a fixture
         /// rendering at z8 read 2445.985 = <c>MetersPerPixel(5.0)</c> out of this global — three whole zoom
         /// levels of stale process state — while its own camera measured 305.748113. Nothing in the suite
         /// compared the two.</para>
@@ -137,7 +137,7 @@ namespace MapRenderer.Tests.Style
                     $"zoom {zoom}, dpr {dpr}: the frame constant must be {expected:F6} m per DEVICE px " +
                     $"(MetersPerPixel({zoom}) = {logical:F6} m per LOGICAL px, ÷ the effective ratio " +
                     $"{effectiveRatio}). Read {pushed:F6}. Reading {logical:F6} means the ÷ dpr is missing — " +
-                    "the shader's _Width already arrives in device px (S107), so the two halves would be a " +
+                    "the shader's _Width already arrives in device px, so the two halves would be a " +
                     "factor of dpr apart and every px width would be wrong by exactly that on a dense panel. " +
                     "Reading 0 means SyncToCamera never pushed it at all, which is a blank frame for every " +
                     "pixel-width layer.");
@@ -146,7 +146,7 @@ namespace MapRenderer.Tests.Style
                     $"zoom {zoom}, dpr {dpr}: the pushed constant {pushed:F6} must be the camera's OWN scale " +
                     $"at the look-at, 2·|camPos|·tan(fov/2)/viewportPx.y = {measured:F6}. A disagreement " +
                     "means the ruler the shader sizes lines with was derived from something other than the " +
-                    "camera doing the rendering — the S116 defect, which presented as a clean factor of 8 " +
+                    "camera doing the rendering — the defect, which presented as a clean factor of 8 " +
                     "(three zoom levels of stale process global) in DevicePixelRatioSnapshotTests.");
             }
             finally { Destroy(go, rt); }
@@ -213,7 +213,7 @@ namespace MapRenderer.Tests.Style
         /// <see cref="CameraPoseMath.ComputeRelativePose"/> holds fixed, so the world width a style asks for
         /// is the same overhead as at the horizon — tilt changes only where in the frame each depth lands,
         /// which is the perspective divide's business and not the ruler's. A tilt term here would be a
-        /// per-frame version of exactly the compensation this epic reverted.
+        /// per-frame version of exactly the compensation that was reverted.
         /// </summary>
         [TestCase(0.0,  TestName = "T2b_FrameConstant_Tilt0")]
         [TestCase(30.0, TestName = "T2b_FrameConstant_Tilt30")]

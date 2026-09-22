@@ -1,16 +1,15 @@
 // Unity EditMode only — SymbolGatherPlan / Unity.Collections. NOT registered in core-tests.csproj.
 //
 // The symbol unit tests' concise "tick these symbols" seam, living in the TEST assembly instead of on
-// SymbolPlacementSystem. It replaces the demo Tick(in SceneFrame, IReadOnlyList<…>, ...) overload (over the
-// pre-migration per-symbol managed carrier), which existed on the production class for tests and demos only.
+// SymbolPlacementSystem.
 //
-// It is NOT a reimplementation of that overload: it wraps a SymbolTileBuffer build buffer into a real
-// SymbolGatherPlan and calls the PRODUCTION entry, so a unit test written against this seam exercises the
-// path that ships. The convenience is the wrapping, not a second code path.
+// It is NOT a second code path: it wraps a SymbolTileBuffer build buffer into a real SymbolGatherPlan and
+// calls the PRODUCTION entry, so a unit test written against this seam exercises the path that ships. The
+// convenience is the wrapping.
 //
-// The projection is an explicit parameter rather than read off the system, because reaching it would
-// mean adding an accessor to SymbolPlacementSystem with no production caller — precisely the surface
-// this step removes. Callers already have the MapCamera they built the system with.
+// The projection is an explicit parameter rather than read off the system: reaching it would mean adding an
+// accessor to SymbolPlacementSystem with no production caller. Callers already have the MapCamera they
+// built the system with.
 
 using System.Collections.Generic;
 using Unity.Collections;
@@ -62,7 +61,7 @@ namespace MapRenderer.Tests
 
         // ── Staged collision boxes ───────────────────────────────────────────────────────────────────
 
-        /// <summary>W3 — the last <c>Tick</c>'s staged collision boxes, valid over
+        /// <summary>The last <c>Tick</c>'s staged collision boxes, valid over
         /// <c>[0, SymbolPlacementSystem.LastBoxCount)</c>. Lives here, not on the system, for the same reason
         /// the world-slot forwards below do: a "Test surface" DATA accessor is the shape the conventions bar
         /// from a production class (<c>LastBoxCount</c> itself stays — it is a real N+1 of the counter
@@ -77,11 +76,9 @@ namespace MapRenderer.Tests
             => system._stageBoxes.AsArray();
 
         // ── World-slot inspection ────────────────────────────────────────────────────────────────────
-        // These four were `internal` members on SymbolPlacementSystem, each a one-line forward to its
-        // WorldSymbolRenderer and each documented "Test surface" — the shape the conventions call out as not
-        // belonging on a production class. They forward to the same renderer from here instead; the field was
-        // broadened private -> internal, which IS the sanctioned footprint. Names are unchanged, so every call
-        // site reads exactly as before.
+        // One-line forwards to the system's WorldSymbolRenderer, which is broadened private -> internal.
+        // A "Test surface" member does not belong on the production class; this location is the sanctioned
+        // footprint.
 
         /// <summary>The WORLD mesh bound to <c>(tileKey, slot, kind)</c>'s slot, or null if nothing has been
         /// emitted to it. Returns whatever the slot last built, regardless of current visibility — see
@@ -110,9 +107,8 @@ namespace MapRenderer.Tests
         public static Transform WorldSlotTransform(this SymbolPlacementSystem system, long tileKey, int slot, SymbolKind kind)
             => system.WorldRenderer.GetSlotTransform(tileKey, slot, kind);
 
-        // The bake needs a slot count covering every symbol's MaterialIndex; the retired demo overload
-        // hardcoded 1 because it had no layer list. Deriving it keeps multi-layer callers working
-        // without every call site having to state it.
+        // The bake needs a slot count covering every symbol's MaterialIndex. Deriving it keeps multi-layer
+        // callers working without every call site having to state it.
         private static int SlotCountFor(SymbolTileBuffer buffer)
         {
             int max = 0;

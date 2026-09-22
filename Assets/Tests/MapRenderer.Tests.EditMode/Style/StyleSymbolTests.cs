@@ -94,7 +94,7 @@ namespace MapRenderer.Tests.Style
         // ── T1: constant arm, bind ────────────────────────────────────────────────────────────
 
         /// <summary>The bound `_TextColor` must be the authored sRGB triple — NO manual gamma conversion
-        /// before <c>ZoomStyleApplier.BindColor</c> (the same UMR-135 defect shape one field over). RED-verify:
+        /// before <c>ZoomStyleApplier.BindColor</c> (the same defect shape one field over). RED-verify:
         /// pre-convert the Constant arm's colour to linear before constructing the <c>CoreColor</c> passed to
         /// <c>BindColor</c> in <c>SymbolRenderLayer.BindTextPaint</c>.</summary>
         [Test]
@@ -209,7 +209,7 @@ namespace MapRenderer.Tests.Style
             finally { renderLayer?.Dispose(); }
         }
 
-        // ── T5: D4's fence — a data-driven halo must not swallow the text-color bind ──────────
+        // ── T5: fence — a data-driven halo must not swallow the text-color bind ───────────────
 
         /// <summary>A data-driven <c>text-halo-color</c> is skipped by its own <c>!DependsOnFeature</c>
         /// guard in <c>BindTextPaint</c>; the <c>text-color</c> arm is a separate, independent guard, so a
@@ -248,7 +248,7 @@ namespace MapRenderer.Tests.Style
 
         /// <summary><c>RidesUniform</c> is true for Constant, and false for Zoom/Feature/Composite — the
         /// discriminator is <c>Kind == Constant</c>, not <c>!DependsOnFeature</c>, because Zoom stays on the
-        /// vertex-bake carrier by the decision recorded in SSOT §6 (a Zoom-kind ease path is out of scope,
+        /// vertex-bake carrier by design (a Zoom-kind ease path is out of scope,
         /// see <see cref="RestyleSurvivorGateTests"/>'s <c>SymbolLayer_ZoomKindTextColorChange_IsRefused</c>).
         /// RED-verify: widen the predicate to <c>!DependsOnFeature</c> — the Zoom row is the one that then
         /// wrongly reads true.</summary>
@@ -274,7 +274,7 @@ namespace MapRenderer.Tests.Style
             Assert.IsFalse(SymbolTextColorCarrier.RidesUniform(composite), "Composite must not ride the uniform.");
         }
 
-        // ── T9 (UMR-147): the extraction half of skip 3's "no symbol BAKE output" claim ───────
+        // ── T9: the extraction half of skip 3's "no symbol BAKE output" claim ─────────────────
 
         /// <summary>Skip 3's observer (<c>MapView.cs</c>): a Constant <c>text-color</c> change between two
         /// otherwise-identical symbol layers must extract IDENTICAL <see cref="SymbolPaint"/>s (white vertex
@@ -456,7 +456,7 @@ namespace MapRenderer.Tests.Style
     ]
 }";
 
-        /// <summary>Removing a SYMBOL layer must REFUSE the in-place path (UMR-152 would let it survive).
+        /// <summary>Removing a SYMBOL layer must REFUSE the in-place path.
         /// That arm skips the <c>_symbolRenderLayers</c> rebuild, so tombstoning a symbol slot leaves the
         /// list handing <c>SymbolPlacementSystem.Tick</c> materials <c>SymbolRenderLayer.Dispose</c> has
         /// destroyed. Clause 2 pins WHERE the fence sits: a fence below the mutation pass still returns
@@ -492,7 +492,7 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        /// <summary>Not plan §7.1's T7 (that needs a mid-call observation hook <c>TryRestyleInPlace</c>
+        /// <summary>Not the mid-call T7 (that needs an observation hook <c>TryRestyleInPlace</c>
         /// exposes none of — no <c>CommitProbe</c>-equivalent exists inside a single synchronous call).
         /// This is the two-pass shape's OTHER half instead: a REFUSED restyle must leave every original
         /// Material and instance completely untouched — never disposed, never replaced.</summary>
@@ -648,7 +648,7 @@ namespace MapRenderer.Tests.Style
             // new style) so the gate's own "unknown root/paint key" fail-closed rule (correct, unrelated
             // to this clause) does not refuse before the timing question is even reached. There is no
             // parse site to point a RED injection at: this clause is a guard against a future regression
-            // (someone adding one), not a property provable today (see plan §3 tooth 11 and §4).
+            // (someone adding one), not a property provable today.
             string WithTransitionHints(string fillColorRgba) => @"{
     ""version"": 8, ""name"": ""T"", ""transition"": { ""duration"": 5000, ""delay"": 5000 },
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
@@ -725,7 +725,7 @@ namespace MapRenderer.Tests.Style
                 "would accept and every tile would keep the previous style's baked colour forever.");
         }
 
-        // ── UMR-147: symbol layers survive and ease across a restyle (T1, T2a–e) ─────────────
+        // ── Symbol layers survive and ease across a restyle (T1, T2a–e) ──────────────────────
 
         private const string SymbolTemplate = @"{{
     ""version"": 8, ""name"": ""T"",
@@ -742,7 +742,7 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// <b>T1.</b> The real shipped liberty → liberty-night pair must survive the gate once text-color
-        /// and text-halo-color are transitionable — this is the stage's actual deliverable (§0). RED-verify
+        /// and text-halo-color are transitionable. RED-verify
         /// (two injections, either alone leaves the other's RED unproven): remove text-halo-color from
         /// TransitionablePaintKeys (18 refuse); separately remove text-color (20 refuse).
         /// </summary>

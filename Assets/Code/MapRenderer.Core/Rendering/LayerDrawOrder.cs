@@ -7,12 +7,12 @@ namespace MapRenderer.Core.Rendering
     /// cross-layer concept. <see cref="Above"/> draws on top of <see cref="Base"/> <i>of the same
     /// layer</i>, and still strictly below every sub-slot of the NEXT layer's band. A symbol layer
     /// maps icon = <see cref="Base"/>, text = <see cref="Above"/>, so the badge draws under the number
-    /// it frames (G7/D7); every other kind (fill, line, background) uses <see cref="Base"/> only.
+    /// it frames; every other kind (fill, line, background) uses <see cref="Base"/> only.
     ///
     /// <para>Named <c>Above</c>, not <c>Overlay</c>: <c>Overlay</c> already names Unity's
     /// <c>RenderQueue.Overlay</c> (4000) in this render-queue domain — the very pin the Unity-side
-    /// symbol render layer was freed from (E2/D11) — so reusing it here for an unrelated,
-    /// per-layer-relative concept would collide.</para>
+    /// symbol render layer was freed from — so reusing it here for an unrelated, per-layer-relative
+    /// concept would collide.</para>
     ///
     /// <para>Values must stay contiguous from 0 — they are queue offsets, not flags
     /// (<see cref="LayerDrawOrder.SubSlotsPerLayer"/> is pinned to equal the value count).</para>
@@ -25,15 +25,15 @@ namespace MapRenderer.Core.Rendering
     /// The style is an ordered list of layers composited bottom-to-top (MapLibre painter's algorithm).
     /// Most map layers are coplanar on the ground plane, so Unity's automatic sort
     /// (render queue → camera distance → depth buffer) z-fights and reorders them wrongly.
-    /// Rule (ARCHITECTURE §2 "Layer ordering &amp; draw submission"): <b>we own draw order; we never
-    /// rely on Unity's automatic sort.</b>
+    /// Rule (<c>ARCHITECTURE.md</c>, "Layer ordering &amp; draw submission"): <b>we own draw order; we
+    /// never rely on Unity's automatic sort.</b>
     ///
-    /// This is the <b>interim integer-queue mechanism</b> named in ARCHITECTURE §2: each declared layer
+    /// This is the <b>interim integer-queue mechanism</b> named there: each declared layer
     /// owns a contiguous <b>band</b> of <see cref="SubSlotsPerLayer"/> queue values
     /// (<c>base + layerIndex * SubSlotsPerLayer + subSlot</c>), with ZWrite off, all layers inside ONE
     /// transparent queue band. A symbol layer's icon sits at <see cref="LayerSubSlot.Base"/> and its text at
-    /// <see cref="LayerSubSlot.Above"/> so the badge never paints over its own number (G7/D7, Stage 2 of
-    /// road-shields) — every other kind uses only <see cref="LayerSubSlot.Base"/>. The BatchRendererGroup /
+    /// <see cref="LayerSubSlot.Above"/> so the badge never paints over its own number — every other kind
+    /// uses only <see cref="LayerSubSlot.Base"/>. The BatchRendererGroup /
     /// custom URP ScriptableRenderPass target (which scales past the integer-queue trick) is a deferred
     /// follow-up.
     ///
@@ -46,7 +46,7 @@ namespace MapRenderer.Core.Rendering
     ///   • URP excludes Queue≥2501 from the opaque depth/GBuffer prepasses and draws those materials
     ///     via UniversalForward in the transparent phase. Within the transparent phase Unity's only
     ///     remaining tiebreak is camera distance — which on a coplanar plane can only reorder tiles
-    ///     WITHIN one layer (disjoint regions; explicitly irrelevant per S07), never across layers,
+    ///     WITHIN one layer (disjoint regions, so the order does not matter), never across layers,
     ///     because each declared layer gets a DISTINCT queue value.
     ///
     /// Engine-free: this is pure C# (no UnityEngine.Rendering reference). The caller passes the base
@@ -58,7 +58,7 @@ namespace MapRenderer.Core.Rendering
         /// <summary>
         /// Number of sub-slots reserved per declared layer — i.e. the queue stride between one layer's
         /// <see cref="LayerSubSlot.Base"/> and the next layer's <see cref="LayerSubSlot.Base"/>. Also equals
-        /// <c>Enum.GetValues(typeof(LayerSubSlot)).Length</c> (pinned by a test — N4). Adding a future
+        /// <c>Enum.GetValues(typeof(LayerSubSlot)).Length</c> (pinned by a test). Adding a future
         /// sub-slot means adding a <see cref="LayerSubSlot"/> value AND bumping this constant; nothing else
         /// re-derives the stride.
         /// </summary>

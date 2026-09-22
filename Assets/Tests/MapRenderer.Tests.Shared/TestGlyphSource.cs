@@ -1,5 +1,5 @@
-// S18 — the glyph-fetch counterpart to TestSupport/TestDataSource.cs: a single, streamlined
-// IGlyphSource test double with always-on, thread-safe fetch-count instrumentation.
+// The glyph-fetch counterpart to TestDataSource.cs: a single, streamlined IGlyphSource test double with
+// always-on, thread-safe fetch-count instrumentation.
 //
 // Engine-free by design: references only byte[]/string/UniTask/CancellationToken/MapRenderer.Core.Text —
 // NO `using UnityEngine`. GlyphManagerTests.cs (which uses this) is compiled by BOTH the Unity EditMode

@@ -1,7 +1,7 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
 // (Tools/core-tests). Do NOT add any UnityEngine, NativeArray, or MonoBehaviour references.
 //
-// S61 projection math tests:
+// Projection math tests:
 //   T3: Ecef is genuinely 3D (pole, antipodal, chord, tangent-frame varies with position).
 //   T4-numeric: batch Forward equals scalar Forward element-wise (exact), for both modules.
 //   T6: WebMercator.Forward(geo).xz == FromLonLat(lon,lat) within 1e-6 m.

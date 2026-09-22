@@ -46,7 +46,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S12 / S60 — data-driven paint evaluation over the real fixture: <see cref="StyleProperty{T}"/>
+    /// Data-driven paint evaluation over the real fixture: <see cref="StyleProperty{T}"/>
     /// resolved once per decoded MVT feature, which is what <c>StyledFillTileBuilder</c> and
     /// <c>StyledLineTileBuilder</c> do per feature while meshing a tile.
     ///
@@ -65,11 +65,11 @@ namespace MapRenderer.Tests.Style
     public class DataDrivenColorBakeTests
     {
 
-        /// <summary>IR C1 P3: the address the committed fixture is decoded at (its buffers are stamped with
+        /// <summary>The address the committed fixture is decoded at (its buffers are stamped with
         /// it). z0/0/0 — the fixture's own tile.</summary>
         private static readonly TileId FixtureTileId = new TileId { Z = 0, X = 0, Y = 0 };
 
-        /// <summary>IR C1 P3: a decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
+        /// <summary>A decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private static byte[] LoadFixture()
@@ -101,7 +101,7 @@ namespace MapRenderer.Tests.Style
         {
             var features = new List<IFeature>(layer.Features.Count);
             foreach (var f in layer.Features)
-                features.Add(f); // A6: MvtFeature implements IFeature directly — no adapter
+                features.Add(f); // MvtFeature implements IFeature directly — no adapter
             return features;
         }
 
@@ -207,7 +207,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// UMR-143: pins <c>liberty-night.json</c> as a COLOUR-ONLY restyle of <c>liberty.json</c> — same
+    /// Pins <c>liberty-night.json</c> as a COLOUR-ONLY restyle of <c>liberty.json</c> — same
     /// sources, same layer id sequence, same per-layer type/source/source-layer/filter/minzoom/maxzoom/
     /// layout, only <c>*-color</c> paint values differ. Without this, an edit to the night style can
     /// silently drift into a structural restyle, and any conclusion drawn from clicking between the two
@@ -317,7 +317,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S08 acceptance: a MapLibre Style JSON parses into the typed model; spec defaults applied;
+    /// A MapLibre Style JSON parses into the typed model; spec defaults applied;
     /// all 10 layer types recognized + dispatched; unknown keys tolerated; raw paint/layout/filter
     /// retained; the source-layer string drives feature selection from the decoded MVT fixture.
     /// </summary>
@@ -396,7 +396,7 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(doc.Layers.Count >= 8, "real style has its layers");
             Assert.AreEqual(StyleLayerType.Background, doc.Layers[0].LayerType, "first declared layer");
             Assert.IsInstanceOf<Background.StyleLayer>(doc.Layers[0],
-                "background dispatches to its typed subclass (E3), like fill/line/symbol.");
+                "background dispatches to its typed subclass, like fill/line/symbol.");
             foreach (var l in doc.Layers)
                 Assert.AreNotEqual(StyleLayerType.Unknown, l.LayerType,
                     $"every layer type in the real style is recognized (offender id={l.Id})");
@@ -774,7 +774,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// I3: <see cref="SymbolFeatureExtractor.Extract"/>'s icon path — a supplied
+    /// <see cref="SymbolFeatureExtractor.Extract"/>'s icon path — a supplied
     /// <see cref="SpriteAtlasView"/> resolves <c>icon-image</c> per feature and lays out an
     /// <see cref="SymbolQuad"/>-carrying <see cref="SymbolStyle.SymbolFeature"/> (<c>Kind == Icon</c>)
     /// independently of the existing text path (<c>Kind == Text</c>, unchanged). Mirrors
@@ -785,9 +785,9 @@ namespace MapRenderer.Tests.Style
     public class SymbolFeatureExtractorIconTests
     {
 
-        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// <summary>A synthetic decoded tile owns <c>Allocator.Persistent</c> buffers, so the
         /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
-        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        /// leak would be invisible, which is the failure class this guard exists to catch.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         // Walk-up fixture loader — mirrors SymbolFeatureExtractorTests.LoadFixture.
@@ -853,7 +853,7 @@ namespace MapRenderer.Tests.Style
         public void Extract_IconOnlyFeature_YieldsOneIconWithExactQuad()
         {
             // PRIMARY tooth (RED-verified): a feature with NO text-field but a resolvable icon-image must
-            // still emit a symbol — the pre-I3 extractor would have skipped it entirely on "text==null".
+            // still emit a symbol — the previous extractor would have skipped it entirely on "text==null".
             var tile = OnePointTile(new double2(100, 200));
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"icon-image\":\"star\"}");
@@ -888,14 +888,14 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void Extract_TextAndIcon_YieldsTwoSymbols_IconFirstThenText()
         {
-            // §10 D8/D10 (road-shields, road-shields-design.md — supersedes D5): a feature resolving BOTH a
+            // road-shields-design.md: a feature resolving BOTH a
             // text and an icon is ONE placement instance. The icon (collision owner) is emitted first, the
             // text rides as its Rider — ONE placement instance downstream (SymbolPairing / StagePointPair), so
             // neither half's overlap flags are forced anymore; both carry their AUTHORED
             // text-allow-overlap/text-ignore-placement (default false, unset here).
             // NOTE (P-A): this layer leaves every anchor/offset at its default, i.e. the halves are CENTRED —
-            // the retired conjuncts were all inert at that value, so this test does NOT discriminate the P-A
-            // predicate. SymbolPairPredicateTests carries the teeth that do.
+            // the retired conjuncts were all inert at that value, so this test does NOT discriminate the
+            // pairing predicate. SymbolPairPredicateTests carries the teeth that do.
             var tile = OnePointTile(new double2(100, 200));
             var atlas = LoadAtlas();
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
@@ -910,9 +910,9 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(SymbolKind.Text, symbols[1].Kind, "the rider text is emitted second");
             Assert.AreEqual("L", symbols[1].Text);
             Assert.AreEqual(1, symbols[1].FeatureIndex, "the text symbol continues the SAME ordinal sequence");
-            Assert.IsFalse(symbols[1].AllowOverlap, "the D5 forcing is retired — the rider carries its AUTHORED flag (default false)");
-            Assert.IsFalse(symbols[1].IgnorePlacement, "the D5 forcing is retired — the rider carries its AUTHORED flag (default false)");
-            // §10 D10: the pair is stamped Owner/Rider sharing one PairId (the owner's own FeatureIndex).
+            Assert.IsFalse(symbols[1].AllowOverlap, "the forcing is retired — the rider carries its AUTHORED flag (default false)");
+            Assert.IsFalse(symbols[1].IgnorePlacement, "the forcing is retired — the rider carries its AUTHORED flag (default false)");
+            // The pair is stamped Owner/Rider sharing one PairId (the owner's own FeatureIndex).
             Assert.AreEqual(MapRenderer.Core.Text.SymbolPairRole.Owner, symbols[0].PairRole);
             Assert.AreEqual(MapRenderer.Core.Text.SymbolPairRole.Rider, symbols[1].PairRole);
             Assert.AreEqual(symbols[0].FeatureIndex, symbols[0].PairId);
@@ -945,7 +945,7 @@ namespace MapRenderer.Tests.Style
             var tile = OnePointTile(new double2(100, 200));
             var layer = PointLayer("{\"text-field\":\"L\",\"icon-image\":\"marker\"}");
 
-            // 5-arg (pre-I3) call and the explicit 6-arg call with spriteAtlas: null must agree exactly.
+            // 5-arg call and the explicit 6-arg call with spriteAtlas: null must agree exactly.
             var preI3Style = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(layer, tile, TileId0, 0.0, new WebMercatorProjection(), preI3Style);
 
@@ -994,7 +994,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S105 Slice 2 (A3): <see cref="SymbolFeatureExtractor.Extract"/> over the committed fixture's
+    /// <see cref="SymbolFeatureExtractor.Extract"/> over the committed fixture's
     /// <c>centroids</c> layer (250 Point features with <c>NAME</c>/<c>ABBREV</c>) yields the right count,
     /// the right resolved text for the first feature (<c>"Aruba"</c>), an anchor that is the REAL
     /// tile→geo→project chain (not a stub), and honours the layer filter. Unity EditMode only (see
@@ -1004,9 +1004,9 @@ namespace MapRenderer.Tests.Style
     public class SymbolFeatureExtractorTests
     {
 
-        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// <summary>A synthetic decoded tile owns <c>Allocator.Persistent</c> buffers, so the
         /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
-        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        /// leak would be invisible, which is the failure class this guard exists to catch.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         // Walk-up fixture loader (works in Unity batch mode AND dotnet test) — mirrors MvtPropertyDecodeTests.
@@ -1049,7 +1049,7 @@ namespace MapRenderer.Tests.Style
             SymbolFeatureExtractor.Extract(CentroidsLayer(), tile, FixtureTile, 0.0, projection, symbols);
 
             // The fixture has 250 centroids features; one symbol per point feature with a NON-EMPTY NAME.
-            // Two features have an absent/empty NAME → their "{NAME}" resolves empty → skipped (the A2 skip
+            // Two features have an absent/empty NAME → their "{NAME}" resolves empty → skipped (the skip
             // rule proven on real data), so 248 symbols. Compute the expectation independently, then pin it.
             MvtLayer centroids = tile.GetLayer("centroids");
             Assert.AreEqual(250, centroids.Features.Count, "fixture pin: 250 centroids features");
@@ -1070,7 +1070,7 @@ namespace MapRenderer.Tests.Style
 
             // Its anchor is the REAL tile→geo→project chain, not a stubbed origin. Recompute independently
             // from the decoded first point and assert equality; also pin the fixture point (1252,1904).
-            // IR C1 P3: arm A reads the command stream from the BYTES (a decoded feature carries none).
+            // Arm A reads the command stream from the BYTES (a decoded feature carries none).
             List<List<double2>> paths = MvtGeometry.Decode(
                 MvtFixtureStreams.ReadLayer(LoadFixture(), "centroids").Commands[0]);
             double2 firstPoint = paths[0][0];
@@ -1186,7 +1186,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(250f, first.SpacingPx, 1e-6, "symbol-spacing default (250) carried onto the line symbol");
             Assert.IsNotNull(first.PathRender, "a line symbol carries the projected path");
             Assert.GreaterOrEqual(first.PathRender.Length, 2, "a placeable line has >= 2 vertices");
-            // A-2: the extractor computes the zoom-invariant along-line anchors (line-center → exactly one).
+            // The extractor computes the zoom-invariant along-line anchors (line-center → exactly one).
             Assert.IsNotNull(first.LineAnchors, "a line symbol carries its build-time anchors");
             Assert.AreEqual(1, first.LineAnchors.Length, "line-center places a single centred anchor");
             Assert.AreEqual("L", first.Text);
@@ -1199,12 +1199,11 @@ namespace MapRenderer.Tests.Style
             double3 expected = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
             Assert.AreEqual(expected.x, first.PathRender[0].x, 1e-6, "path vertex is the real projection, not a stub");
 
-            // D2 (road-shields): a POINT-placement layer over the SAME line layer now anchors each path at its
-            // mid arc-length (one symbol per path) instead of skipping it outright — the G2 fix. (Superseded the
-            // pre-shields "point placement skips LineString features" assertion, which was the very bug D2 fixes.)
+            // A POINT-placement layer over the SAME line layer anchors each path at its mid arc-length (one
+            // symbol per path) instead of skipping it outright.
             var pointOverLines = new List<SymbolStyle.SymbolFeature>();
             SymbolFeatureExtractor.Extract(LineLayer("point"), tile, FixtureTile, 0.0, projection, pointOverLines);
-            Assert.Greater(pointOverLines.Count, 0, "D2: point placement now anchors a LineString path at its mid arc-length");
+            Assert.Greater(pointOverLines.Count, 0, "Point placement anchors a LineString path at its mid arc-length");
             foreach (SymbolStyle.SymbolFeature l in pointOverLines)
             {
                 Assert.AreEqual(MapRenderer.Core.Text.SymbolPlacement.Point, l.Placement, "a mid-arc anchor is Point-placed");
@@ -1212,7 +1211,7 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── S4-T5: Mercator extractor length-identity — the engine-free half of the byte-identity invariant ──
+        // ── Mercator extractor length-identity — the engine-free half of the byte-identity invariant ─────────
 
         [Test]
         public void Extract_LinePlacement_Mercator_PathRenderLengthMatchesOriginalVertexCount()
@@ -1238,11 +1237,11 @@ namespace MapRenderer.Tests.Style
             int originalVertexCount = paths[0].Count;
 
             Assert.AreEqual(originalVertexCount, lineSymbols[0].PathRender.Length,
-                "S4: on a flat projection (MaxRefineAngleRad == +infinity) LineCurvatureSubdivision.Subdivide "
+                "On a flat projection (MaxRefineAngleRad == +infinity) LineCurvatureSubdivision.Subdivide "
                 + "must never fire — PathRender length stays the original decoded vertex count");
         }
 
-        // ── S4-T6: globe subdivision + anchor alignment (the crux) ─────────────────────────────────────
+        // ── T6: globe subdivision + anchor alignment (the crux) ────────────────────────────────────────
 
         /// <summary>Minimal engine-free <see cref="IFeature"/>/<see cref="ITileLayer"/>/<see cref="IDecodedTile"/>
         /// test doubles for a synthetic tile — mirrors <c>A7TileFeatureSourceTests.FixtureDecodedTile</c>/
@@ -1324,7 +1323,7 @@ namespace MapRenderer.Tests.Style
                 "the anchor must resolve to (approximately) the true midpoint on the finer render curve");
         }
 
-        // ── Stage B: single-world clip — point anchors outside [0, extent) are source world-copies ──────
+        // ── single-world clip — point anchors outside [0, extent) are source world-copies ───────────────
 
         /// <summary>Hand-encodes a MultiPoint MVT geometry command stream: a single MoveTo(count=N) followed
         /// by N zigzag-encoded cumulative deltas from a cursor starting at (0,0) — mirrors
@@ -1350,7 +1349,7 @@ namespace MapRenderer.Tests.Style
         {
             const uint extent = 4096;
             // In-bounds (kept): an interior point, another interior point, the min edge (inclusive), and the
-            // max edge (extent - 1, inclusive). Out-of-bounds (dropped): the plan's own examples
+            // max edge (extent - 1, inclusive). Out-of-bounds (dropped):
             // (extent*1.5, -extent*0.5, extent+1) plus the half-open upper-bound edges x==extent/y==extent
             // (a shared-edge anchor belongs to the NEXT tile, not this one).
             double2 inA = new double2(100, 200);
@@ -1423,26 +1422,20 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S13 / S60 — <see cref="Fill.PaintProperties"/>: classification, pinned values, BakeNumbers
+    /// <see cref="Fill.PaintProperties"/>: classification, pinned values, BakeNumbers
     /// distinct-alpha, and SourceLayerResolver seam routing.
     ///
     /// Unity EditMode only (see file header) — it exercises the MapRenderer.Jobs.Tiles/.Mvt decode seam.
-    ///
-    /// S60 changes:
-    ///   • All properties are <c>StyleProperty&lt;T&gt;</c>; XKind → <c>.Kind</c>; null-guard →
-    ///     <c>.DependsOnFeature</c>; DataDrivenX → same property.
-    ///   • fill-translate: ONE <c>StyleProperty&lt;double2&gt;</c>; access via <c>.Translate.Evaluate(0.0).x/y</c>.
-    ///   • BakeNumbers: now typed <c>StyleProperty&lt;float&gt;</c>.
     /// </summary>
     [TestFixture]
     public class FillPaintTests
     {
 
-        /// <summary>IR C1 P3: the address the committed fixture is decoded at (its buffers are stamped with
+        /// <summary>The address the committed fixture is decoded at (its buffers are stamped with
         /// it). z0/0/0 — the fixture's own tile.</summary>
         private static readonly TileId FixtureTileId = new TileId { Z = 0, X = 0, Y = 0 };
 
-        /// <summary>IR C1 P3: a decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
+        /// <summary>A decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private static byte[] LoadFixture()
@@ -1474,7 +1467,7 @@ namespace MapRenderer.Tests.Style
         {
             var features = new List<IFeature>(layer.Features.Count);
             foreach (var f in layer.Features)
-                features.Add(f); // A6: MvtFeature implements IFeature directly — no adapter
+                features.Add(f); // MvtFeature implements IFeature directly — no adapter
             return features;
         }
 

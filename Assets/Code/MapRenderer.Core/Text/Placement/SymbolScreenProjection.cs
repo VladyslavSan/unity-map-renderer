@@ -1,26 +1,24 @@
 // Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified float4x4 —
 // this file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float4x4` would bind
 // to a (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234) since the
-// leading `Unity` segment resolves against the CURRENT namespace first. See the S19/S20 namespace-
-// collision trap in GlyphAtlasTexture.cs.
+// leading `Unity` segment resolves against the CURRENT namespace first. See the namespace-collision
+// trap in GlyphAtlasTexture.cs.
 
 using Unity.Mathematics;
 
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// S20 T2: geo → render (floating-origin rebase) → screen, with culling — pure static, Burst-inlinable.
+    /// Geo → render (floating-origin rebase) → screen, with culling — pure static, Burst-inlinable.
     /// Reproduces <c>Camera.WorldToScreenPoint(local)</c> given the SAME view-projection matrix and a
     /// floating-origin-rebased local position (mirrors the tile placement math: subtract
-    /// <c>SceneFrame.SceneOriginRender</c> BEFORE any camera transform — S06/S91).
+    /// <c>SceneFrame.SceneOriginRender</c> BEFORE any camera transform).
     /// </summary>
     public static class SymbolScreenProjection
     {
         /// <summary>
         /// A symbol anchor further than this many logical pixels outside the viewport on any edge is culled
-        /// (a generous fixed margin — Slice 1 has no collision box yet to size an exact margin from;
-        /// Slice 2's per-symbol AABB replaces this with a precise bound). Internal, not a call-site
-        /// parameter, so <see cref="TryProjectAnchor"/>'s signature matches the S20 plan exactly.
+        /// (a generous fixed margin, not an exact per-symbol bound). Internal, not a call-site parameter.
         /// </summary>
         private const float ViewportMarginPx = 256f;
 
@@ -41,7 +39,7 @@ namespace MapRenderer.Core.Text.Placement
         /// anchor is behind the camera (<c>clip.w &lt;= 0</c>) or (with a fixed margin) outside the
         /// viewport. <paramref name="sceneOriginRender"/> is the per-frame floating-origin rebase
         /// (<c>SceneFrame.SceneOriginRender</c>) — MANDATORY: skipping it lands at the wrong pixel once the
-        /// camera has panned away from the render origin (T2's decisive tooth).
+        /// camera has panned away from the render origin.
         /// </summary>
         /// <param name="renderPos">The symbol anchor in render space (pre-RTC).</param>
         /// <param name="sceneOriginRender">The per-frame scene origin the camera orbits (<c>SceneFrame.SceneOriginRender</c>).</param>
@@ -68,7 +66,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// True if <paramref name="screenPx"/> lies within the viewport plus the fixed <see cref="ViewportMarginPx"/>
-        /// margin — the point-anchor viewport cull, factored OUT of <see cref="TryProjectAnchor"/> so the B-2
+        /// margin — the point-anchor viewport cull, factored OUT of <see cref="TryProjectAnchor"/> so the
         /// projection job can do pure (behind-camera-only) projection while the serial staging pass applies this
         /// cheap screen-bounds cull. <see cref="TryProjectAnchor"/> = <see cref="TryProjectPoint"/> + this, so the
         /// two paths stay bit-identical.
@@ -83,7 +81,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// Projects <paramref name="renderPos"/> to a logical screen pixel, culling ONLY behind-camera
-        /// (<c>clip.w &lt;= 0</c>) — no viewport-margin cull. Used by the curved line-text path (#5): a line
+        /// (<c>clip.w &lt;= 0</c>) — no viewport-margin cull. Used by the curved line-text path: a line
         /// vertex may be far off-screen while the symbol's visible portion is on-screen, so the margin cull
         /// (correct for a point anchor) would wrongly drop the whole line.
         /// </summary>

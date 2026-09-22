@@ -6,7 +6,7 @@ using MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// Road-shields §10 D10 — the ONE resolver that turns a proposed <see cref="SymbolPairRole"/> stamping into
+    /// The ONE resolver that turns a proposed <see cref="SymbolPairRole"/> stamping into
     /// a resolved pair. The extractor's roles are a PROPOSAL, not a fact (a rider can go missing to per-symbol
     /// shaping isolation, list truncation, or a downstream filter); this class decides the truth from a list,
     /// so the baker and the reconciler cannot disagree on which pairs actually hold.

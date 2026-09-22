@@ -1,11 +1,8 @@
-// S54: test-only helper for building a single-line mesh with the production line vertex layout.
-// S89 Stage B: builds via the Mesh.MeshData advanced API (LayerMeshData + UploadMesh retired), reusing
-// StyledLineTileBuilder.LineVertexDescriptors so the REAL stream-3 interleave is still exercised.
-// UMR-173: the generator moved from the retired managed line tessellator onto RibbonJob (via the shared
-// FlatRibbon harness) — same flat-centerline mapping LineRibbonJobTests uses. Every field the streams
-// below read (Position/Across/Side/DistanceAlong/WidthScale) crosses into the mesh through a
-// (float) cast, and the documented managed↔Burst divergence (~1e-9 absolute at these coordinate
-// magnitudes) is three orders below float's ~1e-7 resolution, so the cast quantises it away.
+// Test-only helper for building a single-line mesh with the production line vertex layout. It builds via
+// the Mesh.MeshData advanced API, reusing StyledLineTileBuilder.LineVertexDescriptors so the REAL stream-3
+// interleave is exercised, and generates geometry with RibbonJob through the shared FlatRibbon harness.
+// Every field the streams below read (Position/Across/Side/DistanceAlong/WidthScale) crosses into the mesh
+// through a (float) cast, which quantises away the ~1e-9 managed↔Burst divergence.
 
 using System.Collections.Generic;
 using UnityEngine;
@@ -20,7 +17,7 @@ namespace MapRenderer.Tests
     /// <summary>
     /// Builds a synthetic line mesh from a flat polyline point list, with the production line vertex
     /// layout. Callers attach the returned <see cref="Mesh"/> to a <see cref="GameObject"/> and set
-    /// material uniforms as needed. Replaces the retired <c>LineMeshBuilder</c>.
+    /// material uniforms as needed.
     /// </summary>
     internal static class SyntheticLineMesh
     {
@@ -38,7 +35,7 @@ namespace MapRenderer.Tests
         /// <summary>
         /// Build a <see cref="Mesh"/> from a polyline with an explicit per-vertex baked <paramref name="color"/>
         /// and <paramref name="widthScale"/> multiplier written into the real stream-3 <c>LineWidthColor</c>
-        /// interleave. Used by the S54 LineWidthColor-flip falsifiability tooth.
+        /// interleave. Used by the LineWidthColor-flip falsifiability tooth.
         /// </summary>
         public static Mesh BuildFromPoints(IReadOnlyList<double2> pts, Vector4 color, float widthScale,
             JoinType join = JoinType.Miter, CapType cap = CapType.Butt)
@@ -49,7 +46,6 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// Build the three golden test shapes (horizontal, L-shape, diagonal) combined into one mesh.
-        /// Used by tests that previously relied on <c>LineBootstrap</c>.
         /// </summary>
         public static Mesh BuildGoldenShapes(JoinType join = JoinType.Miter, CapType cap = CapType.Butt)
         {

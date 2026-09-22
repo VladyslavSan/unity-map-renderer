@@ -3,7 +3,7 @@
 // Index parsing first, then the two repack halves (pixel, rect).
 //
 // Contents:
-//   SpriteIndexTests          — I1 acceptance: a MapLibre sprite JSON index parses into name-keyed SpriteEntry values; malformed/wrong-shaped input never throws (forward-compat posture, mirrors StyleParserTests).
+//   SpriteIndexTests          — a MapLibre sprite JSON index parses into name-keyed SpriteEntry values; malformed/wrong-shaped input never throws (forward-compat posture, mirrors StyleParserTests).
 //   SpriteSheetComposerTests  — Teeth for the padded repack's PIXEL half (SpriteSheetComposer).
 //   SpriteSheetPadderTests    — Teeth for the padded repack's RECT half (SpriteSheetPadder): every sprite ends up with its own one-texel border that no neighbour's content can reach into, the plan is byte-for-byte reproducible regardless of dictionary insertion order, aliased names stay…
 
@@ -23,7 +23,7 @@ namespace MapRenderer.Tests.Text.Sprites
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// I1 acceptance: a MapLibre sprite JSON index parses into name-keyed <see cref="SpriteEntry"/>
+    /// A MapLibre sprite JSON index parses into name-keyed <see cref="SpriteEntry"/>
     /// values; malformed/wrong-shaped input never throws (forward-compat posture, mirrors
     /// StyleParserTests).
     /// </summary>

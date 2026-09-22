@@ -1,11 +1,11 @@
-// MapView-loop tile-pipeline GPU/visual acceptance test (UMR-176 pack: tile-pipeline topic).
+// MapView-loop tile-pipeline GPU/visual acceptance test.
 //
 // Standalone, not merged with TileSeamSnapshotTests: the two collide on `CameraProperties`
 // (MapRenderer.Core.Geo vs UnityEngine.Rendering, CS0104) — this file uses the bare
 // Core.Geo constructor, TileSeamSnapshotTests imports UnityEngine.Rendering.
 //
 // Contents:
-//   MapViewSnapshotTests  — S06 visual proof: the LIVE multi-tile loop (MapView) renders a non-blank fill cover.
+//   MapViewSnapshotTests  — visual proof: the LIVE multi-tile loop (MapView) renders a non-blank fill cover.
 
 using System.IO;
 using Cysharp.Threading.Tasks;
@@ -19,11 +19,11 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Visual
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapViewSnapshotTests — S06 visual proof
+    // MapViewSnapshotTests — visual proof
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S06 visual proof: the LIVE multi-tile loop (<see cref="MapView"/>) renders a non-blank fill cover.
+    /// Visual proof: the LIVE multi-tile loop (<see cref="MapView"/>) renders a non-blank fill cover.
     /// The geometry is the committed fixture replayed across the cover (synthetic, same shape per tile) —
     /// this proves the go-live loop produces visible meshes through the jobified pipeline; it is NOT a real
     /// multi-zoom basemap. Pan/tilt jitter is proven separately by the Core

@@ -9,7 +9,7 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 namespace MapRenderer.Unity.Editor
 {
     /// <summary>
-    /// Our clean-room base material inspector (S58). Subclasses the RAW <see cref="ShaderGUI"/> and
+    /// Our clean-room base material inspector. Subclasses the RAW <see cref="ShaderGUI"/> and
     /// reproduces the familiar URP-Lit inspector — <b>Surface Options</b> / <b>Surface Inputs</b> /
     /// <b>Advanced</b> — as collapsible <see cref="MaterialHeaderScope"/> foldouts, so a map material reads
     /// almost identically to a stock Lit material. Successors extend it: <see cref="LitShaderGUI"/> adds the
@@ -127,9 +127,9 @@ namespace MapRenderer.Unity.Editor
                 material.HasProperty(ShaderProperties.PropertyId.AlphaClip) &&
                 material.GetFloat(ShaderProperties.PropertyId.AlphaClip) >= 0.5f);
 
-            // S58 exposes raw blend factors directly rather than a blend preset, so the premultiply/modulate
-            // blend-preset keywords are not auto-derived — keep them off (URP sets these in its transparent
-            // branch, L1114/L1115).
+            // This inspector exposes raw blend factors rather than a blend preset, so the premultiply/
+            // modulate blend-preset keywords are not auto-derived — keep them off (URP sets these in its
+            // transparent branch, L1114/L1115).
             CoreUtils.SetKeyword(material, ShaderKeywords.AlphaPremultiplyOn, false);
             CoreUtils.SetKeyword(material, ShaderKeywords.AlphaModulateOn,    false);
         }
@@ -148,7 +148,7 @@ namespace MapRenderer.Unity.Editor
             EnumPopup<WorkflowMode>(ShaderProperties.PropertyNames.WorkflowMode, "Workflow Mode");
 
             EditorGUILayout.Space();
-            // Raw low-level render state (the S58 knobs — what URP's Surface Type/Blend presets hide).
+            // Raw low-level render state — what URP's Surface Type/Blend presets hide.
             EnumPopup<DepthWrite>(ShaderProperties.PropertyNames.ZWrite, "Depth Write");
             EnumPopup<CompareFunction>(ShaderProperties.PropertyNames.ZTest, "Depth Test");
             // Label matches the ShaderLab `Cull` directive: the enum names the face that is CULLED
@@ -294,7 +294,7 @@ namespace MapRenderer.Unity.Editor
             Prop(ShaderProperties.PropertyNames.SpecularHighlights,     "Specular Highlights");
             Prop(ShaderProperties.PropertyNames.EnvironmentReflections, "Environment Reflections");
             EditorGUILayout.Space();
-            _editor.RenderQueueField(); // render queue edited directly on the material (S58)
+            _editor.RenderQueueField(); // render queue edited directly on the material
             _editor.EnableInstancingField();
         }
 

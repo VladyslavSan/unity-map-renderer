@@ -81,7 +81,7 @@ not yet selectable from a style.
 
 | Source | Status | Evidence / notes |
 |---|:---:|---|
-| vector (MVT) | ✅ | the one real path: `TileDataSourceFactory` → `MvtDecoder` → `ITileMeshRenderLayer.BuildGraphRequest` (job-scheduling-design.md §8 stage 5 Group B retired the synchronous `WriteInto` this row used to name). Encoding hardcoded MVT. |
+| vector (MVT) | ✅ | the one real path: `TileDataSourceFactory` → `MvtDecoder` → `ITileMeshRenderLayer.BuildGraphRequest`. Encoding hardcoded MVT. |
 | TileJSON | ✅ | `TileJson.Parse` + `SourceResolver.Resolve` at SetStyle; inline `tiles[]` short-circuits |
 | raster | 🟠 | `SourceType.Raster` parsed but never fetched/decoded; a raster source used by a layer would be decoded as MVT and fail |
 | raster-dem | ❌ | enum discriminator only; no terrain/hillshade path |

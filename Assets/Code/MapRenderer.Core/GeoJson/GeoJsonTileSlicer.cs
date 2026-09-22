@@ -18,7 +18,7 @@ namespace MapRenderer.Core.GeoJson
     /// </summary>
     public readonly struct GeoJsonSliceOptions
     {
-        /// <summary>4096 — the MVT authoring convention, adopted deliberately: it sets the positional
+        /// <summary>4096 — the MVT authoring convention, adopted here because it sets the positional
         /// resolution of every declarative fixture (~0.6 m at z14).</summary>
         public const double DefaultExtent = 4096.0;
 
@@ -37,19 +37,15 @@ namespace MapRenderer.Core.GeoJson
         /// <c>b = keep · extent / 4096</c> formula <see cref="TileBufferClip.TryWindow"/> uses. Set 0 to cut
         /// exactly at the tile boundary; negative and NaN both degrade to that in <see cref="Window"/>.
         ///
-        /// <para><b>Configuration interaction, verified at S2 wiring time — and the S1 note it replaces was
-        /// wrong.</b> That note said <see cref="TileBufferClip"/> "defaults to DISABLED", so a GeoJSON
-        /// <i>fill</i> sliced with a non-zero buffer would double-paint its seam strip. It does not, at the
-        /// production configuration: <c>MapViewConfig.FillTileBufferClip</c> defaults to <c>0.0</c>, and
+        /// <para><b>There is no GeoJSON-specific fill seam.</b> At the production configuration
+        /// <c>MapViewConfig.FillTileBufferClip</c> defaults to <c>0.0</c>, and
         /// <c>TileBufferClip.FromInspectorUnits(0.0)</c> takes the <c>KeepTileUnits(0.0)</c> branch, whose
         /// <c>IsEnabled</c> is <b>true</b> with a keep of 0 — only a NEGATIVE knob disables it. So the fill
-        /// pipeline already clips every layer to <c>[0, extent]</c>, MVT and GeoJSON alike, and a GeoJSON fill
-        /// sliced at buffer 64 is cut back by the same job that cuts an MVT fill buffered by a tile server.
-        /// There is no GeoJSON-specific fill seam.</para>
+        /// pipeline clips every layer to <c>[0, extent]</c>, MVT and GeoJSON alike, and a GeoJSON fill sliced
+        /// at buffer 64 is cut back by the same job that cuts a server-buffered MVT fill.</para>
         ///
-        /// <para>What genuinely is NOT clipped, identically for both formats, is the <b>line</b> and
-        /// <b>symbol</b> path: a polyline or a point inside the margin is emitted by both neighbouring tiles.
-        /// That is a pre-existing, format-independent property of the pipeline.</para>
+        /// <para>What is NOT clipped, identically for both formats, is the <b>line</b> and <b>symbol</b>
+        /// path: a polyline or a point inside the margin is emitted by both neighbouring tiles.</para>
         /// </summary>
         public double BufferAtReferenceExtent { get; init; }
 
@@ -74,7 +70,7 @@ namespace MapRenderer.Core.GeoJson
         /// <summary>
         /// Throws unless every option is one this slicer can honour: <see cref="Extent"/> a WHOLE NUMBER in
         /// <c>(0, uint.MaxValue]</c>, and <see cref="SimplifyTolerance"/> exactly 0.
-        /// <see cref="BufferAtReferenceExtent"/> is deliberately unchecked — <see cref="Window"/> degrades
+        /// <see cref="BufferAtReferenceExtent"/> is unchecked — <see cref="Window"/> degrades
         /// NaN and every negative to the tile boundary, so its whole domain is honourable.
         ///
         /// <para><b>Why integrality, and not a silent round.</b> Tile-local coordinates are quantized to
@@ -99,19 +95,14 @@ namespace MapRenderer.Core.GeoJson
         /// smaller "sensible" extent: extent is a per-source authoring choice, and what this validator owes
         /// is representability, not taste.</para>
         ///
-        /// <para><b>Why the tolerance is validated HERE, and only since D1.</b> A non-zero
-        /// <see cref="SimplifyTolerance"/> is unimplemented, so it is exactly as unusable as a zero extent —
-        /// but it used to be admitted at construction on purpose, because the fault it produced at the first
-        /// slice was the instrument a lazy-decode tooth used to observe that no slicing had happened yet.
-        /// The source decodes eagerly now and that tooth is retired, so the carve-out has nothing left to
-        /// serve and the validator states the whole domain of the options it validates.
-        /// <see cref="GeoJsonTileSlicer.Slice"/> keeps its own tolerance guard, and that guard is now a
-        /// DUPLICATE of this arm — <c>Slice</c> calls <c>Validate()</c> unconditionally three lines later, so
-        /// deleting it would reject exactly the same options, here instead. It is kept for one reason: it
-        /// runs FIRST, so the exception a direct <c>Slice</c> caller sees stays a
-        /// <see cref="NotSupportedException"/> rather than becoming this
-        /// <see cref="ArgumentOutOfRangeException"/>. Unifying the two types is a behaviour change on a
-        /// public API and is deliberately out of scope here.</para>
+        /// <para><b>Why the tolerance is validated HERE.</b> A non-zero <see cref="SimplifyTolerance"/> is
+        /// unimplemented, so it is as unusable as a zero extent, and this validator states the whole domain
+        /// of the options it validates. <see cref="GeoJsonTileSlicer.Slice"/> keeps its own tolerance guard,
+        /// a DUPLICATE of this arm — <c>Slice</c> calls <c>Validate()</c> unconditionally three lines later,
+        /// so deleting it would reject the same options here instead. It is kept because it runs FIRST, so
+        /// the exception a direct <c>Slice</c> caller sees stays a <see cref="NotSupportedException"/> rather
+        /// than this <see cref="ArgumentOutOfRangeException"/>. Unifying the two types is a behaviour change
+        /// on a public API, out of scope here.</para>
         ///
         /// <para>Called by <see cref="GeoJsonTileSlicer.Slice"/> and by every source that retains options to
         /// slice with later — the point of validating from one place is that "the window is NaN and every
@@ -305,7 +296,7 @@ namespace MapRenderer.Core.GeoJson
     /// clippers are orientation-preserving, so output winding equals the winding
     /// <see cref="GeoJsonParser"/> normalised. The Unity-front reversal for stock Cull Back stays where it
     /// is, at the mesh-write boundary in <c>StyledFillTileBuilder</c>
-    /// (<c>docs/coordinates-and-projections.md</c> §7.1).</para>
+    /// (<c>docs/coordinates-and-projections.md</c>).</para>
     ///
     /// <para><b>Lazy, not eager, and stateless.</b> Slicing is a pure function of (dataset, tile, options),
     /// evaluated per requested tile; memoization belongs to the source that calls it. Eager pyramid slicing
@@ -395,9 +386,9 @@ namespace MapRenderer.Core.GeoJson
                     break;
 
                 case TileGeometryType.Unknown:
-                    // RFC §3.2's UNLOCATED feature — `"geometry": null`, which GeoJsonParser deliberately
-                    // accepts rather than rejects. It carries identity and properties but no geometry, so it
-                    // contributes to no tile. The empty path list is the intended result, not a gap.
+                    // RFC §3.2's UNLOCATED feature — `"geometry": null`, which GeoJsonParser accepts. It
+                    // carries identity and properties but no geometry, so it contributes to no tile: the
+                    // empty path list is the intended result, not a gap.
                     break;
             }
 

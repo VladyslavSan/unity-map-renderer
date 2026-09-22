@@ -112,8 +112,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Diffs the registry against <paramref name="specs"/> by (SourceId, resolved Key),
         /// keeping unchanged pipelines and disposing removed ones, then commits stable slots
         /// <c>0..N-1</c> and appends the source-less slot last if <paramref name="hasBackground"/>.
-        /// Returns the OLD-slot → NEW-slot map (<c>-1</c> for a departed pipeline) — UMR-151, see
-        /// `docs/tile-pipeline-design.md` §1.10.</summary>
+        /// Returns the OLD-slot → NEW-slot map (<c>-1</c> for a departed pipeline) — see
+        /// `docs/tile-pipeline-design.md`.</summary>
         public int[] Rebuild(IReadOnlyList<TileManager.SourceSpec> specs, bool hasBackground)
         {
             int oldCount = _pipelines.Count;
@@ -121,7 +121,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             for (int i = 0; i < oldCount; i++) oldSlotOf[_pipelines[i]] = i;
 
             // The synthetic background pipeline holds no resource, but its IDENTITY must survive an
-            // unchanged-background restyle or its slot reads as departed below (§1.10).
+            // unchanged-background restyle or its slot reads as departed below.
             SourcePipeline oldBackground = oldCount > 0 && _pipelines[oldCount - 1].IsSourceless
                 ? _pipelines[oldCount - 1] : null;
 

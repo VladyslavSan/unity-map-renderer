@@ -1,5 +1,5 @@
 // Engine-free: no UnityEngine dependency.
-// BLITTABLE: this struct crosses into the S20 Jobs boundary as a NativeArray<PlacedQuad> element (mirrors the
+// BLITTABLE: this struct crosses into the Jobs boundary as a NativeArray<PlacedQuad> element (mirrors the
 // Core-defines-the-struct/Jobs-creates-the-NativeArray pattern LineRibbonVertex/GlyphAtlasEntry already use).
 // Keep it to blittable fields only.
 
@@ -17,7 +17,7 @@ namespace MapRenderer.Core.Text.Placement
     /// </summary>
     public struct PlacedQuad
     {
-        /// <summary>The symbol-local, anchor-relative baked-px quad (S19).</summary>
+        /// <summary>The symbol-local, anchor-relative baked-px quad.</summary>
         public SymbolQuad Quad;
 
         /// <summary>The symbol's projected anchor, in logical screen pixels (<see cref="SymbolScreenProjection.TryProjectAnchor"/>).
@@ -35,27 +35,27 @@ namespace MapRenderer.Core.Text.Placement
         public float4 Color;
 
         /// <summary>Screen-space rotation (radians) applied to the quad about its anchor — 0 for the upright/
-        /// viewport billboard, the map bearing for <c>text-rotation-alignment:map</c> (#4).</summary>
+        /// viewport billboard, the map bearing for <c>text-rotation-alignment:map</c>.</summary>
         public float RotationRadians;
 
-        /// <summary>Stage AC (curved-world): this glyph's world anchor, tile-local render space
+        /// <summary>Curved arm: this glyph's world anchor, tile-local render space
         /// (<c>worldPoint − CurvedStageInput.TileOriginRender</c>, Level-1 RTC bake) — sampled from the
         /// world polyline at the SAME <c>(segment, t)</c> the screen arc walk placed this glyph at. Default
         /// <see cref="float3.zero"/> for a point symbol (which carries its single anchor on
         /// <see cref="CandidateEmit.AnchorLocal"/> instead).</summary>
         public float3 AnchorLocal;
 
-        /// <summary>Stage AC: this glyph's tile-local world tangent along the line (unit-normalized, the
+        /// <summary>Curved arm: this glyph's tile-local world tangent along the line (unit-normalized, the
         /// keep-upright negation baked in) — the world-space direction <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/>
         /// projects live to derive the on-screen rotation. Default <see cref="float3.zero"/> for a point
         /// symbol (unread there).</summary>
         public float3 Tangent;
 
-        /// <summary>P2 (curved arm): this glyph's unit surface normal, pre-RTC render-space DIRECTION —
+        /// <summary>Curved arm: this glyph's unit surface normal, pre-RTC render-space DIRECTION —
         /// sampled from the world polyline's per-vertex ups at the SAME <c>(segment, t)</c>
         /// <see cref="AnchorLocal"/> was sampled at (<see cref="PolylineArcMath.SampleUp"/>). Default
         /// <see cref="float3.zero"/> for a point symbol (which carries its anchor's up on
-        /// <see cref="CandidateEmit.SurfaceUp"/> instead). WRITTEN by P2; UNREAD by every shader.</summary>
+        /// <see cref="CandidateEmit.SurfaceUp"/> instead). Written, but not yet read by any shader.</summary>
         public float3 SurfaceUp;
     }
 }

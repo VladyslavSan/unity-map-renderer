@@ -5,8 +5,8 @@ namespace MapRenderer.Core.Text
     /// <summary>
     /// One cell of a curved along-line symbol: its cell plus the along-run arc distance to place it at.
     /// Two producers, both riding the same field: <see cref="CurvedTextLayout"/> emits one per GLYPH of a
-    /// line-placed text symbol (#5), and <c>StyledSymbolTileBuilder</c> emits exactly ONE, holding an
-    /// <see cref="IconQuadLayout"/> sprite quad, for a map-aligned line ICON (P-B). The per-frame placement
+    /// line-placed text symbol, and <c>StyledSymbolTileBuilder</c> emits exactly ONE, holding an
+    /// <see cref="IconQuadLayout"/> sprite quad, for a map-aligned line ICON. The per-frame placement
     /// maps <see cref="ArcCenter"/> onto the projected screen line to get the cell's screen point + tangent.
     /// </summary>
     public readonly struct CurvedGlyph

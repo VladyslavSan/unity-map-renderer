@@ -1,7 +1,7 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
 // (Tools/core-tests). Do NOT add any UnityEngine reference.
 //
-// Tests Angle value type (S68): B1 deg<->rad round-trips, trig association, B4 shortest-path lerp.
+// Tests the Angle value type: deg↔rad round-trips, trig association, shortest-path lerp.
 
 
 using NUnit.Framework;
@@ -14,7 +14,7 @@ namespace MapRenderer.Tests.Cameras
     [TestFixture]
     public class AngleTests
     {
-        // ── B1: degrees↔radians conversion ───────────────────────────────────────────────────────
+        // ── Degrees↔radians conversion ───────────────────────────────────────────────────────────
 
         [Test]
         public void FromDegrees45_Radians_EqualsPI_Over4()
@@ -98,7 +98,7 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(0.0, d, 0.0, "360° normalized must be exactly 0° (half-open [0,360)).");
         }
 
-        // ── B4: LerpShortest — shortest-path heading lerp ──────────────────────────────────────────
+        // ── LerpShortest — shortest-path heading lerp ──────────────────────────────────────────────
         //
         // The decisive acceptance test: 350°→10° must traverse +20° (NOT −340°).
         // A naive linear lerp yields (350 + (10-350)*t = 350 - 340t), landing at 180° at t=0.5
@@ -162,14 +162,14 @@ namespace MapRenderer.Tests.Cameras
 // Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
 // (Tools/core-tests). Do NOT add any UnityEngine reference.
 //
-// Tests ConstrainedAngle (S68): B2 Heading Wrap, B3 Tilt Clamp, B5 runtime Clamped, operator+.
+// Tests ConstrainedAngle: Heading Wrap, Tilt Clamp, runtime Clamped, operator+.
 
 
 
     [TestFixture]
     public class ConstrainedAngleTests
     {
-        // ── B2: Heading — Wrap to [0, 360) ───────────────────────────────────────────────────────
+        // ── Heading — Wrap to [0, 360) ───────────────────────────────────────────────────────────
         //
         // Degree storage guarantees bitwise-exact integer-degree wraps (370 % 360 == 10 exactly).
 
@@ -202,9 +202,9 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(0.0, d, 0.0, "Heading(360) must wrap to exactly 0° (half-open [0,360)).");
         }
 
-        // ── B3: Tilt — Clamp to [0, 90] ──────────────────────────────────────────────────────────
+        // ── Tilt — Clamp to [0, 90] ──────────────────────────────────────────────────────────────
         //
-        // This is the NEW CameraProperties.Tilt invariant that S68 introduces. The existing test
+        // This is the CameraProperties.Tilt invariant. The existing test
         // suite uses tilt ≤ 60 and never exercised the clamp; these tests pin it explicitly.
 
         [Test]
@@ -235,7 +235,7 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(90.0, d, 0.0, "Tilt(90) must be exactly 90° (inclusive upper bound).");
         }
 
-        // ── B5: Clamped — runtime range ≠ the [0,90] Tilt preset ─────────────────────────────────
+        // ── Clamped — runtime range ≠ the [0,90] Tilt preset ─────────────────────────────────────
         //
         // ViewInput.ApplyTiltDelta's maxPitch limit is a runtime value, distinct from the [0,90] Tilt
         // type invariant. If both were collapsed into the Tilt preset, Clamped(75,0,60) would return

@@ -1,6 +1,4 @@
-// S81 — the single test double for IDataSource. Replaces the 14 copy-pasted FixtureSource /
-// FakeDataSource / FakeDataSourceCt / DisposeSpySource / CancelFaultingSource doubles that had drifted
-// across the test suite.
+// The single test double for IDataSource.
 //
 // Engine-free by design: it references only byte[]/TileId/UniTask/CancellationToken/TileEncoding — NO
 // `using UnityEngine`. TileSchedulerOrderingTests.cs (which uses this) is compiled by BOTH the Unity
@@ -18,15 +16,13 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// A single, streamlined <see cref="IDataSource"/> test double: a thin wrapper over one fetch delegate
-    /// with always-on, thread-safe instrumentation. The convenience factories cover every behaviour the old
-    /// per-file doubles needed:
+    /// with always-on, thread-safe instrumentation.
     /// <list type="bullet">
-    ///   <item><see cref="FromBytes"/> — constant bytes for every tile (the 10 <c>FixtureSource</c> copies).</item>
-    ///   <item><see cref="Absent"/> — every tile reported absent (<c>HasData=false</c>; the wiring/dispose-spy doubles).</item>
-    ///   <item><see cref="FromFetch"/> — a per-coord delegate (the <c>FakeDataSource</c> shape).</item>
+    ///   <item><see cref="FromBytes"/> — constant bytes for every tile.</item>
+    ///   <item><see cref="Absent"/> — every tile reported absent (<c>HasData=false</c>).</item>
+    ///   <item><see cref="FromFetch"/> — a per-coord delegate.</item>
     ///   <item>The <see cref="TestDataSource(Func{TileId, CancellationToken, UniTask{TileResponse}}, TileEncoding)"/>
-    ///     ctor — a per-coord delegate that also sees the <see cref="CancellationToken"/> (the
-    ///     <c>FakeDataSourceCt</c> / <c>CancelFaultingSource</c> shapes).</item>
+    ///     ctor — a per-coord delegate that also sees the <see cref="CancellationToken"/>.</item>
     /// </list>
     /// <see cref="FetchCount"/>, <see cref="WasDisposed"/>, and <see cref="DisposeCount"/> are always on and
     /// thread-safe (the live loop increments fetches from the thread pool).

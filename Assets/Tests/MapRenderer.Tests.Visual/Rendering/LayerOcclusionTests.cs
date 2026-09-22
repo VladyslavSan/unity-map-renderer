@@ -1,4 +1,4 @@
-// Layer-occlusion and layer-compositing GPU/visual acceptance tests (UMR-176 pack: render-layers topic).
+// Layer-occlusion and layer-compositing GPU/visual acceptance tests.
 //
 // Both members pin one layer occluding/being occluded by another in the composited draw
 // stack (background vs. surrounding layers; a symbol layer vs. a fill layer by draw index).
@@ -11,7 +11,7 @@
 // constructor.
 //
 // Contents:
-//   BackgroundSnapshotTests        — Epic A / A2 — tooth §F.4: a style's background layer renders at its declared draw slot (the style's colour, not the camera clear) and composites mid-stack (occludes a layer declared below it, is occluded by one declared above it).
+//   BackgroundSnapshotTests        — a style's background layer renders at its declared draw slot (the style's colour, not the camera clear) and composites mid-stack (occludes a layer declared below it, is occluded by one declared above it).
 //   SymbolLayerOrderSnapshotTests  — Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
 
 using System.Collections.Generic;
@@ -39,25 +39,23 @@ using Symbol = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Tests.Visual
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // BackgroundSnapshotTests — Epic A / A2 — tooth §F.4
+    // BackgroundSnapshotTests — background renders at its declared draw slot and composites mid-stack
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Epic A / A2 — tooth §F.4: a style's <c>background</c> layer renders at its declared draw slot (the
-    /// style's colour, not the camera clear) and composites mid-stack (occludes a layer declared below it,
-    /// is occluded by one declared above it). MIGRATED from E3's bare-<c>RenderLayerSet</c> harness (plan §E
-    /// step 10, §G risk 1): A2 moves background's geometry from a self-owned world-cap
-    /// <see cref="MeshRenderer"/> (visible on a bare-set render) to per-covered-tile meshes owned by the
+    /// A style's <c>background</c> layer renders at its declared draw slot (the style's colour, not the
+    /// camera clear) and composites mid-stack: it occludes a layer declared below it and is occluded by one
+    /// declared above it. Background's geometry is per-covered-tile meshes owned by the
     /// backend (visible only through <see cref="MapRenderer.Unity.Rendering.Tile.TileManager"/>'s
-    /// cover→build→consume loop) — so this harness now drives a real <see cref="MapView"/> over a small
+    /// cover→build→consume loop), not a self-owned world-cap
+    /// <see cref="MeshRenderer"/> — so this harness drives a real <see cref="MapView"/> over a small
     /// deterministic cover (<see cref="MapRenderer.Tests.MapViewTestExtensions.LoadTestStyle"/>) and frames
     /// the render camera on ONE specific loaded tile's own container position (read from the GameObject
     /// backend's live Transform hierarchy — a frustum-selected cover is not guaranteed to be a solid square
     /// block, so framing on the whole cover's bounding-box centre can land in an uncovered gap), instead of a bare
-    /// <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerSet"/> render. The ASSERTIONS are unchanged
-    /// (green/red-dominant centre sample; mid-stack occlude-below / occluded-by-above) — only the geometry
-    /// SOURCE moved (plan §G risk 1: "Mercator background visually preserved", not "byte-identical pixels
-    /// through an unchanged harness").
+    /// <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerSet"/> render. The assertions are relational
+    /// (green/red-dominant centre sample; mid-stack occlude-below / occluded-by-above), so they pin
+    /// "Mercator background visually preserved", never byte-identical pixels.
     /// </summary>
     [TestFixture]
     public class BackgroundSnapshotTests : VisualTestFixture
@@ -77,7 +75,7 @@ namespace MapRenderer.Tests.Visual
         private const int SX0 = 216, SY0 = 216, SX1 = 296, SY1 = 296;
 
         // The mid-stack tooth's small hand-built fill quad's footprint (a FRACTION of the framed footprint,
-        // §B below) and its centred/corner sample rects — the fill quad sits centred in the frame, so a
+        // see FillFraction below) and its centred/corner sample rects — the fill quad sits centred, so a
         // corner sample lands outside it while staying inside the camera frustum (and inside the covered
         // background's real per-tile extent — see FrameFraction/FillFraction below).
         private const int FillCenterX0 = 236, FillCenterY0 = 236, FillCenterX1 = 276, FillCenterY1 = 276;
@@ -95,7 +93,7 @@ namespace MapRenderer.Tests.Visual
         // samples past its true edge into the camera clear) — see the design note on RenderCameraOrthoSize.
         private const float FrameFraction = 0.2f;
         // The hand-built fill quad's half-extent, as a fraction of the frustum half-size — small enough that
-        // the corner sample (§ above) sits clearly outside it, large enough that the centre sample sits
+        // the corner sample above sits clearly outside it, large enough that the centre sample sits
         // clearly inside it.
         private const float FillFraction = 0.15f;
 
@@ -130,7 +128,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>The world-space bounds of ONE specific loaded (background) tile — its container's own
         /// SW-corner position (read from the live GameObject backend hierarchy) expanded to the tile's own
         /// physical size. Framing on a SINGLE real tile (rather than the whole cover's bounding box) is
-        /// robust regardless of the frustum-selected cover's shape (§NewView).</summary>
+        /// robust regardless of the frustum-selected cover's shape (see <c>NewView</c>).</summary>
         private static Bounds LoadedBounds(MapView view)
         {
             float tileSize = (float)(WebMercator.WorldExtent * 2.0 / math.pow(2.0, Zoom));
@@ -253,8 +251,8 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>Drives the given two-layer (fill + background) style through a real <see cref="MapView"/>
         /// cover (background is per-tile, produced by the real pipeline; the fill layer declares no
-        /// <c>source</c> — same as the pre-A2 harness — so it never fetches and is hand-quaded here, using
-        /// the SET's own fill material, exactly as before), renders, and returns the centre-region mean
+        /// <c>source</c>, so it never fetches and is hand-quaded here, using
+        /// the SET's own fill material), renders, and returns the centre-region mean
         /// colour (<paramref name="corner"/> gets the corner-region mean). Null (and <paramref name="corner"/>
         /// null) on the GPU-context guard.</summary>
         private static double[] RenderMidStackStyle(
@@ -365,10 +363,10 @@ namespace MapRenderer.Tests.Visual
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
     // NOT registered in core-tests.csproj.
     //
-    // E2 acceptance teeth (the render-layer model) — now real snapshot tests
-    // because option (c)'s persistent per-slot MeshRenderer is the PROVEN-HEADLESS path (§5): unlike the retired
-    // Graphics.RenderMesh submit (0 px headless — SymbolAtlasOrientationSnapshotTests' header), a scene
-    // MeshRenderer Unity redraws on its own renders normally under a manually-invoked Camera.Render().
+    // The render-layer model's acceptance teeth, as real snapshot tests: the persistent per-slot
+    // MeshRenderer is the proven-headless path. A Graphics.RenderMesh submit renders 0 px headless (see
+    // SymbolAtlasOrientationSnapshotTests' header); a scene MeshRenderer Unity redraws on its own renders
+    // normally under a manually-invoked Camera.Render().
     //
     // Setup fuses two proven harnesses: the real-glyph symbol pipeline from SymbolAtlasOrientationSnapshotTests
     // (fixture atlas, CodepointTextShaper, real SymbolPlacementSystem) and the queue/composite scene from
@@ -376,7 +374,7 @@ namespace MapRenderer.Tests.Visual
     // SymbolRenderLayers are built directly via SymbolRenderLayer.Create, bypassing RenderLayerSet.Build — so
     // each test writes the renderQueue itself (`TransparentQueue + drawIndex`, one sub-slot's worth — these
     // tests order two TEXT materials against each other / against an occluding line, never a layer's own
-    // icon-vs-text pair, so the G7/D7 sub-slot band is inert here and the hand-written values stay valid),
+    // icon-vs-text pair, so the sub-slot band is inert here and the hand-written values stay valid),
     // mirroring exactly what RenderLayerSet.Build does in production for a single sub-slot. EVERY Create call
     // below additionally writes its own WorldIconMaterial queue at QueueFor(drawIndex, Base), which can sit
     // ABOVE the text queue the test hand-writes — inert in all of them for the reason above; the first such
@@ -385,7 +383,7 @@ namespace MapRenderer.Tests.Visual
     // Tooth 1's occluder is a wide LINE ribbon, not a fill quad, so it exercises the REAL production line
     // vertex layout (StyledLineTileBuilder.LinePositionNormal/LineWidthColor) rather than the generic Lit
     // vertex streams a hand-built Vector3[]/Vector2[] quad carries. (A hand-built quad DOES render headless
-    // once wound Unity-front — see LayerOrderSnapshotTests.BuildFillQuad and its §7.11 winding note — and that
+    // once wound Unity-front — see LayerOrderSnapshotTests.BuildFillQuad and its winding note — and that
     // file's variance tooth now carries a non-vacuous top-fill guard; the line here is a vertex-layout choice,
     // not a workaround for an invisible quad.)
     // SyntheticLineMesh builds the real production vertex layout, proven to render headless (it backs
@@ -450,7 +448,7 @@ namespace MapRenderer.Tests.Visual
                 textSizePx: 200f,
                 sortKey: 0f,
                 featureIndex: 0,
-                // Epic A / A1 Risk R1: a realistic containing tile (BuildOverheadScene's look-at) keeps the
+                // A realistic containing tile (BuildOverheadScene's look-at) keeps the
                 // world-anchored bake float32-safe — TileKey=0 is ~2e7m away (see
                 // SymbolAtlasOrientationSnapshotTests' identical note).
                 tileKey: TestTileKeys.PackedContaining(
@@ -508,7 +506,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         // A HUGE line ribbon through the world origin at Y=0 (the ground plane a MapCamera at tilt 0 looks
-        // straight down at, world origin == the look-at, S52 camera-relative rendering), standing in for a
+        // straight down at, world origin == the look-at under camera-relative rendering), standing in for a
         // fill occluder — see the header comment for why a fill quad doesn't work here. Built via
         // SyntheticLineMesh (the real production line vertex layout, proven to render headless by
         // LayerOrderSnapshotTests.BuildWideLine), sized to cover the whole frustum regardless of camera
@@ -561,7 +559,7 @@ namespace MapRenderer.Tests.Visual
                 frame, x - half, y - half, x + half + 1, y + half + 1);
 
 
-        // ── Tooth 1 (§6.1): a fill at a HIGHER queue occludes symbols; a fill BELOW them does not ──────────
+        // ── Tooth 1: a fill at a HIGHER queue occludes symbols; a fill BELOW them does not ─────────────────
 
         [Test]
         public void FillAboveSymbolLayer_OccludesSymbols_FillBelow_SymbolWins()
@@ -591,17 +589,16 @@ namespace MapRenderer.Tests.Visual
             var greenSymbolColor = new Color32(26, 217, 26, 255); // (0.1, 0.85, 0.1) in 0-255
             var redOccluderColor = new Color(0.85f, 0.1f, 0.1f, 1f);
 
-            // G7/D7 note: Create(drawIndex: 1) now also writes WorldIconMaterial.renderQueue itself, at
+            // Create(drawIndex: 1) also writes WorldIconMaterial.renderQueue itself, at
             // QueueFor(1, Base) = 3002 — ABOVE the TransparentQueue + 1 = 3001 this test hand-writes to
             // Material (the text) next. That is inert here: this test never stages or renders an icon quad,
             // only the text glyph, so the icon material's queue is set but never composited against
-            // anything. Left as-is per the Phase 4 fence — rewriting this scene's hand-written queues to
-            // QueueFor(...) is the riskiest available edit for zero contract gain.
+            // anything.
             var renderLayer = SymbolRenderLayer.Create(symbolLayer, settings, 8.0, drawIndex: 1);
             Assert.IsNotNull(renderLayer.Material, "MapMaterialSet.SymbolTextWorld must be assigned (asserted by MapMaterialSetTestUtil.Load).");
             renderLayer.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
 
-            // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
+            // Point text draws through the world path — pass the world base too.
             var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var buffer = new SymbolTileBuffer();
@@ -612,7 +609,7 @@ namespace MapRenderer.Tests.Visual
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             try
             {
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the single 'A' glyph must place (precondition, not the tooth itself).");
@@ -651,7 +648,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── Tooth 2 (§6.2): declared order among symbol layers — later DrawIndex wins the overlap ────────
+        // ── Tooth 2: declared order among symbol layers — later DrawIndex wins the overlap ───────────────
 
         [Test]
         public void TwoSymbolLayers_SameAnchor_LaterDrawIndexWins_SwapFlipsWinner()
@@ -682,7 +679,7 @@ namespace MapRenderer.Tests.Visual
             var redColor  = new Color32(230, 38, 26, 255);  // (0.9, 0.15, 0.1)
             var blueColor = new Color32(26, 51, 230, 255);  // (0.1, 0.2, 0.9)
 
-            // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
+            // Point text draws through the world path — pass the world base too.
             var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { layerA, layerB };
@@ -704,7 +701,7 @@ namespace MapRenderer.Tests.Visual
                 AddCenteredSymbol(bothBuffer, quads, bounds, frame.SceneOriginRender, new float4(0.9f, 0.15f, 0.1f, 1f), materialIndex: 0, allowOverlap: true);
                 AddCenteredSymbol(bothBuffer, quads, bounds, frame.SceneOriginRender, new float4(0.1f, 0.2f, 0.9f, 1f), materialIndex: 1, allowOverlap: true);
 
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 var layerAOnly = new List<SymbolRenderLayer> { layerA };
                 system.Tick(in frame, plan.Build(soloBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
                 system.Tick(in frame, plan.Build(soloBuffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layerAOnly);
@@ -714,7 +711,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.IsTrue(found, "solo label-A render must contain a pixel close to its ink colour — precondition for the sample point.");
 
                 // Both symbols, same anchor, AllowOverlap — collision keeps both (the tooth is DRAW order, not collision).
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(2, system.LastQuadCount, "both overlapping labels place (AllowOverlap — the tooth is draw order, not collision).");
@@ -727,10 +724,9 @@ namespace MapRenderer.Tests.Visual
                 // Swap declared order (mutate renderQueue in place — same materials, same presenters).
                 layerA.Material.renderQueue = LayerDrawOrder.TransparentQueue + 2;
                 layerB.Material.renderQueue = LayerDrawOrder.TransparentQueue + 1;
-                // Epic A / A1 (D5): points now draw through the WORLD path, whose queue lives on a SEPARATE
-                // material (WorldTextMaterial) synced from Material.renderQueue at Tick/present time (the
-                // PresentIcon precedent) — unlike the OLD path (presenter bound directly to Material, so a
-                // live queue mutation took effect on the very next Render with no re-Tick). A re-Tick here
+                // Points draw through the WORLD path, whose queue lives on a SEPARATE material
+                // (WorldTextMaterial) synced from Material.renderQueue at Tick/present time, so a live queue
+                // mutation needs a re-Tick to take effect. A re-Tick here
                 // matches real usage (production always Ticks before every Render); rebuilding through the
                 // SAME TestSymbolPlan keeps the mirror-refresh guard satisfied (see its note above).
                 system.Tick(in frame, plan.Build(bothBuffer, slotCount: 2), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
@@ -751,7 +747,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── Persistence (tooth §6.4's headless proxy): show across repeated renders, hide when empty ─────
+        // ── Persistence (the headless proxy): show across repeated renders, hide when empty ──────────────
 
         [Test]
         public void Presenter_ShowsAcrossRepeatedRenders_HidesWhenTickIsEmpty()
@@ -779,7 +775,7 @@ namespace MapRenderer.Tests.Visual
             var inkColor = new Color32(230, 230, 230, 255); // near-white ink, distinct from the near-black background
             var buffer = new SymbolTileBuffer();
             AddCenteredSymbol(buffer, quads, bounds, frame.SceneOriginRender, new float4(0.9f, 0.9f, 0.9f, 1f), materialIndex: 0);
-            // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
+            // Point text draws through the world path — pass the world base too.
             var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layers = new List<SymbolRenderLayer> { renderLayer };
@@ -790,9 +786,9 @@ namespace MapRenderer.Tests.Visual
             try
             {
                 // SHOW half: one Tick with a symbol, render TWICE with no Tick between — no manual
-                // MeshFilter/MeshRenderer attach anywhere in this test (E2's whole point: the presenter IS
-                // a persistent scene renderer, created/bound entirely inside Tick).
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // MeshFilter/MeshRenderer attach anywhere in this test: the presenter IS a persistent scene
+                // renderer, created and bound entirely inside Tick.
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity, symbolLayers: layers);
                 Assert.AreEqual(1, system.LastQuadCount, "the label must place (precondition).");
@@ -827,10 +823,10 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── Collision parity (tooth §6.3): the demo (no layers) and production (real SymbolRenderLayer)
-        //    paths must produce IDENTICAL candidate/survivor/quad counts — E2 touches only the DRAW, never
-        //    anything upstream of the emit loop. Two fresh SymbolPlacementSystem instances (not one instance
-        //    ticked twice) so A-5 sticky-placement incumbency from the first call can't bias the second. ──
+        // ── Collision parity: the no-layers and the real-SymbolRenderLayer paths must produce IDENTICAL
+        //    candidate/survivor/quad counts — render layers touch only the DRAW, never anything upstream of
+        //    the emit loop. Two fresh SymbolPlacementSystem instances (not one instance ticked twice), so
+        //    sticky-placement incumbency from the first call cannot bias the second. ──
 
         private static GlyphAtlasTexture BuildTinyAtlasTexture()
         {
@@ -858,12 +854,12 @@ namespace MapRenderer.Tests.Visual
                 sortKey: sortKey,
                 featureIndex: featureIndex,
                 tileKey: 0L,
-                // R3: PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey —
-                // so two symbols sharing an anchor with the (both-default) Text/MaterialIndex this method used to
-                // leave unset would collide on FadeId. Under R3, FadeId is the display key (SymbolCandidate.FadeId's
-                // uniqueness contract), so a collision would make the loser show alongside the winner. Distinct Text
-                // per symbol keeps the anchors identical (the real collision this test needs) while giving each a
-                // unique identity; it does not perturb the staged geometry (its quads are supplied explicitly here).
+                // PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey —
+                // so two symbols sharing an anchor with a default Text/MaterialIndex collide on FadeId. FadeId is
+                // the display key (SymbolCandidate.FadeId's uniqueness contract), so a collision makes the loser
+                // show alongside the winner. A distinct Text per symbol keeps the anchors identical (the real
+                // collision this test needs) while giving each a unique identity, and does not perturb the staged
+                // geometry (its quads are supplied explicitly here).
                 text: "L" + featureIndex);
         }
 
@@ -898,11 +894,9 @@ namespace MapRenderer.Tests.Visual
             AddOverlappingSymbol(buffer, 0, frame.SceneOriginRender, sortKey: 20f);
             AddOverlappingSymbol(buffer, 1, frame.SceneOriginRender, sortKey: 10f); // lower key wins the collision
 
-            // Step 5b: this compared the symbols-list overload against the SymbolBatch overload — both demo
-            // seams, so it compared demo against demo while calling one side "prod". Both are gone. The invariant
-            // it actually asserts survives and is now stated directly: supplying per-layer render layers (E2 —
-            // each with its own material + persistent presenter) partitions only the DRAW, and must not perturb
-            // anything upstream of the emit loop. Same plan, same symbols, layers vs no layers.
+            // The invariant: supplying per-layer render layers — each with its own material and persistent
+            // presenter — partitions only the DRAW, and must not perturb anything upstream of the emit loop.
+            // Same plan, same symbols, layers vs no layers.
             var noLayersSystem = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             var layeredSystem  = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var plan = new TestSymbolPlan(mapCamera.Projection);
@@ -913,7 +907,7 @@ namespace MapRenderer.Tests.Visual
                     "precondition: both labels reach the placement path — they share an anchor, so a dedup " +
                     "merge here would silently turn the comparison into 1-vs-2 and read as a real divergence.");
 
-                // R3: duplicate both systems' ticks — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate both systems' ticks — the collision verdict is harvested one Tick late.
                 // Without this, a fresh system's single Tick harvests nothing (LastSurvivorCount == 0 on both
                 // sides), and the equality assertions below would pass VACUOUSLY (0 == 0) without ever exercising
                 // a real collision — hence the Assert.Greater lines strengthening them against that.

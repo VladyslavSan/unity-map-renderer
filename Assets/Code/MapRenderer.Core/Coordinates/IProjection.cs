@@ -23,10 +23,10 @@ namespace MapRenderer.Core.Geo
     /// </summary>
     public interface IProjection
     {
-        // ── Geometry (build side; docs §6) ────────────────────────────────────────────────────────
+        // ── Geometry (build side) ─────────────────────────────────────────────────────────────────
 
         /// <summary>The projection kernel: a geodetic SURFACE point (no elevation) → render-space position
-        /// (pre-RTC; east=+X, up=+Y, north=+Z, docs §7) + the surface up. The single shared math — called from
+        /// (pre-RTC; east=+X, up=+Y, north=+Z) + the surface up. The single shared math — called from
         /// Burst via the generic <c>ProjectPointsJob&lt;TProj&gt;</c> constraint AND from the OOP conveniences
         /// below. Input is <see cref="GeoCoordinate"/> (2D): today's geometry is on the datum surface. Elevated
         /// geometry (<see cref="GeoCoordinate3D"/> with altitude) is a future, more-complex path — out of scope
@@ -60,10 +60,10 @@ namespace MapRenderer.Core.Geo
         /// split count falls out to zero and the flat case is the degenerate value, not a separate branch.
         /// <para>Planar Mercator: <see cref="double.PositiveInfinity"/> (a flat sheet never subdivides). Globe
         /// (ECEF sphere): a small tolerance (~2°). This replaces the former curvature/handedness capability
-        /// flags: winding is now derived by construction (line <c>across = cross(along, up)</c> ties
+        /// flags: winding is derived from the geometry (line <c>across = cross(along, up)</c> ties
         /// the ribbon to the same <c>up</c> its centerline was projected with — one frame, correct for every
-        /// projection — so no per-projection winding fact is needed; see <c>GlobeLineWindingTests</c> /
-        /// <c>docs §7.1</c>).</para></summary>
+        /// projection — so no per-projection winding fact is needed; see <c>GlobeLineWindingTests</c> and
+        /// <c>docs/coordinates-and-projections.md</c>).</para></summary>
         double MaxRefineAngleRad { get; }
 
         // ── Camera interaction (managed side) ───────────────────────────────────────────────────────

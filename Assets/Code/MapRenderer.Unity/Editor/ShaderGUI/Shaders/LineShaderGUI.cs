@@ -7,7 +7,7 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 namespace MapRenderer.Unity.Editor
 {
     /// <summary>
-    /// Inspector for <c>Map/Line</c> (S58). The final successor
+    /// Inspector for <c>Map/Line</c>. The final successor
     /// (<see cref="BaseShaderGUI"/> → <see cref="LitShaderGUI"/> → this): inherits the full Lit layout
     /// and adds a line-specific foldout (width / blur / gap / offset / dash).
     ///

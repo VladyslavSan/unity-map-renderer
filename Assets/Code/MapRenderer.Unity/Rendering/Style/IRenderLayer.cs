@@ -18,10 +18,10 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>The parsed style data (source, filter, source-layer, id) this layer renders from.</summary>
         StyleLayer StyleLayer { get; }
 
-        /// <summary>The lifetime class — which loop feeds this layer's geometry (D6).</summary>
+        /// <summary>The lifetime class — which loop feeds this layer's geometry.</summary>
         RenderLayerBuild Build { get; }
 
-        /// <summary>Who re-draws this layer each camera render (D6).</summary>
+        /// <summary>Who re-draws this layer each camera render.</summary>
         DrawPersistence Persistence { get; }
 
         /// <summary>This layer's <b>slot</b> — the backend <c>materialIndex</c>, the
@@ -60,7 +60,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <see cref="RenderLayerSet.ApplyZoom"/> (the alloc-free hot path). Non-local invariant: the shader
         /// converts a px-valued width using the <c>_MapFrameMetersPerDevicePixel</c> global
         /// (<see cref="Map.MapCamera.SyncToCamera"/>, metres per DEVICE pixel), so <paramref name="inputs"/>'
-        /// device-pixel ratio must agree with it (S107/S116) or every px width is off by that ratio.</summary>
+        /// device-pixel ratio must agree with it, or every px width is off by that ratio.</summary>
         /// <param name="inputs">The live zoom, device-pixel ratio, and wall clock for this frame.</param>
         void ApplyZoom(in StyleFrameInputs inputs);
 

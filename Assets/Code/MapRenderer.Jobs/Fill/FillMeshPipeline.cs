@@ -10,15 +10,10 @@ using MapRenderer.Jobs.Geometry;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// job-scheduling-design.md §8 stage 4 Group B: the synchronous decode → ring assembly → earcut →
-    /// projection job CHAIN this class used to coordinate (<c>Schedule</c>) is retired — <see cref="FillMeshGraph.Schedule"/>
-    /// is the only mesher left. What survives here is what the graph and its callers still share:
-    /// <see cref="LayerInput"/> (the input descriptor both used), <see cref="HoleRingComparer"/> (the hole-sort
-    /// order <see cref="FillMeshGraph"/>'s gather node uses, unchanged), and the decode-sizing pair
-    /// <see cref="PrecountRingsAndVertices"/>/<see cref="EnsureCapacity"/> (still called from
-    /// <c>MvtGeometryMaterializer</c>, upstream of either mesher). ~20 call sites reference
-    /// <c>FillMeshPipeline.LayerInput</c>; renaming this class to something that no longer implies "the
-    /// pipeline" is a follow-up sweep with no behaviour change (DIV-B1), not done here.
+    /// What <see cref="FillMeshGraph"/> and its callers share: <see cref="LayerInput"/>, the input
+    /// descriptor; <see cref="HoleRingComparer"/>, the hole-sort order the graph's gather node uses; and the
+    /// decode-sizing pair <see cref="PrecountRingsAndVertices"/>/<see cref="EnsureCapacity"/>, which
+    /// <c>MvtGeometryMaterializer</c> calls upstream of the mesher.
     /// </summary>
     public static class FillMeshPipeline
     {
@@ -27,37 +22,22 @@ namespace MapRenderer.Jobs.Fill
         private const uint LineTo = 2;
 
         /// <summary>
-        /// Exact pre-count of the rings and vertices <see cref="MvtDecodeJob.Execute"/> will emit for a
-        /// layer's flattened command stream — computed by walking every command exactly as the decode job
-        /// does (S06 gated follow-up, item a; the fix that closes it for real).
-        ///
-        /// <b>Why exact (not a heuristic).</b> The decode job emits one ring AND one vertex per MoveTo point,
-        /// and one vertex per LineTo point. So:
-        ///   - <c>rings    = Σ over all MoveTo commands of (count)</c>
-        ///   - <c>vertices = Σ over all MoveTo + LineTo commands of (count)</c>
-        /// These are the precise quantities the job writes, for ANY input — including a malformed multi-point
-        /// <c>MoveTo</c> (count=N), which starts N rings from a single header. The old heuristic
-        /// (<c>maxRings = totalCommands/3 + featureCount + 2</c>) was correct only for spec-compliant polygons
-        /// (one MoveTo per ring → ≥3 cmd uints/ring) and UNDER-allocated for a multi-point MoveTo
-        /// (counterexample: one MoveTo count=11 → 11 rings, but the heuristic sized maxRings=10), letting
-        /// <see cref="MvtDecodeJob"/> write out of range and corrupt adjacent <see cref="NativeArray{T}"/>
-        /// memory in a release build (where <c>ENABLE_UNITY_COLLECTIONS_CHECKS</c> is stripped). Sizing from
-        /// this exact pre-count makes under-allocation impossible, so the OOB write cannot occur in any build.
+        /// Exact pre-count of the rings and vertices <see cref="MvtDecodeJob.Execute"/> emits for a layer's
+        /// flattened command stream, computed by walking every command the way the decode job does. The
+        /// count is exact, not a heuristic: the job emits one ring and one vertex per MoveTo point, and one
+        /// vertex per LineTo point, for ANY input — a malformed multi-point <c>MoveTo</c> included. Sizing
+        /// from it makes under-allocation impossible, so no build can produce the out-of-range write.
         ///
         /// <b>Must mirror <see cref="MvtDecodeJob.Execute"/> exactly.</b> The job advances its read cursor by
-        /// 2 param uints per MoveTo/LineTo point and reads no params for ClosePath or any unknown command. We
-        /// walk the commands the same way here. If you change one, change the other — they desync silently
-        /// otherwise and re-introduce the overflow.
+        /// 2 param uints per MoveTo/LineTo point and reads no params for ClosePath or an unknown command. If
+        /// you change one, change the other — they desync silently and re-introduce the overflow.
         ///
-        /// Note (latent, out of scope here): a truncated/malformed param stream can make the decode job read
-        /// PAST the feature's command range (an input-read OOB, distinct from the output-write OOB this closes).
-        /// The counts computed here still match what the job writes, so the sizing is correct regardless; the
-        /// input-read hardening is tracked separately.
+        /// A truncated param stream can still make the decode job read PAST the feature's command range.
+        /// That is an input-read overflow; the counts here match what the job WRITES either way.
         /// </summary>
-        /// <remarks>2a: takes the same native-flat <c>(commands, featureOffsets, featureLengths)</c> shape
-        /// <see cref="MvtDecodeJob"/> reads — the caller (<see cref="MvtGeometryMaterializer.Materialize"/>)
-        /// no longer holds a per-feature managed <c>uint[]</c> to precount from. A feature with
-        /// <c>featureLengths[fi] == 0</c> is skipped, the flat-buffer equivalent of the old null element.</remarks>
+        /// <remarks>Takes the same native-flat <c>(commands, featureOffsets, featureLengths)</c> shape
+        /// <see cref="MvtDecodeJob"/> reads. A feature with <c>featureLengths[fi] == 0</c> is
+        /// skipped.</remarks>
         public static void PrecountRingsAndVertices(
             NativeArray<uint> commands, NativeArray<int> featureOffsets, NativeArray<int> featureLengths,
             out int rings, out int vertices)
@@ -98,13 +78,10 @@ namespace MapRenderer.Jobs.Fill
         }
 
         /// <summary>
-        /// Never-fired capacity backstop for the sizing pre-pass (S06 gated follow-up, item a).
-        ///
-        /// With the exact <see cref="PrecountRingsAndVertices"/> sizing, the decode/ring-assembly jobs can
-        /// never report a count exceeding the buffers they were sized for, so this <c>if</c> never fires. It is
-        /// kept as defense-in-depth: a plain <c>if</c> (NOT behind <c>ENABLE_UNITY_COLLECTIONS_CHECKS</c>, so it
-        /// runs in Editor and release alike) that would fail fast — loudly, before any further processing —
-        /// should a future sizing miscalculation ever under-allocate.
+        /// Never-fired capacity backstop for the sizing pre-pass. With exact
+        /// <see cref="PrecountRingsAndVertices"/> sizing no job can report a count past the buffers it was
+        /// sized for. The check is a plain <c>if</c>, not behind <c>ENABLE_UNITY_COLLECTIONS_CHECKS</c>, so
+        /// a future sizing mistake fails fast in a release build too.
         /// </summary>
         /// <param name="count">The actual count reported by a job (or computed in the pre-pass).</param>
         /// <param name="capacity">The capacity the buffer was sized to.</param>
@@ -124,53 +101,47 @@ namespace MapRenderer.Jobs.Fill
         /// </summary>
         public struct LayerInput
         {
-            /// <summary>Waist 1's shared tile geometry — <b>BORROWED</b>. <see cref="FillMeshGraph.Schedule"/>
+            /// <summary>The shared tile geometry — <b>BORROWED</b>. <see cref="FillMeshGraph.Schedule"/>
             /// never disposes it, never writes into it, and does not retain it past
-            /// <c>Handle.Complete()</c>: it derives its own private buffer holding exactly the rings
-            /// <see cref="RingVisitOrder"/> names, and owns only that. It is still the sole authority for the
-            /// tile address and extent, which <see cref="FillMeshGraph.Schedule"/> reads off it, so there is
-            /// no second copy for a stage to route around.</summary>
+            /// <c>Handle.Complete()</c>: it derives its own private buffer over the rings
+            /// <see cref="RingVisitOrder"/> names, and owns only that. It stays the sole authority for the
+            /// tile address and extent, so there is no second copy to route around.</summary>
             public TileGeometryBuffers Geometry;
 
             /// <summary>Ring indices into <see cref="Geometry"/>, in the exact order this layer wants them
-            /// triangulated — the caller's selection AND its draw order in one array (fill's
-            /// <c>fill-sort-key</c> rank lives here now). Caller-owned; <see cref="FillMeshGraph.Schedule"/>
+            /// triangulated — the caller's selection AND its draw order in one array, so fill's
+            /// <c>fill-sort-key</c> rank lives here. Caller-owned; <see cref="FillMeshGraph.Schedule"/>
             /// only reads it.
             /// <para><b>Must group each feature's rings contiguously</b>: <see cref="RingAssemblyJob"/> resets
             /// its exterior sign on a feature CHANGE, so a feature's rings split across the order would have
             /// its second run re-read as a fresh exterior with a fresh sign.</para></summary>
             public NativeArray<int> RingVisitOrder;
 
-            /// <summary>Suppresses the outward boundary band for this layer — <c>false</c> (the default a
-            /// caller gets for free) emits it, which is what every real fill layer wants. Set by the two
-            /// callers whose geometry has no silhouette to antialias: <c>FillExtrusionMeshGraph</c>'s roof,
-            /// whose mesh layout carries no band attribute and whose buildings keep hard edges, and
-            /// <c>BackgroundQuad</c>, a full-tile quad whose every edge is a tile seam abutting the
-            /// neighbour's identical quad — a band there is a double-composited rim, never antialiasing.
-            /// <para>It is also where the style's <c>fill-antialias</c> lands: a layer that opts out emits no
-            /// band geometry at all, which is what keeps the property per-layer implementable —
-            /// <c>StyledFillTileBuilder.BuildLayerInput</c> is the site that resolves it.</para></summary>
+            /// <summary>Suppresses the outward boundary band for this layer. The default <c>false</c> emits
+            /// it, which every real fill layer wants. Set by the callers whose geometry has no silhouette to
+            /// antialias: <c>FillExtrusionMeshGraph</c>'s roof, whose buildings keep hard edges, and
+            /// <c>BackgroundQuad</c>, whose every edge abuts the neighbour tile's identical quad, where a
+            /// band is a double-composited rim.
+            /// <para>The style's <c>fill-antialias</c> also lands here: a layer that opts out emits no band
+            /// geometry at all. <c>StyledFillTileBuilder.BuildLayerInput</c> resolves it.</para></summary>
             public bool SuppressBoundaryBand;
 
-            /// <summary>S91-C: the RTC render-space origin (docs §5) the mesh vertices are baked relative to —
-            /// the tile's SW corner projected through <see cref="Projection"/>. The single source of the
-            /// bake origin, shared with the tile transform (Mercator: <c>(mercX, 0, mercZ)</c>; globe: the
-            /// corner's ECEF). Use <c>TileRenderOrigin.Project</c> (Core) to compute it.</summary>
+            /// <summary>The RTC render-space origin the mesh vertices are baked relative to — the tile's SW
+            /// corner projected through <see cref="Projection"/>. The single source of the bake origin,
+            /// shared with the tile transform (Mercator: <c>(mercX, 0, mercZ)</c>; globe: the corner's
+            /// ECEF). Use <c>TileRenderOrigin.Project</c> (Core) to compute it.</summary>
             public double3 OriginRender;
 
-            /// <summary>S91: the projection the geometry is built with (a stateless struct behind
+            /// <summary>The projection the geometry is built with (a stateless struct behind
             /// <see cref="MapRenderer.Core.Geo.IProjection"/>). Left <c>null</c> ⇒ Web Mercator (planar).</summary>
             public MapRenderer.Core.Geo.IProjection Projection;
 
-            /// <summary>How much of the tile's buffer to keep before triangulating (Stage 1b). <c>default</c>
-            /// ⇒ disabled ⇒ the clip stage is skipped entirely and the geometry reaches assembly exactly as
-            /// decoded — the behaviour-preserving state every unset caller gets.</summary>
+            /// <summary>How much of the tile's buffer to keep before triangulating. <c>default</c> ⇒
+            /// disabled ⇒ the clip stage is skipped and the geometry reaches assembly as decoded.</summary>
             public MapRenderer.Core.Tiles.TileBufferClip Clip;
         }
 
         // ── Helpers ───────────────────────────────────────────────────────────────────────────
-        // (The tile's bake origin is TileRenderOrigin.Project — Core, engine-free, shared by every geometry
-        //  kind; it is NOT fill-specific, so it does not live on this fill pipeline.)
 
         private static double LeftmostX(NativeArray<double2> verts, int start, int len)
         {
@@ -189,24 +160,20 @@ namespace MapRenderer.Jobs.Fill
         }
 
         /// <summary>
-        /// Orders hole ring indices by (leftmost-x, then min-y, then ring index) — the deterministic bridge
-        /// order that must match managed <c>validHoles.Sort</c>. A <b>struct</b> comparer so
-        /// <c>NativeArray.Sort&lt;int, HoleRingComparer&gt;</c> takes it by generic constraint with no boxing —
-        /// the sort of the reused native hole buffer allocates nothing.
+        /// Orders hole ring indices by leftmost-x, then min-y, then ring index — the deterministic bridge
+        /// order. A <b>struct</b> comparer, so <c>NativeArray.Sort&lt;int, HoleRingComparer&gt;</c> takes it
+        /// by generic constraint with no boxing and the sort allocates nothing.
         /// </summary>
-        /// <remarks><c>internal</c> (not <c>private</c>) so <c>FillHoleRingComparerAllocationTests</c> can
-        /// measure that sorting a <see cref="Unity.Collections.NativeArray{T}"/> through it allocates no
-        /// managed memory — the property this stage creates (versus the retired managed <c>int[]</c> + managed
-        /// <c>Array.Sort</c>). Jobs grants <c>InternalsVisibleTo("MapRenderer.Tests.EditMode")</c>.</remarks>
+        /// <remarks><c>internal</c>, not <c>private</c>, so a test can measure that sorting through it
+        /// allocates no managed memory.</remarks>
         internal readonly struct HoleRingComparer : IComparer<int>
         {
             private readonly NativeArray<double2> _vertices;
             private readonly NativeArray<int>     _ringOffsets;
 
-            /// <summary>Binds the comparer directly to the two arrays the ordering reads — the graph-node
-            /// shape: a job field cannot hold a <see cref="TileGeometryBuffers"/>
-            /// alongside its own <c>AsArray()</c> views without the safety system seeing two aliases of the
-            /// same allocation.</summary>
+            /// <summary>Binds the comparer directly to the two arrays the ordering reads. A job field cannot
+            /// hold a <see cref="TileGeometryBuffers"/> alongside its own <c>AsArray()</c> views without the
+            /// safety system seeing two aliases of the same allocation.</summary>
             /// <param name="vertices">Ring vertices, tile-space.</param>
             /// <param name="ringOffsets">Per-ring start offsets into <paramref name="vertices"/>.</param>
             public HoleRingComparer(NativeArray<double2> vertices, NativeArray<int> ringOffsets)

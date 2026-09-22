@@ -17,29 +17,24 @@ namespace MapRenderer.Jobs.Mvt
     /// strings/dictionaries. Therefore this managed decoder is the single point that decodes the full MVT
     /// message — feature properties, id, geometry type, and geometry are all decoded here.
     ///
-    /// <para><b>IR C1 P3 — the decode takes the <see cref="TileId"/> and materializes EAGERLY.</b> Each
-    /// layer's rings are flattened into its own <c>TileGeometryBuffers</c> before <see cref="Decode"/>
-    /// returns. <b>2a:</b> no per-feature <c>uint[]</c> command array is ever minted to get there — each
-    /// feature's geometry field is captured as a byte-range only (see <c>DecodeFeature</c>'s doc) and every
-    /// feature's commands are flattened directly into one shared <c>Allocator.Persistent</c>
-    /// <c>NativeArray&lt;uint&gt;</c>, consumed by <c>MvtGeometryMaterializer</c> and freed before this call
-    /// returns. Feature tag words are flattened the same way, into <c>MvtLayer.FeatureTagWords</c> — one
-    /// shared per-layer buffer instead of a per-feature <c>uint[]</c>.</para>
+    /// <para><b>The decode takes the <see cref="TileId"/> and materializes EAGERLY.</b> Each layer's rings
+    /// are flattened into its own <c>TileGeometryBuffers</c> before <see cref="Decode"/> returns, and no
+    /// per-feature <c>uint[]</c> command array is minted on the way: each feature's geometry field is
+    /// captured as a byte range only, and every feature's commands are flattened directly into one shared
+    /// <c>Allocator.Persistent</c> <c>NativeArray&lt;uint&gt;</c>. Feature tag words are flattened the same
+    /// way, into <c>MvtLayer.FeatureTagWords</c>.</para>
     ///
-    /// <para><b>Why eager, and why the id is a parameter.</b> Lazy per-layer materialization would mutate the
-    /// tile on a second thread <i>after</i> the wrapping <c>SharedDisposable{IDecodedTile}</c> publishes it,
-    /// retroactively invalidating that class's documented safe-publication argument; eager keeps every write
-    /// inside the decode. And the
-    /// tile address enters the pipeline exactly ONCE, here, at the fetch — it is no longer supplied by
-    /// whichever caller happened to want geometry, which is precisely the mispairing the retired
-    /// <c>TileGeometryStore</c> made possible.</para>
+    /// <para><b>Why eager, and why the id is a parameter.</b> Lazy per-layer materialization would mutate
+    /// the tile on a second thread <i>after</i> the wrapping <c>SharedDisposable{IDecodedTile}</c> publishes
+    /// it, breaking that class's safe-publication argument; eager keeps every write inside the decode. And
+    /// the tile address enters the pipeline exactly ONCE, here, at the fetch, rather than coming from
+    /// whichever caller happened to want geometry.</para>
     /// </summary>
     public static class MvtDecoder
     {
         /// <summary>Profiler marker name constants (SSOT) — referenced by the marker field below and by
-        /// <c>ProfilerMarkerTests</c>. The marker brackets the geometry materialization, so it lives wherever
-        /// that happens: it moved from <c>FillMeshPipeline</c> to <c>TileGeometryStore</c> in IR B7, and here
-        /// in IR C1 P3 when the store was retired and the decoder took the work over.</summary>
+        /// <c>ProfilerMarkerTests</c>. The marker brackets the geometry materialization, so it lives
+        /// wherever that happens.</summary>
         public static class ProfilerMarkerNames
         {
             public const string Decode = "MapRenderer.Pipeline.Decode";
@@ -139,7 +134,7 @@ namespace MapRenderer.Jobs.Mvt
             // must not assume the counted and actual feature counts are identical.
             var tagStart = new List<int>(featureCount);
             var tagEnd   = new List<int>(featureCount);
-            // 2a: per-feature geometry BYTE BOUNDS only, same shape as the tag bounds above — the command
+            // Per-feature geometry BYTE BOUNDS only, same shape as the tag bounds above — the command
             // words themselves are never parsed into managed memory. See DecodeFeature's doc.
             var geomStart = new List<int>(featureCount);
             var geomEnd   = new List<int>(featureCount);
@@ -200,8 +195,8 @@ namespace MapRenderer.Jobs.Mvt
             for (int i = 0; i < layer.Keys.Count; i++)
                 keyIndex[layer.Keys[i]] = i;
 
-            // IR C1 P3: materialize this layer's rings and tag words NOW, from the byte bounds collected
-            // above, and let the scratch fall out of scope. `layer.Extent` is fully resolved by this point —
+            // Materialize this layer's rings and tag words NOW, from the byte bounds collected above, and
+            // let the scratch fall out of scope. `layer.Extent` is fully resolved by this point —
             // the extent field may appear anywhere in the layer message, which is why this runs after the
             // read loop and not inside it. The kind column is read off the same features, in the same order,
             // as the command list.
@@ -209,8 +204,8 @@ namespace MapRenderer.Jobs.Mvt
             for (int i = 0; i < headers.Count; i++)
                 kinds.Add(headers[i].Kind);
 
-            // 2a: flatten tags, then geometry — both via FlattenFeatureColumn (see its doc for the two-pass
-            // count-then-fill technique) — into ONE shared Allocator.Persistent NativeArray<uint> apiece.
+            // Flatten tags, then geometry — both through FlattenFeatureColumn — into ONE shared
+            // Allocator.Persistent NativeArray<uint> apiece.
             // The geometry buffers are BORROWED by the materializer (never disposed by it — see its ctor
             // doc); the tag-words buffer is adopted by the layer (see AdoptFeatureTagWords below) — this
             // method remains the sole owner of every buffer until it hands ownership off, and frees whatever
@@ -459,11 +454,11 @@ namespace MapRenderer.Jobs.Mvt
         /// Decodes one Feature sub-message. Returns the feature HEADER (geometry type + id, the latter
         /// <see cref="Value.Null"/> when field 1 was absent), the tag-word stream's byte bounds (to be
         /// flattened after the layer's key/value tables are fully read) and the geometry command stream's
-        /// byte bounds — all as OUT-OF-BAND results the caller consumes to build the feature once, complete,
-        /// later (none belongs on the feature — IR C1 P3 — and <see cref="MvtFeature"/> is construct-once,
-        /// so it is not built until its store exists).
+        /// byte bounds — all as OUT-OF-BAND results the caller consumes to build the feature once,
+        /// complete, later: none of them belongs on the feature, and <see cref="MvtFeature"/> is
+        /// construct-once, so it is not built until its store exists.
         ///
-        /// <para><b>2a: neither the tag field nor the geometry field is parsed here.</b>
+        /// <para><b>Neither the tag field nor the geometry field is parsed here.</b>
         /// <c>ReadLengthDelimited</c> returns <c>[start,end)</c> as absolute offsets into the tile's root byte
         /// buffer (every <see cref="ProtobufReader"/> slice shares the same backing array — see
         /// <c>ProtobufReader.Slice</c>), so the caller can re-open that exact byte range later with its OWN

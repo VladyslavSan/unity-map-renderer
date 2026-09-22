@@ -7,27 +7,21 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
-    /// One fill layer's graph output — the scheduled form of what the (retired) synchronous
-    /// <c>FillMeshPipeline.Schedule</c> used to return computed and complete (job-scheduling-design.md §3.2
-    /// rule 1). Returned by <see cref="FillMeshGraph.Schedule"/> with <see cref="Handle"/> UNCOMPLETED: the
-    /// caller polls <c>Handle.IsCompleted</c>, calls <see cref="Dispose"/> (which completes first) or reads
-    /// outputs only after its own <c>Handle.Complete()</c>.
+    /// One fill layer's graph output. <see cref="FillMeshGraph.Schedule"/> returns it with
+    /// <see cref="Handle"/> UNCOMPLETED: the caller polls <c>Handle.IsCompleted</c>, calls
+    /// <see cref="Dispose"/> (which completes first), or reads outputs only after its own
+    /// <c>Handle.Complete()</c>.
     ///
-    /// <para><b>Two ways to end up with a value.</b> A layer with nothing to draw
-    /// (<c>!Geometry.IsCreated || !RingVisitOrder.IsCreated || Length == 0</c>) makes
+    /// <para><b>Two ways to end up with a value.</b> A layer with nothing to draw makes
     /// <see cref="FillMeshGraph.Schedule"/> return <c>default</c> — <see cref="IsCreated"/> false, no lists
-    /// ever allocated, <see cref="Handle"/> the completed default handle. Every other call allocates real
-    /// lists up front and schedules the whole chain over them, even when the layer turns out to have zero
-    /// polygons after the chain runs — the graph cannot know that at schedule time, unlike a synchronous
-    /// pipeline that reads the polygon count back before returning (job-scheduling-design.md §8 stage 4
-    /// Group B: this is exactly the shape a parity check against such a pipeline had to normalise, back when
-    /// one existed as an independent oracle to check against).</para>
+    /// allocated, <see cref="Handle"/> the completed default handle. Every other call allocates real lists
+    /// up front and schedules the whole chain over them, even when the layer turns out to have zero
+    /// polygons, because the graph cannot know that at schedule time.</para>
     /// </summary>
     public struct FillGraphOutput : IDisposable
     {
         /// <summary>Merged-polygon vertices in tile-space <c>double2</c> — the earcut IR on the flat arm, the
-        /// SUBDIVIDED tile coordinate on the curved arm (job-scheduling-design.md §3.7: one column set for
-        /// both arms).</summary>
+        /// SUBDIVIDED tile coordinate on the curved arm. One column set serves both arms.</summary>
         public NativeList<double2> TileVertices;
 
         /// <summary>Origin-relative projected world positions, one per <see cref="TileVertices"/> entry.</summary>
@@ -43,14 +37,12 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>The boundary band's per-vertex attribute — <c>(dirEast, dirNorth, side)</c> in the
         /// vertex's own surface frame, one per <see cref="TileVertices"/> entry, reaching the shaders as
-        /// TEXCOORD3. Exactly <c>(0,0,0)</c> on every interior vertex and on the band's inner ring;
-        /// <c>side = 1</c> with an outward miter on the band's outer ring. Written by
-        /// <see cref="AggregateJob"/> (zeros) then <see cref="FillBandJob"/> (the band's own slots). On the
-        /// curved arm the same values are carried through subdivision on <see cref="GlobeFillVertex.Band"/>,
-        /// so a midpoint vertex can hold an INTERPOLATED band — <c>side</c> strictly between 0 and 1, with a
-        /// proportionally shortened miter. The two halves are independent: <c>dirEast/dirNorth</c> is the
-        /// displacement, <c>side</c> only the coverage coordinate, and the shader never multiplies one by the
-        /// other (<c>Fill_VertexModify.hlsl</c>).</summary>
+        /// TEXCOORD3. <c>(0,0,0)</c> on every interior vertex and on the band's inner ring; <c>side = 1</c>
+        /// with an outward miter on its outer ring. Written by <see cref="AggregateJob"/> (zeros), then
+        /// <see cref="FillBandJob"/> (the band's own slots). Subdivision carries the same values on
+        /// <see cref="GlobeFillVertex.Band"/>, so a midpoint vertex can hold an INTERPOLATED band. The two
+        /// halves are independent: <c>dirEast/dirNorth</c> displaces, <c>side</c> is only the coverage
+        /// coordinate, and the shader never multiplies one by the other.</summary>
         public NativeList<float3> VertexBand;
 
         /// <summary>Feature index of each vertex (into the caller's selected-feature list), one per
@@ -64,11 +56,10 @@ namespace MapRenderer.Jobs.Fill
         /// <see cref="Error"/> is separate; see <see cref="FillGraphCounts"/>'s doc for why.</summary>
         public NativeArray<FillGraphCounts> Counts;
 
-        /// <summary>Non-zero ⇒ one of <see cref="FillGraphCounts"/>'s <c>Error*</c> codes; <see cref="FillGraphCounts.Ok"/>
-        /// otherwise. A standalone <see cref="NativeReference{T}"/>, not a <see cref="Counts"/> field — every
-        /// writer of an error code (<see cref="SizingJob"/>, <see cref="EarcutBatchJob"/>) would otherwise
-        /// also become a writer of <see cref="Counts"/>, which is exactly the hidden-edge hazard this split
-        /// removes (job-scheduling-design.md §3.2's own shape).</summary>
+        /// <summary>Non-zero ⇒ one of <see cref="FillGraphCounts"/>'s <c>Error*</c> codes;
+        /// <see cref="FillGraphCounts.Ok"/> otherwise. A standalone <see cref="NativeReference{T}"/>, not a
+        /// <see cref="Counts"/> field: folding it in would make every error writer a writer of
+        /// <see cref="Counts"/> too, and add a hidden edge.</summary>
         public NativeReference<int> Error;
 
         /// <summary>The terminal handle: every geometry node plus every scratch dispose node, combined.
@@ -79,9 +70,9 @@ namespace MapRenderer.Jobs.Fill
         /// empty-input fast-out (see the type doc).</summary>
         public bool IsCreated;
 
-        // ── Leak/balance counters — internal (test-code-bloat rule; the test assemblies see internals) ──
-        // copying the MeshDataPayload.DebugLiveAllocCount idiom (a static allocate-and-count helper pairs
-        // with Dispose's decrement, so the increment can never be forgotten at a call site).
+        // ── Leak/balance counters ────────────────────────────────────────────────────────────────────
+        // A static allocate-and-count helper pairs with Dispose's decrement, so the increment cannot be
+        // forgotten at a call site.
 
         private static long _liveCount;
         private static long _buffersAllocated;
@@ -97,10 +88,9 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>Dispose(handle) nodes <see cref="FillMeshGraph"/>'s <c>ScheduleDispose&lt;T&gt;</c>
         /// helper scheduled during one <see cref="FillMeshGraph.Schedule"/> call. Must equal
-        /// <see cref="DebugBuffersAllocated"/> once <see cref="FillMeshGraph.Schedule"/> returns — a
-        /// worker-side <c>Dispose(handle)</c> node cannot decrement a managed counter on completion (it runs
-        /// off the main thread), so scratch balance is observable only as this PAIRING, never as a live
-        /// count the way <see cref="DebugLiveCount"/> is for outputs.</summary>
+        /// <see cref="DebugBuffersAllocated"/> once <see cref="FillMeshGraph.Schedule"/> returns. A
+        /// worker-side dispose node cannot decrement a managed counter, so scratch balance is observable
+        /// only as this PAIRING, never as a live count.</summary>
         public static long DebugBufferDisposeNodes => Interlocked.Read(ref _bufferDisposeNodes);
 
         /// <summary>Allocates one of this output's list containers and counts it live. Used only by

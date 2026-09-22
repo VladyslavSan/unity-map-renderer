@@ -48,7 +48,7 @@ namespace MapRenderer.Core.Data
     /// BYO data-source abstraction. HTTP, local files, PMTiles, in-memory tiles — all look
     /// identical to the pipeline.
     ///
-    /// S51: returns UniTask&lt;TileResponse&gt; (not Task) so the contract is engine-free AND
+    /// Returns UniTask&lt;TileResponse&gt; (not Task) so the contract is engine-free AND
     /// compatible with the headless dotnet-test path (UniTask NetCore NuGet build).
     /// Core implementations use only the PlayerLoop-independent UniTask subset:
     /// UniTask.RunOnThreadPool, UniTaskCompletionSource, UniTask.FromResult.
@@ -63,8 +63,8 @@ namespace MapRenderer.Core.Data
         /// when the tile is explicitly absent (e.g. 404/204 or missing file). Throws on a
         /// genuine error (network failure, I/O error, unexpected HTTP status).
         ///
-        /// S51: UniTask&lt;TileResponse&gt; (was Task). Core callers: FileDataSource, fixture fakes.
-        /// Unity callers: UnityWebRequestDataSource (production HTTP), TileScheduler (orchestration).
+        /// Core callers: FileDataSource, fixture fakes. Unity callers: UnityWebRequestDataSource
+        /// (production HTTP), TileScheduler (orchestration).
         /// </summary>
         UniTask<TileResponse> FetchAsync(TileId coord, CancellationToken ct = default);
     }

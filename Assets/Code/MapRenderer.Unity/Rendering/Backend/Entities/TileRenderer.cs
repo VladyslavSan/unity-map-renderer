@@ -24,7 +24,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
     /// Graphics owns the instance data: we create one entity per (tile, layer) carrying the layer's
     /// shared <see cref="Material"/> + the tile's <see cref="Mesh"/> + a <see cref="LocalToWorld"/>.
     /// The per-entity advantage is debuggability — each draw item is inspectable/disable-able in the
-    /// Entities Hierarchy (the reason the project goes past raw BRG; see the S53 epic).
+    /// Entities Hierarchy — the reason the project goes past raw BRG.
     ///
     /// Hierarchy: a tile's layer entities are <see cref="Parent"/>ed under one named root entity
     /// (<c>"Tile z/x/y"</c>) per tile, so the Entities Hierarchy shows a per-tile tree instead of a flat
@@ -36,7 +36,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
     /// Styling is per-layer (the shared material, written each frame by <c>ZoomStyleApplier</c>) plus
     /// per-feature (vertex colours baked into the mesh), so no per-instance material-property override
     /// components are needed — Entities Graphics reads the live material. <paramref name="layerMaterials"/>
-    /// is the FULL-WIDTH, global-draw-slot-aligned material list (§3.3), so <c>materialIndex</c> matches
+    /// is the FULL-WIDTH, global-draw-slot-aligned material list, so <c>materialIndex</c> matches
     /// <see cref="Backend.BRG.TileRenderer.AddTileLayer"/>.
     ///
     /// World lifecycle: this owns a <see cref="World"/> created on construction (automatic bootstrap is
@@ -58,7 +58,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             public Entity      Entity;
             public TileId      TileId;   // which tile root this layer hangs under
             public BatchMeshID MeshId;   // stall #3: the EG-registered mesh id, for UnregisterMesh on removal
-            public int         MaterialIndex; // the layer slot this entity was created at — UMR-151: lets
+            public int         MaterialIndex; // the layer slot this entity was created at — lets
                                                // SetLayerMaterials find every item a retired slot must retire
         }
 
@@ -214,9 +214,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             BuildLayerPrototype();
         }
 
-        /// <summary>UMR-151 restyle-time material update — retires a slot's entities (one batched
+        /// <summary>Restyle-time material update — retires a slot's entities (one batched
         /// <see cref="RemoveItems"/>, including an immediate EG mesh unregister — UNLIKE BRG) when its
-        /// material goes null; see `docs/tile-pipeline-design.md` §1.10.</summary>
+        /// material goes null; see `docs/tile-pipeline-design.md`.</summary>
         public void SetLayerMaterials(
             IReadOnlyList<Material> layerMaterials, IReadOnlyList<ShadowCastingMode> layerShadowModes)
         {
@@ -234,7 +234,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
                     continue;
                 }
                 // Reference-null, NOT `!=` (Unity's fake-null hides a DESTROYED material — see
-                // docs/tile-pipeline-design.md §1.10's SetLayerMaterials note).
+                // docs/tile-pipeline-design.md's SetLayerMaterials note).
                 if (i < oldCount && !ReferenceEquals(oldMat, null) && i < _materialIds.Length)
                     _eg.UnregisterMaterial(_materialIds[i]);
                 newMaterialIds[i] = mat != null ? _eg.RegisterMaterial(mat) : default;
@@ -274,9 +274,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         /// <see cref="RenderFilterSettings"/>, which is <see cref="ISharedComponentData"/>, so writing it per
         /// entity would be a structural change per layer — the measured <c>MapRenderer.Tile.AddLayer</c> spike
         /// this whole path exists to avoid.</para>
-        /// E1: seeds the RenderMeshArray with the first NON-null material — slot 0 may be a
+        /// Seeds the RenderMeshArray with the first NON-null material — slot 0 may be a
         /// background layer (null Material, when unconfigured) or a symbol layer (non-null
-        /// <c>WorldTextMaterial</c>, §0.2) that AddTileLayer is never called for either way; this is an
+        /// <c>WorldTextMaterial</c>) that AddTileLayer is never called for either way; this is an
         /// inert, ID-overridden prototype seed, harmless regardless of which kind supplies it.
         /// </summary>
         private void BuildLayerPrototype()
@@ -498,7 +498,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             // after this frame's Rebuild), so the tile renders at the right place immediately — no origin
             // blink. The next Rebuild's LocalToWorldSystem re-derives the identical value from the root.
             // (LocalToWorld is already present from RenderMeshUtility.AddComponents, so this is a set, not a
-            // migration.) Identity rebase (Mercator) ⇒ TRS == Translate — bit-for-bit the pre-S91 placement.
+            // migration.) Identity rebase (Mercator) ⇒ TRS == Translate.
             _em.SetComponentData(e, new LocalToWorld
             {
                 Value = float4x4.TRS(InitialScenePos(tileOriginRender), InitialSceneRot(), new float3(1f))

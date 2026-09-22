@@ -11,12 +11,12 @@ namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
     /// Moves the per-tile screen-coverage pre-cull (<see cref="SymbolTileCoverage"/>) AHEAD of the SoA batch
-    /// build — culled AFTER the A-3 cross-tile dedup (<see cref="Text.SymbolTileStore.CollectInto"/>),
+    /// build — culled AFTER the cross-tile dedup (<see cref="Text.SymbolTileStore.CollectInto"/>),
     /// BEFORE the native gather stages the surviving records — so a low-coverage
     /// tile's records never enter the SoA build at all (the SoA-copy cost scales with what's on
     /// screen). NOT before/inside dedup: culling pre-dedup would change dedup WINNERS (a &lt;5%-coverage
     /// child tile culled first would let its &gt;5% parent win the finest-zoom-wins tiebreak and render a
-    /// symbol that is hidden today) — see the epic doc for the full trap.
+    /// symbol that is hidden today).
     ///
     /// <para><b>Fade, not pop.</b> A tile crossing BELOW threshold is not dropped outright — it is a 3-way
     /// classification (Keep / Fade / Drop) so a tile that was actually on screen gets to ease out instead of
@@ -29,7 +29,7 @@ namespace MapRenderer.Core.Text.Placement
     /// </summary>
     public static class SymbolTileCoverageFilter
     {
-        // D1 (Blocker 2): public so the Unity-side SymbolGatherPlan.Build can read a ClassifyActive decision
+        // Public so the Unity-side SymbolGatherPlan.Build can read a ClassifyActive decision
         // (decisions[i] == Drop / == Fade) without duplicating the encoding.
         public const byte Keep = 0, Fade = 1, Drop = 2;
 
@@ -38,7 +38,7 @@ namespace MapRenderer.Core.Text.Placement
         /// (<see cref="ClassifyTile"/>) + cross-frame state and WRITES a per-record decision into
         /// <paramref name="decisions"/> (<see cref="Keep"/>/<see cref="Fade"/>/<see cref="Drop"/>, one per record)
         /// so a downstream native gather can MASK a Dropped record instead of physically moving/removing list
-        /// elements. Runs AFTER the A-3 cross-tile dedup (<see cref="Text.SymbolTileStore.CollectInto"/>),
+        /// elements. Runs AFTER the cross-tile dedup (<see cref="Text.SymbolTileStore.CollectInto"/>),
         /// BEFORE the SoA batch build, so a low-coverage tile's records are skipped rather than staged.
         ///
         /// <para>No-op (leaves cross-frame state untouched, clears <paramref name="coverageAboveThisFrame"/>/

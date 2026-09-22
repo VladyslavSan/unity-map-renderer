@@ -2,7 +2,7 @@
 // Unity EditMode only — real Materials via MaterialFactory / MapMaterialSet.
 // NOT registered in Tools/core-tests/core-tests.csproj.
 //
-// S107 Stage 2, T4 — table-driven over the px-valued style surface, split by HOW each property is observed.
+// Table-driven over the px-valued style surface, split by HOW each property is observed.
 //
 // The universally-true invariant, and the reason this file's title is not "every px property is multiplied":
 //
@@ -79,9 +79,9 @@ namespace MapRenderer.Tests.Style
         // ── Line: the four device-space float uniforms ───────────────────────────────────────────
 
         /// <summary>
-        /// <b>T4 (line float rows).</b> Each of <c>_Width</c> / <c>_GapWidth</c> / <c>_LineOffset</c> /
+        /// <b>Line float rows.</b> Each of <c>_Width</c> / <c>_GapWidth</c> / <c>_LineOffset</c> /
         /// <c>_Blur</c> reads EXACTLY twice its dpr-1 value after <c>ApplyZoom(z, 2.0)</c>, and exactly the
-        /// styled logical value at dpr 1 (the stage invariant, on the same material).
+        /// styled logical value at dpr 1 (the same invariant, on the same material).
         /// </summary>
         [Test]
         public void LinePxUniforms_DoubleAtDpr2_AndAreStyledLogicalValuesAtDpr1()
@@ -125,7 +125,7 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// <b>T4 (the data-driven row).</b> When <c>line-width</c> depends on the feature, the evaluated width
+        /// <b>The data-driven row.</b> When <c>line-width</c> depends on the feature, the evaluated width
         /// is baked into the per-vertex <c>WidthScale</c> stream and the uniform carries the base, so
         /// <c>widthWorld = _Width × widthScale × pxToWorld</c>. The base is 1 at dpr 1 and must be <b>2</b> at
         /// dpr 2 — scaling the mesh bake instead would put the ratio inside the geometry, where a live ratio
@@ -164,7 +164,7 @@ namespace MapRenderer.Tests.Style
         // ── The two translates ───────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// <b>T4 (translate rows).</b> <c>line-translate</c> and <c>fill-translate</c> are px offsets applied
+        /// <b>Translate rows.</b> <c>line-translate</c> and <c>fill-translate</c> are px offsets applied
         /// through the same <c>MapPixelsToWorld</c> call as the widths, so they sit in the identical device
         /// space and scale identically. Both components, including the negative one — a conversion applied to
         /// <c>x</c> only would pass a magnitude-blind check.
@@ -208,27 +208,24 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── The halo pair: moved out ──────────────────────────────────────────────────────────────
+        // ── The halo pair: not a material uniform ─────────────────────────────────────────────────
 
-        // text-halo-width/-blur are no longer material uniforms to read back. They are evaluated PER FEATURE
-        // onto the vertex stream and take the logical→device conversion at emit, against the LIVE ratio — so
-        // the tooth has to read the emitted mesh. It lives in
-        // SymbolHaloEmitTests.HaloWidthAndBlur_ScaleTogetherWithDevicePixelRatio, which asserts the same two
-        // claims this arm did: both terms scale, and they scale TOGETHER.
+        // text-halo-width/-blur are evaluated PER FEATURE onto the vertex stream and converted at emit
+        // against the LIVE ratio, so the tooth reads the emitted mesh:
+        // SymbolHaloEmitTests.HaloWidthAndBlur_ScaleTogetherWithDevicePixelRatio.
         //
-        // Kept from the old arm because it is still true and still worth not re-learning: do NOT rewrite this
-        // as a RENDERED softness ratio. The halo's rendered transition is (_SdfAaDevicePx + blur) — an AA
-        // constant in device px summed with the style's blur — so that ratio is not 2 even on a correct build.
+        // Do NOT rewrite it as a RENDERED softness ratio: the halo's rendered transition is
+        // (_SdfAaDevicePx + blur) — an AA constant in device px plus the style's blur — so that ratio is
+        // not 2 even on a correct build.
 
-        // A zoom-expression text-halo-width no longer tracks the live zoom through a uniform either: like
-        // every other text-* paint term it is evaluated PER FEATURE at tile build (SymbolFeatureExtractor),
-        // so it moves when the tile is rebuilt, not every frame. The T5 tooth that read _HaloWidthPx back off
-        // the material went with the uniform.
+        // A zoom-expression text-halo-width does not track the live zoom either: like every other text-*
+        // paint term it is evaluated PER FEATURE at tile build (SymbolFeatureExtractor), so it moves when
+        // the tile is rebuilt, not every frame.
 
-        // ── The BRG arm (design-doc C2) ──────────────────────────────────────────────────────────
+        // ── The BRG arm ──────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// <b>T4 (backend row).</b> The three render backends inherit a material-level conversion for free,
+        /// <b>Backend row.</b> The three render backends inherit a material-level conversion for free,
         /// because <c>BrgTileRenderer.PackMaterialProps</c> reads every property back off the
         /// <see cref="Material"/>. This converts that argument into a tooth: after a dpr-2 <c>ApplyZoom</c>,
         /// the BRG-packed <c>_Width</c> equals the material's — which is the scaled value, not the styled one.
@@ -269,7 +266,7 @@ namespace MapRenderer.Tests.Style
         // ── The LOGICAL family: padding must NOT be scaled ───────────────────────────────────────
 
         /// <summary>
-        /// <b>T4 (logical rows).</b> <c>text-padding</c> and <c>icon-padding</c> are collided in
+        /// <b>Logical rows.</b> <c>text-padding</c> and <c>icon-padding</c> are collided in
         /// <c>SymbolStagingMath</c> against anchors that <c>SymbolProjectionJob</c> projects with
         /// <see cref="MapRenderer.Unity.Rendering.Map.MapCamera.ViewportLogicalPx"/> — the SAME space
         /// <c>text-size</c> and the glyph bounds live in. One space, logical, factor 1: the value reaching the
@@ -303,7 +300,7 @@ namespace MapRenderer.Tests.Style
                     "projects anchors into. Multiplying padding there would collide logical boxes against " +
                     "device-px padding and over-reject labels on a dense panel.");
                 Assert.That(source, Does.Not.Contain("DeviceToLogicalPx"),
-                    $"{relativePath} must not convert FROM device px either (S108). Named separately from " +
+                    $"{relativePath} must not convert FROM device px either. Named separately from " +
                     "LogicalToDevicePx above because it is not a substring of it — without this line the " +
                     "staging path could acquire the new conversion without tripping the fence.");
                 Assert.That(source, Does.Not.Contain("DevicePixelRatio"),

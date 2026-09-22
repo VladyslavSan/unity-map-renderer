@@ -11,11 +11,11 @@ namespace MapRenderer.Core.Geo
     /// planar case. The Mercator forward/inverse formulas live on <see cref="WebMercator"/>; this
     /// class applies the viewport + camera-pose arithmetic on top.
     ///
-    /// <para><b>Screen convention (D2/T0):</b> +x right, +y up, origin bottom-left — matches Unity's
+    /// <para><b>Screen convention:</b> +x right, +y up, origin bottom-left — matches Unity's
     /// <c>Mouse.current.position</c>. Bearing (heading) rotates the pixel offset into (east, north)
     /// Mercator axes: <c>east = sx·cosH + sy·sinH</c>, <c>north = −sx·sinH + sy·cosH</c>.</para>
     ///
-    /// <para><b>Overhead-correct (D5):</b> <see cref="ScreenToGround"/> is exact for <c>tilt=0</c>;
+    /// <para><b>Overhead-correct:</b> <see cref="ScreenToGround"/> is exact for <c>tilt=0</c>;
     /// the tilted ray-cast is a future internal upgrade of the same method, not a new interface member.</para>
     /// </summary>
     public readonly struct WebMercatorProjection : IProjection
@@ -37,7 +37,7 @@ namespace MapRenderer.Core.Geo
                 Up    = new double3(0.0, 1.0, 0.0),
             };
 
-        // ── Geometry (build side; docs §6) — conveniences forwarding to the kernel ─────────────────
+        // ── Geometry (build side) — conveniences forwarding to the kernel ──────────────────────────
 
         /// <inheritdoc/>
         public double3 Project(in GeoCoordinate geo) => ProjectPoint(geo).World;
@@ -82,7 +82,7 @@ namespace MapRenderer.Core.Geo
             double  sy  = off.y;
 
             // Rotate into Mercator (east, north) axes using the camera bearing.
-            // Locked rotation (D2.4 / T0): east = sx·cosH + sy·sinH; north = −sx·sinH + sy·cosH.
+            // Locked rotation: east = sx·cosH + sy·sinH; north = −sx·sinH + sy·cosH.
             double cH    = camera.Heading.Value.Cos;
             double sH    = camera.Heading.Value.Sin;
             double east  =  sx * cH + sy * sH;
@@ -113,10 +113,8 @@ namespace MapRenderer.Core.Geo
             double mpp = WebMercator.GroundResolution(camera.Zoom);
 
             // Mercator offset divided by mpp gives the (east, north) pixel offset.
-            // Reciprocal multiply, NOT `/ mpp`. Originally because the core-tests shim lacked
-            // operator/(double2, double); S108 added it, so this now LOOKS like an obvious cleanup — it is
-            // not. `v * (1/m)` and `v / m` differ in the last bit for about a third of all values, and every
-            // GroundToScreen golden was baked against this expression. Leave it.
+            // Reciprocal multiply, NOT `/ mpp`. `v * (1/m)` and `v / m` differ in the last bit for about a
+            // third of all values, and every GroundToScreen golden was baked against this expression.
             double2 d     = (groundMerc - centreMerc) * (1.0 / mpp);
             double  e     = d.x;
             double  n     = d.y;

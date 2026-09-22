@@ -1,8 +1,8 @@
 // Unity EditMode only — needs a real Camera/Mesh/GameObject/Texture2D (SymbolSlotPresenter creates one,
 // SymbolRenderLayer clones materials). NOT registered in core-tests.csproj.
 //
-// I5b — the icon render-integration WIRING tooth (headless proves compile + byte-identical text + the
-// draw-side bind; the actual on-screen sprite pixels are eyeball-owed, see the I5b plan). Three ticks:
+// The icon render-integration WIRING tooth (headless proves compile + byte-identical text + the
+// draw-side bind; the on-screen sprite pixels stay eyeball-owed). Three ticks:
 //   1. An icon-bearing batch through SymbolPlacementSystem.Tick with a fixture sprite Texture2D + a
 //      SymbolRenderLayer whose WorldIconMaterial is a real "Map/Symbol/IconWorld" clone — the icon slot mesh
 //      must build non-zero verts, LastQuadCount must include the icon quad, and the icon presenter's BOUND
@@ -47,7 +47,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static MapMaterialSet BuildSettings()
         {
             var settings = ScriptableObject.CreateInstance<MapMaterialSet>();
-            // Epic A / A1 (Codex #2): SymbolTextWorld is REQUIRED — points/icons draw through the world
+            // SymbolTextWorld is REQUIRED — points/icons draw through the world
             // path, so both world bases must be assigned for this wiring tooth to observe real content.
             settings.SymbolTextWorld = new Material(Shader.Find("Map/Symbol/TextWorld"));
             settings.SymbolIconWorld = new Material(Shader.Find("Map/Symbol/IconWorld"));
@@ -86,7 +86,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
             var buffer = new SymbolTileBuffer();
             TestSymbolTileBuffer.AddPoint(buffer, sceneOriginRender, quads, new float2(-8f, -8f), new float2(8f, 8f),
-                kind: SymbolKind.Icon, // I3: routes this symbol onto the icon draw path (AtlasKind, I5b)
+                kind: SymbolKind.Icon, // routes this symbol onto the icon draw path (AtlasKind)
                 paint: SymbolPaint.Default,
                 textSizePx: TextQuadLayout.OneEm, // scale 1 — mirrors StyledSymbolTileBuilder's real icon path
                 sortKey: 0f,
@@ -147,7 +147,7 @@ namespace MapRenderer.Tests.Text.Placement
                 paint: SymbolPaint.Default);
         }
 
-        // ── A5 (P-B): end-to-end — a map-aligned line icon lands in the (tile, slot) ICON world mesh and
+        // ── End-to-end: a map-aligned line icon lands in the (tile, slot) ICON world mesh and
         //    NOTHING in the text mesh, with one candidate staged per along-line anchor. ──
         [Test]
         public void AlongLineIconBatch_BuildsIntoTheIconWorldMesh_NotTheTextMesh_OneCandidatePerAnchor()
@@ -171,7 +171,7 @@ namespace MapRenderer.Tests.Text.Placement
                 var buffer = new SymbolTileBuffer();
                 AddAlongLineIcon(buffer, frame.SceneOriginRender, materialIndex: 0, iconRotateRadians: 0f, anchors);
 
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
                 system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity,
@@ -215,7 +215,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── B4 (P-B): icon-rotate on the ALONG-LINE path, observed headlessly by mesh readback. Two
+        // ── Icon-rotate on the ALONG-LINE path, observed headlessly by mesh readback. Two
         //    identical layers over the SAME road, one with icon-rotate: 180 — the rotated layer's corner
         //    offsets must be the exact negation of the unrotated one's, with identical UVs. ──
         [Test]
@@ -240,7 +240,7 @@ namespace MapRenderer.Tests.Text.Placement
                 AddAlongLineIcon(buffer, frame.SceneOriginRender, materialIndex: 0, iconRotateRadians: 0f, anchor);
                 AddAlongLineIcon(buffer, frame.SceneOriginRender, materialIndex: 1, iconRotateRadians: math.PI, anchor);
 
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer, slotCount: 2), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
                 system.Tick(in frame, plan.Build(buffer, slotCount: 2), atlasTexture,
@@ -260,7 +260,7 @@ namespace MapRenderer.Tests.Text.Placement
                 for (int v = 0; v < plain.Length; v++)
                 {
                     // The whole tooth: a 180 deg rotation is -I, so every drawn corner offset flips sign.
-                    // After stage A alone the two meshes are IDENTICAL, so this is what discriminates.
+                    // Without the rotation the two meshes are IDENTICAL, so this is what discriminates.
                     Assert.AreEqual(-plain[v].Offset.x, rotated[v].Offset.x, Tol, $"vertex {v}: Offset.x negated");
                     Assert.AreEqual(-plain[v].Offset.y, rotated[v].Offset.y, Tol, $"vertex {v}: Offset.y negated");
                     // …and the corners move, the TEXTURE does not: an impl that rotated the UVs with them
@@ -296,7 +296,7 @@ namespace MapRenderer.Tests.Text.Placement
             return (camGo, mapCamera, frame);
         }
 
-        // Epic A / A1 (D5): the world-anchored icon shader pair must compile/import.
+        // The world-anchored icon shader pair must compile/import.
         [Test]
         public void ShaderMapSymbolIconWorld_IsFound()
         {
@@ -324,11 +324,11 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 // ── 1. Icon-bearing batch ──────────────────────────────────────────────────────────────
-                // Epic A / A1: icons draw through the WORLD path now — the icon quad no longer lands on
+                // Icons draw through the WORLD path — the icon quad no longer lands on
                 // system.IconMesh/renderLayer.IconPresenterVisible (the screen slot/presenter), so this
                 // reads the world surface instead (TryGetWorldSlotMesh/IsWorldSlotVisible).
                 var iconBuffer = MakeIcon(frame.SceneOriginRender);
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(iconBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
                 system.Tick(in frame, plan.Build(iconBuffer), atlasTexture, deltaTime: float.PositiveInfinity,

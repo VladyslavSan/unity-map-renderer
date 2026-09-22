@@ -19,7 +19,7 @@ namespace MapRenderer.Jobs.Mvt
         /// <c>keyIndex &lt; 0</c> branch), each literal string to its
         /// <see cref="MvtLayerPropertyResolver.ValueStrings"/> id via a full ordinal scan — never a
         /// duplicate-tolerant partial one, since string dedup is an encoder property, not a decoder
-        /// guarantee (design doc §5.6). A literal matching zero strings resolves to -1 (a never-equal
+        /// guarantee. A literal matching zero strings resolves to -1 (a never-equal
         /// sentinel: comparing against a real column id, always ≥0, is then statically false — byte-
         /// identical to comparing two distinct strings). A literal matching two or more strings makes a
         /// single-id compare unsound for this layer, so the whole rebind is refused; the caller keeps this

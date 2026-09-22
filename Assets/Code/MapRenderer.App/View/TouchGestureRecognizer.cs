@@ -22,8 +22,8 @@ namespace MapRenderer.App.View
         /// <summary>Degrees of bearing change per degree of inter-finger-angle change.</summary>
         public double BearingSensitivity { get; init; }
 
-        /// <summary>Degrees of tilt change per LOGICAL pixel of vertical centroid movement (S92 touch-DPI
-        /// closure: positions are fed in logical px, so this is a density-independent physical rate).</summary>
+        /// <summary>Degrees of tilt change per LOGICAL pixel of vertical centroid movement. Positions are
+        /// fed in logical px, so this is a density-independent physical rate.</summary>
         public double PitchSensitivity { get; init; }
 
         /// <summary>Minimum zoom level clamp (passed through to <see cref="GestureIntent.ZoomAt"/>).</summary>
@@ -54,14 +54,14 @@ namespace MapRenderer.App.View
     }
 
     /// <summary>
-    /// S74: Stateful, engine-free gesture recognizer — the touch source's brain (S73 D2/D3).
+    /// Stateful, engine-free gesture recognizer — the touch source's brain.
     ///
     /// <para>Converts per-frame <see cref="TouchSample"/> lists into <see cref="GestureIntent"/>
-    /// values via the S73 seam (<see cref="ViewInput.Apply"/>). Owns cross-frame disambiguation state
+    /// values through <see cref="ViewInput.Apply"/>. Owns cross-frame disambiguation state
     /// (one-finger grabbed-ground latch, two-finger family lock). No <c>UnityEngine</c>,
     /// no <c>System.Math</c>, no LINQ, no per-call heap allocation in steady state.</para>
     ///
-    /// <para><b>Family-lock rule (D3):</b> on the first decisive two-finger motion, one of two
+    /// <para><b>Family-lock rule:</b> on the first decisive two-finger motion, one of two
     /// mutually-exclusive families is latched and held for the rest of the touch-event chain:
     /// <list type="bullet">
     ///   <item><b>TILT</b> — only <see cref="GestureKind.TiltBy"/> is emitted; zoom/heading never.</item>
@@ -199,10 +199,8 @@ namespace MapRenderer.App.View
             double dth = WrapPm180(angleDeg - _prevAngleDeg);   // (−180, 180]
             double2 dc = centroid - _prevCentroid;
 
-            // Thresholds in LOGICAL px (S92 touch-DPI closure). The recognizer is fed logical positions
-            // (TouchController divides the raw touch + viewport by DevicePixelRatio, matching the render and
-            // the mouse seam), so a threshold is already a constant physical size — density normalization
-            // happens ONCE, at the position basis, not again here.
+            // Thresholds in LOGICAL px. The recognizer is fed logical positions, so a threshold is already
+            // a constant physical size — density normalization happens ONCE, at the position basis.
             double pinchPx   = _cfg.PinchDistanceThresholdPx;
             double tiltPx    = _cfg.TiltCentroidThresholdPx;
             double twistDeg  = _cfg.TwistAngleThresholdDeg;

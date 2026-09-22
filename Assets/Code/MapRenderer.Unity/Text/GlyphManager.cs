@@ -18,18 +18,18 @@ using MapRenderer.Core.Lifetime;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// S18 Slice 4 integration: ties <see cref="IGlyphSource"/> + <see cref="GlyphPbfDecoder"/> +
+    /// Ties <see cref="IGlyphSource"/> + <see cref="GlyphPbfDecoder"/> +
     /// <see cref="GlyphCache"/> + <see cref="GlyphAtlas"/> + <see cref="FontStackResolver"/> into the
     /// fetch/decode/cache/atlas pipeline a <c>text-font</c> stack needs.
     ///
     /// <para>
-    /// <b>Fetch model (resolves the §6.1/resolver tension, per the stage doc's locked decision):</b>
+    /// <b>Fetch model:</b>
     /// fetches happen PER INDIVIDUAL FONT NAME in a <see cref="FontStack"/>'s <see cref="FontStack.Names"/>
     /// — not the joined <see cref="FontStack.RequestToken"/>. For each font name: <see cref="IGlyphSource.FetchAsync"/>
     /// → <see cref="GlyphPbfDecoder.Decode"/> → store under <c>(fontName, rangeStart)</c> in
     /// <see cref="GlyphCache"/> → append every decoded glyph to the shared <see cref="Atlas"/>. A
     /// <see cref="FontStackResolver"/> (constructed by <see cref="CreateResolver"/>) then resolves a
-    /// codepoint against the per-font-name cache entries in stack order, giving correct fallback (T5).
+    /// codepoint against the per-font-name cache entries in stack order, giving correct fallback.
     /// A single-entry stack (e.g. the demotiles composite "Noto Sans Regular") is simply the degenerate
     /// one-name case of this same loop.
     /// </para>
@@ -67,7 +67,7 @@ namespace MapRenderer.Unity.Text
         /// <summary>The shared SDF glyph atlas every ensured range's glyphs are appended to.</summary>
         public GlyphAtlas Atlas => _atlas;
 
-        /// <summary>The keep-all-per-session decoded-range cache (§6.4a) backing <see cref="CreateResolver"/>.</summary>
+        /// <summary>The keep-all-per-session decoded-range cache backing <see cref="CreateResolver"/>.</summary>
         public GlyphCache Cache => _cache;
 
         /// <summary>Builds a fallback-aware resolver over this manager's cache for the given font stack.
@@ -98,7 +98,7 @@ namespace MapRenderer.Unity.Text
         /// <summary>
         /// Ensures ONE font's 256-codepoint range is fetched/decoded/cached/appended. A no-op (no fetch)
         /// if that <c>(fontName, rangeStart)</c> pair is already cached — keep-all-per-session caching
-        /// (§6.4a) means every range is fetched at most once for the process's lifetime, including a
+        /// means every range is fetched at most once for the process's lifetime, including a
         /// range the source reported absent (cached as an empty range so a permanently-missing range
         /// doesn't get refetched every time it's requested).
         /// </summary>
@@ -123,7 +123,7 @@ namespace MapRenderer.Unity.Text
                 }
             }
 
-            // §6.3: absent/empty is a defined outcome, never a throw — cache it so a permanently-missing
+            // Absent/empty is a defined outcome, never a throw — cache it so a permanently-missing
             // range (404/204, or a decoded PBF with zero stacks) is not refetched on every request.
             return new FontStackGlyphs
             {

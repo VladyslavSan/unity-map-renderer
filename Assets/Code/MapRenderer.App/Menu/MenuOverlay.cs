@@ -7,7 +7,7 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App.Menu
 {
     /// <summary>
-    /// Toggleable, page-based debug GUI for the MapDemo app (epic UMR-77). A single draggable IMGUI window whose
+    /// Toggleable, page-based debug GUI for the MapDemo app. A single draggable IMGUI window whose
     /// content is the top of a page stack: the root is a menu of buttons, each opening a sub-page
     /// (<see cref="IMenuPage"/>) with its own layout and a Back button to return. Open/close with
     /// <see cref="ToggleKey"/> (default backquote <c>`</c>) or a small hotspot in the top-right screen corner.

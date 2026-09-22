@@ -1,6 +1,6 @@
-// The shared delay-job test instrument (job-scheduling-design.md E2, option iii: a `deps`-parameter job is
-// the production-legitimate seam for holding a graph genuinely in-flight — never JobsUtility.JobWorkerCount,
-// which does not hold a scheduled job incomplete, see JobGraphInstrumentTests).
+// The shared delay-job test instrument. A `deps`-parameter job is the production-legitimate seam for
+// holding a graph genuinely in-flight — never JobsUtility.JobWorkerCount, which does not hold a scheduled
+// job incomplete (see JobGraphInstrumentTests).
 
 using NUnit.Framework;
 using Unity.Burst;
@@ -11,35 +11,32 @@ using Unity.Jobs;
 namespace MapRenderer.Tests
 {
     /// <summary>A job that spins until released, for holding a downstream <c>deps</c> chain genuinely
-    /// in-flight under the DEFAULT worker count (JobGraphInstrumentTests' own finding is why worker count is
-    /// never touched for this instrument).
+    /// in-flight under the DEFAULT worker count.
     ///
     /// <para>Guards against two failure modes: a spin Burst folds to a closed form (a silently-instant
-    /// "delay" — a caller's in-flight assertions would pass while proving nothing), and a loop-invariant
-    /// hoist of the gate read (spins forever, or never spins at all). <see cref="Gate"/> is deliberately NOT
-    /// <c>[ReadOnly]</c> and carries <see cref="NativeDisableContainerSafetyRestrictionAttribute"/> — the
-    /// releasing thread writes it while this job is still scheduled, which Unity's ordinary container safety
-    /// check would otherwise reject as a race. The accumulator mixes the gate value into a running product
-    /// every iteration so the loop cannot reduce to a closed-form iteration count the way a bare counter
-    /// would.</para></summary>
+    /// "delay", so a caller's in-flight assertions pass while proving nothing), and a loop-invariant hoist
+    /// of the gate read (spins forever, or never spins at all). <see cref="Gate"/> is NOT <c>[ReadOnly]</c>
+    /// and carries <see cref="NativeDisableContainerSafetyRestrictionAttribute"/> — the releasing thread
+    /// writes it while this job is still scheduled, which container safety otherwise rejects as a race. The
+    /// accumulator mixes the gate value into a running product every iteration, so the loop cannot reduce to
+    /// a closed-form iteration count.</para></summary>
     [BurstCompile(CompileSynchronously = true)]
     internal struct SpinUntilGateJob : IJob
     {
         [NativeDisableContainerSafetyRestriction]
         public NativeArray<int> Gate; // [0] != 0 ⇒ stop. Written by the releasing thread while this job runs.
 
-        // NOT on Out — the releaser must not touch Out while the job is live. Started is the one field the
-        // releasing thread both reads AND races-by-design, same as Gate.
+        // NOT on Out — the releaser must not touch Out while the job is live. Started, like Gate, is read
+        // and raced by the releasing thread by design.
         [NativeDisableContainerSafetyRestriction]
-        public NativeArray<int> Started; // [0] set to 1 as the job's FIRST act, before the loop — a caller
-                                          // spins on this instead of a fixed sleep, so "still spinning" is
-                                          // asserted only once it causally IS spinning.
+        public NativeArray<int> Started; // [0] set to 1 as the job's FIRST act — a caller spins on this
+                                          // instead of a fixed sleep, so "still spinning" is asserted only
+                                          // once the job causally IS spinning.
 
-        public NativeArray<int> Out;  // [0] = iterations run, [1] = accumulator — both readable by the
-                                       // caller, so the loop's result is observably used and cannot be
-                                       // dead-code-eliminated.
-        public int MaxIterations;     // bounded ceiling (AGENTS.md "always bound loops") — a forgotten gate
-                                       // release cannot hang the suite.
+        public NativeArray<int> Out;  // [0] = iterations run, [1] = accumulator — both read by the caller,
+                                       // so the loop's result cannot be dead-code-eliminated.
+        public int MaxIterations;     // bounded ceiling ("always bound loops") — a forgotten gate release
+                                       // cannot hang the suite.
 
         public void Execute()
         {

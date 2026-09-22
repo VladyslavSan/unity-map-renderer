@@ -1,4 +1,4 @@
-// Unlit-shading lighting-independence GPU/visual acceptance test (UMR-176 pack: shaders topic).
+// Unlit-shading lighting-independence GPU/visual acceptance test.
 //
 // Standalone, not merged with ShaderColorTests.cs: the two collide on bare `Object`
 // (System.Object vs UnityEngine.Object, CS0104) — this file imports System,

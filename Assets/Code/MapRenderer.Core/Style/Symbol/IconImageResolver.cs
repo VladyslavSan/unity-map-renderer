@@ -6,7 +6,7 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Style.Symbol
 {
     /// <summary>
-    /// I3 — resolves a symbol layer's <c>icon-image</c> to a concrete sprite name for one feature. Mirrors
+    /// Resolves a symbol layer's <c>icon-image</c> to a concrete sprite name for one feature. Mirrors
     /// <see cref="TextFieldResolver"/> verbatim (same two forms, same skip policy) — this is the icon
     /// analogue of that resolver, not a different resolution strategy:
     /// <list type="bullet">

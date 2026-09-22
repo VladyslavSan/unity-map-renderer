@@ -5,11 +5,9 @@ namespace MapRenderer.Unity.Rendering.Style
     /// render-layer model). Orthogonal to <see cref="DrawPersistence"/> (who
     /// re-draws it) and <see cref="IRenderLayer.DrawIndex"/> (its stable slot in the layer set).
     ///
-    /// Epic A / A2: the former view-synthesized-geometry member (background's pre-A2 self-owned world-cap
-    /// quad) is REMOVED — background is now a per-covered-tile <see cref="TileMesh"/> layer (source-less,
-    /// scheduled through the graph like fill — <c>TileManager.KickSourcelessBackground</c> —
-    /// job-scheduling-design.md §8 stage 3), registered with the backend like fill/line, so the axis
-    /// collapses to exactly these two members (design §B, "the RenderLayerBuild enum decision").
+    /// Background is a source-less per-covered-tile <see cref="TileMesh"/> layer, scheduled through the
+    /// graph like fill (<c>TileManager.KickSourcelessBackground</c>) and registered with the backend like
+    /// fill/line, so the axis collapses to these two members.
     /// </summary>
     internal enum RenderLayerBuild
     {

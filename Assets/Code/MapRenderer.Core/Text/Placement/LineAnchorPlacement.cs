@@ -10,7 +10,7 @@ using MapRenderer.Core.Text;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// A-2: computes a <c>symbol-placement: line</c> / <c>line-center</c> symbol's along-line anchors ONCE at
+    /// Computes a <c>symbol-placement: line</c> / <c>line-center</c> symbol's along-line anchors ONCE at
     /// build time, in TILE space (projection-agnostic, zoom-invariant) — the MapLibre <c>getAnchors</c>
     /// analogue. Anchors are returned as stable <see cref="LineAnchor"/> topology (segment + t), so the number
     /// of anchors and their world positions are FIXED for the tile's lifetime: the per-frame placement pass

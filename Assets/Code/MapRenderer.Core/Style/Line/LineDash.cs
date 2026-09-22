@@ -6,13 +6,13 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.Line
 {
     /// <summary>
-    /// S43: line-dasharray — engine-free helpers for the in-shader modulo dash mechanism.
+    /// <c>line-dasharray</c> — engine-free helpers for the in-shader modulo dash mechanism.
     ///
-    /// Design decision D1: in-shader modulo over cumulative dash-pattern length. Cheap and exact
-    /// for simple patterns; no LUT/SDF texture needed. AA is handled in the fragment shader via
-    /// fwidth feather on the on/off transition edges. Round dash-caps deferred to a follow-up.
+    /// The mechanism is an in-shader modulo over cumulative dash-pattern length: cheap and exact for
+    /// simple patterns, no LUT/SDF texture needed. AA is handled in the fragment shader via fwidth
+    /// feather on the on/off transition edges. Round dash-caps are not implemented.
     ///
-    /// Design decision D2 (restated at S110): dash lengths are line-width units
+    /// Dash lengths are line-width units
     /// (distanceAlong / metersPerDashUnit), so dashes scale automatically with line-width and remain
     /// zoom-stable. The unit is FIXED FOR THE FRAME — it is the styled width measured with the frame's
     /// ground resolution, not with each vertex's own screen measurement — so the pattern is anchored to the
@@ -20,11 +20,10 @@ namespace MapRenderer.Core.Style.Line
     /// mirror in this file returns the same ratio formula that the HLSL fragment uses.
     ///
     /// This file is the single source of truth for the dash function. The HLSL mirror lives in
-    /// Assets/Code/MapRenderer.Unity/Shaders/Map/Line/Line_VertexExtrude.hlsl (search "S43 dash" to find
-    /// the corresponding fragment code).
+    /// Assets/Code/MapRenderer.Unity/Shaders/Map/Line/Line_VertexExtrude.hlsl.
     ///
     /// Engine-free: no UnityEngine references. Runs in both dotnet core-tests and Unity EditMode.
-    /// Clean-room: dash semantics from the public MapLibre Style Spec. No MapLibre source read.
+    /// Clean-room: dash semantics from the public MapLibre Style Spec.
     /// </summary>
     public static class LineDash
     {
@@ -36,15 +35,15 @@ namespace MapRenderer.Core.Style.Line
         //
         // Returns 1.0 when the fragment is on a "dash-on" region, 0.0 on a "dash-off" gap.
         // This is the hard (non-AA) binary step; the GPU fragment adds fwidth feather around
-        // the same transition edges (see Line_VertexExtrude.hlsl, "S43 dash: fwidth feather").
+        // the same transition edges (see Line_VertexExtrude.hlsl).
         //
         // Parameters:
         //   distanceAlong    — cumulative arc length along the line in world meters.
         //   metersPerDashUnit — metres of road per dash unit: the styled line width in world metres,
         //                   measured with the FRAME-CONSTANT ruler (MetersPerPixel(zoom)/dpr × the styled
-        //                   device-px width). Deliberately NOT "the line's width in world metres at this
-        //                   point on screen" — since S110 that is a different, per-vertex quantity, and
-        //                   using it here is what made dashes crawl, skew and depend on tessellation.
+        //                   device-px width). NOT "the line's width in world metres at this point on
+        //                   screen": that is a different, per-vertex quantity, and using it here makes
+        //                   dashes crawl, skew and depend on tessellation.
         //   pattern       — on/off alternating lengths in line-width units (same units as dashU).
         //                   pattern[0] = first on-length, pattern[1] = first off-length, ...
         //                   Odd-length arrays → treat as solid (documented below).
@@ -55,9 +54,8 @@ namespace MapRenderer.Core.Style.Line
         //   • pattern has odd length / length==1 → ambiguous spec; render solid.
         //   • all pattern entries are <= 0       → degenerate, render solid.
         //
-        // Note on [1]: a single-entry array [1] has odd length → solid identity.
-        // This matches the stage acceptance tooth 1 which explicitly lists [1] as the solid control.
-        // A single entry cannot define both an on and an off span, so solid is the correct fallback.
+        // Note on [1]: a single-entry array [1] has odd length → solid identity. A single entry cannot
+        // define both an on and an off span, so solid is the correct fallback.
         //
         // Mirror note: this function must produce the same on/off result as the HLSL fragment
         // (Assets/Code/MapRenderer.Unity/Shaders/Map/Line/Line_VertexExtrude.hlsl). Keep both in sync on
@@ -123,8 +121,8 @@ namespace MapRenderer.Core.Style.Line
         /// its array literals bare (e.g. <c>[2,1]</c>, or the per-stop outputs of
         /// <c>["step",["zoom"],[1,1],10,[2,1]]</c>), but the strict expression parser rejects an array
         /// whose first element is not an operator string. So bare arrays are wrapped as
-        /// <c>["literal", …]</c> (<see cref="ExpressionParser.WrapBareArrayLiterals"/>, S23 I2b — shared
-        /// with <c>FillExtrusion.PaintProperties</c>'s translate parse) — at the top level and in an
+        /// <c>["literal", …]</c> (<see cref="ExpressionParser.WrapBareArrayLiterals"/>, shared with
+        /// <c>FillExtrusion.PaintProperties</c>'s translate parse) — at the top level and in an
         /// operator's direct arguments (which covers step / interpolate stop outputs). Returns null for a
         /// null or malformed value (→ render solid; never throws).
         /// </summary>

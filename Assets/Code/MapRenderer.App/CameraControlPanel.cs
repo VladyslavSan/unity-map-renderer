@@ -7,17 +7,17 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// S72: A dev/authoring surface that two-way binds Zoom / Tilt / Heading sliders to the live
+    /// A dev/authoring surface that two-way binds Zoom / Tilt / Heading sliders to the live
     /// camera. A <b>thin shuttle</b>: it owns no reconcile logic — every frame it hands its serialized
     /// floats to the pure engine-free <see cref="CameraSliderBinding.Reconcile"/>, applies the returned
     /// patch through the existing write seam, and writes the returned display values back into the fields.
     ///
-    /// <para><b>Kept out of <c>Controller</c>:</b> S72 is the Editor/authoring input source only; runtime
-    /// gestures (mouse+keyboard → S73, touch → S74) are independent sources over the same seam, so this is
-    /// a separate component and does not touch the pan/zoom <see cref="Controller"/>.</para>
+    /// <para><b>Kept out of <c>Controller</c>:</b> this is the Editor/authoring input source only. Runtime
+    /// gestures — mouse and keyboard, touch — are independent sources over the same seam, so this is a
+    /// separate component and does not touch the pan/zoom <see cref="Controller"/>.</para>
     ///
-    /// <para><b>Play-mode only (decision 6):</b> <see cref="MapView.Camera"/> is constructed only on the
-    /// runtime runtime wiring/startup path, so in edit mode it is null. <see cref="Update"/>
+    /// <para><b>Play-mode only:</b> <see cref="MapView.Camera"/> is constructed only on the
+    /// runtime wiring/startup path, so in edit mode it is null. <see cref="Update"/>
     /// null-guards <see cref="Map"/>/<see cref="MapView.Camera"/> and no-ops cleanly when unwired.</para>
     /// </summary>
     public sealed class CameraControlPanel : MonoBehaviour
@@ -48,7 +48,7 @@ namespace MapRenderer.App
         [Tooltip("Look-at longitude (WGS-84 degrees). Read-only readout.")]
         public double Longitude;
 
-        // ── Baseline: the last values the panel synced (decision 3), in the same units as the fields.
+        // ── Baseline: the last values the panel synced, in the same units as the fields.
         // Compared against the fields to tell a user drag from camera self-motion. Float-precision is
         // fine: CameraSliderBinding compares with an epsilon that absorbs the double→float serialization
         // round-trip (the field-vs-baseline guard never compares against the live camera).

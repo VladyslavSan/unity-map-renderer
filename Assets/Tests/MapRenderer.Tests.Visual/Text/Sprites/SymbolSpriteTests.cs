@@ -1,6 +1,6 @@
-// Sprite-atlas GPU/visual acceptance tests (UMR-176 pack: text/sprites sub-topic).
+// Sprite-atlas GPU/visual acceptance tests.
 //
-// docs/test-conventions.md §5: text's sprite-atlas sub-area lives in Text/Sprites/.
+// docs/test-conventions.md: text's sprite-atlas sub-area lives in Text/Sprites/.
 //
 // Contents:
 //   SymbolAtlasMultiPageRenderSnapshotTests  — Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
@@ -29,7 +29,7 @@ namespace MapRenderer.Tests.Text.Placement
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
     // NOT registered in core-tests.csproj.
     //
-    // M-T3 (Stage M multi-atlas plan): a 2-page glyph atlas must render glyphs from BOTH pages correctly —
+    // A 2-page glyph atlas must render glyphs from BOTH pages correctly —
     // the Texture2DArray sample must actually read the layer BillboardVertex.Page selects, not silently fall
     // back to layer 0 (which would render page-0's leftover/garbage content, or nothing, at a page-1 UV).
     //
@@ -147,16 +147,16 @@ namespace MapRenderer.Tests.Text.Placement
                 textSizePx: 220f,
                 sortKey: 0f,
                 featureIndex: 0,
-                // Epic A / A1 Risk R1: a realistic containing tile keeps the world-anchored bake float32-safe
+                // a realistic containing tile keeps the world-anchored bake float32-safe
                 // (TileKey=0 is ~2e7m away — see SymbolAtlasOrientationSnapshotTests' identical note).
                 tileKey: TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14));
 
-            // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
+            // point text now draws through the world path — pass the world base too.
             using var system = new SymbolPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the label's anchor must not be culled");
@@ -177,7 +177,7 @@ namespace MapRenderer.Tests.Text.Placement
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
     // NOT registered in core-tests.csproj.
     //
-    // S20 plan Risk de-risk (HIGH): synthetic-UV tests (BillboardMathTests/SymbolBillboardJobTests) cannot
+    // Synthetic-UV tests (BillboardMathTests/SymbolBillboardJobTests) cannot
     // catch a vertical flip because they never touch the REAL uploaded atlas texture or the REAL shader. This
     // test renders one REAL glyph ('A', from the committed NotoSansRegular fixture — the SAME glyph
     // GlyphAtlasTextureTests/SdfDistanceFieldTests already prove is present) through the REAL
@@ -197,14 +197,13 @@ namespace MapRenderer.Tests.Text.Placement
     // check. Absolute VERTICAL position is therefore NOT asserted here -- it's a verified-live eyeball item;
     // only the flip-invariant horizontal axis (1) and the un-mirrored orientation (2) are machine-checked.
     //
-    // SUBMISSION PATH (E2, the render-layer model): system.Tick() renders through a
+    // SUBMISSION PATH: system.Tick() renders through a
     // REAL persistent scene MeshRenderer now -- SymbolPlacementSystem's demo-path fallback SymbolSlotPresenter
     // creates a hidden GameObject with a MeshFilter/MeshRenderer bound to the built Mesh/Material as PART OF
-    // Tick() itself, so this test calls snap.Render(uCam) directly with no manual attach. This replaces the
-    // pre-E2 Graphics.RenderMesh submission, which rendered 0 px in headless EditMode (a harness limitation --
-    // same bucket as the Entities-Graphics gotcha -- confirmed with a minimal repro: a
-    // plain quad + the built-in URP Unlit shader submitted the same immediate-mode way also rendered nothing
-    // headless); a persistent MeshRenderer has no such limitation -- Unity redraws it like any scene object.
+    // Tick() itself, so this test calls snap.Render(uCam) directly with no manual attach. Do NOT route it
+    // back through Graphics.RenderMesh: an immediate-mode submission renders 0 px in headless EditMode (a
+    // harness limitation, same bucket as the Entities-Graphics gotcha), while a persistent MeshRenderer is
+    // redrawn by Unity like any scene object.
     // The Map/Symbol vertex shader ignores the object-to-world/VP transform entirely (screen-space px -> clip
     // via _ScreenParamsLogical), so the hidden presenter's identity transform is inert.
 
@@ -289,17 +288,17 @@ namespace MapRenderer.Tests.Text.Placement
                 textSizePx: 220f, // large -- reliably legible at the readback resolution
                 sortKey: 0f,
                 featureIndex: 0,
-                // Epic A / A1 Risk R1: TileKey=0 (tile 0/0/0) is ~2e7m from this mid-latitude anchor —
+                // TileKey=0 (tile 0/0/0) is ~2e7m from this mid-latitude anchor —
                 // float32-unsafe for the world-anchored AnchorLocal bake (jitter/vanish on-screen). A
                 // realistic containing tile keeps the bake within one tile span (float32-safe).
                 tileKey: TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14));
 
-            // Epic A / A1: point text now draws through the world path — pass the world base too (D7).
+            // point text now draws through the world path — pass the world base too.
             using var system = new SymbolPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount,
@@ -307,7 +306,7 @@ namespace MapRenderer.Tests.Text.Placement
                     "1, matching the single glyph quad) -- if this is 0, the failure is a projection/culling " +
                     "bug, not a rendering bug.");
 
-                // E2: Tick() already bound the built Mesh/Material to a real persistent scene MeshRenderer
+                // Tick() already bound the built Mesh/Material to a real persistent scene MeshRenderer
                 // (the demo fallback SymbolSlotPresenter) — render straight away, no manual attach (see the
                 // file header's SUBMISSION PATH paragraph; a double-attach would double-blend the SDF ink).
                 snap.Render(uCam);
@@ -448,7 +447,7 @@ namespace MapRenderer.Tests.Text.Placement
     // Unity EditMode only — off-screen GPU render of the REAL icon draw path to a PNG artifact. NOT registered
     // in core-tests.csproj (needs Camera/RenderTexture/Material/Texture2D/SpriteSheet).
     //
-    // This is the machine-checkable form of the I5b/I6 "on-screen eyeball": it renders four DISTINCT, deliberately
+    // This is the machine-checkable form of the "on-screen eyeball": it renders four DISTINCT, deliberately
     // ASYMMETRIC demo sprites (a committed fixture — an up-triangle, an "F", a down-arrow, a ring) through the REAL
     // SymbolPlacementSystem.Tick → Map/Symbol/IconWorld shader → row-flipped SpriteSheet texture, reads the framebuffer
     // back, and writes Logs/snapshots/symbol-icons.png. Asymmetric shapes make any vertical flip / horizontal
@@ -494,7 +493,7 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void DemoIcons_RenderThroughRealIconPath_WritesPng()
         {
-            // 1. Real sprite sheet via the I4 path (LoadImage + the row-flip that matches the glyph-atlas
+            // 1. Real sprite sheet via the LoadImage path (LoadImage + the row-flip that matches the glyph-atlas
             //    orientation contract) — the committed asymmetric demo fixture.
             SpriteIndex index = SpriteIndex.Parse(LoadFixtureText("demo-icons.json"));
             using var sheet = new SpriteSheet(LoadFixtureBytes("demo-icons.png"), index);
@@ -534,7 +533,7 @@ namespace MapRenderer.Tests.Text.Placement
                 ("ring",        k, -k),
             };
 
-            // Epic A / A1 Risk R1: a realistic containing tile keeps the world-anchored bake float32-safe
+            // a realistic containing tile keeps the world-anchored bake float32-safe
             // (TileKey=0 is ~2e7m away — see SymbolAtlasOrientationSnapshotTests' identical note).
             long tileKey = TestTileKeys.PackedContaining(new GeoCoordinate { Latitude = 30.0, Longitude = 30.0 }, zoom: 14);
 
@@ -560,7 +559,7 @@ namespace MapRenderer.Tests.Text.Placement
                     kind: SymbolKind.Icon,
                     paint: whitePaint,
                     textSizePx: TextQuadLayout.OneEm, // scale 1 — matches the real StyledSymbolTileBuilder icon path
-                    iconImage: name,                  // the I6 cross-tile identity discriminant
+                    iconImage: name,                  // the cross-tile identity discriminant
                     allowOverlap: true,               // render diagnostic — never collision-cull
                     sortKey: 0f,
                     featureIndex: i,
@@ -588,8 +587,8 @@ namespace MapRenderer.Tests.Text.Placement
                 featureIndex: 99,
                 tileKey: tileKey);
 
-            // Epic A / A1: point text + icons draw through the world path (D7) — the ONLY draw path since
-            // commit 1 retired the screen materials/path.
+            // Point text and icons draw through the world path — the ONLY draw path; there are no screen
+            // materials.
             using var system = new SymbolPlacementSystem(
                 mapCamera,
                 new Material(Shader.Find("Map/Symbol/TextWorld")),
@@ -600,7 +599,7 @@ namespace MapRenderer.Tests.Text.Placement
             // SymbolGatherParityTests for the mixed-kind (curved + point) case where the split reorders.
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 Assert.AreEqual(buffer.Symbols.Count, plan.CollectedCount,
@@ -653,11 +652,11 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // A6 (P-B) — the ICON shader's along-line TANGENT branch, the one thing no CPU readback can prove:
+        // The ICON shader's along-line TANGENT branch, the one thing no CPU readback can prove:
         // the rotation happens in the vertex shader, from the projected world Tangent. So render the SAME
         // deliberately NON-SQUARE icon quad as an along-line icon on a HORIZONTAL road and on a VERTICAL
         // one, and assert the ink's long axis follows the road. Against an icon pass that ignores
-        // tangentOS (its state before P-B) both renders are identical wide bars — RED on the vertical case.
+        // tangentOS both renders are identical wide bars — RED on the vertical case.
         //
         // Not a golden: the assertion is a RELATION between two renders of the same content, so it needs no
         // committed pixel signature and cannot enshrine a wrong rotation the way a minted golden could.
@@ -712,7 +711,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // A6 (P-B) — the SIGN of the two rotations, which the aspect tooth above cannot see. A bounding box
+        // The SIGN of the two rotations, which the aspect tooth above cannot see. A bounding box
         // is direction-blind: a quad turned +90° and one turned −90° are the same tall box, and 180° (what
         // `road_one_way_arrow_opposite` asks for) is its own inverse. A sign error therefore survives both
         // the tangent tooth and the icon-rotate teeth while misorienting every arrow on a DIAGONAL road —
@@ -840,13 +839,13 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ══════════════════════════════════════════════════════════════════════════════════════════════
-        // W2 — the map-PITCHED along-line ICON arm, rendered. (Review REQUIRED 1.)
+        // The map-PITCHED along-line ICON arm, rendered.
         //
-        // WHY THIS EXISTS. W2 gave `Map/Symbol/Icon/SymbolIconWorld_ForwardPass.hlsl` a map-pitch branch, and
+        // WHY THIS EXISTS. `Map/Symbol/Icon/SymbolIconWorld_ForwardPass.hlsl` carries a map-pitch branch, and
         // that branch is LIVE IN PRODUCTION TODAY: `AlignmentResolution.ResolvePitch(Auto, Auto, LineCenter)`
         // resolves to Map, `SymbolFeatureExtractor` stamps it onto the along-line ICON SymbolFeature, and
         // `StageCurved` is shared across AtlasKind — so `road_one_way_arrow` / `road_one_way_arrow_opposite`
-        // ship with AlignFlags bit2 and METRE corner offsets. Every other W2 rendered tooth binds
+        // ship with AlignFlags bit2 and METRE corner offsets. Every other map-pitch rendered tooth binds
         // Map/Symbol/TextWorld and SymbolKind.Text, so without this pair the icon copy of the branch was
         // compiled and shipped but never rendered by any test. `round-caps-never-rendered` is this repo's
         // recorded cost of shipping exactly that shape.
@@ -867,9 +866,9 @@ namespace MapRenderer.Tests.Text.Placement
         //     plane is ⊥ the view axis, so `cornerPx · metresPerLogicalPixel` metres projects to exactly
         //     `cornerPx` logical px. (Same calibration MapPitchedGlyphSizeTiltZeroTests rests on.)
         //   · road 45° — a sign or composition error is INVISIBLE on a screen-axis-aligned road; this file's own
-        //     sign teeth are at 45° for that reason, and W2's E8 sign measurement read a false agreement at 0°.
+        //     sign teeth are at 45° for that reason: a sign measurement at 0° reads a false agreement.
         //   · icon-rotate 90°, NOT 180° — 180° is its own inverse, so the only value production styles use
-        //     cannot expose a sign error. This file's header says so; the reviewer's REQUIRED said so.
+        //     cannot expose a sign error.
         //   · sprite 'f-glyph' — 'arrow-down' is very nearly centroid-symmetric (0.25 px of 32 from its cell
         //     centre), so it carries no usable direction signal however far it is rotated.
         //   · PathUpRender is set to world up by the harness, so the map arm takes SymbolWorldGroundFrame's
@@ -878,11 +877,11 @@ namespace MapRenderer.Tests.Text.Placement
         //
         // THE REFERENCE IS THE VIEWPORT ARM, which shares no code with the map branch: SymbolWorldIsMapPitched
         // sends the two down mutually exclusive paths. The twins differ in EXACTLY ONE FIELD,
-        // ShapedSymbol.PitchAlignment. (P3a's rebuilt-T2 lesson: a reference drawn from the arm under test
-        // cancels the defect it is meant to expose.)
+        // ShapedSymbol.PitchAlignment. A reference drawn from the arm under test cancels the defect it is
+        // meant to expose.
         //
         // Two [Test] methods, never one with two clauses — NUnit throws on the first failure, so a second
-        // clause would never run. That has already cost this epic two teeth. The COUNT clause is the only one
+        // clause would never run. The COUNT clause is the only one
         // that can see a uniform scale error (it reads k as k²); the CENTROID clause is the only one that can
         // see a mirror or a rotation error (a mirror is an isometry, so the count is structurally blind to it).
         // ══════════════════════════════════════════════════════════════════════════════════════════════
@@ -1185,7 +1184,7 @@ namespace MapRenderer.Tests.Text.Placement
             public int BoxWidth { get; set; }
             public int BoxHeight { get; set; }
 
-            /// <summary>Total inked pixels. W2 reads this: a uniform scale error `k` shows up as `k²` here,
+            /// <summary>Total inked pixels. A uniform scale error `k` shows up as `k²` here,
             /// and it is the ONLY one of these measures that can see one (a box is quantised to whole pixels
             /// and both centroids are scale-free about their own reference).</summary>
             public int InkCount { get; set; }
@@ -1234,7 +1233,7 @@ namespace MapRenderer.Tests.Text.Placement
             double3 dir = new double3(math.cos(rad), 0.0, math.sin(rad));
             double halfLen = altitude * 0.02;
 
-            // W2: the per-vertex surface normal. Web-Mercator, so up IS (0,1,0). Set UNCONDITIONALLY — it is
+            // The per-vertex surface normal. Web-Mercator, so up IS (0,1,0). Set UNCONDITIONALLY — it is
             // unread on the viewport path (so no existing arm moves), and it is what makes a map-pitched arm
             // take SymbolWorldGroundFrame's GROUND branch rather than its camera-facing fallback. Without it
             // the map arm would still pass at tilt 0 (the two frames coincide there) while never exercising
@@ -1251,7 +1250,7 @@ namespace MapRenderer.Tests.Text.Placement
                 up: worldUp,
                 iconImage: iconImage,
                 kind: SymbolKind.Icon,
-                // W2: the ONLY field the map/viewport twins below differ in.
+                // The ONLY field the map/viewport twins below differ in.
                 pitchAlignment: pitchAlignment,
                 iconRotateRadians: math.radians(iconRotateDeg),
                 // White vertex color so SAMPLE(_MainTex) * color shows the sprite's own hue (SymbolPaint.Default
@@ -1278,7 +1277,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 system.Tick(in frame, plan.Build(buffer), atlasTexture,
@@ -1386,7 +1385,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), atlasTexture,
                     deltaTime: float.PositiveInfinity, spriteTexture: sheet.Texture);
                 system.Tick(in frame, plan.Build(buffer), atlasTexture,
@@ -1425,7 +1424,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // The minimum a Tick needs to stage anything at all (see the gate note above) — one real glyph
-        // uploaded to a GlyphAtlasTexture. Nothing in the A6 scene ever samples it.
+        // uploaded to a GlyphAtlasTexture. Nothing in the icon scene ever samples it.
         private static GlyphAtlasTexture BuildTinyGlyphAtlasTexture()
         {
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadGlyphFixture("0-255.pbf.bytes")).Stacks[0];
@@ -1859,7 +1858,7 @@ namespace MapRenderer.Tests.Text.Placement
         //     one too).
         //   * the retired inset still applied    → 7 texels over 64px, 9.143 px/texel: 45.714 px.
         //
-        // MEASUREMENT — deliberately NOT a coverage-threshold width. The readback is gamma-encoded (the
+        // MEASUREMENT — NOT a coverage-threshold width. The readback is gamma-encoded (the
         // project renders in Linear colour space into an sRGB ARGB32 target), so a "50% darkness" crossing
         // does NOT sit at 50% coverage: it sits at alpha ≈ 0.79, which pulls BOTH edges inward by a
         // magnification-proportional amount comparable to the whole signal. Instead the fixture carries two
@@ -2231,7 +2230,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // The collision verdict is harvested one Tick late (§2.6) — hence the duplicate tick.
+                // The collision verdict is harvested one Tick late — hence the duplicate tick.
                 system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity,
                     spriteTexture: sheet.Texture);
                 system.Tick(in frame, plan.Build(buffer), glyphAtlas, deltaTime: float.PositiveInfinity,
@@ -2571,7 +2570,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var snap = new SnapshotRenderer(Size, Size);
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // The collision verdict is harvested one Tick late (§2.6) — hence the duplicate tick.
+                // The collision verdict is harvested one Tick late — hence the duplicate tick.
                 system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity);
                 system.Tick(in frame, plan.Build(buffer), atlasTexture, deltaTime: float.PositiveInfinity);
                 Assert.AreEqual(1, system.LastQuadCount, "the single glyph quad must place (not culled).");

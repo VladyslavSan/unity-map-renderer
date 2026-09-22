@@ -1,18 +1,15 @@
 // Unity EditMode only — real GameObject/Transform. NOT registered in core-tests.csproj.
 //
-// Namespace is MapRenderer.Tests (not .Visual) deliberately: C# resolves extension methods only through
-// the call site's ENCLOSING namespaces, and callers live in both MapRenderer.Tests and
-// MapRenderer.Tests.Visual. The parent namespace is the one both can see.
+// Namespace is MapRenderer.Tests, not .Visual: C# resolves extension methods only through the call site's
+// ENCLOSING namespaces, and callers live in both MapRenderer.Tests and MapRenderer.Tests.Visual. The parent
+// namespace is the one both can see.
 //
 // Observability for the GameObject backend, living in the TEST assembly rather than on the production
-// class. These five were `public` members on Backend.GameObjects.TileRenderer under a "Test / debug
-// observability" banner, with ZERO production callers between them — the shape the conventions rule out
-// ("a member that exists solely for a test does not belong on the production class"). They read the
-// backend's `_items`/`_tree`, broadened private -> internal, which IS the sanctioned footprint.
+// class. These read the backend's `_items`/`_tree`, broadened private -> internal, which IS the sanctioned
+// footprint.
 //
-// They also drop the post-dispose leniency the production versions carried (null / 0 / NaN). That
-// existed so a test could read a torn-down backend; using an object after Dispose is a bug rather than
-// a case to accommodate, so these now fault like any other post-dispose access.
+// Post-dispose access faults here rather than returning null / 0 / NaN: reading a torn-down backend is a
+// bug, not a case to accommodate.
 
 using UnityEngine;
 using MapRenderer.Core.Geo;

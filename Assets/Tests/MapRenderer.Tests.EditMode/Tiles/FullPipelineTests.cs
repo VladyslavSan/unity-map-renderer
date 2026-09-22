@@ -3,15 +3,15 @@
 // The four job-graph scheduling/parity fixtures first, then the two whole-pipeline fixtures (full, jobified), then profiler markers, disposable sharing, worker-pass, tile-selector diagnostics and decode-dispatch, in roughly pipeline order.
 //
 // Contents:
-//   FillExtrusionMeshGraphSchedulingTests  — job-scheduling-design.md §8 stage 5 (the wall-job-graph stage), tooth (c) — every buffer FillExtrusionMeshGraph.Schedule allocates gets exactly one matching Dispose(handle) node.
-//   FillMeshGraphGlobeParityTests          — R6's extension (this file is not itself R6's named site, but shares its exact defect shape — see Group B's stage brief): the first check used to be a LIVE differential against WriteGlobeSubdivided's own call — GlobeFillSubdivideDispatch.Run over…
+//   FillExtrusionMeshGraphSchedulingTests  — job-scheduling-design.md, tooth (c) — every buffer FillExtrusionMeshGraph.Schedule allocates gets exactly one matching Dispose(handle) node.
+//   FillMeshGraphGlobeParityTests          — The first check used to be a LIVE differential against WriteGlobeSubdivided's own call — GlobeFillSubdivideDispatch.Run over…
 //   FillMeshGraphParityTests               — This tooth is RED-verified by perturbing the aggregate's index rebase by one and by dropping the gather's hole-ring tie-break — executed manually, one at a time, and reverted; not left in this file.
-//   FillMeshGraphSchedulingTests           — job-scheduling-design.md §8 stage 1: not-completed-at-return, and scratch/output dispose-balance.
+//   FillMeshGraphSchedulingTests           — job-scheduling-design.md: not-completed-at-return, and scratch/output dispose-balance.
 //   FullPipelineTests                      — Full-pipeline headless test: decode → assemble → earcut over all 239 country features.
-//   JobifiedPipelineTests                  — Parity and integration tests for the jobified decode + mesh pipeline (S04).
+//   JobifiedPipelineTests                  — Parity and integration tests for the jobified decode + mesh pipeline.
 //   ProfilerMarkerTests                    — ProfilerRecorder notes:   - Use ProfilerCategory.Scripts to match the explicit category on each ProfilerMarker constructor.
-//   SharedDisposableSharingTests           — Epic A / A4 acceptance teeth, carried onto the reference-counted SharedDisposable{T}: the mesh and symbol cadences of ONE kick observe the SAME IDecodedTile instance, in either arrival order.
-//   TileSymbolWorkerPassTests              — Epic A / A3 acceptance tooth #5: proves RunSymbolWorkerPass decodes the fetched bytes exactly once, shares that same IDecodedTile reference across every processor in dense order, runs NO tail (the tail is the caller's main-thread step), rejects a…
+//   SharedDisposableSharingTests           — Acceptance teeth, carried onto the reference-counted SharedDisposable{T}: the mesh and symbol cadences of ONE kick observe the SAME IDecodedTile instance, in either arrival order.
+//   TileSymbolWorkerPassTests              — proves RunSymbolWorkerPass decodes the fetched bytes exactly once, shares that same IDecodedTile reference across every processor in dense order, runs NO tail (the tail is the caller's main-thread step), rejects a…
 //   VisibleTileSelectorDiagnosticTests     — Hard gates: (3) must equal (2) tile-for-tile (proves the engine-free frustum matches the real camera — the linchpin).
 //   WorkSchedulerDecodeDispatchTests       — Stage-1 acceptance: TileDecodeDispatch.DecodeAsync driven directly with an injected IWorkScheduler, over the real committed MVT fixture.
 
@@ -148,7 +148,7 @@ namespace MapRenderer.Tests.Tiles
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // FillMeshGraphGlobeParityTests — R6's defect shape, extended to the globe arm
+    // FillMeshGraphGlobeParityTests — the defect shape, extended to the globe arm
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -156,12 +156,12 @@ namespace MapRenderer.Tests.Tiles
     {
         private static readonly Regex TileIdFromName = new Regex(@"-(\d+)-(\d+)-(\d+)\.pbf\.bytes$");
 
-        // ── (a) Golden parity of the subdivided output, over the whole fixture corpus (R6-shaped fix). ─────
+        // ── (a) Golden parity of the subdivided output, over the whole fixture corpus. ─────
 
-        // Frozen golden (R6-shaped): captured from GlobeFillSubdivideDispatch.Run over
-        // FillMeshPipeline.Schedule's output — exactly WriteGlobeSubdivided's own call — before Group B
-        // deleted both. Commit f5e13c19; see docs/stage4-groupb-goldens-capture-f5e13c19.txt's SITE2 lines.
-        // Re-captured for UMR-106 Stage 1: the degenerate-candidate ear-predicate fix (EarcutJob.PointInTriangle)
+        // Frozen golden: captured from GlobeFillSubdivideDispatch.Run over
+        // FillMeshPipeline.Schedule's output — WriteGlobeSubdivided's own call — captured before both
+        // were deleted.
+        // Re-captured after the degenerate-candidate ear-predicate fix (EarcutJob.PointInTriangle)
         // moves the corpus's triangulated output, so this digest was recomputed against the fixed predicate.
         private const string FrozenGoldens =
             "TriangleStream=rGzWbOAGcl9bEQyzuS336mSlkYFucl2qqTZO2cO5zdk=";
@@ -219,7 +219,7 @@ namespace MapRenderer.Tests.Tiles
                     // Arm 2: clip ENABLED — the arm production actually takes on a curved projection
                     // (MapViewConfig.FillTileBufferClip = 0.0 decodes to KeepTileUnits(0.0), not Disabled;
                     // this test uses 64 so TryWindow provably enters). Curved + clip-enabled is exactly what
-                    // the only shipped scene (OpenStreetMapLiberty, UseGlobe: 1) runs, and before the §3.7
+                    // the only shipped scene (OpenStreetMapLiberty, UseGlobe: 1) runs, and before the
                     // reshape it had geometry parity coverage only incidentally, through the pre-subdivision
                     // columns FillMeshGraphParityTests used to compare — which no longer exist post-reshape.
                     // Assert the enabled arm was actually ENTERED, not merely configured — the same rule
@@ -255,7 +255,7 @@ namespace MapRenderer.Tests.Tiles
         /// count — a genuine split. BOTH builds suppress the boundary band (see the body's comment: the
         /// frozen digest pins subdivision and predates the band). The source count comes from a second,
         /// flat-arm Schedule call over the SAME geometry: triangulation runs identically before the arm split
-        /// (job-scheduling-design.md §3.7), so the flat arm's TriangleIndices.Length IS the curved arm's
+        /// (job-scheduling-design.md), so the flat arm's TriangleIndices.Length IS the curved arm's
         /// pre-subdivision count, with no need for the retired synchronous pipeline as a witness.
         ///
         /// <para>The extra schedule is <b>deliberate, not an oversight</b>: neither <see cref="FillGraphOutput"/>
@@ -404,9 +404,9 @@ namespace MapRenderer.Tests.Tiles
 
         private static string ProjectionName(IProjection p) => p.GetType().Name;
 
-        // ── Frozen goldens (R6) — captured from FillMeshPipeline.Schedule on commit f5e13c19, before Group B
-        // deleted it. See this file's header comment for the capture methodology and provenance.
-        // Re-captured for UMR-106 Stage 1: the degenerate-candidate ear-predicate fix (EarcutJob.PointInTriangle)
+        // ── Frozen goldens — captured from FillMeshPipeline.Schedule before it was deleted.
+        // See this file's header comment for the capture methodology and provenance.
+        // Re-captured after the degenerate-candidate ear-predicate fix (EarcutJob.PointInTriangle)
         // moves the corpus's triangulated output, so these digests were recomputed against the fixed predicate.
         internal const string FrozenGoldensMercator =
             "Vertex=abw1RVTEKTX0q2SAH1frMmR5klneemBfwyLltWhcC9Q= World=ix/06MAQIOpWn5DSnMXHtCoVJJOMR5ZlDZ1RPmZ4jos= " +
@@ -414,15 +414,15 @@ namespace MapRenderer.Tests.Tiles
             "Indices=ibY64qOJPV0HG+vpmH423n2jBLqjxYDgNT6EoQxbnMs= PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= " +
             "RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= " +
             "ForceClip=Vpd9xrW9d4LB+WVE++TrZdW/iYFu85X89YP3j2yGX7M=";
-        // Re-captured for UMR-106 Stage 1 (same cause as FrozenGoldensMercator above).
+        // Re-captured for the same cause as FrozenGoldensMercator above.
         internal const string FrozenGoldensSpherical =
             "PolyCount=GPT25e2QoKuZlvyLJr217Hg+BzNu4tsF/xTSGD8EEno= RingCount=dQChKlRF3Q9rhXNaIn6SihAPsssTMDHD5yXoYuxCvLE= " +
             "HoleCount=aerOkFJ48oBOi7mWf7Zq9gT/lhB5U+vlf3fz+yjaZeQ= ForceClip=Vpd9xrW9d4LB+WVE++TrZdW/iYFu85X89YP3j2yGX7M=";
 
         /// <summary>Walks the same (corpus fixture × 2 clip arms) + 1 synthetic-hole-layer sequence, in the
         /// same fixed order, that <see cref="Schedule_MatchesFrozenSynchronousPipelineGoldens_AcrossCorpusAndSyntheticLayer"/>
-        /// captured its frozen goldens against — extracted so <c>GraphDeterminismTests</c> (job-scheduling-
-        /// design.md §8 stage 6, B.5) can reproduce the EXACT same input sequence its own golden-equality
+        /// captured its frozen goldens against — extracted so <c>GraphDeterminismTests</c> can reproduce
+        /// the EXACT same input sequence its own golden-equality
         /// assertion needs, rather than a second hand-typed copy that could silently drift from this one.
         /// <paramref name="visit"/> receives each case's <see cref="FillMeshPipeline.LayerInput"/> in
         /// accumulation order; the two corpus-coverage preconditions (at least 4 fixtures, at least one
@@ -542,7 +542,7 @@ namespace MapRenderer.Tests.Tiles
                     ringBytes.AddRange(BitConverter.GetBytes(output.Counts[0].RingCount));
                     holeBytes.AddRange(BitConverter.GetBytes(output.Counts[0].HoleCount));
                     fcBytes.AddRange(BitConverter.GetBytes(output.Counts[0].ForceClipCount));
-                    if (curved) return; // §3.7: the curved arm's five geometry arrays are POST-subdivision —
+                    if (curved) return; // The curved arm's five geometry arrays are POST-subdivision —
                                          // not the same quantity FillMeshPipeline.Schedule returned; never pinned here.
 
                     // The INTERIOR prefix only, never the whole column set. FillBandJob appends the outward
@@ -599,7 +599,7 @@ namespace MapRenderer.Tests.Tiles
                 "longer matches the frozen FillMeshPipeline.Schedule goldens — a real regression, not a re-bake candidate.");
         }
 
-        // ── (e) Projection dispatch coverage — job-scheduling-design.md §8 stage 4. ─────────────────────────
+        // ── (e) Projection dispatch coverage — job-scheduling-design.md. ────────────────────────────────────
         //
         // Deliberately NOT a corpus sweep: this is about ProjectionDispatch.Schedule's DISPATCH being wired
         // to the right struct, not about coverage breadth — Tiles/FillMeshGraphGlobeParityTests.cs's corpus
@@ -905,7 +905,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── (g) Counters still balance on a CURVED layer — job-scheduling-design.md §8 stage 4. ────────────
+        // ── (g) Counters still balance on a CURVED layer — job-scheduling-design.md. ───────────────────────
 
         /// <summary>Same baseline/delta idiom as the flat-arm test above, over a layer that genuinely takes
         /// the curved sub-chain (<see cref="FillMeshGraphSchedulingTests.LargeTrianglePolygon"/> +
@@ -930,7 +930,7 @@ namespace MapRenderer.Tests.Tiles
                 FillGraphOutput o = FillMeshGraph.Schedule(input);
                 JobHandle.ScheduleBatchedJobs();
                 o.Handle.Complete();
-                // job-scheduling-design.md §3.7: TileVertices IS the post-subdivision column on the curved
+                // job-scheduling-design.md: TileVertices IS the post-subdivision column on the curved
                 // arm now, so "genuinely subdivided" reads as "more vertices than the raw 3-vertex triangle".
                 Assert.Greater(o.TileVertices.Length, 3, "precondition: the layer must genuinely subdivide");
                 o.Dispose();
@@ -959,11 +959,11 @@ namespace MapRenderer.Tests.Tiles
 
     /// <summary>
     /// Full-pipeline headless test: decode → assemble → earcut over all 239 country features. Re-homed
-    /// onto the Burst arm in A0 — <see cref="EarcutJobGatherHarness.RunLayer"/> drives the real
+    /// onto the Burst arm — <see cref="EarcutJobGatherHarness.RunLayer"/> drives the real
     /// RingSelect → RingAssembly → gather → <c>EarcutJob</c> chain, and each result is paired with its
     /// OWN input rings (<c>PolygonRun.InputOuter</c>/<c>InputHoles</c>, reconstructed from the gather
     /// state's own columns) rather than a separately assembled <c>PolygonAssembler</c> list — the two
-    /// decompositions are not guaranteed to agree in polygon order (RED-checked in A0: on this fixture
+    /// decompositions are not guaranteed to agree in polygon order (RED-checked: on this fixture
     /// the two orders happen to coincide exactly, 0 of 3218 polygons mismatched by index — evidence
     /// about this fixture's order, not licence to pair by index on a different one).
     /// Validates that:
@@ -977,11 +977,11 @@ namespace MapRenderer.Tests.Tiles
     ///       / expected &lt; 1%. Holed polygons are skipped only when ALL rings (outer + every hole)
     ///       are proved self-intersecting via HasSelfIntersection(). Well-formed holed polygons
     ///       (all rings clean) must conserve area.
-    ///   (d) [removed in S54] the Gen-1 sync mesh-builder index-format check; the async
-    ///       StyledFillTileBuilder upload path is covered by MapViewAsyncMeshBuildTests.
+    ///   (d) the index-format check: the async StyledFillTileBuilder upload path is covered by
+    ///       MapViewAsyncMeshBuildTests.
     ///
     /// KNOWN SKIP POLYGONS (sample-tile fixture, all confirmed degenerate by HasSelfIntersection, and
-    /// re-measured byte-identical on the Burst arm in A0 — both assemblers agree on all four):
+    /// re-measured byte-identical on the Burst arm — both assemblers agree on all four):
     ///   Four tiny clip-boundary slivers with self-intersecting rings (MVT tile-boundary artefacts).
     ///   All four have forceClips=0 (stall guard did NOT fire on them; the area inflation is purely
     ///   geometric — the rings are intrinsically degenerate before the triangulator sees them):
@@ -998,7 +998,7 @@ namespace MapRenderer.Tests.Tiles
     ///   skip is genuinely degenerate (a real area-inflating self-intersection, not just a ring
     ///   HasSelfIntersection flags) before updating.
     ///
-    /// KNOWN NON-SKIPS (A0 investigation, same fixture): five more rings that HasSelfIntersection also
+    /// KNOWN NON-SKIPS (same fixture): five more rings that HasSelfIntersection also
     /// flags (a repeated-vertex or T-junction artefact of near-collinear points) but that do NOT skip,
     /// because they do not inflate area — ratio 1.00x, triangulated correctly, no overlap. The (c) skip
     /// gate is `triArea > outerArea * 1.5`, not bare self-intersection; these are the rings that prove
@@ -1111,7 +1111,7 @@ namespace MapRenderer.Tests.Tiles
                     // (MVT tile-boundary artefacts) produce inflated areas by definition and are
                     // legitimately excused. Well-formed holed polygons must conserve area to < 1%.
                     //
-                    // NOTE (A0 investigation): a self-intersecting-but-non-inflating outer (a near-
+                    // NOTE: a self-intersecting-but-non-inflating outer (a near-
                     // collinear sliver — HasSelfIntersection's repeated-vertex/T-junction clauses can
                     // fire on a ring that still triangulates without overlap) legitimately falls through
                     // this branch uncounted — it is not a "skip" in the (c) sense, since nothing needs
@@ -1171,7 +1171,7 @@ namespace MapRenderer.Tests.Tiles
             Assert.AreEqual(3218, runs.Count, "Countries fixture's assembled polygon count (Burst arm) moved.");
             Assert.Greater(totalTriangles, 0, "Should have produced at least one triangle.");
 
-            // Pinned skip count: re-measured for the Burst arm (§8 of the A0 plan) — the upstream is
+            // Pinned skip count: re-measured for the Burst arm — the upstream is
             // RingAssemblyJob, not PolygonAssembler, and the polygon decomposition may differ. Measured
             // result: 4, byte-identical to the managed arm's pin — the two assemblers agree on this
             // fixture's degenerate rings. If this fails after a triangulator or assembler change, DO NOT
@@ -1268,7 +1268,7 @@ namespace MapRenderer.Tests.Tiles
         }
 
         // -----------------------------------------------------------------------------------------
-        // (d) Gen-1 MeshBuilder tests removed in S54 (MeshBuilder retired).
+        // (d) MeshBuilder is retired.
         //     UInt32 index format and vertex/index count are covered by
         //     MapViewAsyncMeshBuildTests.BuildMeshDataAndUploadMesh_RoundTrip_MatchesSyncBuildMesh
         //     and StyledFillTileBuilder tests (same assertions via StyledFillTileBuilder.BuildMesh).
@@ -1402,14 +1402,14 @@ namespace MapRenderer.Tests.Tiles
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Parity and integration tests for the jobified decode + mesh pipeline (S04).
+    /// Parity and integration tests for the jobified decode + mesh pipeline.
     ///
     /// Structure:
     ///   (1) Decode job vs managed MvtGeometry.Decode — ring count + per-ring vertex content hash equal.
     ///   (2) Ring assembly job vs managed PolygonAssembler — polygon/hole count match.
-    ///   (3) End-to-end jobified vs managed S02 path — vertex+index CONTENT HASH equal (strict,
+    ///   (3) End-to-end jobified vs managed path — vertex+index CONTENT HASH equal (strict,
     ///       no tolerance — tile-space integer coords are exact; projection uses same job on same input).
-    ///       Subsumes the S03 count-only DataSourceRenderPathTests follow-up.
+    ///       Subsumes the count-only DataSourceRenderPathTests follow-up.
     ///   (4) Multi-tile throughput — N tiles scheduled and completed; total verts == N × single-tile.
     /// </summary>
     [TestFixture]
@@ -1426,7 +1426,7 @@ namespace MapRenderer.Tests.Tiles
             FileAssert.Exists(FixturePath);
             byte[] mvtBytes = File.ReadAllBytes(FixturePath);
 
-            // IR C1 P3: the command streams come from the independent fixture reader — a decoded feature
+            // The command streams come from the independent fixture reader — a decoded feature
             // carries none, and reading production's own buffer would make this parity self-referential.
             var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
             Assert.IsNotNull(layer);
@@ -1577,7 +1577,7 @@ namespace MapRenderer.Tests.Tiles
 
                 int ringCount = outRingCount[0];
 
-                // IR B7: the assembler is kind-gated. This fixture hand-drives MvtDecodeJob (no
+                // The assembler is kind-gated. This fixture hand-drives MvtDecodeJob (no
                 // materializer), so the column it would have produced is supplied here — every feature IS a
                 // polygon, which is exactly what the managed reference arm assembles.
                 var featureKinds = new NativeArray<TileGeometryType>(
@@ -1634,7 +1634,7 @@ namespace MapRenderer.Tests.Tiles
                 { polygonKinds.Add(layer.Kinds[fi]); polygonCommands.Add(layer.Commands[fi]); }
 
             var (bMin, _)  = new TileId { Z = 0, X = 0, Y = 0 }.MercatorBounds();
-            // IR B7: ONE buffer, borrowed by all N+1 Schedule calls below — pre-B7 each call consumed its
+            // ONE buffer, borrowed by all N+1 Schedule calls below — each call used to consume its
             // own mint, so this is also a live demonstration that Schedule no longer consumes its input.
             TileGeometryBuffers geometry = MvtGeometryMaterializerTestFactory.Materialize(
                 new TileId { Z = 0, X = 0, Y = 0 }, extent, polygonKinds, polygonCommands);
@@ -1755,7 +1755,7 @@ namespace MapRenderer.Tests.Tiles
             return Convert.ToBase64String(sha256.ComputeHash(bytes.ToArray()));
         }
 
-        // job-scheduling-design.md §8 stage 4 Group B: the oracle now reads FillMeshGraph.Schedule's
+        // The oracle reads FillMeshGraph.Schedule's
         // NativeList output — same byte layout as the NativeArray hashers above, over a NativeList view.
         private static string HashDouble2ArrayFromList(NativeList<double2> list, int count)
         {
@@ -1857,8 +1857,8 @@ namespace MapRenderer.Tests.Tiles
                 // assembly (MapRenderer.Tests.SyncMeshWrite.Fill) with it.
                 StyledFillTileBuilder.ProfilerMarkerNames.BuildLayerInput,
                 TileManager.ProfilerMarkerNames.MeshUpload,
-                MvtDecoder.ProfilerMarkerNames.Decode, // IR C1 P3: the marker follows the decode it brackets
-                // job-scheduling-design.md §8 stage 4 Group B: FillMeshPipeline.ProfilerMarkerNames.Clip/
+                MvtDecoder.ProfilerMarkerNames.Decode, // The marker follows the decode it brackets
+                // FillMeshPipeline.ProfilerMarkerNames.Clip/
                 // RingAssembly/Earcut/Project retired with FillMeshPipeline.Schedule, the schedule-then-Complete
                 // main-thread path they bracketed — FillMeshGraph's nodes are scheduled, not run synchronously,
                 // and carry no marker of their own (the graph write step's Profiler coverage is
@@ -1907,7 +1907,7 @@ namespace MapRenderer.Tests.Tiles
             foreach (string name in expectedNames)
             {
                 Assert.IsTrue(name.StartsWith("MapRenderer."),
-                    $"Marker name '{name}' must be under the MapRenderer.* namespace (S46 acceptance).");
+                    $"Marker name '{name}' must be under the MapRenderer.* namespace.");
             }
 
             // Belt-and-suspenders: construct each marker (would throw if Unity.Profiling not available).
@@ -1927,14 +1927,14 @@ namespace MapRenderer.Tests.Tiles
         // giving the profiler a chance to commit the sample data. The recorder is started BEFORE
         // the tile load so it captures the samples fired in BuildTile.
         //
-        // job-scheduling-design.md §8 stage 3: a fill layer's PRODUCTION path no longer fires
+        // A fill layer's PRODUCTION path no longer fires
         // WriteMeshData at all — the graph arm's prologue calls BuildLayerInput and the write step is a
         // Burst job with no ProfilerMarker sample of its own. A marker named WriteMeshData around the
         // prologue would make the telemetry contract a lie, since no mesh is written there any more.
         // WriteMeshData is not in production at all any more (vestige sweep: moved to the test assembly,
         // zero production callers) — so this tooth repoints at the marker production actually fires now.
         //
-        // S47 update: BuildMeshData (which fires PmBuildMesh) now runs on a ThreadPool thread inside
+        // BuildMeshData (which fires PmBuildMesh) runs on a ThreadPool thread inside
         // Task.Run. We must NOT use CollectOnlyOnCurrentThread — that would miss cross-thread samples.
         // ProfilerRecorderOptions.Default collects samples from all threads.
         [UnityTest]
@@ -1953,7 +1953,7 @@ namespace MapRenderer.Tests.Tiles
             // Start both recorders BEFORE the tile load — must be open when samples fire.
             // ProfilerCategory.Scripts matches the explicit category in each ProfilerMarker constructor.
             // Negative control (bogus name) verifies the count metric discriminates real hits from frames.
-            // S47: use Default (not CollectOnlyOnCurrentThread) — build marker fires on ThreadPool.
+            // Use Default (not CollectOnlyOnCurrentThread) — build marker fires on ThreadPool.
             using var recorder      = ProfilerRecorder.StartNew(
                 ProfilerCategory.Scripts, markerName, capacity: RecorderCapacity,
                 options: ProfilerRecorderOptions.SumAllSamplesInFrame);
@@ -2022,7 +2022,7 @@ namespace MapRenderer.Tests.Tiles
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Epic A / A4 acceptance teeth, carried onto the reference-counted <see cref="SharedDisposable{T}"/>: the
+    /// Acceptance teeth, carried onto the reference-counted <see cref="SharedDisposable{T}"/>: the
     /// mesh and symbol cadences of ONE kick observe the SAME <see cref="IDecodedTile"/> instance, in either
     /// arrival order. Successor to <c>SharedTileDecodeTests</c>.
     ///
@@ -2031,7 +2031,7 @@ namespace MapRenderer.Tests.Tiles
     /// reused it. Under the eager decode the tile is already built when the kick receives it, so sharing is
     /// true BY CONSTRUCTION. It is still worth pinning: nothing else in the suite would notice a future
     /// change that re-introduced a per-pass decode (say, a handle that cloned its tile per reader), and the
-    /// per-source-layer buffer sharing the whole IR C1 design rests on is exactly what that would break.</para>
+    /// per-source-layer buffer sharing the whole design rests on is exactly what that would break.</para>
     ///
     /// <para><b>What retired here.</b> The cached-fault tooth
     /// (<c>GetOrDecode_MalformedBytes_CachesTheFault_SameExceptionInstanceToEveryCaller</c>) is gone: there
@@ -2049,7 +2049,7 @@ namespace MapRenderer.Tests.Tiles
     public class SharedDisposableSharingTests
     {
         /// <summary>The address these teeth decode at — the same one <see cref="MakeContext"/> processes at,
-        /// because IR C1 P3 makes the decode's id the buffers' id and a mismatch would be a mispairing.</summary>
+        /// because the decode's id IS the buffers' id and a mismatch would be a mispairing.</summary>
         private static readonly TileId Tile = new TileId { Z = 0, X = 0, Y = 0 };
 
         private static TileLayerProcessContext MakeContext() => new TileLayerProcessContext
@@ -2165,17 +2165,15 @@ namespace MapRenderer.Tests.Tiles
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Epic A / A3 acceptance tooth #5: proves
+    /// Proves
     /// <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/> decodes the fetched bytes exactly once,
     /// shares that same <see cref="IDecodedTile"/> reference across every processor in dense order, runs NO
     /// tail (the tail is the caller's main-thread step), rejects a <see cref="LayerPhase.WorkerOnly"/>
-    /// processor (the mirrored A1/A2 guard), and propagates a decode fault rather than swallowing it (§B
+    /// processor (the mirrored guard), and propagates a decode fault rather than swallowing it (the
     /// "fault policy: propagate, don't settle").
-    /// <para>IR C1 P2 (fix round F5) added the sharing half of the same claim: every processor of the pass
-    /// borrows the same per-source-layer buffer. IR C1 P3 kept the claim and moved its subject — the
-    /// pass-scoped store is gone, so the assertion is now on the BUFFER the decoded layer hands each
-    /// processor. It remains the only tooth that can see this: re-materializing per get is byte-identical in
-    /// output.</para>
+    /// <para>It also pins the sharing half of the same claim: every processor of the pass borrows the
+    /// same per-source-layer buffer, read off the decoded layer. It remains the only tooth that can
+    /// see this: re-materializing per get is byte-identical in output.</para>
     /// <para>Every pass here runs against a live lease reference, released in a <c>finally</c>, mirroring
     /// the two production sites — reading a lease after its last release is a programming error and
     /// throws.</para>
@@ -2198,14 +2196,10 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>Records ProcessOnWorker invocations (order + the observed decoded-tile reference + the
         /// source-layer buffer that tile hands back) into a SHARED log, and counts CompleteOnMain calls
         /// so a test can assert the runner never invokes the tail.
-        /// <para><b>IR C1 P3 — what the third column became.</b> Under P2 it recorded the pass-scoped
-        /// <c>TileGeometryStore</c>, because a <c>null</c> or per-processor store was output-neutral (each
-        /// <c>Extract</c> fell back to a private store) and would silently revert the sharing. P3 deleted the
-        /// store, so that column would now be vacuous — it is REPLACED, not dropped, by the thing it stood
-        /// for: the actual <c>TileGeometryBuffers</c> the processor would borrow, read through the same
-        /// <c>GetLayer(...).Geometry</c> expression the real consumers use. A layer that re-materialized per
-        /// get hands out a different backing pointer to each processor, which is the P3 shape of the same
-        /// silent regression.</para></summary>
+        /// <para><b>The third column.</b> It records the actual <c>TileGeometryBuffers</c> the processor
+        /// borrows, read through the same <c>GetLayer(...).Geometry</c> expression the real consumers use.
+        /// A layer that re-materialized per get hands out a different backing pointer to each processor,
+        /// which is the silent regression this column exists to catch.</para></summary>
         private sealed class RecordingWorkerThenMainProcessor : ITileWorkerThenMainLayerProcessor
         {
             private const string ProbeSourceLayer = "countries"; // present in the committed fixture
@@ -2258,7 +2252,7 @@ namespace MapRenderer.Tests.Tiles
             Assert.AreSame(log[0].tile, log[1].tile, "every processor must observe the SAME decoded tile reference");
             Assert.AreSame(log[0].tile, log[2].tile, "every processor must observe the SAME decoded tile reference");
 
-            // IR C1 P3, successor to P2's store clauses: one materialization per source-layer, shared by
+            // One materialization per source-layer, shared by
             // every symbol layer of the pass. NativeArray<T>.Equals compares the backing pointer and length,
             // so this is buffer IDENTITY, not content equality — a layer that re-materialized per get would
             // hand each processor an equal-CONTENT but different-POINTER buffer and fail here, with output
@@ -2268,7 +2262,7 @@ namespace MapRenderer.Tests.Tiles
                 "below compare two default(NativeArray)s and assert nothing");
             Assert.IsTrue(log[0].buffer.Equals(log[1].buffer),
                 "every symbol processor must borrow the SAME source-layer buffer — a per-get materialization " +
-                "is the per-layer mint this epic retired, wearing the layer's name");
+                "is the retired per-layer mint, wearing the layer's name");
             Assert.IsTrue(log[0].buffer.Equals(log[2].buffer),
                 "every symbol processor must borrow the SAME source-layer buffer");
 
@@ -2291,7 +2285,7 @@ namespace MapRenderer.Tests.Tiles
                 Assert.Throws<NotSupportedException>(
                     () => TileLayerProcessorRunner.RunSymbolWorkerPass(decode, in context, processors),
                     "a WorkerOnly processor has no tail — the symbol pass exists to feed tails, so this is the " +
-                    "mirrored programming error of A1/A2's guard.");
+                    "mirrored programming error of the guard.");
             }
             finally
             {
@@ -2303,16 +2297,15 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // R2 (decode-refcount plan §1/§5): RunSymbolWorkerPass_WhenTheDecodedTileReadFaults_Propagates_
-        // AndInvokesNoProcessor is RETIRED here, not "made to pass". It drove the §B propagate-don't-settle
+        // RunSymbolWorkerPass_WhenTheDecodedTileReadFaults_Propagates_AndInvokesNoProcessor is RETIRED
+        // here, not "made to pass". It drove the propagate-don't-settle
         // policy through DecodedTileLease's own release-then-read ObjectDisposedException — the ONE fault
         // that could still reach this runner post-eager-decode. SharedDisposable<T> is undefended by design
         // (no throw after the last Release(); see its doc), so the anti-vacuity assertion this tooth opened
         // with can no longer be satisfied, and neither can the fault it exists to drive: `decode.Value` after
         // release just hands back the (disposed) instance, so RunSymbolWorkerPass's loop runs the
         // RecordingWorkerThenMainProcessor fake — which never reads native memory — to completion instead of
-        // faulting. This mirrors DecodedTileLeaseTests' retirement exactly; a genuine deviation from the R2
-        // plan (§5's throw-guard audit did not surface this sibling test), recorded in the dev report.
+        // faulting. This mirrors DecodedTileLeaseTests' retirement exactly.
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
@@ -2342,7 +2335,7 @@ namespace MapRenderer.Tests.Tiles
                 zoom: 13, heading: headingDeg, tilt: tiltDeg, verticalFovDeg: fov);
             var     proj = new WebMercatorProjection();
 
-            // Selection zoom the pipeline uses (offset 0 under the S93 512 convention), clamped like the selector.
+            // Selection zoom the pipeline uses (offset 0 under the 512 convention), clamped like the selector.
             const int minZoom = 0, maxZoom = 14, onScreenTilePx = 512;
             int offset  = (int)math.round(math.log2(WebMercator.TilePixelSize / onScreenTilePx));
             int targetZ = math.clamp(cam.IntegerZoom + offset, minZoom, maxZoom);
@@ -2682,7 +2675,7 @@ namespace MapRenderer.Tests.Tiles
             UniTask<SharedDisposable<IDecodedTile>> task = TileDecodeDispatch.DecodeAsync(
                 SomeTile, SampleTileFixture.Bytes(), probe, new ThreadPoolWorkScheduler()).Preserve();
 
-            // The exact wait TileManager.DrainMeshBuilds/DoDispose use (§G-1): parks on a kernel event with
+            // The exact wait TileManager.DrainMeshBuilds/DoDispose use: parks on a kernel event with
             // NO PlayerLoop pumping. A bridge that marshalled the UniTaskCompletionSource's completion via
             // UniTask.SwitchToMainThread() would post the continuation to the PlayerLoop instead of firing
             // it on the pool thread, and this would time out.
@@ -2711,7 +2704,7 @@ namespace MapRenderer.Tests.Tiles
 
             Assert.IsNull(handle,
                 "a decoder throw must fault the TASK and mint no SharedDisposable — a failed decode can " +
-                "never leak a reference (IR C1 P3).");
+                "never leak a reference.");
             Assert.IsInstanceOf<TileDecodeException>(thrown,
                 "the fault must be wrapped as a TileDecodeException, unchanged by the scheduler policy.");
             Assert.IsInstanceOf<InvalidOperationException>(thrown.InnerException,

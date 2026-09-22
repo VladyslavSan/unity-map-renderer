@@ -1,4 +1,4 @@
-// Style/StyleTransitionTests.cs — the style-transitions epic: the transition inside the binding for
+// Style/StyleTransitionTests.cs — the transition inside the binding for
 // all-survivors, ZoomStyleApplier's integration contract, symbol layers surviving the restyle gate, the
 // fade gate as driven by a real MapViewComponent, and MapView.SetStyle's full-rebuild commit atomicity.
 // Unity EditMode only — real Materials via MaterialFactory/MapMaterialSet, real RenderLayerSet; not in
@@ -9,7 +9,7 @@
 // docs/conventions-short.md's "Plain-import collisions" note.
 //
 // Contents:
-//   StyleTransitionBindingTests  — style-transitions epic: the transition inside the binding, all-survivors path.
+//   StyleTransitionBindingTests  — the transition inside the binding, all-survivors path.
 //   ZoomStyleApplierTests        — ZoomStyleApplier integration: no mesh rebuild, ordered queues, zero-GC hot path.
 //   SymbolRestyleTests           — symbol layers survive the restyle gate and ease colour across a restyle.
 //   LayerFadeViewTests           — the fade gate as driven by a real MapViewComponent.
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Style
 {
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // StyleTransitionBindingTests — style-transitions epic: the transition inside the binding, all-survivors path
+    // StyleTransitionBindingTests — the transition inside the binding, all-survivors path
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -316,7 +316,7 @@ namespace MapRenderer.Tests.Style
 
         // ── 13-15. Alloc-free at every phase — the loop the 5 per-commit teeth cannot see ────
         // MinimalStyle() (the 5 existing per-commit teeth) has one Constant fill-color and arms no
-        // transition, so those teeth measure a loop that iterates zero entries (stage 1 proved this by
+        // transition, so those teeth measure a loop that iterates zero entries (proved by
         // putting a live `new float[4]` in it: all five stayed green). These three measure the SAME
         // ZoomStyleApplier.ApplyZoom with >=3 colour + >=2 float + >=1 device-px binding actually easing.
 
@@ -386,11 +386,11 @@ namespace MapRenderer.Tests.Style
         // the material reference actually moving.)
 
         /// <summary>
-        /// UMR-147: <c>text-opacity</c> is the still-refusing symbol paint key this tooth's ORIGINAL intent
+        /// <c>text-opacity</c> is the still-refusing symbol paint key this tooth's ORIGINAL intent
         /// (a symbol paint change generally takes the rebuild path) now needs — Constant <c>text-color</c>
         /// itself flips to the in-place path (see <see cref="SymbolPaintChange_TakesTheInPlacePath_MaterialSurvives"/>
         /// below), so it can no longer carry this guard. <c>text-opacity</c> ALWAYS bakes into the vertex
-        /// stream (<c>SymbolPaint.Opacity</c>), so it is deliberately NOT a gate key (plan §6) — the
+        /// stream (<c>SymbolPaint.Opacity</c>), so it is NOT a gate key — the
         /// Fork-A hazard class, approached from the refusing side. RED-verify: add <c>text-opacity</c> to
         /// <c>SurvivingLayerGate.TransitionablePaintKeys</c> — the gate then wrongly accepts.
         /// </summary>
@@ -417,10 +417,8 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// UMR-147 inverts the OLD verdict on this same fixture shape (a symbol <c>text-color</c> change)
-        /// on purpose: a Constant <c>text-color</c> change now takes the IN-PLACE path (its previous
-        /// justification — "deliberately not in TransitionablePaintKeys" — is exactly the premise this
-        /// stage removes), and gains a NEW clause nothing else in the suite observes: the material
+        /// A Constant symbol <c>text-color</c> change takes the IN-PLACE path, because the key IS in
+        /// <c>TransitionablePaintKeys</c>. It carries a clause nothing else in the suite observes: the material
         /// reference must not move, which is what <c>MapView</c>'s skip of <c>Layers.Build</c> depends on.
         /// RED (clause 1): revert <c>SurvivingLayerGate</c>'s two new symbol keys — <c>TryRestyleInPlace</c>
         /// then refuses and the <c>IsTrue</c> fires. Clause 2 has no separate injection:
@@ -447,7 +445,7 @@ namespace MapRenderer.Tests.Style
 
             Assert.IsTrue(set.TryRestyleInPlace(oldStyle, newStyle, StyleTransition.Default, 0.0),
                 "a Constant text-color change must take the IN-PLACE path — text-color rides the " +
-                "_TextColor uniform and SymbolRenderLayer.Restyle re-binds it (UMR-147).");
+                "_TextColor uniform and SymbolRenderLayer.Restyle re-binds it.");
             // Not Material identity (WorldTextMaterial has no setter — unbreakable). StyleLayer moving
             // forward is the breakable half: see TryRestyleInPlace's own doc for why a stale StyleLayer matters.
             Assert.AreSame(newStyle.Layers[0], set[0].StyleLayer,
@@ -521,17 +519,17 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S11 — <see cref="ZoomStyleApplier"/> integration tests.
+    /// <see cref="ZoomStyleApplier"/> integration tests.
     ///
     /// Acceptance criteria verified:
     ///   1. No mesh rebuild: a line mesh reference is unchanged while the width uniform changes across zooms.
     ///   2. Premultiplied-alpha color uniform matches spec values (via Core evaluator).
-    ///   3. Per-layer distinct Material instances and ordered queues (acceptance #5).
+    ///   3. Per-layer distinct Material instances and ordered queues.
     ///   4. Allocation gate: <c>ApplyZoom</c> with SWEEPING zoom allocates zero GC bytes
-    ///      (acceptance #4 — Unity-side full path including Material.SetFloat/SetColor).
+    ///      (Unity-side full path including Material.SetFloat/SetColor).
     ///
-    /// S54: drives the live <see cref="RenderLayerSet"/> / <see cref="MaterialFactory"/> path (the
-    /// production "style → GPU layers" machinery), replacing the retired LayerStack MonoBehaviour.
+    /// Drives the live <see cref="RenderLayerSet"/> / <see cref="MaterialFactory"/> path — the
+    /// production "style → GPU layers" machinery.
     /// </summary>
     [TestFixture]
     public class ZoomStyleApplierTests : BaseTestFixture
@@ -636,7 +634,7 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── 3. Per-layer distinct Material instances (acceptance #5) ─────────────
+        // ── 3. Per-layer distinct Material instances ─────────────────────────────
 
         [Test]
         public void RenderLayerSet_PerLayerMaterials_AreDistinctInstances()
@@ -671,7 +669,7 @@ namespace MapRenderer.Tests.Style
             Assert.GreaterOrEqual(q1, LayerDrawOrder.TransparentBandStart);
         }
 
-        // ── 4. No per-frame GC allocation (SWEEPING zoom — acceptance #4) ─────────
+        // ── 4. No per-frame GC allocation (SWEEPING zoom) ─────────────────────────
         //
         // The zoom is SWEPT across different values each iteration (not held constant) so the
         // evaluator's full interpolation path is exercised on every call.  A constant zoom would
@@ -687,7 +685,7 @@ namespace MapRenderer.Tests.Style
                     0f, v => (float)v.AsNumber());
                 var applier = new ZoomStyleApplier(lineMat);
                 applier.BindFloat(widthSp, ShaderProperties.Line.PropertyId.Width);
-                // T8b (UMR-147): also exercise the device-pixel float loop — it iterated ZERO elements in
+                // T8b: also exercise the device-pixel float loop — it iterated ZERO elements in
                 // this file until now, so a used allocation there could not have been caught here.
                 var devicePixelSp = new StyleProperty<float>(
                     JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"],5,1.0,15,4.0]"),
@@ -723,7 +721,7 @@ namespace MapRenderer.Tests.Style
                     default, v => v.AsColorCoerced());
                 var applier = new ZoomStyleApplier(fillMat);
                 applier.BindColor(colorSp, ShaderProperties.PropertyId.BaseColor);
-                // T8b (UMR-147): also exercise the device-pixel float loop — see the sibling float-binding
+                // T8b: also exercise the device-pixel float loop — see the sibling float-binding
                 // test's identical addition for why.
                 var devicePixelSp = new StyleProperty<float>(
                     JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"],5,1.0,15,4.0]"),
@@ -746,7 +744,7 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// Stage 1 (fill-color two-carrier split): unlike the row above, this drives the binding
+        /// Unlike the row above, this drives the binding
         /// <see cref="MaterialFactory.BindFillPaintToApplier"/> ACTUALLY creates for a zoom-interpolate
         /// <c>fill-color</c>, not a hand-built <see cref="StyleProperty{CoreColor}"/> — so the alloc-free
         /// claim is measured on the production binding, not a stand-in for it.
@@ -776,7 +774,7 @@ namespace MapRenderer.Tests.Style
                     "on the swept-zoom ApplyZoom path.");
             }
         }
-        // ── P4: the _Opacity uniform half of data-driven fill-opacity ─────────────
+        // ── The _Opacity uniform half of data-driven fill-opacity ─────────────────
 
         /// <summary>
         /// A CONSTANT fill-opacity rides the <c>_Opacity</c> uniform. Pairs with
@@ -842,13 +840,13 @@ namespace MapRenderer.Tests.Style
         private static StyleDocument SingleSymbolStyle(string textColorHex)
             => StyleParser.Parse(string.Format(SingleSymbolTemplate, textColorHex));
 
-        // #996633 -> #2288DD: no shared channel, none at 0/1 (plan §4 colour choice).
+        // #996633 -> #2288DD: no shared channel, none at 0/1.
         private const float OldR = 0x99 / 255f, OldG = 0x66 / 255f, OldB = 0x33 / 255f;
         private const float NewR = 0x22 / 255f, NewG = 0x88 / 255f, NewB = 0xDD / 255f;
 
         /// <summary>
         /// <b>T3.</b> A surviving symbol layer's <c>_TextColor</c> uniform must reach the NEW colour after
-        /// the transition settles — before UMR-147, <c>Restyle</c> was a documented no-op and the uniform
+        /// the transition settles — with <c>Restyle</c> a no-op the uniform
         /// held the previous style's colour forever. RED-verify: revert <c>SymbolRenderLayer.Restyle</c> to
         /// <c>=&gt; StyleLayer = layer</c> — the uniform holds #996633 and the R assertion fires first.
         /// </summary>
@@ -948,7 +946,7 @@ namespace MapRenderer.Tests.Style
 
         /// <summary>
         /// <b>T8a.</b> Three symbol layers' <c>ApplyZoom</c> must not allocate GC memory. Needed because the
-        /// epic's five allocation teeth build over <c>MinimalStyle()</c> — one fill layer — so their sweep
+        /// five allocation teeth build over <c>MinimalStyle()</c> — one fill layer — so their sweep
         /// iterates ZERO symbol bindings and cannot see this path. RED-verify: add a USED allocation inside
         /// <c>SymbolRenderLayer.ApplyZoom</c> (assign a <c>new float[1]</c> to a static sink — an unused
         /// local is dead-store-eliminated and never fires).

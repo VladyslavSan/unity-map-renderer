@@ -1,12 +1,9 @@
 // Unity EditMode only — Mesh.AcquireReadOnlyMeshData needs the engine. NOT registered in core-tests.csproj.
 //
-// Epic A / A1: after A1, point/icon draws land on a WorldSymbolRenderer-built mesh (WorldBillboardVertex
-// stream 0 + a separate stream-1 Opacity float), not the screen slot mesh's BillboardVertex (Position=px,
-// Color=RGBA, ...) the pre-A1 tests read via mesh.vertices/mesh.colors. This is the single shared readback
-// several point/icon test files need (SymbolFadeTests, HorizonCullGatherTests, SymbolPlacementStructureTests,
-// SymbolPlacementDemoProductionFlipTests) — kept in its own file (mirrors WorldSymbolInkAnalysis's identical
-// "one shared helper, not duplicated per test" reasoning) so none of them re-derive the MeshData readback.
-// Internal, not public (test-code-bloat convention: a test helper's footprint stays inside the test assembly).
+// Point/icon draws land on a WorldSymbolRenderer-built mesh (WorldBillboardVertex stream 0 plus a separate
+// stream-1 Opacity float), which mesh.vertices/mesh.colors cannot read. This is the single shared readback
+// the point/icon test files use, so none of them re-derive the MeshData round-trip. Internal, not public:
+// a test helper's footprint stays inside the test assembly.
 
 using Unity.Collections;
 using Unity.Mathematics;
@@ -42,9 +39,8 @@ namespace MapRenderer.Tests
             opacity = nativeOpacity.ToArray();
         }
 
-        /// <summary>The maximum stream-1 Opacity value across every vertex — the world-mesh analogue of the
-        /// pre-A1 <c>MaxAlpha(mesh)</c> helper (which read <c>BillboardVertex.Color.a</c>). 0 for a
-        /// null/empty mesh (no live slot / nothing built this Tick).</summary>
+        /// <summary>The maximum stream-1 Opacity value across every vertex. 0 for a null/empty mesh (no live
+        /// slot, or nothing built this Tick).</summary>
         public static float MaxOpacity(Mesh mesh)
         {
             Read(mesh, out _, out float[] opacity);

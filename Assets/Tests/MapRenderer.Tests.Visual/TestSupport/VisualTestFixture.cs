@@ -92,8 +92,8 @@ namespace MapRenderer.Tests
                 parsedStyle: null, mapView: null, camera);
         }
 
-        // Round-half-up, not Color32's implicit truncating conversion — keeps the background byte identical
-        // to the value this fixture computed before the Frame/Color32 migration (UMR-176).
+        // Round-half-up, not Color32's implicit truncating conversion, so the background byte matches what
+        // the camera's float background colour names.
         private static byte ToByteChannel(float c) => (byte)(Mathf.Clamp01(c) * 255f + 0.5f);
 
         /// <summary>What a top-down snapshot camera should frame. World units, not device pixels —

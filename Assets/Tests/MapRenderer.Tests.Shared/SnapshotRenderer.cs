@@ -46,10 +46,9 @@ namespace MapRenderer.Tests
         ///
         /// <para>That is Unity's native convention for <see cref="Texture2D.ReadPixels"/> +
         /// <see cref="Texture2D.GetPixels32"/>, and this class does not flip (unlike <c>SpriteSheet</c>,
-        /// which deliberately does). The doc here said "top-left origin" until P5, which is backwards and
-        /// cost a debugging round on <c>FillTranslateSnapshotTests</c> — any test asserting a vertical
-        /// DIRECTION must read this as bottom-up. Counts, coverage fractions and mean luminance are
-        /// orientation-independent, which is why nothing caught it sooner.</para>
+        /// which does). Any test asserting a vertical DIRECTION must read this as bottom-up. Counts,
+        /// coverage fractions and mean luminance are orientation-independent, so they do not see the
+        /// difference.</para>
         /// </summary>
         public Frame Pixels { get; private set; }
 

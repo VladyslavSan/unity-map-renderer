@@ -9,10 +9,9 @@ namespace MapRenderer.Jobs.Mvt
     /// Burst job: decodes an MVT polygon-feature geometry command stream (uint[] → NativeArray&lt;uint&gt;)
     /// into ring vertices stored in a flat <see cref="RingVertices"/> buffer with per-ring offsets.
     ///
-    /// <b>This job IS the production MVT geometry decoder</b> — the only one. (It began as a native
-    /// reimplementation of a managed <c>MvtGeometry.Decode</c>; since IR C1 P3 that managed twin exists only
-    /// as an independent oracle in <c>MapRenderer.Tests.EditMode/TestSupport/</c>, so nothing in production
-    /// decodes commands but this.) It implements the MVT spec's encoding over native containers:
+    /// <b>This job IS the production MVT geometry decoder</b> — the only one; its managed twin lives in the
+    /// test assembly as an independent oracle. It implements the MVT spec's encoding over native
+    /// containers:
     ///   command = id &amp; 0x7; count = id &gt;&gt; 3
     ///   MoveTo=1, LineTo=2, ClosePath=7
     ///   Parameters are zigzag-encoded deltas applied to a running cursor.

@@ -66,7 +66,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         public struct TileSelectionConfig
         {
             /// <summary>The framing viewport in pixels — <c>(refH · liveAspect, refH)</c>, not raw live px
-            /// (see <see cref="IVisibleTileSelector"/> D6/D7). Flows into the per-tick <see cref="ViewContext"/>.</summary>
+            /// (see <see cref="IVisibleTileSelector"/>). Flows into the per-tick <see cref="ViewContext"/>.</summary>
             public double2 FramingViewportPx;
 
             /// <summary>The active pixel↔ground projection (Web-Mercator today). Per-frame view context.</summary>
@@ -97,7 +97,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── Mesh build payload ──────────────────────────────────────────────────────────────
 
         /// <summary>Per-tile live record: fetch request, mesh build handle, and build progress (see
-        /// <c>docs/job-scheduling-design.md</c> §8 stage 3). A default instance carries no source, so every
+        /// <c>docs/job-scheduling-design.md</c>). A default instance carries no source, so every
         /// read needs <see cref="Step"/> == <see cref="BuildStep.Prologue"/>; <see cref="Graph"/> is non-null
         /// only when <see cref="Step"/> is <see cref="BuildStep.Measure"/> or <see cref="BuildStep.Write"/>.</summary>
         private struct LoadedTile
@@ -413,8 +413,8 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>The <see cref="Map.View.SetStyle"/> FULL-REBUILD entry point: applies
         /// <paramref name="specs"/> and (re)builds the backend, unconditionally. Why unconditional, and how
-        /// this differs from <see cref="RestyleSourcesInPlace"/> — `docs/tile-pipeline-design.md` §1.10.</summary>
-        /// <param name="teardownRecordProbe">UMR-151 test seam — see §1.10. Null in production.</param>
+        /// this differs from <see cref="RestyleSourcesInPlace"/> — `docs/tile-pipeline-design.md`.</summary>
+        /// <param name="teardownRecordProbe">Test seam; null in production.</param>
         internal void SetSources(
             IReadOnlyList<SourceSpec> specs, Map.RenderBackend backend, System.Action teardownRecordProbe = null)
         {
@@ -447,10 +447,10 @@ namespace MapRenderer.Unity.Rendering.Tile
             BuildBackend(backend);
         }
 
-        /// <summary>UMR-151: the <see cref="Map.View.SetStyle"/> PARTIAL-SURVIVAL entry point — called only
+        /// <summary>The <see cref="Map.View.SetStyle"/> PARTIAL-SURVIVAL entry point — called only
         /// after <see cref="Style.RenderLayerSet.TryRestyleInPlace"/> has patched <c>_layers</c> in place.
         /// Keeps (re-keys) a record whose source pipeline survived instead of tearing it down; see
-        /// `docs/tile-pipeline-design.md` §1.10 for why that is sound and what happens to a removed slot.</summary>
+        /// `docs/tile-pipeline-design.md` for why that is sound and what happens to a removed slot.</summary>
         internal void RestyleSourcesInPlace(IReadOnlyList<SourceSpec> specs, Map.RenderBackend backend)
         {
             int[] slotMap = ApplySourceDiff(specs);
@@ -499,7 +499,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             _desiredSet.Clear();
         }
 
-        /// <summary>UMR-151: <see cref="RestyleSourcesInPlace"/>'s backend step. This method is never reached
+        /// <summary><see cref="RestyleSourcesInPlace"/>'s backend step. This method is never reached
         /// with a null <see cref="_instanced"/> — the partial-survival arm only runs after a first, full
         /// <see cref="SetStyle"/> has already called <see cref="SetSources"/> → <see cref="BuildBackend"/> at
         /// least once — but falls back to building one rather than assuming that.</summary>
@@ -647,7 +647,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal int ReleaseQueueDepth => _releaseQueue.Count;
 
         /// <summary>Pull-based telemetry, computed on demand — never read by <see cref="Tick"/>'s request/release
-        /// decision. Returned by reference, no copy or boxing (<c>docs/telemetry-design.md</c> §3); still derives
+        /// decision. Returned by reference, no copy or boxing (<c>docs/telemetry-design.md</c>); still derives
         /// two of its numbers once per Tick, whether or not anyone reads it.</summary>
         internal ref readonly TileTelemetrySnapshot Telemetry => ref _telemetry;
 
@@ -1084,7 +1084,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Kicks each tile's mesh build then consumes it, bounded by the mesh-build/consume/vertex
-        /// budgets — whichever binds first stops it for this Tick. Sorted by <paramref name="priorityCtx"/>, the paint-order seam (<c>docs/tile-pipeline-design.md</c> §4).</summary>
+        /// budgets — whichever binds first stops it for this Tick. Sorted by <paramref name="priorityCtx"/>, the paint-order seam (<c>docs/tile-pipeline-design.md</c>).</summary>
         private int PumpPending(
             CameraProperties cam,
             int              maxConsumesPerTick,
@@ -1300,8 +1300,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         }
 
         /// <summary>Starts a background mesh build over the shared decode (off-PlayerLoop completion — see
-        /// <c>docs/async-architecture.md</c> §"Disposal &amp; cancellation contract"). Bakes at the tile's
-        /// integer zoom — see <c>docs/tile-pipeline-design.md</c> §1.9 for the full bake-parameter SSOT.</summary>
+        /// <c>docs/async-architecture.md</c> "Disposal &amp; cancellation contract"). Bakes at the tile's
+        /// integer zoom — see <c>docs/tile-pipeline-design.md</c> for the full bake-parameter SSOT.</summary>
         private WorkHandle<Processing.TilePrologueOutput> KickMeshBuild(
             LoadedTile                       lt, TileId id, SharedDisposable<IDecodedTile> decode, string sourceId,
             Processing.ISymbolTileWorkerPass symbolPass = null)
@@ -1581,7 +1581,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         {
             if (!_loaded.Remove(key, out LoadedTile lt)) return;
 
-            // Transfer instead of destroy — scoped to eviction, not restyle (docs/tile-pipeline-design.md §5.1).
+            // Transfer instead of destroy — scoped to eviction, not restyle (docs/tile-pipeline-design.md).
             // A source-less background record is excluded: a full-tile quad is trivial to rebuild on re-entry.
             if (transferToCache && _cacheEnabled && lt.Built && lt.Meshes != null && !_sources.IsSourceless(key.Slot))
                 TransferBuiltMeshesToCache(key.Tile, _sources.SourceIdOf(key.Slot), ref lt);

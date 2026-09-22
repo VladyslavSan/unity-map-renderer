@@ -11,15 +11,14 @@ namespace MapRenderer.Core.Style.Symbol
     /// <c>paint</c> sub-tree (via <see cref="PropertyNames"/>) and collapsed into a
     /// <see cref="StyleProperty{T}"/> (one parsed expression + typed default), exactly as <c>Line</c>/
     /// <c>Fill</c> do. Engine-free; clean-room (public Style Spec §symbol paint).
-    /// <c>icon-color</c> and the <c>icon-halo-*</c> trio are deferred to the SDF epic.
+    /// <c>icon-color</c> and the <c>icon-halo-*</c> trio are not parsed yet.
     ///
-    /// <para>How each is consumed (S20/S105 F1, split per the style-transitions epic): all five evaluate
+    /// <para>How each is consumed: all five evaluate
     /// per feature into the billboard vertex streams — <see cref="Color"/>/<see cref="Opacity"/> on the
     /// label's glyphs and the halo trio on a second copy of them — so constant, zoom and data-driven all
     /// work. A CONSTANT <see cref="Color"/> or <see cref="HaloColor"/> is the one exception: its RGB binds
     /// to the per-layer <c>_TextColor</c>/<c>_HaloColor</c> uniform so a restyle can ease it, and the stream
-    /// carries white for it. <see cref="IconOpacity"/> is parsed here; consumption (icon quad alpha) is a
-    /// later stage.</para>
+    /// carries white for it. <see cref="IconOpacity"/> is parsed here but not yet consumed.</para>
     /// </summary>
     public sealed class PaintProperties
     {
@@ -46,7 +45,7 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>text-translate-anchor: the frame of reference for <see cref="Translate"/>. Default
         /// <see cref="Text.TextTranslateAnchor.Map"/>. Parsed here; the map-vs-viewport divergence (a
-        /// bearing rotation) is consumed with the rotation-alignment work (roadmap #4) — until then both
+        /// bearing rotation) is consumed with the rotation-alignment work — until then both
         /// resolve to the same screen-space delta (identical at bearing 0).</summary>
         public TextTranslateAnchor TranslateAnchor { get; init; }
 

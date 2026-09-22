@@ -1,6 +1,6 @@
 // Engine-free: no UnityEngine dependency.
 // BLITTABLE (mirrors BillboardVertex): ONE per billboard corner = stream 0 of the world-anchored symbol
-// mesh (Epic A) — fed straight to Mesh.SetVertexBufferData by WorldBillboardMeshBuilder — field
+// mesh — fed straight to Mesh.SetVertexBufferData by WorldBillboardMeshBuilder — field
 // DECLARATION order is the vertex stream byte layout and MUST match
 // WorldBillboardMeshBuilder.VertexDescriptors' order EXACTLY: Position (AnchorLocal), Color (ColorRGB),
 // TexCoord0 (Uv), TexCoord1 (Page), TexCoord2 (Offset), TexCoord3 (AlignFlags), TexCoord5 (Tangent),
@@ -12,13 +12,9 @@
 // stream than this struct actually writes (BillboardVertex's header documents the exact failure mode: the
 // symbol renders nothing). Keep to blittable fields only.
 //
-// FROZEN at A0: A1/A2/A3 are purely additive on top of this layout — never a reshuffle of stream 0. Stage
-// AC (curved-world) appended Tangent as the LAST field at the time (TEXCOORD5) — AlignFlags was no longer
-// last, Tangent was; P2 now appends Up (TEXCOORD6) as the new LAST field (see its own doc below) —
-// Tangent is no longer last, Up is; the halo stage now appends SdfWidenPx (TEXCOORD7) as the new last
-// field. All three still honor "append, never reshuffle existing attributes."
+// FROZEN: a new attribute is APPENDED as the new last field, never a reshuffle of stream 0.
 // Opacity is NOT here — it is stream 1 (a separate per-frame dynamic array, TexCoord4 on the mesh) so a
-// fade update (A2) never touches this stream's topology.
+// fade update never touches this stream's topology.
 
 using Unity.Mathematics;
 
@@ -55,38 +51,37 @@ namespace MapRenderer.Core.Text.Placement
         public float Page;
 
         /// <summary>UNROTATED glyph-corner offset from the anchor (TEXCOORD2) — the world-path analogue of
-        /// <see cref="BillboardMath.BuildQuad"/>'s anchor-relative corner, minus any rotation (A0 is north-up;
-        /// map-aligned bearing rotation is applied in the vertex shader once <c>AlignFlags</c> is wired,
-        /// A1/A3 — see <c>SymbolTextWorld_ForwardPass.hlsl</c>).
-        /// <para><b>W2 — TWO UNITS, selected by <see cref="AlignFlags"/> bit2.</b> Bit2 CLEAR (every point/icon
-        /// symbol, every viewport-pitched curved symbol — the pre-W2 behaviour): LOGICAL SCREEN PIXELS, added to
+        /// <see cref="BillboardMath.BuildQuad"/>'s anchor-relative corner, minus any rotation (north-up;
+        /// map-aligned bearing rotation is applied in the vertex shader once <c>AlignFlags</c> is wired —
+        /// see <c>SymbolTextWorld_ForwardPass.hlsl</c>).
+        /// <para><b>TWO UNITS, selected by <see cref="AlignFlags"/> bit2.</b> Bit2 CLEAR (every point/icon
+        /// symbol, every viewport-pitched curved symbol): LOGICAL SCREEN PIXELS, added to
         /// <c>clip.xy</c> after projection, so the glyph is a fixed screen size at any depth. Bit2 SET
         /// (map-pitched curved): WORLD METRES, displaced in the ground plane at the anchor before projection,
-        /// so the glyph is a fixed WORLD size and foreshortens with depth. <b>The field is deliberately NOT named
-        /// <c>OffsetPx</c>:</b> it was, and the suffix became a lie the moment bit2 introduced the metre
-        /// unit. Read the unit off bit2, never off the name (F-W2-1, discharged).</para></summary>
+        /// so the glyph is a fixed WORLD size and foreshortens with depth. <b>The field is NOT named
+        /// <c>OffsetPx</c>:</b> a px suffix would be a lie under bit2's metre unit. Read the unit off bit2,
+        /// never off the name.</para></summary>
         public float2 Offset;
 
-        /// <summary>Bit flags (TEXCOORD3): bit0 = rotation-alignment map(1)/viewport(0). WRITTEN by A0 (always
-        /// 0 — viewport-aligned, matching the old path's only mode today), UNREAD by the A0 shader (the
-        /// <c>_MapBearingRadians</c> uniform + the shader branch are plumbed at A1/A3). Stage AC adds bit1 =
-        /// along-line tangent rotation (set only by curved; point/icon leave it clear).</summary>
+        /// <summary>Bit flags (TEXCOORD3): bit0 = rotation-alignment map(1)/viewport(0), always 0 today and
+        /// unread by the shader; bit1 = along-line tangent rotation (set only by curved; point/icon leave it
+        /// clear).</summary>
         public float AlignFlags;
 
-        /// <summary>Stage AC (curved-world) — TEXCOORD5, the new LAST field (see this file's header):
+        /// <summary>TEXCOORD5 — for the curved (along-line) arm:
         /// tile-local WORLD direction along the line at this glyph (unit-normalized, the keep-upright
         /// negation already baked in by <see cref="MapRenderer.Core.Text.Placement.SymbolStagingMath"/>).
         /// Read by the shader ONLY when <see cref="AlignFlags"/> bit1 is set (curved); <see cref="float3.zero"/>
         /// for point/icon (an unread attribute — their render stays byte-identical).</summary>
         public float3 Tangent;
 
-        /// <summary>P2 — TEXCOORD6, the new LAST field (see this file's header): unit surface normal at the
-        /// anchor, pre-RTC render-space DIRECTION (the Level-1 RTC translation does not apply to a direction),
-        /// supplied by <c>IProjection.ProjectPoint(...).Up</c> via <see cref="BillboardMath.BuildWorldQuad"/>.
-        /// WRITTEN by P2, UNREAD by every shader — the pitch-alignment tangent-frame branch is P3.</summary>
+        /// <summary>TEXCOORD6 — unit surface normal at the anchor, pre-RTC render-space DIRECTION (the
+        /// Level-1 RTC translation does not apply to a direction), supplied by
+        /// <c>IProjection.ProjectPoint(...).Up</c> via <see cref="BillboardMath.BuildWorldQuad"/>.
+        /// Written, but not yet read by any shader.</summary>
         public float3 Up;
 
-        /// <summary>TEXCOORD7, the new LAST field (see this file's header): how far this corner's glyph is
+        /// <summary>TEXCOORD7 — how far this corner's glyph is
         /// grown past the SDF fill edge, in DEVICE px — x pushes the edge OUT, y widens the AA transition.
         /// <para>Zero on a text run, which makes the shader's one shading path reproduce the plain fill.
         /// A halo run carries <c>text-halo-width</c>/<c>text-halo-blur</c> here and the halo colour in

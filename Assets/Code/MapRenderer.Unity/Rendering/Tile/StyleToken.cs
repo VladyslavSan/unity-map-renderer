@@ -3,13 +3,12 @@ using System;
 namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>
-    /// S82: an opaque, equatable cache-key token identifying the active style — one component of
+    /// An opaque, equatable cache-key token identifying the active style — one component of
     /// <see cref="PreparedTileCache"/>'s composite key (alongside <c>TileId</c> and layerId). MapView
     /// supplies it; the cache never interprets the string, only compares it — so prepared meshes under two
-    /// different tokens coexist (keying by content is COEXISTENCE, not a flush — see the S82 stage's
-    /// Decision 2).
+    /// different tokens coexist: keying by content is COEXISTENCE, not a flush.
     ///
-    /// UMR-95: the id is a digest of <c>styleId</c> PLUS the style document's CONTENT PLUS the layer
+    /// The id is a digest of <c>styleId</c> PLUS the style document's CONTENT PLUS the layer
     /// numbering <c>RenderLayerSet.Build</c> actually produced (<see cref="Map.MapView.SetStyle"/>,
     /// <c>JsonCanonical.CacheKey</c>) — the numbering component matters because a <c>MapMaterialSet</c> field
     /// Build reads is live-mutable and not part of the style document, so it can shift dense layer ids under

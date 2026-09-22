@@ -3,9 +3,9 @@
 // The two cover-growth fixtures first (projected-area, tilt), then cover statistics and priority ordering.
 //
 // Contents:
-//   ProjectedAreaLodTests  — ProjectedAreaLodStrategy's cover, measured on the same production selector wiring as TiltCoverGrowthTests (same fixture pose family), plus the aggressiveness knob's reach and its two measured limits (§1.7 of the stage plan: it moves the curve, not its…
+//   ProjectedAreaLodTests  — ProjectedAreaLodStrategy's cover, measured on the same production selector wiring as TiltCoverGrowthTests (same fixture pose family), plus the aggressiveness knob's reach and its two measured limits.
 //   TileCoverStatsTests    — Engine-free (NUnit + Core only) → runs in BOTH the Unity EditMode runner and the fast core-tests project.
-//   TilePriorityTests      — T6 (tile-load smoothness plan §3.5): TilePriority.Key/SortByPriority must be monotonic in each metric (center strictly before a far corner), deterministic (same input twice → identical order), and the sort must actually place the center-most tile first.
+//   TilePriorityTests      — TilePriority.Key/SortByPriority must be monotonic in each metric (center strictly before a far corner), deterministic (same input twice → identical order), and the sort must place the center-most tile first.
 //   TiltCoverGrowthTests   — Tile-cover growth under camera tilt, measured on the production selector wiring (ScreenSpaceLodStrategy + RaySphereFarPlane), plus a self-check of the on-screen-size instrument the measurement reads.
 
 using System.Collections.Generic;
@@ -25,7 +25,7 @@ namespace MapRenderer.Tests.Tiles
     /// <summary>
     /// <see cref="ProjectedAreaLodStrategy"/>'s cover, measured on the same production selector wiring as
     /// <see cref="TiltCoverGrowthTests"/> (same fixture pose family), plus the aggressiveness knob's reach
-    /// and its two measured limits (§1.7 of the stage plan: it moves the curve, not its shape, and it is
+    /// and its two measured limits (it moves the curve, not its shape, and it is
     /// NOT monotone on the globe).
     /// </summary>
     public class ProjectedAreaLodTests
@@ -263,8 +263,8 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>
         /// T-AGGR-MONO, globe — CHARACTERISATION, not a monotonicity claim. On a globe, stopping early can
         /// EMIT a coarse tile where descending would have had all four children culled (frustum + horizon
-        /// occlusion apply per tile, per level), so a coarser policy is not always a smaller cover (§1.7 Limit
-        /// 2 of the stage plan). Measured: RAISING aggressiveness 0.5 → 0.55 RAISES the cover at tilt 30
+        /// occlusion apply per tile, per level), so a coarser policy is not always a smaller cover.
+        /// Measured: RAISING aggressiveness 0.5 → 0.55 RAISES the cover at tilt 30
         /// (28 → 33) and tilt 45 (45 → 48) — a genuine rise as the knob gets coarser, not the same data read
         /// backwards. Pinned exactly so the next reader does not "fix" this as a bug; do NOT add a
         /// non-increasing assertion here.
@@ -306,7 +306,7 @@ namespace MapRenderer.Tests.Tiles
         /// T-PARTITION. At the default aggressiveness (1.0) the area cover is an exact quadtree partition of
         /// the flat (uniform-zoom) cover: no area tile is an ancestor of another, and every flat leaf has
         /// exactly one ancestor-or-self in the area cover. Scoped to 1.0 — at other values the area cover can
-        /// EXCEED the flat cover (§1.7 Limit 2), so "partition of the flat cover" is only well-posed here. A
+        /// EXCEED the flat cover, so "partition of the flat cover" is only well-posed here. A
         /// count clamp or cover cap drops tiles, which surfaces here as an uncovered leaf.
         /// </summary>
         [Test]

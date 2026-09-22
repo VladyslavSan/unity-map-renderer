@@ -12,14 +12,9 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// The <see cref="RenderLayerBuild.TileMesh"/> capability — built once per <c>(tile, layer)</c> by the
-    /// Burst mesh pipeline (job-scheduling-design.md §8) and registered with a
-    /// <see cref="Backend.ITileRenderBackend"/>. Symbols/text are deliberately NOT this capability — per
-    /// ARCHITECTURE they are a separate, placed-every-frame path, not a built-mesh static layer.
-    ///
-    /// <para><b>D1 (job-scheduling-design.md §8 stage 5 Group B):</b> merged with the former
-    /// <c>IGraphInputRenderLayer</c> — every implementer meshes on the job graph now, so a standalone
-    /// capability interface probed with <c>is</c> no longer earns its keep. <see cref="BuildGraphRequest"/>
-    /// is this capability's one member.</para>
+    /// Burst mesh pipeline (job-scheduling-design.md) and registered with a
+    /// <see cref="Backend.ITileRenderBackend"/>. Symbols/text are NOT this capability — per ARCHITECTURE
+    /// they are a separate, placed-every-frame path, not a built-mesh static layer.
     /// </summary>
     internal interface ITileMeshRenderLayer : IRenderLayer
     {
@@ -34,10 +29,10 @@ namespace MapRenderer.Unity.Rendering.Style
         /// and <paramref name="geometry"/> is the whole source layer's tile geometry, materialized once per
         /// worker pass and <b>BORROWED</b> — an implementation must not dispose it, retain it or write to it.
         /// The ordinal is how a per-feature side array joins back to the buffer's <c>RingFeatureIdx</c>. The
-        /// tile extent is <c>geometry.Extent</c>; it is deliberately not a separate parameter, because a
-        /// second copy is what lets a stage quietly substitute a constant.</para>
+        /// tile extent is <c>geometry.Extent</c>; it is not a separate parameter, because a second copy is
+        /// what lets a stage quietly substitute a constant.</para>
         ///
-        /// <para><b>There is no <c>TileId</c> parameter</b> (B7a review N1, retired in IR C1 P2). The buffer
+        /// <para><b>There is no <c>TileId</c> parameter.</b> The buffer
         /// declares its own tile as <c>geometry.Tile</c>, exactly as it declares its own extent, so a caller
         /// cannot pair a z0 buffer with a z1 address — the mispairing shape does not exist in the signature.</para>
         ///
@@ -45,7 +40,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <b>Fill honours it; every other kind ignores it BY DECISION.</b> Clipping an input polyline at the
         /// tile boundary turns the join at that vertex into a cap — trading the alpha band for a notch at
         /// every seam — so the line equivalent is clipping the tessellated RIBBON, a different and harder
-        /// operation that is deliberately not attempted here.</para>
+        /// operation that is not attempted here.</para>
         /// </summary>
         /// <param name="selected">This layer's already-selected features, paired with their ordinal in the
         /// source layer.</param>

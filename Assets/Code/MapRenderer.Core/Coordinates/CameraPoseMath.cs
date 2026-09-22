@@ -3,30 +3,14 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geo
 {
     /// <summary>
-    /// S45: Engine-free pose math.
-    ///
-    /// Absorbed from <c>MapController.AltitudeForZoom</c> and <c>MapController.ApplyCameraTransform</c>
-    /// (S42). Now lives in Core so headless tests can exercise the full pose computation.
-    ///
-    /// <para><b>Altitude formula (D1 — S42 D2):</b>
-    ///   Web-Mercator ground resolution: metersPerPixel = EarthConstants.EquatorialCircumferenceMetres / (TilePixelSize × 2^zoom).
-    ///   For a perspective camera looking straight down:
-    ///   altitude = (viewportHeightPx × metersPerPixel) / (2 × tan(verticalFovDeg/2)).
-    ///   Earth equatorial circumference: see EarthConstants.EquatorialCircumferenceMetres.</para>
-    ///
-    /// <para><b>Pose formula (D6):</b>
-    ///   Orbit on a sphere of radius=altitude around the look-at position.
-    ///   Rot(heading, Y) × Rot(tilt, X) × (0, altitude, 0) gives the camera offset from the look-at.
-    ///   At tilt=0 the inner rotation is identity → offset=(0,altitude,0) → camera directly above.
-    ///   The up-vector is derived from the heading direction in the horizontal plane so LookRotation
-    ///   is never fed collinear vectors even at tilt=0 (D6 degeneracy fix).</para>
-    ///
-    /// <para>Clean-room: standard web-map perspective framing + orbit-camera math.</para>
+    /// Engine-free camera pose math: the zoom→altitude framing, the clip planes derived from it, and
+    /// the orbit pose around the look-at point. Lives in Core so headless tests can exercise the full
+    /// pose computation.
     /// </summary>
     public static class CameraPoseMath
     {
-        // ── Constants — reference EarthConstants and WebMercator (single sources of truth, S62) ─────
-        // Note: EarthCircumferenceMetres is kept as a literal in EarthConstants (NOT derived as 2π·A).
+        // ── Constants — reference EarthConstants and WebMercator (single sources of truth) ──────────
+        // EarthCircumferenceMetres is a literal in EarthConstants, NOT derived as 2π·A.
         private const double EarthCircumferenceMetres = EarthConstants.EquatorialCircumferenceMetres;
         private const double TilePixelSize            = WebMercator.TilePixelSize;
 
@@ -35,8 +19,7 @@ namespace MapRenderer.Core.Geo
         /// <summary>
         /// Web-Mercator ground resolution: metres per pixel at a given fractional zoom level.
         ///
-        /// <para>Formula (S42 D2 / S43 D2): metersPerPixel = EarthCircumference / (TilePixelSize × 2^zoom).
-        /// This is the single source of truth for the px→m conversion used everywhere (altitude
+        /// <para>This is the single source of truth for the px→m conversion used everywhere (altitude
         /// calculation, line-width scaling, zoom-stability tests).</para>
         /// </summary>
         /// <param name="zoom">Fractional zoom level.</param>
@@ -45,10 +28,7 @@ namespace MapRenderer.Core.Geo
             => EarthCircumferenceMetres / (TilePixelSize * math.pow(2.0, zoom));
 
         /// <summary>
-        /// Computes camera altitude in render-space metres from a fractional zoom level (S42 D2).
-        ///
-        /// <para>Exact same formula as the retired <c>MapController.AltitudeForZoom</c>; pinned by
-        /// the ported <c>CameraTransformTests</c>.</para>
+        /// Computes camera altitude in render-space metres from a fractional zoom level.
         /// </summary>
         /// <param name="zoom">Fractional zoom level.</param>
         /// <param name="viewportHeightPx">Deterministic reference viewport height.</param>
@@ -61,14 +41,12 @@ namespace MapRenderer.Core.Geo
             return (viewportHeightPx * metersPerPixel) / (2.0 * math.tan(halfFovRad));
         }
 
-        // ── Clip planes (derived from altitude — S42 D3) ──────────────────────────────────────────
-
-        // ── Fit-to-viewport minimum zoom (S92 D2) ─────────────────────────────────────────────────
+        // ── Fit-to-viewport minimum zoom ──────────────────────────────────────────────────────────
 
         /// <summary>
         /// The most-zoomed-out fractional zoom at which the whole Web-Mercator world still frames inside the
-        /// viewport with a little breathing room (S92 D2) — the device-derived floor for the zoom clamp,
-        /// replacing the hardcoded <c>MinZoom = 0</c> that let the map shrink to a useless world-square grape.
+        /// viewport with a little breathing room — the device-derived floor for the zoom clamp, below
+        /// which the map would shrink to a world square smaller than the viewport.
         ///
         /// <para>The world square is <c>tilePixelSize · 2^zoom</c> <b>logical</b> px per side, so it exactly
         /// fits the shorter viewport side when <c>zoom_fit = log2(min(vpW, vpH) / tilePixelSize)</c>. The floor
@@ -76,7 +54,7 @@ namespace MapRenderer.Core.Geo
         /// (whole map visible, with margin) — never larger (grape), never cropped.</para>
         ///
         /// <para><b>Logical px in.</b> Feed the DPI-normalized viewport (<c>physicalPx / DevicePixelRatio</c>),
-        /// the same basis the DPI-normalized camera (D1) and the tile selector frame in — so the floor scales
+        /// the same basis the DPI-normalized camera and the tile selector frame in — so the floor scales
         /// with the viewport and with DPR. Cyclic (globe) worlds use this fit; the finite Mercator sheet uses
         /// <see cref="MinZoomToFill(double,double,double,double)"/> instead — see <see cref="MinZoomFloor"/>.</para>
         /// </summary>
@@ -96,8 +74,7 @@ namespace MapRenderer.Core.Geo
         /// <summary>
         /// <see cref="MinZoomToFit(double,double,double,double)"/> over the standard tile size
         /// (<see cref="WebMercator.TilePixelSize"/>). The convenience the <c>Controller</c> calls so the tile
-        /// constant — projection math — stays in Core (the S73 adapter rule: no <c>WebMercator.*</c> in the
-        /// Unity input adapter).
+        /// constant — projection math — stays in Core: no <c>WebMercator.*</c> in the Unity input adapter.
         /// </summary>
         public static double MinZoomToFit(double viewportWidthLogical, double viewportHeightLogical, double margin)
             => MinZoomToFit(viewportWidthLogical, viewportHeightLogical, TilePixelSize, margin);
@@ -133,7 +110,7 @@ namespace MapRenderer.Core.Geo
             => MinZoomToFill(viewportWidthLogical, viewportHeightLogical, TilePixelSize, margin);
 
         /// <summary>
-        /// The projection-keyed min-zoom floor selector (D1): branches once on
+        /// The projection-keyed min-zoom floor selector: branches once on
         /// <see cref="IProjection.IsFinitePlanarWorld"/> so neither <c>Controller</c> nor <c>TouchController</c>
         /// duplicates the finite/cyclic decision. Finite (Mercator) → <see cref="MinZoomToFill(double,double,double)"/>
         /// (fills the viewport, no margin — a positive margin would reopen the off-world gap). Cyclic (globe) →
@@ -150,10 +127,10 @@ namespace MapRenderer.Core.Geo
                 ? MinZoomToFill(viewportWidthLogical, viewportHeightLogical, 0.0)
                 : MinZoomToFit(viewportWidthLogical, viewportHeightLogical, margin);
 
-        /// <summary>Near clip plane from altitude (S42 D3: near = altitude · 0.01, min 0.1).</summary>
+        /// <summary>Near clip plane from altitude: near = altitude · 0.01, min 0.1.</summary>
         public static double NearClip(double altitude) => math.max(0.1, altitude * 0.01);
 
-        /// <summary>Far clip plane from altitude (S42 D3: far = altitude · 4). The plain overhead/globe form;
+        /// <summary>Far clip plane from altitude: far = altitude · 4. The plain overhead/globe form;
         /// the planar view uses the geometry-aware overload below.</summary>
         public static double FarClip(double altitude) => altitude * 4.0;
 
@@ -253,7 +230,7 @@ namespace MapRenderer.Core.Geo
             up = new double3(sinH * cosT, sinT, cosH * cosT);
         }
 
-        // ── Heading interpolation (D4) ──────────────────────────────────────────────────────────
+        // ── Heading interpolation ───────────────────────────────────────────────────────────────
 
     }
 }

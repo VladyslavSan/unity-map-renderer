@@ -5,10 +5,10 @@ namespace MapRenderer.Unity.Rendering.Materials
 {
     /// <summary>
     /// Base material tweaker — the minimal <b>runtime</b> render-state contract shared by every map material.
-    /// Deliberately small: full material setup (keyword sync, all the URP-Lit surface inputs) lives editor-side
-    /// in the shader GUIs (<c>BaseShaderGUI</c>/<c>LitShaderGUI</c>); at runtime we only re-assert the generic
-    /// states a cloned <c>.mat</c> must carry — depth write/test and the colour identity — leaving the per-type
-    /// blend to <see cref="FillTweaker"/> / <see cref="LineTweaker"/>. (S58)
+    /// Full material setup (keyword sync, all the URP-Lit surface inputs) lives editor-side in the shader
+    /// GUIs (<c>BaseShaderGUI</c>/<c>LitShaderGUI</c>); at runtime we only re-assert the generic states a
+    /// cloned <c>.mat</c> must carry — depth write/test and the colour identity — leaving the per-type
+    /// blend to <see cref="FillTweaker"/> / <see cref="LineTweaker"/>.
     /// </summary>
     public static class BaseTweaker
     {

@@ -20,7 +20,7 @@ using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain usin
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// S23 I2b managed fill-extrusion mesh builder: roof cap + side walls, with VS height extrusion (the
+    /// Managed fill-extrusion mesh builder: roof cap + side walls, with VS height extrusion (the
     /// mesh itself is <b>height-agnostic</b> — see the class-level invariant below). Mirrors
     /// <see cref="StyledFillTileBuilder"/>'s shape (managed color/bake eval → Burst geometry → alloc-free
     /// stream write), but the two geometry kinds diverge structurally:
@@ -34,18 +34,16 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// courtyard hole needs interior walls too). The ring gather (<see cref="RingSelectJob"/>), tile→geo
     /// (<see cref="TileToGeoJob"/>), projection (<see cref="ProjectionDispatch"/>) and quad emission
     /// (<c>WallQuadJob</c>, <c>StyledFillExtrusionTileBuilder.WallJob.cs</c>) are four Burst nodes SCHEDULED
-    /// by <see cref="FillExtrusionMeshGraph.Schedule"/> alongside the roof (job-scheduling-design.md §8 stage
-    /// 5, the wall-job stage) — this class no longer runs them synchronously; see that type's own doc.
-    /// "Byte-identical" is NOT inherited at the managed-vs-Burst projection boundary — see job-scheduling-
-    /// design.md §8 stage 5's opening invariant block (shared preamble, not line-specific) for the measured
-    /// per-field bound.</item>
+    /// by <see cref="FillExtrusionMeshGraph.Schedule"/> alongside the roof (job-scheduling-design.md); see
+    /// that type's own doc. "Byte-identical" is NOT inherited at the managed-vs-Burst projection
+    /// boundary — job-scheduling-design.md carries the measured per-field bound.</item>
     /// </list>
     ///
-    /// <para><b>metres→world (OQ1, C1-A):</b> height is applied ENTIRELY in the vertex shader along a baked
+    /// <para><b>metres→world:</b> height is applied ENTIRELY in the vertex shader along a baked
     /// per-vertex <c>extrudeUp</c> stream — <c>unit-up × sec(φ_vertex)</c> on the flat Web-Mercator sheet
     /// (the standard conformal point-scale factor; <c>1.0</c> at the equator, ~2 at φ=60°), <c>1.0</c> on the
     /// globe (true ECEF metres). <c>extrudeUp</c> is baked PER-VERTEX, not per-tile, because a low-zoom tile
-    /// can span enough latitude that a single sec φ would be visibly wrong at one end (see T2 in the mesh
+    /// can span enough latitude that a single sec φ would be visibly wrong at one end (see the mesh
     /// tests). It is a SEPARATE stream from the lighting normal (roof=up, wall=outward-horizontal) — never
     /// overload the two.</para>
     ///
@@ -61,7 +59,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// curvature subdivision) even on the globe — unlike the roof, which subdivides via
     /// <see cref="GlobeFillSubdivideDispatch"/>. A wall's height (tens of metres) is negligible next to a
     /// chord's sag at building zooms; the sag only becomes visible at very low zoom, where fill-extrusion
-    /// layers are not normally styled. Wall subdivision is out of scope for I2b.</para>
+    /// layers are not normally styled. Wall subdivision is out of scope.</para>
     ///
     /// <para><b>Wall winding (calibrated against the render gate):</b> the fill roof's CCW-in-tile-space
     /// convention is for a HORIZONTAL surface; a vertical wall quad's vertex order and outward-normal sign
@@ -70,10 +68,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// <c>outward</c> lighting normal (<c>cross(edgeDir, up)</c>) sets shading. The floor-A/B ring order is a
     /// non-lever — swapping it negates both together. The calibration point is (b): <c>outward</c> must point
     /// away from the interior, which <c>StyledFillExtrusionMeshTests</c> pins against the fixture centroid
-    /// (handedness-free, per §7.1's lesson) before its absolute winding check can mean anything.</para>
+    /// (handedness-free) before its absolute winding check can mean anything.</para>
     ///
-    /// Clean-room: design follows the MapLibre Style Spec + this repo's own §2/§7 math. No MapLibre source
-    /// read.
+    /// Clean-room: design follows the MapLibre Style Spec + this repo's own projection math. No MapLibre
+    /// source read.
     /// </summary>
     public static partial class StyledFillExtrusionTileBuilder
     {
@@ -98,10 +96,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// Interleaved stream-1 payload: the D1 extrusion inputs. <c>ExtrudeUpAndT.xyz</c> is the
+        /// Interleaved stream-1 payload: the extrusion inputs. <c>ExtrudeUpAndT.xyz</c> is the
         /// <c>sec(φ)</c>-baked extrude-up direction (unit-up × the metres→world factor — see the class doc);
         /// <c>ExtrudeUpAndT.w</c> is <c>t</c> (0 = floor/base, 1 = roof/height). <c>BakedBaseHeight</c> is the
-        /// per-vertex data-driven bake (S12): <c>x</c> = evaluated fill-extrusion-base, <c>y</c> = evaluated
+        /// per-vertex data-driven bake: <c>x</c> = evaluated fill-extrusion-base, <c>y</c> = evaluated
         /// fill-extrusion-height, each 0 when that property is constant/zoom (the uniform carries it
         /// instead) — the VS composes them ADDITIVELY (<c>lerp(_ExtrusionBase + x, _ExtrusionHeight + y, t)</c>),
         /// so uniform-only and bake-only both reduce to the plain uniform path when the other is zero.
@@ -114,14 +112,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// job-scheduling-design.md §8 stage 5 (the wall-job-graph stage): the wall geometry
-        /// <see cref="FillExtrusionMeshGraph.Schedule"/> builds alongside the roof — native columns owned by
-        /// <c>TileBuildGraph.LayerBuild</c> (production) or the caller directly (a test-assembly caller,
-        /// reached via <c>InternalsVisibleTo</c>), which the write step later appends after the roof
-        /// (<see cref="ScheduleWrite"/>), at indices rebased by the roof's own vertex count. Indices here are
-        /// WALL-LOCAL: the first wall vertex is 0, exactly as the retired managed <c>WriteWalls</c> loop's
-        /// <c>quadBase</c> always was — only the list it counts against moved from a local to this struct's
-        /// field.
+        /// The wall geometry <see cref="FillExtrusionMeshGraph.Schedule"/> builds alongside the roof —
+        /// native columns owned by <c>TileBuildGraph.LayerBuild</c> (production) or the caller directly
+        /// (a test-assembly caller, reached via <c>InternalsVisibleTo</c>), which the write step later
+        /// appends after the roof (<see cref="ScheduleWrite"/>), at indices rebased by the roof's own vertex
+        /// count. Indices here are WALL-LOCAL: the first wall vertex is 0.
         /// </summary>
         internal struct WallColumns
         {
@@ -144,7 +139,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
             /// <summary>True once minted by <see cref="Allocate"/>; false for a never-allocated
             /// (<c>default</c>) instance or after <see cref="Dispose"/>. Derived from <see cref="PositionNormal"/>
-            /// rather than stored (F1, review): a stored <c>bool</c> lives on the STRUCT VALUE, so a copy —
+            /// rather than stored: a stored <c>bool</c> lives on the STRUCT VALUE, so a copy —
             /// e.g. <c>FillExtrusionGraphOutput.Walls</c>, itself copied again into a local at every call site
             /// that reads it (<c>ext.Walls</c> in a test-assembly caller, in
             /// <c>TileBuildGraph.CompleteMeasureAndScheduleWrite</c>, in the parity tests) — would clear only
@@ -220,17 +215,14 @@ namespace MapRenderer.Unity.Rendering.Meshing
         };
 
         /// <summary>
-        /// job-scheduling-design.md §8 stage 4: the graph arm's prologue — everything the retired synchronous
-        /// <c>WriteMeshData</c> (vestige sweep: moved to a test-assembly caller, reached via
-        /// <c>InternalsVisibleTo</c>, zero production callers) did BEFORE handing off to the
-        /// roof/wall write, lifted out so a graph-arm processor can run it on the seam and hand the result
-        /// to the pump. Mirrors <see cref="StyledFillTileBuilder.BuildLayerInput"/>'s
+        /// The graph arm's prologue — the work that precedes the roof/wall write, so a graph-arm processor
+        /// can run it on the seam and hand the result to the pump. Mirrors
+        /// <see cref="StyledFillTileBuilder.BuildLayerInput"/>'s
         /// shape exactly: bakes each surviving polygon feature's linear colour (<paramref name="featureColors"/>)
         /// and data-driven base/height (<paramref name="featureBake"/>), and builds the ring visit order —
-        /// colour, bake, ring visit order, nothing else. The wall geometry moved out of this method
-        /// (job-scheduling-design.md §8 stage 5, the wall-job stage): it is built by
-        /// <see cref="FillExtrusionMeshGraph.Schedule"/> instead, from the SAME borrowed <paramref name="geometry"/>
-        /// this method still selects rings over — see that type's own doc.
+        /// colour, bake, ring visit order, nothing else. The wall geometry is NOT built here:
+        /// <see cref="FillExtrusionMeshGraph.Schedule"/> builds it from the SAME borrowed
+        /// <paramref name="geometry"/> this method selects rings over — see that type's own doc.
         ///
         /// <para>Returns <c>default</c> (an uncreated <see cref="FillMeshPipeline.LayerInput"/>, with every
         /// out-param also left uncreated) when there is no polygon geometry to build — the caller reads
@@ -338,13 +330,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// job-scheduling-design.md §8 stage 4 Group B: the sizing + <see cref="FillExtrusionStreamWriteJob"/>
-        /// schedule half of <see cref="ScheduleWrite"/>, split out so a test-assembly caller (vestige sweep:
-        /// the verbatim lift of the retired synchronous <c>WriteMeshData</c>, zero production callers,
-        /// reached via <c>InternalsVisibleTo</c>) can run it over its OWN caller-supplied
+        /// The sizing + <see cref="FillExtrusionStreamWriteJob"/> schedule half of
+        /// <see cref="ScheduleWrite"/>, split out so a test-assembly caller (via
+        /// <c>InternalsVisibleTo</c>) can run it over its OWN caller-supplied
         /// <paramref name="md"/> instead of a freshly-minted
-        /// <see cref="Mesh.MeshDataArray"/> — one write job, two callers (that test-assembly caller
-        /// and <see cref="ScheduleWrite"/>), no <c>MeshData</c>-to-<c>MeshData</c> copy. Sizes
+        /// <see cref="Mesh.MeshDataArray"/> — one write job, two callers, no
+        /// <c>MeshData</c>-to-<c>MeshData</c> copy. Sizes
         /// <paramref name="md"/> to the roof's completed measure PLUS <paramref name="walls"/>'s own
         /// vertex/index count and schedules one <see cref="FillExtrusionStreamWriteJob"/> that writes the
         /// roof at <c>[0, Vr)</c> then the walls at <c>[Vr, Vr+Vw)</c>, wall indices rebased by <c>+Vr</c>.
@@ -358,13 +349,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// </summary>
         /// <param name="md">The <c>Mesh.MeshData</c> slot to size and write into — caller-owned.</param>
         /// <param name="roof">A layer's completed measure-graph output — the empty check below covers BOTH
-        /// the roof and <paramref name="walls"/> (DIV-A5): a faulted or empty roof still lets a hole-less
-        /// footprint's walls alone produce a mesh, matching the managed roof writer's own early-return (an OR
-        /// over BOTH counts, not vertex count alone).
-        /// <para><b>Named, unclosed sub-case (review D2):</b> that OR does NOT fully mirror the managed arm
-        /// for <c>Vr &gt; 0, Ir == 0</c> with non-empty walls — surviving ring vertices whose earcut produces
-        /// zero triangles. Recorded, not closed: see job-scheduling-design.md §8 stage 4's own note; closing
-        /// it needs an explicit roof-vertex-count field on the job, real work for an apparently unreachable
+        /// the roof and <paramref name="walls"/>: a faulted or empty roof still lets a hole-less footprint's
+        /// walls alone produce a mesh (an OR over BOTH counts, not vertex count alone).
+        /// <para><b>Named, unclosed sub-case:</b> that OR leaves <c>Vr &gt; 0, Ir == 0</c> with non-empty
+        /// walls — surviving ring vertices whose earcut produces zero triangles. Closing it needs an
+        /// explicit roof-vertex-count field on the job, real work for an apparently unreachable
         /// case.</para></param>
         /// <param name="featureColors">Per-feature linear colour, indexed by the roof's own
         /// <c>VertexFeatureIdx</c>.</param>
@@ -385,7 +374,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         {
             int vr = roof.IsCreated ? roof.TileVertices.Length : 0;
             int ir = roof.IsCreated ? roof.TriangleIndices.Length : 0;
-            // IsCreated-guarded (R5): FillExtrusionMeshGraph.Schedule's empty guard (RingVisitOrder.Length ==
+            // IsCreated-guarded: FillExtrusionMeshGraph.Schedule's empty guard (RingVisitOrder.Length ==
             // 0, a check BuildLayerInput's old inline WriteWalls path never applied) can return an UNCREATED
             // Walls — neither caller (production's ScheduleWrite nor a test-assembly caller)
             // has an IsCreated skip of its own before reaching this shared site,
@@ -420,7 +409,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// job-scheduling-design.md §8 stage 4: the write graph's node for one non-empty extrusion layer —
+        /// The write graph's node for one non-empty extrusion layer —
         /// the extrusion-specific mirror of <see cref="StyledFillTileBuilder.ScheduleWrite"/>. Allocates one
         /// exact-size <see cref="Mesh.MeshDataArray"/> and hands it to <see cref="ScheduleStreamWrite"/>.
         /// Returns UNCOMPLETED — the caller polls/completes <see cref="MeshWriteOutput.Handle"/> before
@@ -482,7 +471,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
         /// <summary>metres→world factor at one vertex (OQ1): 1.0 on the globe (true ECEF metres); the Web
         /// Mercator point-scale factor sec(φ) on the flat sheet (φ = the vertex's OWN latitude — a low-zoom
-        /// tile can span enough latitude that a per-tile constant would be visibly wrong; see T2).</summary>
+        /// tile can span enough latitude that a per-tile constant would be visibly wrong).</summary>
         private static double MetresToWorldFactor(bool globe, double latitudeDegrees)
             => globe ? 1.0 : 1.0 / math.cos(latitudeDegrees * math.PI_DBL / 180.0);
 

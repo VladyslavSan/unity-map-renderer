@@ -10,7 +10,6 @@ namespace MapRenderer.Jobs.Fill
     /// Burst job: classifies decoded MVT rings into polygons (outer + holes) using signed-area
     /// classification, then stores polygon descriptors for the earcut stage.
     ///
-    /// Reimplements <c>PolygonAssembler.Assemble</c> over native containers:
     ///   - Rings with |shoelace area| &lt; DegenerateThreshold are skipped.
     ///   - The first valid ring of each feature sets the "exterior sign."
     ///   - Subsequent rings with the SAME sign start a new polygon (multipolygon / island).
@@ -18,17 +17,14 @@ namespace MapRenderer.Jobs.Fill
     ///     centroid (or first vertex) falls INSIDE the current outer ring (containment check),
     ///     preventing disjoint artefact rings from corrupting the triangulation.
     ///
-    /// <b>Kind gate (IR B7).</b> A ring whose feature is not a Polygon is skipped outright. This job
-    /// classifies purely by signed area, and a LineString ring is the same shape of data as a polygon ring —
-    /// so without this it would silently read one as a spurious exterior or hole and corrupt the
-    /// triangulation. It used to be guarded only by the caller choosing what to decode; since the geometry
-    /// buffer is shared across consumers, the caller's filter decides which ring INDICES it visits, which is
-    /// bookkeeping-shaped code and much easier to lose. Two independent guards, each observable on its own.
+    /// <b>Kind gate.</b> A ring whose feature is not a Polygon is skipped outright. This job classifies
+    /// purely by signed area, and a LineString ring is the same shape of data as a polygon ring, so without
+    /// the gate it would read one as a spurious exterior or hole. The caller's own selection is the second,
+    /// independent guard.
     ///
-    /// Does NOT reference MapRenderer.Core <b>code</b> — no Core call, and in particular none of Core's
-    /// <c>System.Math</c>, on the Burst path. Blittable Core <i>value types</i> are fine and always were:
-    /// <see cref="TileGeometryType"/> is an enum with no code, and <c>TileToGeoJob</c> in this same assembly
-    /// already takes Core's <c>TileId</c> and emits Core's <c>GeoCoordinate</c>.
+    /// Does NOT reference MapRenderer.Core <b>code</b> — no Core call, and no <c>System.Math</c>, on the
+    /// Burst path. Blittable Core <i>value types</i> are fine: <see cref="TileGeometryType"/> is an enum
+    /// with no code.
     ///
     /// Input: flat vertex array + per-ring offsets from <see cref="MvtDecodeJob"/>.
     /// Output: polygon descriptors (outer start/length + hole start/count) in flat arrays.
@@ -49,15 +45,13 @@ namespace MapRenderer.Jobs.Fill
 
         /// <summary>Selects which of two ways to read the ring count — a plain <c>bool</c>, not a container,
         /// because a <see cref="NativeArray{T}"/> field left at its literal <c>default</c> fails Unity's
-        /// job-schedule-time container validation even when <c>[ReadOnly]</c> and even when never read
-        /// (the field this replaced, <c>DeferredRingCount</c>, broke every
-        /// existing caller of this job at RUNTIME while compiling unchanged).
-        /// <para><c>false</c> (every synchronous caller's default) ⇒ use <see cref="RingCount"/>, the
-        /// producer-reported count for an array-backed, CAPACITY-sized <see cref="RingOffsets"/>
-        /// (<c>TileGeometryBuffers.cs:117</c> — deriving from length is wrong there).</para>
-        /// <para><c>true</c> (the scheduled path only) ⇒ use <c>RingOffsets.Length - 1</c>: on that path
+        /// job-schedule-time container validation even when <c>[ReadOnly]</c> and even when never read.
+        /// <para><c>false</c>, the default, ⇒ use <see cref="RingCount"/>, the producer-reported count for
+        /// an array-backed, CAPACITY-sized <see cref="RingOffsets"/>, where deriving from length is
+        /// wrong.</para>
+        /// <para><c>true</c>, the scheduled path only, ⇒ use <c>RingOffsets.Length - 1</c>: there
         /// <see cref="RingOffsets"/> is a deferred view over a LIST-backed buffer, which is
-        /// length-authoritative (<c>TileGeometryBuffers.cs:133–134</c>, "because a list grows exactly") — so
+        /// length-authoritative, so
         /// the length resolved at EXECUTE time, after <c>RingClipJob</c> has dropped rings, already IS the
         /// surviving ring count with no separate count container needed.</para></summary>
         public bool RingCountFromOffsetsLength;
@@ -74,11 +68,8 @@ namespace MapRenderer.Jobs.Fill
         // OutPolyOuterRingIdx[p] = which ring-index (into Vertices via RingOffsets) is the outer.
         // Holes are stored in a flat list; OutPolyHoleStart[p]/OutPolyHoleCount[p] reference it.
         //
-        // Note: OutPolyOuterRingIdx and OutPolyHoleCount are NOT marked [WriteOnly] because they
-        // are read internally within Execute() (OutPolyOuterRingIdx is read for hole containment;
-        // OutPolyHoleCount is incremented with ++ which is a read-modify-write).
-        // Marking them [WriteOnly] would cause Unity's Job Safety System to throw
-        // InvalidOperationException when reading them, causing Execute() to terminate early.
+        // OutPolyOuterRingIdx and OutPolyHoleCount are NOT [WriteOnly]: Execute reads both, and the
+        // safety system throws on a read through [WriteOnly].
         public            NativeArray<int>    OutPolyOuterRingIdx;    // ring index for outer
         [WriteOnly] public NativeArray<int>   OutPolyHoleListStart;   // start in OutHoleRingIdxs
         public            NativeArray<int>    OutPolyHoleCount;       // hole count for polygon p

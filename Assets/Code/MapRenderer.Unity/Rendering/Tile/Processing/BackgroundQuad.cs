@@ -12,19 +12,17 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// The per-covered-tile background quad's geometry — job-scheduling-design.md §8 stage 3 retired the
-    /// source-less PROCESSOR (background kicks straight through <see cref="TileBuildGraph"/> now, via
-    /// <c>TileManager.KickSourcelessBackground</c>); what remains is this producer-only static class.
+    /// The per-covered-tile background quad's geometry, a producer-only static class. A background tile
+    /// kicks straight through <see cref="TileBuildGraph"/>, via
+    /// <c>TileManager.KickSourcelessBackground</c>, with no processor of its own.
     ///
-    /// <para>Feeds the SAME <see cref="TileBuildGraph"/> write step every fill layer's geometry does
-    /// (design §B "Geometry, winding, material, draw order") rather than hand-building a quad, so the
-    /// background quad gets earcut's cull-correct winding and the fill path's globe subdivision for free —
-    /// dodging the <c>_Cull</c> winding bug that bit E3's hand-wound world-quad.</para>
+    /// <para>Feeds the SAME <see cref="TileBuildGraph"/> write step every fill layer's geometry does,
+    /// rather than hand-building a quad, so the background quad gets earcut's cull-correct winding and the
+    /// fill path's globe subdivision for free — and avoids the <c>_Cull</c> winding hazard of a hand-wound
+    /// quad.</para>
     ///
-    /// <para>IR B5: the corners are handed to a <see cref="PathGeometryMaterializer"/> as plain tile-local
-    /// <c>double2</c>. They used to be a hand-authored MVT zigzag command stream, which existed for exactly
-    /// one reason — the neutral feature interface declared <c>uint[] Geometry</c>, so a source-less quad had
-    /// to transcode itself into MVT to be expressible. It no longer does.</para>
+    /// <para>The corners are handed to a <see cref="PathGeometryMaterializer"/> as plain tile-local
+    /// <c>double2</c>, never an MVT zigzag command stream.</para>
     /// </summary>
     internal static class BackgroundQuad
     {
@@ -35,7 +33,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         // TileBackgroundQuadProjectionTests pins both against the retired MVT encoding this replaced.
         // Hoisted static — no per-tile allocation.
         // internal (not private): TileBackgroundQuadProjectionTests materializes these EXACT corners and
-        // compares the result against the MVT command stream B5 retired — a changed corner order, count or
+        // compares the result against the retired MVT command stream — a changed corner order, count or
         // kind must fail there rather than producing a subtly-wrong background downstream.
         internal static readonly IReadOnlyList<IReadOnlyList<IReadOnlyList<double2>>> FullExtentRingPaths =
             new[]
@@ -56,9 +54,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         // Constant white — vertex colour is white by construction; the background colour comes from the
         // material uniform (_BaseColor/_Opacity), bound by MaterialFactory.BindBackgroundPaintToApplier
-        // over the fill-base clone (design §B). This is the literal the retired {"fill-color":"#ffffff"}
-        // paint evaluated to: Color.white.linear == white, and the constant opacity never depended on a
-        // feature, so no evaluation is lost. Clean-room: public Style Spec, no MapLibre source.
+        // over the fill-base clone. Color.white.linear == white, and the background's opacity never
+        // depends on a feature, so nothing is lost by not evaluating a paint here.
 
         /// <summary>Mints the full-tile-extent quad's geometry — the one thing every dense background layer
         /// over the same tile shares. A per-tile caller (<see cref="TileManager.KickSourcelessBackground"/>)

@@ -51,10 +51,10 @@ namespace MapRenderer.Core.Text
     /// <summary>
     /// The standard Arabic cursive-joining algorithm (Unicode Standard, "Arabic Cursive Joining"; the
     /// same table-driven transform every Arabic-aware shaper implements from the same public data) —
-    /// implemented here as a bounded, codepoint-level pass per S18 decision 7 (Option Y): map each
+    /// implemented here as a bounded, codepoint-level pass: map each
     /// Arabic base letter (U+0600-06FF) to its contextual presentation-form codepoint, entirely from a
     /// hand-rolled joining-type table. No font, no glyph indices — output stays codepoint-keyed so it
-    /// can look up the codepoint-keyed glyph-PBF atlas directly (S18 decision 6, Model A).
+    /// can look up the codepoint-keyed glyph-PBF atlas directly.
     /// </summary>
     public static class ArabicJoining
     {
@@ -230,7 +230,7 @@ namespace MapRenderer.Core.Text
             {
                 if (types[i] == ArabicJoiningType.Transparent)
                 {
-                    // Combining marks aren't presentation-form-mapped in S18 Slice 3 scope; pass through.
+                    // Combining marks are not presentation-form-mapped; pass through.
                     result.Add(new ArabicShapedUnit { AtlasCodepoint = codepoints[i], Cluster = clusters[i] });
                     continue;
                 }

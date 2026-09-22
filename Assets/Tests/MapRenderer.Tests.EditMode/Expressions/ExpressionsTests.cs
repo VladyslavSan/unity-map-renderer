@@ -1,4 +1,4 @@
-// Expressions/ExpressionsTests.cs — the S09/S11 expression engine's per-category behaviour: operators
+// Expressions/ExpressionsTests.cs — the expression engine's per-category behaviour: operators
 // (color/decision/variable-binding/lookup/ramps/string/zoom) and semantics (type assertions,
 // classification, color coercion, the error model, feature-data, the constant-key int-path optimisation,
 // and literal/type coercions). Engine-free: compiled verbatim by both the Unity EditMode runner and the
@@ -574,7 +574,7 @@ namespace MapRenderer.Tests.Expressions
         {
             // black -> white at t=0.5 with alpha=1 on both stops.
             // At alpha=1: premult is identity (R*1=R), unpremult divides by 1 (no-op).
-            // Result equals straight sRGB lerp: R=127.5. This is the regression-pin for S09 tests.
+            // Result equals straight sRGB lerp: R=127.5. This is the regression pin.
             // Stops use alpha=1 so straight-vs-premultiplied cannot diverge.
             string e = "[\"interpolate\", [\"linear\"], 0.5, " +
                        "0, [\"to-color\", \"#000000\"], 1, [\"to-color\", \"#ffffff\"]]";
@@ -590,7 +590,7 @@ namespace MapRenderer.Tests.Expressions
         [Test]
         public void Interpolate_Color_DefaultSpace_PremultAlpha_TransparentToOpaque()
         {
-            // S11 canonical premult case: rgba(0,0,0,0) → rgba(255,255,255,1) at t=0.5.
+            // Canonical premult case: rgba(0,0,0,0) → rgba(255,255,255,1) at t=0.5.
             // Premult math: lerp premult (0,0,0,0) and (1,1,1,1) at t=0.5 → (0.5,0.5,0.5,0.5),
             // then unpremult /0.5 → (1.0, 1.0, 1.0, 0.5). So R=255/255=1, A=0.5.
             // Straight sRGB lerp (old behavior) would give R=0.5=127.5/255.
@@ -686,7 +686,7 @@ namespace MapRenderer.Tests.Expressions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S09 — zoom expression. Per spec, <c>zoom</c> is valid only as the direct input of a top-level
+    /// Zoom expression. Per spec, <c>zoom</c> is valid only as the direct input of a top-level
     /// <c>step</c>/<c>interpolate</c>; anywhere else is a parse error.
     /// </summary>
     [TestFixture]
@@ -736,7 +736,7 @@ namespace MapRenderer.Tests.Expressions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S11 — type-assertion operators (spec "Types / Assertion"):
+    /// Type-assertion operators (spec "Types / Assertion"):
     /// <c>boolean</c> / <c>number</c> / <c>string</c> / <c>object</c> / <c>array</c>.
     ///
     /// These are distinct from the <c>to-*</c> coercions:
@@ -962,9 +962,9 @@ namespace MapRenderer.Tests.Expressions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S09 — classification: each parsed expression reports Constant / Zoom / Feature / Composite. The
+    /// Classification: each parsed expression reports Constant / Zoom / Feature / Composite. The
     /// brief's "constant / zoom / data-driven" maps to Constant / Zoom / Feature; Composite (depends on
-    /// BOTH zoom and feature) is the fourth corner S11/S12 need to distinguish a per-frame uniform from a
+    /// BOTH zoom and feature) is the fourth corner needed to distinguish a per-frame uniform from a
     /// per-vertex attribute.
     /// </summary>
     [TestFixture]
@@ -1084,7 +1084,7 @@ namespace MapRenderer.Tests.Expressions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S09 — error model. Acceptance: coercion / lookup / type failures surface as spec-defined errors
+    /// Error model. Acceptance: coercion / lookup / type failures surface as spec-defined errors
     /// through the evaluation boundary (TryEvaluate returns false), NEVER as an unhandled crash. Parse-time
     /// structural problems throw <see cref="ExpressionParseException"/> from the parser.
     /// </summary>
@@ -1130,8 +1130,8 @@ namespace MapRenderer.Tests.Expressions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S09 — feature-data category: properties/geometry-type/id (Style Spec "Feature data"). Tested over
-    /// synthetic <see cref="DictionaryFeature"/> features. Real decoded features (S39) are covered in
+    /// Feature-data category: properties/geometry-type/id (Style Spec "Feature data"). Tested over
+    /// synthetic <see cref="DictionaryFeature"/> features. Real decoded features are covered in
     /// <c>MapRenderer.Tests.Mvt.MvtPropertyDecodeTests</c> and <c>MapRenderer.Tests.Filters.PropertyFilterTests</c>.
     /// </summary>
     [TestFixture]
@@ -1394,7 +1394,7 @@ namespace MapRenderer.Tests.Expressions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S09 — literal / type category: literal values, typeof, and the to-* coercions, per the Style Spec
+    /// Literal / type category: literal values, typeof, and the to-* coercions, per the Style Spec
     /// "Types" section.
     /// </summary>
     [TestFixture]

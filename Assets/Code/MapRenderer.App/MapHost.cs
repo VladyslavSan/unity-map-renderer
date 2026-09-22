@@ -8,8 +8,6 @@ using MapRenderer.Core.Style;
 using MapRenderer.Unity.View;
 using Unity.Mathematics;
 
-// S51: HttpDataSource removed from Core; HTTP moved to Unity layer as UnityWebRequestDataSource.
-
 using MapRenderer.Unity.Rendering.Materials;
 using MapRenderer.Unity.Rendering.Map;
 // Disambiguate from UnityEngine.RenderMode (Canvas) — the map's render mode is the material-set one.
@@ -84,7 +82,7 @@ namespace MapRenderer.App
 
         [Tooltip("Initial zoom level (0 = world view). z14 is OpenFreeMap's maxzoom — densest data " +
                  "(buildings + full road network). Lower zooms thin out fast (z13 Berlin = 1 building).")]
-        public double InitialZoom = 13.0; // S93: 512 convention shifts zoom numbers −1 (old 14 → 13 = same view)
+        public double InitialZoom = 13.0; // the 512 tile convention shifts zoom numbers down by one
 
         [Tooltip("Vertical field-of-view (degrees) for the perspective camera — the initial camera lens " +
                  "(carried in CameraProperties, pushed to the Unity camera).")]
@@ -96,7 +94,7 @@ namespace MapRenderer.App
         public bool CapFrameRateToRefreshRate = true;
 
         [Tooltip("Render on a 3D globe (SphericalProjection) instead of the flat Web-Mercator plane. " +
-                 "Launch-time only — the projection is a session constant (S91-C). First cut: a spherical-cap " +
+                 "Launch-time only — the projection is a session constant. First cut: a spherical-cap " +
                  "tile cover at low-to-mid zoom; true pan/zoom input on the globe is a later stage.")]
         public bool UseGlobe = false;
 
@@ -123,7 +121,7 @@ namespace MapRenderer.App
 
             // 2. Wire camera + components only — the style drives the sources. Wire builds the MapView over
             //    the main camera; SetStyle (step 4) loads the multi-source pipeline. The projection is the
-            //    launch-time session constant (S91-C) — globe or planar.
+            //    launch-time session constant — globe or planar.
             Wire(gameObject, Camera.main, initialView,
                  UseGlobe ? new SphericalProjection() : null);
 
@@ -161,10 +159,10 @@ namespace MapRenderer.App
                 // Editor window sits on — so play-testing a mobile build takes this machine's density, not
                 // the device's — and that is an observation rather than a contract, because Screen.dpi's
                 // Editor behaviour is undocumented (Unity documents the divergence for Screen.width/height
-                // and says nothing for dpi). Whether the mdpi derivation is right at all
-                // is Stage 4b's open question: mdpi is an Android convention, and no runtime API exposes the
-                // platform's own scale factor to managed user code (docs/device-pixel-ratio-design.md §4b).
-                // Tests drive Wire (not Start) and keep the serialized ratio.
+                // and says nothing for dpi). Whether the mdpi derivation is right at all is open: mdpi is an
+                // Android convention, and no runtime API exposes the platform's own scale factor to managed
+                // user code (docs/device-pixel-ratio-design.md). Tests drive Wire, not Start, and keep the
+                // serialized ratio.
                 mapView.Config.DevicePixelRatio = DeviceScaling.DevicePixelRatioFromDpi(Screen.dpi);
             }
             string styleUri = ResolveStyleUri(StyleUri);
@@ -182,10 +180,9 @@ namespace MapRenderer.App
 
             // Sky background on the main camera directly, so it applies with OR without an input Controller
             // (the stress scene omits the Controller). Camera.main is the same camera Wire framed.
-            // E3: this clear is the camera background ABOVE THE HORIZON under tilt (a style's tile cover
-            // never reaches past the far plane there) and the no-style default; a style's declared
-            // `background` layer now paints the GROUND via BackgroundRenderLayer (a real quad, §3.6) —
-            // this hardcoded colour does not compete with it and is unchanged byte-for-byte.
+            // This clear is the camera background ABOVE THE HORIZON under tilt, where a style's tile cover
+            // never reaches past the far plane, and the no-style default. A style's declared `background`
+            // layer paints the GROUND through BackgroundRenderLayer, so the two do not compete.
             var mainCam = Camera.main;
             if (mainCam != null && mainCam.backgroundColor == default)
                 mainCam.backgroundColor = new Color(0.85f, 0.95f, 1.0f, 1f); // light blue sky
@@ -224,12 +221,12 @@ namespace MapRenderer.App
         }
 
         /// <summary>
-        /// S83b: resolves <paramref name="styleUri"/> to a loadable URI. A leading scheme
+        /// Resolves <paramref name="styleUri"/> to a loadable URI. A leading scheme
         /// (<c>file://</c>, <c>http://</c>, <c>https://</c>) is used verbatim; a bare relative path is
         /// resolved under <c>Application.streamingAssetsPath</c> as a <c>file://</c> URI (so the shipped
         /// liberty.json loads fully offline in a standalone build).
-        /// <c>internal</c>: UMR-143's <see cref="Menu.StylesPage"/> shares this resolution so a runtime
-        /// style switch and startup load agree on the same URI for the same bare path.
+        /// <c>internal</c>: <see cref="Menu.StylesPage"/> shares this resolution, so a runtime style
+        /// switch and the startup load agree on the same URI for the same bare path.
         /// </summary>
         internal static string ResolveStyleUri(string styleUri)
         {
@@ -295,9 +292,9 @@ namespace MapRenderer.App
             if (camera != null)
             {
                 // FOV + viewport come from initialView / the camera; the altitude multiplier (from the
-                // Controller when present, else 1) and the DPI ratio are side config. Seed DPR at construction
-                // (S92 D1) so the ctor's frame-0 SyncToCamera frames the logical viewport too — LateUpdate
-                // keeps it live thereafter.
+                // Controller when present, else 1) and the DPI ratio are side config. Seed DPR at
+                // construction so the ctor's frame-0 SyncToCamera frames the logical viewport too;
+                // LateUpdate keeps it live thereafter.
                 float altitudeMultiplier = ctrl != null ? ctrl.AltitudeMultiplier : 1f;
                 var mapCamera = new MapCamera(camera, initialView, altitudeMultiplier, projection,
                                               mapView.Config.DevicePixelRatio);
@@ -311,7 +308,7 @@ namespace MapRenderer.App
                 ctrl.Camera = camera; // may be null — guarded in Controller.Update
                 ctrl.Map    = mapView;
 
-                // S74: wire the touch source alongside the desktop controller (same write seam).
+                // Wire the touch source alongside the desktop controller, over the same write seam.
                 // GetComponent-or-AddComponent so no committed scene edit is required; the scene validator
                 // only flags missing scripts, not runtime-added ones.
                 var touch = root.GetComponent<TouchController>() ?? root.AddComponent<TouchController>();
@@ -375,7 +372,7 @@ namespace MapRenderer.App
             var light   = lightGo.AddComponent<Light>();
             light.type                 = LightType.Directional;
             light.intensity            = 1.0f;
-            // Explicit, not left to the component default: buildings cast shadows (UMR-92), and a light that
+            // Explicit, not left to the component default: buildings cast shadows, and a light that
             // never enables them makes every backend's declaration invisible. Only the BOOTSTRAP light — the
             // early return above hands a host-supplied light back untouched, same "don't clobber the host's
             // lighting" stance as EnsureEnvironmentLighting, so that host owns enabling shadows on its own.

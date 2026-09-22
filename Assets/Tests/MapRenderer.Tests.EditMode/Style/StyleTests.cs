@@ -52,7 +52,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S83a acceptance: a TileJSON document parses into the typed <see cref="TileJson"/> model (tolerant,
+    /// A TileJSON document parses into the typed <see cref="TileJson"/> model (tolerant,
     /// spec defaults), and <see cref="SourceResolver"/> fills a <see cref="SourceDefinition"/> from it —
     /// with an inline-<c>tiles[]</c> short-circuit. Fixtures use the REAL shipped demo style
     /// <c>liberty.json</c> source shapes (vector <c>openmaptiles</c> via <c>url</c>; raster
@@ -247,7 +247,7 @@ namespace MapRenderer.Tests.Style
         }
 
         // =========================================================================================
-        // 6. NeedsTileJson predicate truth table (the fetch-side short-circuit S83b relies on).
+        // 6. NeedsTileJson predicate truth table (the fetch-side short-circuit relies on).
         // =========================================================================================
         [Test]
         public void NeedsTileJson_TruthTable()
@@ -277,15 +277,14 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S60 — <see cref="StyleProperty{T}"/>: parse, classify, evaluate (uniform + bake), and
-    /// GC-allocation gate. Rehomes S11 PaintPropertyEvaluatorTests and S12 DataDrivenPaintEvaluatorTests
-    /// onto the single collapsed type.
+    /// <see cref="StyleProperty{T}"/>: parse, classify, evaluate (uniform + bake), and the
+    /// GC-allocation gate, all on the single collapsed type.
     ///
     /// Covers:
     ///   1. Constant vs Zoom classification.
     ///   2. Numeric interpolation sampled at stop zooms and a mid-zoom (spec-derived math).
     ///   3. Color interpolation with premultiplied-alpha over zoom.
-    ///   4. Feature / Composite input → Evaluate(zoom) throws (deferred to S12 guard).
+    ///   4. Feature / Composite input → Evaluate(zoom) throws.
     ///   5. No-GC sweep gate (Core-side): evaluating a zoom sweep in a tight loop allocates 0 bytes.
     ///   6. Bake-path (Evaluate(zoom,feature)): all ExpressionKinds accepted; no throw.
     ///   7. Data-driven match expression → distinct colors per feature.
@@ -631,7 +630,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(defaultColor.B, c.B, 1e-6f);
         }
 
-        // ── 9. Data-driven bake path (rehomed from S12 DataDrivenPaintEvaluatorTests) ──────────
+        // ── 9. Data-driven bake path ───────────────────────────────────────────────────────────
 
         [Test]
         public void ConstantControl_SameColorForAllFeatures()
@@ -741,7 +740,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// UMR-108 acceptance: the eight style property types (<c>Fill</c>/<c>Line</c>/<c>Symbol</c>/
+    /// The eight style property types (<c>Fill</c>/<c>Line</c>/<c>Symbol</c>/
     /// <c>Background</c>/<c>FillExtrusion</c> × <c>Paint</c>/<c>Layout</c>, where each exists) parse eagerly
     /// via a static <c>Parse</c> factory — not lazily from a retained raw JSON field.
     ///
@@ -946,7 +945,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// P3 — <see cref="Fill.LayoutProperties"/>: parsing <c>fill-sort-key</c>.
+    /// <see cref="Fill.LayoutProperties"/>: parsing <c>fill-sort-key</c>.
     ///
     /// <para>The ordering behaviour it drives is pinned engine-side by <c>FillSortKeySnapshotTests</c>;
     /// this fixture covers the parse, the default, and the zoom/feature capability that decides whether the
@@ -1028,14 +1027,14 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// P2 — <see cref="Fill.FillPattern"/>: resolving a <c>fill-pattern</c> sprite name against a sheet into
+    /// <see cref="Fill.FillPattern"/>: resolving a <c>fill-pattern</c> sprite name against a sheet into
     /// the rect + repeat count the fill shader samples with.
     ///
     /// <para>The load-bearing case is the NEGATIVE one. A <c>fill-pattern</c> layer characteristically
     /// declares no <c>fill-color</c>, so it inherits the spec's opaque-black default; if an unresolvable
     /// pattern fell back to that colour instead of reporting "unresolved", the layer paints solid black.
     /// That is exactly the defect this stage fixes (Liberty's <c>road_area_pattern</c> plazas and
-    /// <c>landcover_wetland</c>) — see docs/fill-parity-design.md §1.</para>
+    /// <c>landcover_wetland</c>) — see docs/fill-parity-design.md.</para>
     ///
     /// Engine-free (no UnityEngine). Runs in BOTH dotnet core-tests AND Unity EditMode.
     /// </summary>
@@ -1396,7 +1395,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S23 I1 — <see cref="FillExtrusion.PaintProperties"/>: classification + spec defaults, mirroring
+    /// <see cref="FillExtrusion.PaintProperties"/>: classification + spec defaults, mirroring
     /// <c>FillPaintTests</c>. Also pins <see cref="StyleParser"/>'s <c>"fill-extrusion"</c> dispatch to the
     /// typed <see cref="FillExtrusion.StyleLayer"/> subclass.
     /// </summary>
@@ -1659,7 +1658,7 @@ namespace MapRenderer.Tests.Style
                 "absent fill-extrusion-translate-anchor must default to 'map' (0.0).");
         }
 
-        // ── translate (I2b — parsed through the expression engine; mirrors the Height teeth above) ──
+        // ── translate (parsed through the expression engine; mirrors the Height teeth above) ──
 
         [Test]
         public void Translate_ConstantValue_ClassifiesAsConstantAndPins()
@@ -1771,16 +1770,16 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S14 / S60 — <see cref="Line.PaintProperties"/> / <see cref="Line.LayoutProperties"/>:
+    /// <see cref="Line.PaintProperties"/> / <see cref="Line.LayoutProperties"/>:
     /// classification, pinned values, translate-array parse, anchor encoding, pattern-name capture,
     /// join/cap layout parse (now typed enums), and inert-fallback.
     ///
     /// Engine-free (no UnityEngine). Runs in BOTH dotnet core-tests AND Unity EditMode.
     ///
-    /// S60 changes:
+    /// Property shapes:
     ///   • line-color/opacity/width/blur/gap-width/offset: single <c>StyleProperty&lt;T&gt;</c>
-    ///     (no more DataDrivenX / XKind fields; ColorKind etc. are convenience aliases for .Kind).
-    ///   • Data-driven gate: null check → <c>.DependsOnFeature</c>.
+    ///     (ColorKind etc. are convenience aliases for .Kind).
+    ///   • Data-driven gate: <c>.DependsOnFeature</c>.
     ///   • line-translate: ONE <c>StyleProperty&lt;double2&gt;</c>; access via <c>.Translate.Evaluate(0.0).x/y</c>.
     ///   • line-translate-anchor: <c>StyleProperty&lt;float&gt;</c>.
     ///   • line-join / line-cap: <c>JoinType</c> / <c>CapType</c> enums on LayoutProperties.
@@ -1990,7 +1989,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(0.0f, v, 1e-6f, "line-translate-anchor 'map' must encode as 0.0.");
         }
 
-        // ── #D4: line-join, line-cap from layout (now typed enums) ──────────────
+        // ── line-join, line-cap from layout (now typed enums) ──────────────
 
         [Test]
         public void LinePaint_LayoutJoinCap_Parsed()
@@ -2050,7 +2049,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(1.05,           lo.RoundLimit, 1e-6, "Default round-limit must be 1.05.");
         }
 
-        // ── S44: line-offset ─────────────────────────────────────────────────────
+        // ── Line-offset ──────────────────────────────────────────────────────────
 
         [Test]
         public void LinePaint_Offset_ConstantValue_IsParsed()
@@ -2119,7 +2118,7 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(lp.IsInertFallback, "A layer with null Paint must be IsInertFallback.");
         }
 
-        // ── S60: PropertyNames value constants ──────────────────────────────────
+        // ── PropertyNames value constants ───────────────────────────────────────
 
         [Test]
         public void PropertyNames_ValueConstants_AreCorrect()
@@ -2139,7 +2138,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// E3 — <see cref="Background.PaintProperties"/>: spec defaults, explicit parse, and zoom
+    /// <see cref="Background.PaintProperties"/>: spec defaults, explicit parse, and zoom
     /// classification (the Fill pattern, <see cref="FillPaintTests"/>).
     ///
     /// Engine-free (no UnityEngine). Runs in BOTH dotnet core-tests AND Unity EditMode.
@@ -2261,7 +2260,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S105 Slice 1 (A1): a <c>symbol</c> layer parses to the typed <see cref="SymbolStyle.StyleLayer"/> (NOT the
+    /// A <c>symbol</c> layer parses to the typed <see cref="SymbolStyle.StyleLayer"/> (NOT the
     /// generic base) with its <c>text-*</c>/<c>symbol-*</c> paint+layout values — and an EMPTY symbol layer
     /// yields every MapLibre spec DEFAULT. Engine-free; runs in both runners.
     /// </summary>
@@ -2376,7 +2375,7 @@ namespace MapRenderer.Tests.Style
                   'paint':{ 'icon-opacity':0.5 } } ] }").Layers[0];
 
             Assert.IsNotNull(sym.Layout.IconImage, "icon-image must be retained (raw) for per-feature resolution");
-            Assert.IsTrue(sym.Layout.IconImage.IsArray, "icon-image data-driven expression survives as a raw array (resolution is I3)");
+            Assert.IsTrue(sym.Layout.IconImage.IsArray, "icon-image data-driven expression survives as a raw array (resolved per feature)");
             Assert.AreEqual(2f, sym.Layout.IconSize.Evaluate(0.0), 1e-6);
             Assert.AreEqual(5f, sym.Layout.IconPadding.Evaluate(0.0), 1e-6);
             Assert.AreEqual(new float2(3, 4), sym.Layout.IconOffset);
@@ -2389,7 +2388,7 @@ namespace MapRenderer.Tests.Style
             Assert.IsFalse(sym.Paint.IsInertFallback, "an icon-opacity-only paint sub-tree is NOT an inert fallback");
         }
 
-        // ── C1 (stage C) — icon-optional / text-optional parse as plain layout booleans ────────────────────
+        // ── C1 — icon-optional / text-optional parse as plain layout booleans ──────────────────────────────
         [Test]
         public void SymbolLayer_IconAndTextOptional_ParseWithSpecDefaultFalse()
         {
@@ -2435,7 +2434,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(AlignmentMode.Auto, bad.Layout.TextRotationAlignment, "an unrecognized alignment degrades to auto");
         }
 
-        // T6 (P1, pitch-alignment epic) — icon/text parse independence. AlignmentMode has only two usable
+        // T6 — icon/text parse independence. AlignmentMode has only two usable
         // non-auto values for FOUR keys, so one layer can never give all four keys distinguishable values
         // (a prior version of this test wrongly claimed it could, setting two of the four to the same
         // 'map'). Instead: FOUR layers, each setting exactly ONE of the four {text,icon}-{rotation,pitch}
@@ -2517,7 +2516,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(TextTransform.None, sym.Layout.TextTransform, "an unrecognized text-transform degrades to none");
         }
 
-        // ── B1 (P-B): icon-rotate parses as a zoom-capable float, spec default 0. ──
+        // ── icon-rotate parses as a zoom-capable float, spec default 0. ──
         [Test]
         public void SymbolLayer_IconRotate_ParsesConstantZoomAndDefault()
         {
@@ -2559,7 +2558,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S105 Slice 1 (A2): <see cref="SymbolStyle.TextFieldResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND
+    /// <see cref="SymbolStyle.TextFieldResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND
     /// expression form (<c>["get",…]</c>/<c>["coalesce",…]</c>) resolve to the exact label string; a missing
     /// property SKIPS the feature (returns null), never a blank label. Engine-free; runs in both runners.
     /// </summary>
@@ -2639,12 +2638,11 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S43 / S60 — <see cref="Line.LineDash"/>: dash coverage function, zoom-stability, width
+    /// <see cref="Line.LineDash"/>: dash coverage function, zoom-stability, width
     /// coupling, dasharray parse/eval, and shader structure (tooth 4 — greppable assertion).
     ///
-    /// S60: <c>TryEvaluatePattern</c> now returns <c>float4 packed + int count</c> (alloc-free);
-    /// <c>Pack</c> deleted. Tests updated accordingly. <c>DashCoverage(float[])</c> remains for
-    /// the CPU mirror. All passing count preserved.
+    /// <c>TryEvaluatePattern</c> returns <c>float4 packed + int count</c> (alloc-free);
+    /// <c>DashCoverage(float[])</c> is the CPU mirror.
     /// </summary>
     [TestFixture]
     public class LineDashTests
@@ -2735,7 +2733,7 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void DashCoverage_ZoomStable_CycleCountTimesWidthMIsConstantAcrossZoom()
         {
-            // S93 relabel: the 512 convention shifts every zoom number −1, so what was z14/z15 is now z13/z14 —
+            // The 512 convention shifts every zoom number −1, so what was z14/z15 is now z13/z14 —
             // the widthM / cycle counts are bit-identical to the pre-flip run (GroundResolution_512(13) ==
             // GroundResolution_256(14)), keeping this discretization-sensitive check on the same footing.
             double zoom1 = 13.0;
@@ -2819,7 +2817,7 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── S60: TryEvaluatePattern → float4 + count (alloc-free, replaces Pack) ─────────────
+        // ── TryEvaluatePattern → float4 + count (alloc-free) ─────────────────────────────────
 
         [Test]
         public void TryEvaluatePattern_TwoEntry_PackedCorrectly()
@@ -2980,7 +2978,7 @@ namespace MapRenderer.Tests.Style
             // Resolved by name (move-proof) — the lit forward pass now lives under Map/Line/Lit/.
             string text = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_LitForwardPass.hlsl"));
 
-            // S67 + UV-channel cleanup: dashU is computed in the shared Line_VertexExtrude helper; the
+            // dashU is computed in the shared Line_VertexExtrude helper; the
             // forward pass calls it and carries the result in the line uv channel (uv.x — the native
             // along-coordinate), and the fragment reads uv.x for dash coverage. There is no dedicated
             // dashU varying any more (per-vertex distanceAlong sourcing is asserted on the helper below).
@@ -2991,7 +2989,7 @@ namespace MapRenderer.Tests.Style
             Assert.That(text, Does.Contain("input.uv.x"),
                 "Fragment shader must read the dash coordinate from input.uv.x.");
 
-            // _DashCount: S67 factored the dash logic into Line_VertexExtrude.hlsl (shared by all passes).
+            // _DashCount: the dash logic lives in Line_VertexExtrude.hlsl (shared by all passes).
             // Assert the guard is present there — still a single-site check, just in the helper.
             // Shared helper, resolved by name (move-proof) — stays in the Map/Line/ kind root.
             string extrudeText = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_VertexExtrude.hlsl"));
@@ -3000,10 +2998,10 @@ namespace MapRenderer.Tests.Style
             Assert.That(extrudeText, Does.Contain("dashU"),
                 "Line_VertexExtrude.hlsl must emit the dashU dash coordinate.");
             Assert.That(extrudeText, Does.Contain("_DashCount"),
-                "Line_VertexExtrude.hlsl must have _DashCount guard for solid identity (S67: dash logic lives in shared helper).");
+                "Line_VertexExtrude.hlsl must have _DashCount guard for solid identity (dash logic lives in shared helper).");
         }
 
-        // ── S110 T6: the CPU mirror's pointer to its HLSL twin must name a file that exists ──────
+        // ── T6: the CPU mirror's pointer to its HLSL twin must name a file that exists ───────────
 
         /// <summary>Resolves a repo-relative DIRECTORY the same way <see cref="FindRepoFile"/> resolves a
         /// file. Returns null when no ancestor contains it.</summary>
@@ -3029,9 +3027,9 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// <b>S110 T6.</b> <see cref="Line.LineDash"/> is the declared single source of truth for the dash
+        /// <b>T6.</b> <see cref="Line.LineDash"/> is the declared single source of truth for the dash
         /// function and points at its HLSL mirror by name. Those pointers must name the file that actually
-        /// carries the mirror — <c>Line_VertexExtrude.hlsl</c>, where S67 moved it — and not the
+        /// carries the mirror — <c>Line_VertexExtrude.hlsl</c> — and not the
         /// <c>MapLineForwardPass.hlsl</c> that has not existed for several stages.
         ///
         /// <para>The second half is what stops this from rotting: every <c>*.hlsl</c> token in the file is
@@ -3052,7 +3050,7 @@ namespace MapRenderer.Tests.Style
 
             Assert.That(text, Does.Contain("Line_VertexExtrude.hlsl"),
                 "LineDash.cs must point at Line_VertexExtrude.hlsl — the file that carries the HLSL mirror " +
-                "of DashCoverage since S67, and the file S110 changed the dash divisor in.");
+                "of DashCoverage, and the file the dash divisor lives in.");
             Assert.That(text, Does.Not.Contain("MapLineForwardPass"),
                 "LineDash.cs still points at MapLineForwardPass.hlsl, which no longer exists. A reader " +
                 "asked to 'keep both in sync on any arithmetic change' cannot find the other half.");
@@ -3145,7 +3143,7 @@ namespace MapRenderer.Tests.Style
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// I3: <see cref="SymbolStyle.IconImageResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND expression
+    /// <see cref="SymbolStyle.IconImageResolver.Resolve"/> — token sugar (<c>{prop}</c>) AND expression
     /// form (<c>["get",…]</c>/<c>["coalesce",…]</c>) resolve to the exact sprite name; a missing property
     /// SKIPS the icon (returns null), never an empty name. Mirrors <c>TextFieldResolverTests</c> for the
     /// icon-image analogue. Engine-free; runs in both runners.

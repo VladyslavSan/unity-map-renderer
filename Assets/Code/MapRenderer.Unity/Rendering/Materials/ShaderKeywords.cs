@@ -9,7 +9,7 @@ namespace MapRenderer.Unity.Rendering.Materials
     /// <c>LineShaderGUI.ValidateMaterial</c>, each adding the level's own keywords) — the clean-room
     /// replacement for URP's editor-only <c>SetMaterialKeywords</c>. The names live in the runtime assembly
     /// (not the Editor) so the const strings are shareable. We declare ONLY the keywords our shaders actually
-    /// use; this is not a copy of URP's <c>ShaderKeywordStrings</c> (S58).</para>
+    /// use; this is not a copy of URP's <c>ShaderKeywordStrings</c>.</para>
     /// </summary>
     public static class ShaderKeywords
     {
@@ -23,9 +23,8 @@ namespace MapRenderer.Unity.Rendering.Materials
         public const string SpecularSetup                   = "_SPECULAR_SETUP";
         public const string ReceiveShadowsOff               = "_RECEIVE_SHADOWS_OFF";
 
-        // Surface / detail features. NOT fill-only, despite what this comment used to say: Line.shader
-        // declares _NORMALMAP, _PARALLAXMAP, _DETAIL_MULX2, _DETAIL_SCALED and _SURFACE_TYPE_TRANSPARENT
-        // too (:181-187), and MapLine.mat carries _SURFACE_TYPE_TRANSPARENT as a live keyword.
+        // Surface / detail features — declared by Fill.shader AND Line.shader (:181-187), and
+        // MapLine.mat carries _SURFACE_TYPE_TRANSPARENT as a live keyword.
         public const string NormalMap                = "_NORMALMAP";
         public const string ParallaxMap              = "_PARALLAXMAP";
         public const string DetailMulx2              = "_DETAIL_MULX2";
@@ -36,16 +35,13 @@ namespace MapRenderer.Unity.Rendering.Materials
         public const string AlphaModulateOn          = "_ALPHAMODULATE_ON";
 
         // Line-only features (Fill.shader does not declare these).
-        // _OFF polarity is deliberate: shader_feature_local variants are stripped from a player build
-        // unless some material in the build declares the keyword, so the SHIPPING (AA-on) variant is the
-        // one that carries no keyword and can never be stripped. Inverting it would make AA work in the
-        // Editor and silently vanish in a build.
+        // The _OFF polarity is for strip safety: shader_feature_local variants are stripped from a player
+        // build unless some material declares the keyword, so the SHIPPING (AA-on) variant is the one that
+        // carries no keyword. Inverting it makes AA work in the Editor and vanish in a build.
         public const string EdgeAntialiasingOff = "_EDGE_ANTIALIASING_OFF";
 
-        // Hairline strategy — a keyword SET whose default member is `_` (no keyword). Same strip-safety
-        // argument as _OFF polarity above, reached differently: the shipping variant is the unnamed one, so
-        // it carries nothing that could be stripped from a player build. Never make the default a named
-        // keyword.
+        // Hairline strategy — a keyword SET whose default member is `_` (no keyword). Same strip safety as
+        // the _OFF polarity above: the shipping variant is the unnamed one. Never name the default.
         public const string HairlineHard = "_HAIRLINE_HARD";
         public const string HairlineSolidCore = "_HAIRLINE_SOLID_CORE";
     }

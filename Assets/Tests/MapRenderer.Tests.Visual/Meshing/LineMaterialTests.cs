@@ -1,15 +1,15 @@
-// Line-material rendering GPU/visual acceptance tests: Lit shading, base snapshot, globe (UMR-176 pack: meshing topic).
+// Line-material rendering GPU/visual acceptance tests: Lit shading, base snapshot, globe.
 //
 // Split by TWO using collisions, not the line cap: `CameraProperties` (MapRenderer.Core.Geo
 // vs UnityEngine.Rendering) and bare `Object` (System.Object vs UnityEngine.Object) —
 // both CS0104. Within that constraint each file groups its dominant line sub-area.
 // This file: UnityEngine.Rendering importers (or neutral) that use bare Object —
-// the Lit material shader, the general S05 renderer snapshot, and the globe variant.
+// the Lit material shader, the general renderer snapshot, and the globe variant.
 //
 // Contents:
-//   LitLineSnapshotTests    — S33 acceptance tests — Lit forward-transparent line shader.
-//   LineSnapshotTests       — Headless visual snapshot tests for the S05 GPU-driven line renderer.
-//   GlobeLineSnapshotTests  — GlobeLineSnapshotTests (S91-C, C-2) — renders the fixture's geolines layer on the globe through the REAL StyledLineTileBuilder globe path, then places it via the ENU rebase and renders it.
+//   LitLineSnapshotTests    — acceptance tests — Lit forward-transparent line shader.
+//   LineSnapshotTests       — Headless visual snapshot tests for the GPU-driven line renderer.
+//   GlobeLineSnapshotTests  — renders the fixture's geolines layer on the globe through the REAL StyledLineTileBuilder globe path, then places it via the ENU rebase and renders it.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -30,14 +30,14 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.Visual
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // LitLineSnapshotTests — S33 acceptance tests
+    // LitLineSnapshotTests — acceptance tests
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S33 acceptance tests — Lit forward-transparent line shader.
+    /// Acceptance tests — the Lit forward-transparent line shader.
     ///
     /// Test #1 (structural): Map/Line shader exists, compiles without errors, has the full
-    ///   five-pass set (S67: ForwardLit/ShadowCaster/DepthOnly/DepthNormals/GBuffer), each
+    ///   five-pass set (ForwardLit/ShadowCaster/DepthOnly/DepthNormals/GBuffer), each
     ///   prepass carrying only its LightMode tag, and includes Line_LitInput.hlsl +
     ///   Line_VertexExtrude.hlsl. NORMAL stream = +Y, extrudeN on separate TEXCOORD.
     ///   Passes 2-5 are capability-only (present-but-inert for transparent lines).
@@ -46,7 +46,7 @@ namespace MapRenderer.Tests.Visual
     ///   intensity changes. Proves URP PBR lighting is live.
     ///
     /// Test #3 (world-space extrusion): Ribbon width in pixels is invariant under
-    ///   non-identity parent translate + scale transform. This is the decisive S05 fix.
+    ///   non-identity parent translate + scale transform.
     ///
     /// Test #4 (live _Width): SetFloat("_Width") with same-mesh reference identity.
     ///   Measured pixel width changes proportionally without rebuilding the mesh.
@@ -187,27 +187,27 @@ namespace MapRenderer.Tests.Visual
                     System.IO.Directory.GetParent(UnityEngine.Application.dataPath).FullName,
                     shaderPath));
 
-            // 1. Full five-pass set present (S67 capability parity with Fill).
+            // 1. Full five-pass set present (capability parity with Fill).
             // ForwardLit is the primary rendering pass; the four prepasses are capability-only
             // (present-but-inert for transparent lines; URP excludes Queue>=2501 from prepasses).
             Assert.That(src, Does.Contain("\"UniversalForward\""),
                 "Shaders/Map/Line/Line.shader must have a UniversalForward (ForwardLit) pass.");
             Assert.That(src, Does.Contain("\"ShadowCaster\""),
-                "Line.shader must have a ShadowCaster pass (S67 capability — inert for transparent).");
+                "Line.shader must have a ShadowCaster pass (capability pass — inert for transparent).");
             Assert.That(src, Does.Contain("\"UniversalGBuffer\""),
-                "Line.shader must have a GBuffer pass (S67 capability — inert for transparent).");
+                "Line.shader must have a GBuffer pass (capability pass — inert for transparent).");
             Assert.That(src, Does.Contain("\"DepthOnly\""),
-                "Line.shader must have a DepthOnly pass (S67 capability — inert for transparent).");
+                "Line.shader must have a DepthOnly pass (capability pass — inert for transparent).");
             Assert.That(src, Does.Contain("\"DepthNormals\""),
-                "Line.shader must have a DepthNormals pass (S67 capability — inert for transparent).");
+                "Line.shader must have a DepthNormals pass (capability pass — inert for transparent).");
 
-            // 2. S67 shared helpers included.
+            // 2. Shared helpers included.
             Assert.That(src, Does.Contain("Line_VertexExtrude.hlsl"),
-                "Line.shader must #include Line_VertexExtrude.hlsl (S67 shared extrusion + coverage helper).");
+                "Line.shader must #include Line_VertexExtrude.hlsl (the shared extrusion + coverage helper).");
 
-            // 3. Includes the line forward pass (S66: explicit include; input provided separately by .shader).
+            // 3. Includes the line forward pass (explicit include; input provided separately by .shader).
             Assert.That(src, Does.Contain("Line_LitForwardPass.hlsl"),
-                "Line.shader must #include Line_LitForwardPass.hlsl (S66 rename from MapLineForwardPass.hlsl).");
+                "Line.shader must #include Line_LitForwardPass.hlsl (the lit forward pass).");
 
             // 4. Does NOT include the fill forward pass.
             Assert.That(src, Does.Not.Contain("Fill_LitForwardPass.hlsl"),
@@ -217,11 +217,11 @@ namespace MapRenderer.Tests.Visual
             string passSrc = System.IO.File.ReadAllText(
                 ShaderPropertyParser.MapShaderPath("Line_LitForwardPass.hlsl"));
             Assert.That(passSrc, Does.Not.Contain("#include \"Line_LitInput.hlsl\""),
-                "Line_LitForwardPass.hlsl must NOT self-include Line_LitInput.hlsl (S66: Line.shader provides it).");
+                "Line_LitForwardPass.hlsl must NOT self-include Line_LitInput.hlsl (Line.shader provides it).");
             Assert.That(passSrc, Does.Contain("InitializeStandardLitSurfaceData"),
                 "Line_LitForwardPass.hlsl must call InitializeStandardLitSurfaceData (not hand-assembled).");
 
-            // 6. Transparent state. The render state is S58-parameterized (Blend/ZWrite/ZTest/Cull hoisted to
+            // 6. Transparent state. The render state is parameterized (Blend/ZWrite/ZTest/Cull hoisted to
             // the SubShader), so assert the parameterized DIRECTIVE + the property DEFAULTS that encode the
             // prior hardcoded transparent line (standard alpha blend, no depth write) — NOT comment text.
             Assert.That(src, Does.Contain("Blend [_SrcBlend] [_DstBlend]"),
@@ -234,7 +234,7 @@ namespace MapRenderer.Tests.Visual
                 "Line.shader _ZWrite must default to 0 (Off) — transparent, painter's-algorithm layer order.");
 
             // 7. The line mesh emits a NORMAL stream of +Y (0,1,0) for the lit shader.
-            // S54: assert on the live StyledLineTileBuilder output directly (the retired
+            // Assert on the live StyledLineTileBuilder output directly (the retired
             // LineMeshBuilder source-text check is gone). Falsifiable identically: a non-+Y
             // normal stream would scramble the lit luminance delta.
             var normalProbeMesh = SyntheticLineMesh.BuildFromPoints(
@@ -300,7 +300,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ─── Test #3: World-space extrusion (decisive S05 fix) ──────────────────
+        // ─── Test #3: World-space extrusion ─────────────────────────────────────
 
         [Test]
         public void LitLine_WorldSpaceExtrusion_WidthInvariantUnderParentScale()
@@ -355,7 +355,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.That((float)wB, Is.InRange(expected - tol, expected + tol + 2),
                     $"Scaled-parent (3×) line width must equal identity width: " +
                     $"expected ≈{expected:F1}px, got {wB}px. " +
-                    $"S05 fix: normalize(mul(O2W, dir)) strips parent scale from extrude direction.");
+                    $"normalize(mul(O2W, dir)) strips parent scale from extrude direction.");
             }
         }
 
@@ -505,11 +505,11 @@ namespace MapRenderer.Tests.Visual
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // LineSnapshotTests — Headless visual snapshot tests for the S05 GPU-driven line renderer.
+    // LineSnapshotTests — Headless visual snapshot tests for the GPU-driven line renderer.
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Headless visual snapshot tests for the S05 GPU-driven line renderer.
+    /// Headless visual snapshot tests for the GPU-driven line renderer.
     ///
     /// Three discriminating checks that coverage fraction alone cannot provide:
     ///   1. Width measurement: render a horizontal line; sample a perpendicular scanline; count
@@ -570,7 +570,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Build ALL golden test lines (horizontal + L-shape + diagonal) using SyntheticLineMesh.
-        /// S54: replaces LineBootstrap + LineMeshBuilder.
+        /// Built through SyntheticLineMesh.
         /// </summary>
         private static GameObject BuildLineScene(float widthMeters, out Material mat,
             JoinType join = JoinType.Miter, CapType cap = CapType.Butt)
@@ -590,7 +590,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Build a SINGLE horizontal line for width-measurement tests.
-        /// S54: replaces LineMeshBuilder with SyntheticLineMesh.
+        /// Built through SyntheticLineMesh.
         /// </summary>
         private static GameObject BuildSingleHorizontalLine(float widthMeters, out Material mat)
         {
@@ -729,10 +729,9 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// Snapshot test for Round caps on the golden multi-line scene.
         ///
-        /// Both BuildLineScene and BuildSingleHorizontalLine previously hard-coded CapType.Butt /
-        /// JoinType.Miter, leaving cap geometry unexercised in the visual path. This test renders
-        /// the same golden shapes (h-line, L-shape, diagonal) with Round caps and verifies the PNG
-        /// is non-trivial and passes the coverage gate.
+        /// Renders the golden shapes (h-line, L-shape, diagonal) with Round caps — the cap geometry the
+        /// Butt/Miter snapshots leave unexercised — and verifies the PNG is non-trivial and passes the
+        /// coverage gate.
         ///
         /// Uses the multi-line scene (same as RendersLine_WritesPng_PassesCoverage) so that fill
         /// fraction is comfortably above the 3% blank threshold that a single thin line approaches.
@@ -974,13 +973,13 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // GlobeLineSnapshotTests (S91-C, C-2) — renders the fixture's `geolines` layer on the globe through the
+    // GlobeLineSnapshotTests — renders the fixture's `geolines` layer on the globe through the
     // REAL StyledLineTileBuilder globe path, then places it via the ENU rebase and renders it. This is the
     // visual proof that line ribbons now lie ON the sphere surface (3D centerline + radial up + tangent-plane
     // across), not flattened onto the y=0 plane as before C-2.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // GlobeLineSnapshotTests — GlobeLineSnapshotTests (S91-C, C-2)
+    // GlobeLineSnapshotTests — the globe line path, rendered
     // ───────────────────────────────────────────────────────────────────────────────────
 
     public class GlobeLineSnapshotTests : BaseTestFixture

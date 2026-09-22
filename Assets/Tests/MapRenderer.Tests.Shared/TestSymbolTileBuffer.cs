@@ -19,10 +19,9 @@ namespace MapRenderer.Tests.Text.Placement
     /// <see cref="ShapedSymbol"/> field's own XML doc describes (e.g. an omitted <c>keepUpright</c> is
     /// <c>false</c>, not the style-spec's <c>true</c>; an omitted <c>maxAngleDeg</c> is <c>0f</c>, not <c>45</c>;
     /// an omitted <c>paint</c> is <c>default(SymbolPaint)</c> — all-zero — NOT <see cref="SymbolPaint.Default"/>'s
-    /// opaque black). This mirrors the retired per-symbol managed carrier class this buffer-builder replaced —
-    /// its bare <c>init</c> auto-properties had no initializers either, so a fixture built with it also left
-    /// every unset field at <c>default(T)</c>. Do NOT "helpfully" substitute a spec default here — that is what
-    /// keeps every fixture in this cluster byte-identical across a refactor of the underlying representation.
+    /// opaque black). Do NOT "helpfully" substitute a spec default here — leaving every unset field at
+    /// <c>default(T)</c> is what keeps every fixture in this cluster byte-identical across a refactor of the
+    /// underlying representation.
     ///
     /// <para>Field → default(T) table (every field not called out below is either a required parameter here —
     /// <c>anchorRender</c>/<c>quads</c>/<c>boundsMin</c>/<c>boundsMax</c> for a point, <c>glyphs</c>/<c>anchors</c>/
@@ -45,8 +44,8 @@ namespace MapRenderer.Tests.Text.Placement
     /// </summary>
     internal static class TestSymbolTileBuffer
     {
-        // UMR-87: ShapedSymbol carries interned TextId/IconImageId ints, not raw strings — every AddPoint/
-        // AddCurved call below still takes the plain string and interns it. A caller that cares about ids
+        // ShapedSymbol carries interned TextId/IconImageId ints, not raw strings — every AddPoint/
+        // AddCurved call below takes the plain string and interns it. A caller that cares about ids
         // matching ACROSS buffers/calls (e.g. a cross-tile dedup fixture) passes its own SymbolStringTable
         // explicitly; a caller that does not (the overwhelming majority of hand-built single-buffer fixtures)
         // falls back to this ONE shared, never-reset table — never a fresh table per call, which would let two

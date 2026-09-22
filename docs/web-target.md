@@ -149,7 +149,7 @@ drawing any conclusion from a web build:
 - Never conclude from wasm *size*: a one-line string constant moved it 21 KB and made a void build look
   valid.
 
-**Not yet built — the reading the tile pipeline will need.** `job-scheduling-design.md` §7.4 specifies a
+**Not yet built — the reading the tile pipeline will need.** `job-scheduling-design.md`'s worker-index sample specifies a
 worker-index sample: each mesh-build graph's last node records `[NativeSetThreadIndex]` into a
 `NativeReference<int>`, and telemetry counts graphs that completed on thread 0 versus on a worker. **Nothing
 implements this today** (no `[NativeSetThreadIndex]` anywhere in `Assets/Code`), so this paragraph is an

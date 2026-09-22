@@ -21,13 +21,13 @@ namespace MapRenderer.Core.Style.Fill
     {
         /// <summary>
         /// fill-color: polygon interior fill color. Default opaque black rgba(0,0,0,1).
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<Color> Color { get; init; }
 
         /// <summary>
         /// fill-opacity: fill alpha multiplier [0,1]. Default 1.0.
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<float> Opacity { get; init; }
 
@@ -37,7 +37,7 @@ namespace MapRenderer.Core.Style.Fill
         /// <summary>
         /// fill-outline-color: stroke color around the fill polygon boundary. When absent, falls
         /// back to <see cref="Color"/> (same expression, same evaluation). Default: same as fill-color.
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<Color> OutlineColor { get; init; }
 

@@ -6,7 +6,7 @@
 //
 // Contents:
 //   SymbolSubsystemPumpTests  — PlayMode half of the pump-split — [UnityTest] yield-waits for off-main symbol extract/tail work.
-//   SymbolTailPumpTests       — Epic A / A5a-A5b — the PlayMode half of the pump-split, driving SymbolSubsystem directly.
+//   SymbolTailPumpTests       — the PlayMode half of the pump-split, driving SymbolSubsystem directly.
 
 using System;
 using System.Collections;
@@ -40,14 +40,13 @@ namespace MapRenderer.Tests.PlayMode.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Stall-#1 fix (Stage A): the symbol subsystem no longer builds every fetched tile inline on the main
-    /// thread and no longer re-uploads the 16 MB glyph atlas per glyph-adding tile. A5b: the worker phase is
-    /// now driven by <see cref="SymbolSubsystem.TryBeginBuild"/> (kick-time) + the returned pass's
+    /// The symbol subsystem builds no fetched tile inline on the main thread, and re-uploads the 16 MB
+    /// glyph atlas at most once per pump. The worker phase runs through
+    /// <see cref="SymbolSubsystem.TryBeginBuild"/> (kick-time) plus the returned pass's
     /// <c>RunWorkerAndHandoff</c> (pool), and <see cref="SymbolSubsystem.PumpBuilds"/> starts at most
-    /// <c>MaxBuildsPerFrame</c> ready TAILS/frame + performs at most ONE coalesced atlas upload (the
-    /// build-start throttle + stale-drop teeth moved to TileManager's kick — see TileSymbolKickTests). These
-    /// teeth fail a shallow implementation that still builds inline / uploads per tile, and prove the
-    /// cancellation path.
+    /// <c>MaxBuildsPerFrame</c> ready TAILS per frame. The build-start throttle and stale-drop teeth live
+    /// with TileManager's kick — see TileSymbolKickTests. These teeth fail a shallow implementation that
+    /// builds inline or uploads per tile, and prove the cancellation path.
     /// </summary>
     [TestFixture]
     public class SymbolSubsystemPumpTests
@@ -90,7 +89,7 @@ namespace MapRenderer.Tests.PlayMode.Text
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
                 zoom: 5.0, heading: 0.0, tilt: 0.0));
 
-            // D11/E2: the subsystem no longer owns a MapMaterialSet (per-layer materials moved to
+            // The subsystem owns no MapMaterialSet (per-layer materials moved to
             // SymbolRenderLayer) — this suite tests build/pump/atlas behaviour only, none of which touches
             // materials.
             _subsystem = new SymbolSubsystem(mapCamera);
@@ -125,10 +124,10 @@ namespace MapRenderer.Tests.PlayMode.Text
 
         private static LoadedTileKey Key(TileId t) => new LoadedTileKey(SourceId, t);
 
-        /// <summary>A5b drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
-        /// thread, then <c>RunWorkerAndHandoff</c> fire-and-forget on the pool (so
-        /// <c>SymbolDecodeAndExtract_RunOffTheMainThread</c> still observes the decode/extract marker off
-        /// main). Replaces the retired <c>OnTileBytesReady</c> push.</summary>
+        /// <summary>Drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
+        /// thread, then <c>RunWorkerAndHandoff</c> fire-and-forget on the pool, so
+        /// <c>SymbolDecodeAndExtract_RunOffTheMainThread</c> observes the decode/extract marker off
+        /// main.</summary>
         private void DriveTileBytesReady(TileId tile)
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
@@ -145,9 +144,9 @@ namespace MapRenderer.Tests.PlayMode.Text
             }).Forget();
         }
 
-        // E1 D10: production SetStyle no longer walks style.Layers itself (RenderLayerFactory is the sole
+        // Production SetStyle does not walk style.Layers itself (RenderLayerFactory is the sole
         // registry, MapView derives the list). Tests that call the subsystem directly need the equivalent
-        // extraction — kept local to the test assembly (outside the D10 grep tooth's scope).
+        // extraction — kept local to the test assembly, outside the grep tooth's scope.
         private static List<Symbol.StyleLayer> ExtractSymbolLayers(StyleDocument style)
         {
             var result = new List<Symbol.StyleLayer>();
@@ -157,7 +156,7 @@ namespace MapRenderer.Tests.PlayMode.Text
         }
 
         // ── Tooth 2: coalesced atlas upload — A's glyphs upload exactly once; a same-glyph B uploads zero ──
-        // Stage B makes builds genuinely async (decode+extract on a worker, shape back on main via
+        // Builds are genuinely async (decode+extract on a worker, shape back on main via
         // SwitchToMainThread), so this is a [UnityTest] that yields — each `yield return null` ticks the
         // player loop, the only way an off-thread build's main-thread continuation resumes.
         [UnityTest]
@@ -196,20 +195,13 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, uploadsB, "B adds no new glyphs → zero atlas uploads (coalesced/deduped).");
         }
 
-        // Reader cutover (symbols-async-reconcile stage 4.2): the retired subsystem.CollectInto managed-list overload
-        // — only ever used here as a "has anything committed yet" poll — is replaced by the winner COUNT off the
-        // store's plan-aware CollectInto shim.
+        // A "has anything committed yet" poll: the winner COUNT off the store's plan-aware CollectInto shim.
         private int SymbolCount() => _subsystem.CollectedWinnerCount();
 
-        // ── Tooth 5 (Stage B): the symbol EXTRACT marker must fire OFF the main thread ──
-        // The core Stage-B claim (and the project principle: do off-main everything that can be). A
-        // main-thread-only recorder on MapRenderer.Symbol.Extract must read ZERO across a full build, while
-        // an all-thread recorder reads >=1. A regression that drops SwitchToThreadPool (extract back on main)
-        // flips mainHits to >0 and fails this.
-        //
-        // The marker was called MapRenderer.Symbol.TileDecode until the decode moved to fetch-completion;
-        // it never bracketed a decode again after that, so it was renamed rather than left lying. The
-        // quantity measured — which thread the per-tile symbol extract runs on — is unchanged.
+        // ── Tooth 5: the symbol EXTRACT marker must fire OFF the main thread ──
+        // A main-thread-only recorder on MapRenderer.Symbol.Extract must read ZERO across a full build,
+        // while an all-thread recorder reads >=1. A regression that drops SwitchToThreadPool (extract back
+        // on main) flips mainHits to >0 and fails this.
         [UnityTest]
         public IEnumerator SymbolExtract_RunsOffTheMainThread()
         {
@@ -249,9 +241,9 @@ namespace MapRenderer.Tests.PlayMode.Text
         }
 
         // ── Tooth 4: cancellation — a build suspended in glyph-fetch is cancelled by a restyle, silently ──
-        // Stage B: the build now hops to the pool (decode+extract) then back to main (SwitchToMainThread)
-        // before it reaches the gated glyph fetch, so this must pump frames ([UnityTest]) to get the build
-        // parked on the gate, then restyle + release the gate as cancelled.
+        // The build hops to the pool (decode+extract) then back to main (SwitchToMainThread) before it
+        // reaches the gated glyph fetch, so this must pump frames ([UnityTest]) to get the build parked on
+        // the gate, then restyle + release the gate as cancelled.
         [UnityTest]
         public IEnumerator RestyleMidBuild_CancelsInFlightBuild_Silently_NoDisposedStateTouch()
         {
@@ -314,7 +306,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "the tile left cover");
             Assert.AreEqual(1, _subsystem.DepartingTileCount, "…and is departing (fading out), not dropped");
 
-            // Stage 4b: the departing set arrives via the off-main reconcile (1–4 frames later, apply-stale) — pump
+            // The departing set arrives via the off-main reconcile (1–4 frames later, apply-stale) — pump
             // until the FRONT buffer reflects it (every record departing). A broken pickup/swap never flips the
             // front, so this loop times out and the assertion below fails (the tooth still bites).
             SymbolGatherPlan departing = null;
@@ -359,7 +351,7 @@ namespace MapRenderer.Tests.PlayMode.Text
             int recomputesBefore = _subsystem.CollectRecomputeCount;
 
             // The real event: the tile leaves cover at t=100 → released to the warm cache AND departing-stamped
-            // (the store bumps its collect generation — §1 #3/#6). CurrentBatch must SCHEDULE a fresh reconcile
+            // (the store bumps its collect generation). CurrentBatch must SCHEDULE a fresh reconcile
             // (CollectRecomputeCount climbs) and — a few frames later, apply-stale — the picked-up front CHANGES to
             // all-departing. Pump until the front reflects it; a degenerate never-reschedule memo, or a broken
             // pickup/swap, leaves the front unchanged → this loop times out and fails.
@@ -405,12 +397,12 @@ namespace MapRenderer.Tests.PlayMode.Text
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // SymbolTailPumpTests — A5a-A5b — PlayMode half of the pump-split, driving SymbolSubsystem directly
+    // SymbolTailPumpTests — PlayMode half of the pump-split, driving SymbolSubsystem directly
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Epic A / A5a-A5b: the acceptance teeth for the worker-phase / tail split (PlayMode half — see the
-    /// EditMode <c>SymbolTailPumpTests</c> for the 2 synchronous structural teeth that stayed). Reuses
+    /// The acceptance teeth for the worker-phase / tail split (PlayMode half — see the EditMode
+    /// <c>SymbolTailPumpTests</c> for the synchronous structural teeth). Reuses
     /// <see cref="MapRenderer.Tests.Text.SymbolSubsystemPumpTests"/>' fixture/glyph-source harness (a
     /// single symbol layer over the fixture's "centroids", <see cref="TestGlyphSource"/> injected via
     /// <see cref="SymbolSubsystem.GlyphSourceFactoryOverride"/>).
@@ -487,9 +479,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             return result;
         }
 
-        /// <summary>A5b drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
-        /// thread, then <c>RunWorkerAndHandoff</c> fire-and-forget on the pool. Replaces the retired
-        /// <c>OnTileBytesReady</c> push.</summary>
+        /// <summary>Drive helper — mirrors TileManager's kick: <c>TryBeginBuild</c> on the (test) main
+        /// thread, then <c>RunWorkerAndHandoff</c> fire-and-forget on the pool.</summary>
         private void DriveTileBytesReady(TileId tile)
         {
             ISymbolTileWorkerPass pass = _subsystem.TryBeginBuild(SourceId, tile);
@@ -506,12 +497,12 @@ namespace MapRenderer.Tests.PlayMode.Text
             }).Forget();
         }
 
-        // ── F-2: the tail budget gates tail starts (behavioural, PRIMARY drive) ───────────────────────
-        // A5b: worker-phase starts are no longer gated by PumpBuilds at all — DriveTileBytesReady (mirroring
-        // TileManager's kick) fires both worker phases immediately, off any pump. So this drives BOTH worker
-        // phases up front, yields frames with NO pump until both land in the pool→main handoff
-        // (ReadyTailCount == 2 — a player-loop continuation, not a pump product), THEN flips the tail budget
-        // down and proves the tail-start loop is gated (the knob's sole remaining role, §Q4).
+        // ── The tail budget gates tail starts (behavioural, PRIMARY drive) ────────────────────────────
+        // PumpBuilds gates no worker-phase start — DriveTileBytesReady (mirroring TileManager's kick) fires
+        // both worker phases immediately, off any pump. So this drives BOTH worker phases up front, yields
+        // frames with NO pump until both land in the pool→main handoff (ReadyTailCount == 2 — a player-loop
+        // continuation, not a pump product), THEN flips the tail budget down and proves the tail-start loop
+        // is gated, which is the knob's only role.
         [UnityTest]
         public IEnumerator PumpBuilds_TailStartsAreBudgeted_BacklogDrainsOnePumpAtATime()
         {
@@ -542,8 +533,8 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, _subsystem.ReadyTailCount(), "backlog fully drained");
         }
 
-        // ── F-3(a) + F-4: restyle between the worker phase landing and its tail starting drops the ready
-        //    tail (E-1.5) — no partial commit, no stale start, no unexpected log. ─────────────────────────
+        // ── A restyle between the worker phase landing and its tail starting drops the ready tail — no
+        //    partial commit, no stale start, no unexpected log. ────────────────────────────────────────────
         [UnityTest]
         public IEnumerator SetStyle_BetweenWorkerAndTail_DropsReadyTail_NoCommit_NeverStarts()
         {
@@ -573,10 +564,9 @@ namespace MapRenderer.Tests.PlayMode.Text
             Assert.AreEqual(0, _subsystem.ActiveTileCount, "still no stale labels committed after restyle");
         }
 
-        // ── F-3(b): the finer variant — cancel DURING the tail loop (after the tail has STARTED and parked
-        //    on a gated glyph fetch), not just between phases. Partial symbols must never reach CompleteBuild:
-        //    the whole-loop-then-ct-check-then-commit order (moved verbatim from pre-A5a BuildTileAsync)
-        //    still gates the commit. ───────────────────────────────────────────────────────────────────────
+        // ── The finer variant — cancel DURING the tail loop (after the tail has STARTED and parked on a
+        //    gated glyph fetch), not just between phases. Partial symbols must never reach CompleteBuild:
+        //    the whole-loop-then-ct-check-then-commit order gates it. ─────────────────────────────────────
         [UnityTest]
         public IEnumerator SetStyle_DuringTailExecution_CancelsSilently_NoPartialCommit()
         {

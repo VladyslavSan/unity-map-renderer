@@ -6,7 +6,7 @@ using ShaderProperties = MapRenderer.Unity.Rendering.ShaderProperties;
 namespace MapRenderer.Unity.Editor
 {
     /// <summary>
-    /// Inspector for <c>Map/FillExtrusion</c> (S23 I5). The final successor in the hierarchy
+    /// Inspector for <c>Map/FillExtrusion</c>. The final successor in the hierarchy
     /// (<see cref="BaseShaderGUI"/> → <see cref="LitShaderGUI"/> → this): it inherits the full Lit layout
     /// (Surface Options / Surface Inputs / Detail Inputs / Advanced) AND <see cref="LitShaderGUI"/>'s keyword
     /// sync unchanged, because fill-extrusion declares only the standard URP-Lit shader_features (emission,

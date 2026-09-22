@@ -22,20 +22,20 @@ using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain usin
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// S40 managed per-layer fill mesh builder. Receives real <see cref="TileId"/> + origin, a set of
+    /// Managed per-layer fill mesh builder. Receives real <see cref="TileId"/> + origin, a set of
     /// pre-selected features, and a <see cref="Fill.PaintProperties"/> describing the style.
     ///
-    /// Pipeline (S89 D2): managed color eval → Burst geometry via <c>FillMeshPipeline</c>
+    /// Pipeline: managed color eval → Burst geometry via <c>FillMeshPipeline</c>
     ///   (decode → assemble → earcut → project, run on this worker via <c>.Run()</c> into NativeArrays) →
-    ///   managed alloc-free stream write into a <c>Mesh.MeshData</c>. The managed Core triangulator
-    ///   (Earcut) is deleted; <c>PolygonAssembler</c> lives on test-side only, never on this production
-    ///   path — it is the ground truth the differential-oracle tests assemble against.
+    ///   managed alloc-free stream write into a <c>Mesh.MeshData</c>. No managed triangulator is on this
+    ///   path; <c>PolygonAssembler</c> lives test-side only — the ground truth the differential-oracle
+    ///   tests assemble against.
     ///
-    /// S89 Stage B — <see cref="ScheduleWrite"/> builds the mesh AND writes directly into a caller-allocated
-    /// <see cref="Mesh.MeshData"/> (the writable-mesh advanced API), off the main thread. The bespoke
-    /// NativeArray-stream payload + main-thread <c>SetVertexBufferData</c> copy is gone: the worker populates
-    /// the mesh buffers in place, and the main thread only allocates (at kick) and applies (at consume). The
-    /// off-thread-write threading contract is guarded by <c>MeshDataThreadWriteSpikeTests</c>.
+    /// <see cref="ScheduleWrite"/> builds the mesh AND writes directly into a caller-allocated
+    /// <see cref="Mesh.MeshData"/> (the writable-mesh advanced API), off the main thread: the worker
+    /// populates the mesh buffers in place, and the main thread only allocates (at kick) and applies (at
+    /// consume). The off-thread-write threading contract is guarded by
+    /// <c>MeshDataThreadWriteSpikeTests</c>.
     ///
     /// Stream layout (4 streams, matching Unity's max-4-stream cap):
     ///   Stream 0 — Position (Float32x3) + Normal (Float32x3) interleaved via <see cref="FillPositionNormal"/>.
@@ -46,7 +46,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     ///   Stream 3 — Color (Float32x4, linearized sRGB).
     ///   Index buffer — UInt32.
     ///
-    /// Color (D2): two-carrier split for <c>fill-color</c>. Data-driven bakes the per-feature sRGB colour,
+    /// Color: two-carrier split for <c>fill-color</c>. Data-driven bakes the per-feature sRGB colour,
     /// converted to linear via <c>Color.linear</c> off the main thread, and leaves <c>_BaseColor</c> white.
     /// Constant/zoom leaves the vertex white and rides the material's <c>_BaseColor</c> uniform instead,
     /// bound by <see cref="Materials.MaterialFactory.BindFillPaintToApplier"/> (Unity converts sRGB→linear
@@ -66,22 +66,18 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// place; renaming a marker is a one-line edit here that the tests pick up automatically.</summary>
         public static class ProfilerMarkerNames
         {
-            // job-scheduling-design.md §8 stage 3: the fill prologue's own marker — the production path's
-            // only WriteMeshData-family marker since the synchronous WriteMeshData method (which used to
-            // fire its own PmWriteMeshData sample) moved to the test assembly (vestige sweep) with no
-            // production caller left.
+            // The fill prologue's own marker — the production path's only WriteMeshData-family marker.
             public const string BuildLayerInput = "MapRenderer.Meshing.StyledFillTileBuilder.BuildLayerInput";
         }
 
-        // Brackets BuildLayerInput's selection-order + paint-bake + ring-visit-order work — the prologue half
-        // WriteMeshData used to delegate to. Opens AFTER the early-out guard — see BuildLayerInput's own doc —
-        // so an empty layer still fires no PmBuildLayerInput sample. This is BuildLayerInput's OWN marker.
+        // Brackets BuildLayerInput's selection-order + paint-bake + ring-visit-order work. Opens AFTER the
+        // early-out guard — see BuildLayerInput's own doc — so an empty layer fires no sample.
         private static readonly ProfilerMarker PmBuildLayerInput =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.BuildLayerInput);
 
         // Skip Unity's main-thread index validation (O(indices)) + the redundant intermediate bounds compute:
         // indices come from earcut and are covered by tests, and the canonical bounds are the worker-computed
-        // AABB assigned to Mesh.bounds after apply. Preserves the S48/S55 no-main-thread-scan contract.
+        // AABB assigned to Mesh.bounds after apply. Preserves the no-main-thread-scan contract.
         private const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
@@ -99,11 +95,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
             new VertexAttributeDescriptor(VertexAttribute.TexCoord3, VertexAttributeFormat.Float32, 3, stream: 1),
         };
 
-        // S91-A: the projection the geometry is built with. Launch-time config (the host) threads a
-        // chosen projection here in S91-C; until then this single seam defaults to WebMercator. The
-        // pipeline projects with the chosen Projection struct — WebMercator.Forward is hardcoded nowhere.
-        // internal, not private (vestige sweep): a test-assembly caller (via InternalsVisibleTo) reads this
-        // default the same way WriteGeometry used to, before it moved to the test assembly.
+        // The projection the geometry is built with; this single seam defaults to WebMercator. The pipeline
+        // projects with the chosen Projection struct — WebMercator.Forward is hardcoded nowhere.
+        // internal, not private: a test-assembly caller reads this default via InternalsVisibleTo.
         internal static readonly IProjection DefaultProjection = new WebMercatorProjection();
 
         /// <summary>
@@ -239,11 +233,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// job-scheduling-design.md §8 stage 3: the graph arm's prologue — everything the retired synchronous
-        /// <c>WriteMeshData</c> did BEFORE handing off to <c>FillMeshPipeline.Schedule</c> (now
-        /// <c>TileBuildGraph</c>'s job), lifted out so a graph-arm processor can run it on the seam and hand
-        /// the result to the pump (vestige sweep: <c>WriteMeshData</c> itself had zero production callers and
-        /// moved to a test-assembly caller, reached via <c>InternalsVisibleTo</c>). Selects the
+        /// The graph arm's prologue — the work that precedes <c>TileBuildGraph</c>'s scheduling, so a
+        /// graph-arm processor can run it on the seam and hand the result to the pump. Selects the
         /// fill-sort-key order, bakes each surviving polygon feature's linear colour (<paramref name="featureColors"/>,
         /// caller-owned, indexed by feature ORDINAL), and builds the ring visit order.
         ///
@@ -308,7 +299,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     SelectedTileFeature selected = selectedFeatures[si];
                     IFeature feature = selected.Feature;
 
-                    // Polygon-only. Since B7 this is no longer the sole guard — RingAssemblyJob has its own kind
+                    // Polygon-only. Not the sole guard — RingAssemblyJob has its own kind
                     // gate — but it stays, because it also decides which ordinals get a colour and how many rings
                     // are gathered. Two independent guards, each RED-verifiable on its own.
                     if (feature.GeometryType != TileGeometryType.Polygon)
@@ -320,10 +311,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     if (paint.Color.DependsOnFeature && paint.Color.TryEvaluate(zoom, feature, out var color))
                         featureColor = new Color((float)color.R, (float)color.G, (float)color.B, (float)color.A);
 
-                    // S13 D2 gamma fix (off main thread): sRGB→linear here. white.linear == white.
+                    // Gamma: sRGB→linear here, off the main thread. white.linear == white.
                     Color lin = featureColor.linear;
 
-                    // P4 — data-driven fill-opacity: bake the per-feature alpha, since one uniform cannot express
+                    // Data-driven fill-opacity: bake the per-feature alpha, since one uniform cannot express
                     // a value that varies per feature. Constant/zoom opacity stays on the _Opacity uniform (bound
                     // by MaterialFactory) and is NOT folded in here, or the two would multiply twice; the
                     // data-driven branch is exactly the case MaterialFactory declines to bind. Same split
@@ -381,7 +372,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// buffer's rings bucketed on their feature's <c>fill-sort-key</c> rank, skipping rings whose feature
         /// this layer does not draw (<c>rank == -1</c>).
         ///
-        /// <para>Two properties make this the byte-identical form of the pre-B7 "reorder the feature list, then
+        /// <para>Two properties make this the byte-identical form of a "reorder the feature list, then
         /// decode it" shape, and both come free from the counting sort being <b>stable</b>:</para>
         /// <list type="bullet">
         /// <item>rings of one feature stay <b>contiguous</b> — <c>RingAssemblyJob</c> resets its exterior sign
@@ -434,13 +425,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// job-scheduling-design.md §8 stage 4 Group B: the sizing + <see cref="FillStreamWriteJob"/>
-        /// schedule half of <see cref="ScheduleWrite"/>, split out so a test-assembly caller (vestige sweep:
-        /// the verbatim lift of the retired synchronous <c>WriteGeometry</c>, zero production callers, reached
-        /// via <c>InternalsVisibleTo</c>) can run it over its OWN caller-supplied
-        /// <paramref name="md"/> instead of a freshly-minted
-        /// <see cref="Mesh.MeshDataArray"/> — one write job, two callers (that test-assembly caller and
-        /// <see cref="ScheduleWrite"/>), no <c>MeshData</c>-to-<c>MeshData</c> copy. Declares
+        /// The sizing + <see cref="FillStreamWriteJob"/> schedule half of <see cref="ScheduleWrite"/>, split
+        /// out so a test-assembly caller (via <c>InternalsVisibleTo</c>) can run it over its OWN
+        /// caller-supplied <paramref name="md"/> instead of a freshly-minted
+        /// <see cref="Mesh.MeshDataArray"/> — one write job, two callers, no
+        /// <c>MeshData</c>-to-<c>MeshData</c> copy. Declares
         /// <paramref name="md"/>'s buffers (same order both callers always used) and schedules the job.
         /// Returns UNCOMPLETED — the caller completes the handle before reading bounds, and disposes the
         /// bounds array itself.
@@ -491,7 +480,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// job-scheduling-design.md §3.2/§8 stage 2: the write graph's node for one NON-EMPTY layer — owns
+        /// The write graph's node for one NON-EMPTY layer — owns
         /// the vertex-stream layout and the <see cref="Mesh.MeshData"/> boundary, so a caller (the graph
         /// arm's owner) never needs to know either. Allocates one exact-size <see cref="Mesh.MeshDataArray"/>
         /// sized to <paramref name="output"/>'s real vertex/index count and hands it to

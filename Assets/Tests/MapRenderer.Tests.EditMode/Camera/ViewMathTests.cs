@@ -1,7 +1,7 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and the fast dotnet test project
 // (Tools/core-tests). Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
 //
-// S06 Batch B: view-state, tile cover, and floating-origin (jitter) math.
+// View-state, tile cover, and floating-origin (jitter) math.
 
 using System;
 using System.Collections.Generic;
@@ -57,7 +57,7 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(atLimit.y, m.y, 1e-6, "Extreme latitude clamps to the Mercator limit.");
         }
 
-        // ── S71: IVisibleTileSelector / FrustumTileSelector ──────────────────────────────
+        // ── IVisibleTileSelector / FrustumTileSelector ───────────────────────────────────
         //
         // All behavioural teeth exercise the default impl THROUGH the seam: build a ViewContext
         // { Camera, ViewportPx, Projection } and call SelectVisibleTiles(in view, buf). The white-border
@@ -69,7 +69,7 @@ namespace MapRenderer.Tests.Cameras
         private static CameraProperties Cam(double lon, double lat, double zoom, double headingDeg)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, headingDeg, 0);
 
-        /// <summary>The framing view context: viewportPx = (RefH·aspect, RefH), per D6/D7.</summary>
+        /// <summary>The framing view context: viewportPx = (RefH·aspect, RefH).</summary>
         private static ViewContext View(CameraProperties cam, double aspect)
             => new ViewContext { Camera = cam, ViewportPx = new double2(RefH * aspect, RefH), Projection = Proj };
 
@@ -99,7 +99,7 @@ namespace MapRenderer.Tests.Cameras
         /// <summary>
         /// A ground point of the FRAMING quad: camera-center Mercator + (a,b) rotated by the camera heading,
         /// where a ∈ [-halfH, halfH], b ∈ [-halfV, halfV] are ground offsets derived from the framing math
-        /// (D7) — NOT from ScreenToGround (that would make T-FRAME circular). The rotation matches the
+        /// — NOT from ScreenToGround (that would make T-FRAME circular). The rotation matches the
         /// projection's pixel→ground bearing rotation: east = a·cosH + b·sinH; north = −a·sinH + b·cosH.
         /// </summary>
         private static double2 FramingGround(in CameraProperties cam, double a, double b)
@@ -350,7 +350,7 @@ namespace MapRenderer.Tests.Cameras
                 "arbitrary dpi divides by 160.");
         }
 
-        // ── The px→consumer-space conversion (S107 Stage 1) ────────────────────────────────────
+        // ── The px→consumer-space conversion ───────────────────────────────────────────────────
 
         [Test]
         public void LogicalToDevicePx_LogicalTargetIsTheIdentity_DeviceTargetScalesByDpr()
@@ -373,16 +373,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void NonPositiveDpr_FallsBackToOne_InBOTHDirections_SoTheGuardsCannotDiverge()
         {
-            // S108 T3-2. Both directions in ONE test on purpose: the fallback has a single home
-            // (DeviceScaling's private ratio guard), and asserting the pair together is what makes it
-            // impossible to change one direction's behaviour without the other's going red. An unconfigured
-            // ratio that framed the camera at 1 but scaled the paint by 0 would blank every line; one that
-            // divided the viewport by 0 would send the framing viewport to +∞.
-            //
-            // NaN and the infinities are not swept HERE — since S109 the guard is a two-sided plausibility
-            // band, so they fall back by decision rather than by accident, and the test below is where that
-            // decision is recorded (it closes §6.1 finding 6). This one keeps its original scope: the
-            // non-positive ratios that were the whole of the guard before the band existed.
+            // Both directions in ONE test: the fallback has a single home, so a divergence between them
+            // cannot hide. NaN and the infinities belong to the plausibility-band test below.
             foreach (double dpr in new[] { 0.0, -0.0, -1.0, -2.0 })
             {
                 Assert.AreEqual(7.0, DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Device, dpr), 0.0,
@@ -404,20 +396,9 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void ImplausibleDpr_FallsBackToExactlyOne_InBOTHDirections()
         {
-            // S109 T4-1. Both directions in ONE test for the same reason as T3-2 above: the fallback has a
-            // single home, and asserting the pair together is what stops one direction growing a behaviour
-            // the other does not have.
-            //
-            // The expected value is LITERALLY 1.0 at tolerance 0, and that exactness is the tooth. It is
-            // what discriminates a fallback from a clamp: `clamp(d, 0.25, 8)` returns 0.25 for 0.1 and 8.0
-            // for 1e6 — both perfectly plausible-looking ratios that would satisfy any tolerant, "is
-            // finite", or "is in range" assertion while silently rebasing the entire map by 4× or 8×.
-            //
-            // Only +∞ is a BEHAVIOUR change: it satisfied the old positivity test and propagated, taking
-            // logical→device to +∞ and device→logical to 0. NaN and -∞ already fell back (every comparison
-            // against them is false either way) — they are swept to RECORD that an unusable ratio is one
-            // thing rather than to catch a regression, which is how §6.1 finding 6 ("NaN maps to 1 by
-            // accident, not by decision") closes by a tooth instead of by prose.
+            // Both directions in ONE test for the same reason as above: the fallback has a single home, so
+            // one direction cannot grow a behaviour the other lacks. Tolerance is 0 — that exactness is what
+            // separates a fallback from a clamp, which returns a plausible 0.25 or 8.0 and rebases the map.
             foreach (double dpr in new[]
                      {
                          0.1, 1e-9,                                     // below any plausible floor
@@ -450,13 +431,9 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void PlausibleDpr_PassesThroughUnchanged_AndTheBandIsInclusiveAtBothBounds()
         {
-            // S109 T4-2. Kept apart from T4-1 on purpose: this test pins a policy CONSTANT that a later
-            // maintainer may legitimately want to move, so moving the band stays a one-test edit.
-            //
-            // The DISCRIMINATING rows are the straddles — 0.24/0.26 and 7.99/8.01. Neither half of a pair
-            // pins anything alone: 0.24 → 1 only says the floor is above 0.24, and 0.26 → 0.26 only says it
-            // is at or below 0.26; together they trap it in (0.24, 0.26]. The exact-bound rows (0.25, 8.0)
-            // are the WEAKEST in the set — they distinguish >= from > and nothing else.
+            // Kept apart from the fallback tooth: this test pins a policy CONSTANT, so moving the band stays
+            // a one-test edit. The discriminating rows are the straddles — 0.24/0.26 and 7.99/8.01 trap each
+            // bound between them; the exact-bound rows (0.25, 8.0) only distinguish >= from >.
             foreach (double dpr in new[] { 0.25, 0.26, 0.5, 0.625, 1.0, 1.56, 2.0, 3.0, 4.0, 7.99, 8.0 })
             {
                 Assert.AreEqual(7.0 * dpr, DeviceScaling.LogicalToDevicePx(7.0, PixelSpace.Device, dpr), 0.0,
@@ -478,17 +455,13 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── The device→logical conversion (S108 Stage 3) ───────────────────────────────────────
+        // ── The device→logical conversion ──────────────────────────────────────────────────────
 
         /// <summary>
-        /// S108 T3-1: <see cref="DeviceScaling.DeviceToLogicalPx(double,double)"/> is DIVISION, exactly —
-        /// never <c>v * (1/d)</c>. The witness values matter: at dpr 1 and dpr 2 the reciprocal is a power of
-        /// two and therefore exact, so those ratios cannot discriminate at all, and at 1.56 / 3.0 the sizes a
-        /// test naturally reaches for (512, 1024, 1920, 1080) happen to agree too. The sweep below is wide
-        /// enough that an unlucky literal cannot defeat it; 1440 at 1.56 and 640 at 3.0 are the verified
-        /// last-bit witnesses. Tolerance is 0 — a tolerant comparison passes the very implementation this
-        /// exists to reject, and reciprocal drift at a non-dyadic ratio like 1.56 would break the stage's
-        /// byte-identity invariant everywhere the conversion is now shared.
+        /// <see cref="DeviceScaling.DeviceToLogicalPx(double,double)"/> is DIVISION, never <c>v * (1/d)</c>.
+        /// The witnesses matter: at dpr 1 and 2 the reciprocal is a power of two, and at 1.56 / 3.0 the
+        /// sizes a test reaches for agree too — 1440 at 1.56 and 640 at 3.0 are the last-bit witnesses.
+        /// Tolerance is 0: a tolerant comparison passes the implementation this test exists to reject.
         /// </summary>
         [Test]
         public void DeviceToLogicalPx_IsExactDivision_NotReciprocalMultiplication()
@@ -520,7 +493,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// S108: the two directions are exact inverses at the ratios where the round trip is representable
+        /// The two directions are exact inverses at the ratios where the round trip is representable
         /// (powers of two), so a sign or reciprocal slip in either one shows up as a round-trip drift.
         /// </summary>
         [Test]
@@ -535,7 +508,7 @@ namespace MapRenderer.Tests.Cameras
                 }
         }
 
-        // ── S88 T-DENSITY — 512 selects exactly one level coarser than 256, over the SAME span ───
+        // ── T-DENSITY — 512 selects exactly one level coarser than 256, over the SAME span ───────
 
         [Test]
         public void Selector_TDensity_512IsOneLevelCoarserThan256()
@@ -565,7 +538,7 @@ namespace MapRenderer.Tests.Cameras
             }
         }
 
-        // ── S88 T-DEFAULT — a fresh selector is the 512 convention (no inspector change needed) ───
+        // ── T-DEFAULT — a fresh selector is the 512 convention (no inspector change needed) ───────
 
         [Test]
         public void Selector_TDefault_IsThe512Convention()
@@ -899,64 +872,41 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(min.y, o.y, Eps);
         }
 
-        // S52: FloatingOrigin.ShouldRebase / RebaseDelta were removed — the scene origin now tracks the
-        // look-at every frame (camera-relative rendering), so there is no threshold to cross and no rebase
-        // delta to apply. The two-level RTC composition itself is still pinned by the jitter gate below.
+        // FloatingOrigin has no rebase threshold to test: the scene origin tracks the look-at every frame.
 
         // ── FloatingOrigin: the JITTER gate (headline acceptance teeth) ────────────────────────
 
         /// <summary>
-        /// THE no-jitter gate. Sweeps the camera across the entire Web-Mercator extent (±20,037,508 m,
-        /// including longitudes at the antimeridian and latitudes up to the Mercator limit). For each
-        /// camera position it rebases the scene origin to the camera, picks the camera's tile at the
-        /// live-loop zoom, and — for the worst-case vertex (the tile's far corner) — reproduces the GPU's
-        /// TWO float casts (mesh vertex baked tile-origin-relative + tile transform baked
-        /// scene-origin-relative) exactly as the pipeline does. It asserts the rendered position matches
-        /// the exact double truth (merc − sceneOrigin) to sub-millimetre.
-        ///
-        /// This pins "NO float jitter" in pure Core math rather than by eyeball: the round-trip error is
-        /// the actual coordinate precision the renderer achieves at world scale.
+        /// THE no-jitter gate. Sweeps the camera across the whole Web-Mercator extent (±20,037,508 m). For
+        /// each position it rebases the scene origin to the camera and — for the worst-case vertex —
+        /// reproduces the GPU's TWO float casts (mesh vertex baked tile-origin-relative + tile transform
+        /// baked scene-origin-relative). It asserts the rendered position matches the double truth
+        /// (merc − sceneOrigin) to sub-millimetre, pinning "NO float jitter" in Core math, not by eyeball.
         ///
         /// <para><b>Measures the WHOLE cover, not just the camera's tile.</b> The live loop
-        /// (<see cref="MapView"/>) renders a padded rectangle of tiles, so the farthest visible vertex is
-        /// at the EDGE of the cover, not the camera's own tile. This test enumerates the SAME
-        /// <see cref="TileCover.Cover"/> the live loop uses (with the live-loop default cover params) and
-        /// measures the far corner of EVERY cover tile — taking the worst. Measuring only the camera tile
-        /// would understate the real jitter (the closest tile is best-case).</para>
+        /// (<see cref="MapView"/>) renders a padded rectangle of tiles, so the farthest visible vertex is at
+        /// the EDGE of the cover. This test enumerates the SAME <see cref="TileCover.Cover"/> the live loop
+        /// uses and takes the worst corner; the camera's own tile alone is best-case and understates the
+        /// jitter. Latitude is clamped to the Mercator limit as <see cref="CameraProperties"/> clamps it, so
+        /// the camera never reaches the polar singularity where a Mercator tile's span is unbounded.</para>
         ///
-        /// Parameters (computed, not guessed): zoom = <see cref="LiveZoom"/> (tile span ≈ 2446 m), a
-        /// conservative modeled camera drift of 2000 m (S52: the scene origin now tracks the look-at every
-        /// frame, so real drift is ~0 — modeling 2000 m keeps the gate strict), cover = the S71 MapView live
-        /// defaults (framing viewport (RefH·1.5, RefH), pad = 1 tile). The framing-correct cover is wider than
-        /// the old magic rectangle, so the farthest cover-edge vertex now sits ≈ 18 km from the scene origin;
-        /// the measured worst round-trip error across a dense camera sweep is still well under a millimetre.
-        /// Latitude is clamped to the Mercator limit exactly as <see cref="CameraProperties"/>/the selector
-        /// clamp it; the camera never reaches the polar singularity where a single Mercator tile's span is
-        /// unbounded.
-        ///
-        /// <para><b>Antimeridian seam (out of S06 scope).</b> The sweep stays in lon ∈ [-160°, 160°] so it
-        /// never straddles ±180°. At the seam, the selector wraps x (geographically correct), but a wrapped
-        /// tile's ABSOLUTE Mercator x jumps by a full world width
-        /// (≈ 40,075 km) — it is geographically adjacent but ~40 M m away in Mercator. Origin-relative
-        /// placement of such a wrapped tile would need a ±worldWidth offset; without it the render coord
-        /// reaches world scale and float32 precision degrades to metres at the seam. That seam handling is
-        /// deferred (the S06 demo does not cross the antimeridian).</para>
+        /// <para><b>Antimeridian seam.</b> The sweep stays in lon ∈ [-160°, 160°] so it never straddles
+        /// ±180°. At the seam a wrapped tile is geographically adjacent but ~40 M m away in ABSOLUTE
+        /// Mercator x; origin-relative placement would need a ±worldWidth offset, and without it the render
+        /// coord reaches world scale and float32 precision degrades to metres. That seam handling is
+        /// deferred.</para>
         /// </summary>
         [Test]
         public void FloatingOrigin_ExtremeMercator_CoverEdgeRenderCoordsBounded_SubMillimetre()
         {
             const int    LiveZoom                = 14;
-            const double ModeledCameraDriftMeters = 2000.0; // S52: conservative; real drift is ~0 (origin ≡ look-at)
-            // S71: the framing-correct cover is wider than the old magic rectangle, so the worst MEASURED
-            // corner is now an OFF-SCREEN +1-pad-ring tile corner ≈ 18 km from the origin — at that distance
-            // float32's 24-bit mantissa resolves ≈ 18000/2^24 ≈ 1.1 mm, the precision FLOOR, not a regression.
-            // On-screen geometry (inside the framing quad, ≲ 10 km out) stays comfortably sub-millimetre. The
-            // budget is 2 mm: still ~250× tighter than the metre-scale error the NoRebase companion proves, so
-            // it catches a real rebasing regression while admitting the legitimate wider cover.
+            const double ModeledCameraDriftMeters = 2000.0; // conservative; real drift is ~0 (origin ≡ look-at)
+            // The worst MEASURED corner is an off-screen +1-pad-ring tile corner ≈ 18 km from the origin; at
+            // that distance float32's 24-bit mantissa resolves ≈ 1.1 mm — the precision FLOOR, not a regression.
+            // The 2 mm budget is still ~250× tighter than the metre-scale error the NoRebase companion proves.
             const double SubMmBudgetMeters       = 2e-3;
-            // S71 MapView live defaults — the cover the LIVE loop actually selects (framing viewport
-            // (RefH·LiveAspect, RefH), pad = 1 tile). The framing-correct cover is larger than the old magic
-            // rectangle, so this gate now measures a wider cover edge (still sub-mm — see below).
+            // MapView live defaults — the cover the LIVE loop actually selects (framing viewport
+            // (RefH·LiveAspect, RefH), pad = 1 tile).
             const double LiveAspect    = 1.5;
             var liveSelector = (IVisibleTileSelector)new FrustumTileSelector(minZoom: 0, maxZoom: LiveZoom);
 
@@ -1019,8 +969,8 @@ namespace MapRenderer.Tests.Cameras
             }
 
             // The render coords stay small (float32 keeps precision) AND the round-trip error is sub-mm.
-            // S71: the framing-correct cover is wider, so the worst cover-edge magnitude is ≈ 18 km; 30 km is
-            // a comfortable bound, still far under the float32 precision cliff.
+            // The worst cover-edge magnitude is ≈ 18 km; 30 km is a comfortable bound, still far under the
+            // float32 precision cliff.
             Assert.Less(worstCoordMag, 3e4,
                 $"Worst cover-edge render-coord magnitude {worstCoordMag:F1} m must stay well under the " +
                 "float32 precision cliff (rebasing failed to keep coords near the origin).");
@@ -1057,16 +1007,15 @@ namespace MapRenderer.Tests.Cameras
                 "large (>0.5 m) — this is exactly the jitter floating-origin rebasing eliminates.");
         }
 
-        // ── S92 — pixel unification Phase 1 (DPI camera + device min-zoom) ───────────────────────
+        // ── Pixel unification: DPI camera + device min-zoom ──────────────────────────────────────
 
         [Test]
         public void AltitudeForZoom_DprNormalization_HalvesAt2x_IdenticalAt1x()
         {
-            // T-DPI-CAMERA (arithmetic half): the camera frames the LOGICAL viewport (vp ÷ DPR, S92 D1).
+            // T-DPI-CAMERA (arithmetic half): the camera frames the LOGICAL viewport (vp ÷ DPR), and
             // AltitudeForZoom is linear in viewport height, so ÷DPR divides the altitude by DPR:
             //   DPR=2 ⇒ half the altitude (camera 2× closer ⇒ map 2× bigger),
-            //   DPR=1 ⇒ bit-identical to the pre-S92 physical-viewport altitude (the 952-test safety guard —
-            //           every existing camera test runs at DPR=1 and must be unaffected).
+            //   DPR=1 ⇒ bit-identical to the physical-viewport altitude (every camera test runs at DPR=1).
             const double zoom = 6.0, fov = 60.0, vpH = 1080.0;
             double altPhysical = CameraPoseMath.AltitudeForZoom(zoom, vpH,       fov);
             double alt1        = CameraPoseMath.AltitudeForZoom(zoom, vpH / 1.0, fov);
@@ -1078,7 +1027,7 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void GroundResolution_BaseIs512AndHalvesPerZoom()
         {
-            // T-PAINT-UNCHANGED (S92) + T-RELABEL base pin (S93): the paint scale is not DPI-normalized, and
+            // T-PAINT-UNCHANGED + T-RELABEL base pin: the paint scale is not DPI-normalized, and
             // under the 512 convention GroundResolution(0) == equatorial circumference / 512. Literal 512 (not
             // WebMercator.TilePixelSize) so this guards the constant's VALUE, not a tautology.
             Assert.AreEqual(EarthConstants.EquatorialCircumferenceMetres / 512.0,
@@ -1117,12 +1066,12 @@ namespace MapRenderer.Tests.Cameras
                             "logical-px basis ⇒ the floor scales with DPR");
         }
 
-        // ── Stage A — Mercator finite-sheet camera (min-zoom floor) ───────────────────────────────
+        // ── Mercator finite-sheet camera (min-zoom floor) ─────────────────────────────────────────
 
         [Test]
         public void MinZoomToFill_FillsTheLargerSide_NoGap()
         {
-            // A1-FILL: the finite-sheet floor fits the world square to the LARGER viewport side (not the
+            // FILL: the finite-sheet floor fits the world square to the LARGER viewport side (not the
             // shorter side MinZoomToFit uses), so on a landscape viewport there's no off-world margin.
             // Falsifiable: MinZoomToFit (min side) gives world-px == 1080 < 1920 on this viewport.
             const double tile = WebMercator.TilePixelSize;
@@ -1141,7 +1090,7 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void MinZoomFloor_SelectsByProjection_FiniteFillsCyclicFits()
         {
-            // A1-SELECTOR: the projection-keyed floor branches once on IsFinitePlanarWorld — Mercator fills
+            // SELECTOR: the projection-keyed floor branches once on IsFinitePlanarWorld — Mercator fills
             // (margin 0), the globe fits (with margin) — and the two diverge on a non-square viewport,
             // proving the branch is load-bearing (not dead code that happens to agree).
             var mercator = new WebMercatorProjection();
@@ -1163,7 +1112,7 @@ namespace MapRenderer.Tests.Cameras
                 "on a non-square viewport the two floors must diverge (the branch is load-bearing)");
         }
 
-        // ── S93 — pixel unification Phase 2 (512 zoom renumbering; camera zoom == tile zoom) ──────
+        // ── Pixel unification: 512 zoom renumbering; camera zoom == tile zoom ─────────────────────
 
         [Test]
         public void T_ALIGN_SelectionZoom_EqualsCameraZoom_At512Convention()
@@ -1214,7 +1163,7 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void T_DENSITY_REBASED_DefaultSelectorKeepsThe512Density_AndIsAligned()
         {
-            // T-DENSITY-REBASED: the S88 512 density win survives the flip. The production-default selector is
+            // T-DENSITY-REBASED: the 512 density win survives the flip. The production-default selector is
             // one level COARSER than an explicit onScreenTilePx=256 selector over the same viewport — same span,
             // ~4× fewer tiles — AND is now MapLibre-aligned (Z == cameraZoom, vs 256's cameraZoom+1). A
             // count-only check could pass while Z silently misaligns, so assert Z on both.

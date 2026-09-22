@@ -11,9 +11,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
     public static partial class StyledLineTileBuilder
     {
         /// <summary>
-        /// The write graph's stream-write node (job-scheduling-design.md §8 stage 5): one instance per
-        /// layer, reproducing this class's managed stream-copy loop (<c>WriteMeshData</c>'s old
-        /// <c>:368-403</c>/<c>:414-443</c>) as a Burst job over <see cref="LineGraphOutput"/>'s columns.
+        /// The write graph's stream-write node (job-scheduling-design.md): one instance per
+        /// layer, writing <see cref="LineGraphOutput"/>'s columns into the mesh buffers as a Burst job.
         /// Nested here (not a top-level type) so it can read this class's private vertex-stream layout
         /// (<see cref="LinePositionNormal"/>, <see cref="LineWidthColor"/>) directly — <see cref="ScheduleStreamWrite"/>
         /// is its only caller.

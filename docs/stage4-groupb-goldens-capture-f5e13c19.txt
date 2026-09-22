@@ -1,4 +1,4 @@
-# job-scheduling-design.md §8 stage 4 Group B — golden capture provenance
+# Golden capture provenance — the frozen fill-graph parity digests
 #
 # Raw output of a one-shot capture harness (written, run, and deleted the same session — never committed
 # itself), run against commit f5e13c19 (stage 4 Group A landed; 973afaac, the docs-only descendant HEAD was

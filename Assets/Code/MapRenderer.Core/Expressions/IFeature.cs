@@ -7,8 +7,7 @@ namespace MapRenderer.Core.Expressions
     /// The feature-data surface an expression can query: properties (<c>get</c>/<c>has</c>/<c>properties</c>),
     /// geometry type (<c>geometry-type</c>), and feature id (<c>id</c>). An abstraction so the expression
     /// engine and filter layer can run against any property source, not just a decoded MVT feature
-    /// (<c>MvtFeature</c> in <c>MapRenderer.Jobs.Mvt</c> implements this directly — Epic A / A6 folded the
-    /// retired <c>MvtFeatureAdapter</c> into it).
+    /// (<c>MvtFeature</c> in <c>MapRenderer.Jobs.Mvt</c> implements it directly).
     /// </summary>
     public interface IFeature
     {

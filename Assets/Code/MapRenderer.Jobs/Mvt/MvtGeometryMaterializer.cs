@@ -89,8 +89,8 @@ namespace MapRenderer.Jobs.Mvt
                     nameof(_featureGeometryTypes));
 
             // Exact sizing: walk every command exactly as MvtDecodeJob does to pre-count the rings and
-            // vertices it will emit (S06 item a). This makes under-allocation — and thus the in-job OOB write
-            // — impossible for ANY input, including a malformed multi-point MoveTo.
+            // vertices it will emit. This makes under-allocation — and so the in-job out-of-range write —
+            // impossible for ANY input, including a malformed multi-point MoveTo.
             FillMeshPipeline.PrecountRingsAndVertices(
                 _commands, _featureOffsets, _featureLengths, out int exactRings, out int exactVertices);
 
@@ -115,7 +115,7 @@ namespace MapRenderer.Jobs.Mvt
                 OutRingFeatureIndex = geometry.RingFeatureIdx,
                 OutRingCount        = ringCountArr,
                 OutVertexCount      = vertCountArr,
-            }.Run(); // Run (not Schedule) so the pipeline is callable off the main thread (S89 D2 worker path)
+            }.Run(); // Run, not Schedule, so the pipeline is callable off the main thread
 
             geometry.RingCount   = ringCountArr[0];
             geometry.VertexCount = vertCountArr[0];
@@ -124,8 +124,8 @@ namespace MapRenderer.Jobs.Mvt
 
             // Never-fired backstop: with exact PrecountRingsAndVertices sizing the decode job's reported
             // ring/vertex counts equal the buffer capacities, so these cannot trip. Kept as defense-in-depth
-            // against a future sizing-vs-decode desync. (S06 gated item a; see EnsureCapacity doc.) Compared
-            // against the local capacities, never against the buffer lengths — see TileGeometryBuffers.RingCount.
+            // against a future sizing-vs-decode desync. Compared against the local capacities, never
+            // against the buffer lengths — see TileGeometryBuffers.RingCount.
             //
             // The buffer is already minted when these run, so the throw would strand it. The path is
             // unreachable by construction, hence no behavioural test can force it — the catch is there so the

@@ -19,33 +19,33 @@ namespace MapRenderer.Unity.Rendering.Map
         public TileSelectionSettings TileSelection = new TileSelectionSettings();
 
         [Header("Display Scaling")]
-        [Tooltip("S86 (DPI slice): device-pixel-ratio used to normalise the live framebuffer to LOGICAL " +
+        [Tooltip("Device-pixel-ratio used to normalise the live framebuffer to LOGICAL " +
                  "pixels for framing/selection (logicalPx = physicalPx / dpr), so an on-screen tile is the " +
                  "same PHYSICAL size across panel densities. the host overwrites this at startup with " +
                  "Screen.dpi / DeviceScaling.ReferenceDpi (160, Android mdpi) — including in Play mode, " +
                  "where Screen.dpi has been OBSERVED to report the density of whichever monitor the Editor " +
                  "window is on rather than the target device's (its Editor behaviour is undocumented, so " +
                  "that is an observation, not a contract). Whether that derivation is the right one is " +
-                 "Stage 4b's open question (docs/device-pixel-ratio-design.md). This serialized value is " +
+                 "an open question (docs/device-pixel-ratio-design.md). This serialized value is " +
                  "the deterministic one used in tests/headless (which drive Wire, not Start). A value " +
                  "outside the plausible band (roughly a quarter to eight) degrades to 1 at the conversion. " +
                  "Default 1.")]
         public double DevicePixelRatio = 1.0;
 
         [Header("Performance Budgets")]
-        [Tooltip("S87: Per-frame MESH-upload count budget — max tile-layer meshes uploaded + registered per " +
-                 "Tick (responsiveness knob: bounds AddLayer/entity-add + GPU upload per frame). S87 made " +
+        [Tooltip("Per-frame MESH-upload count budget — max tile-layer meshes uploaded + registered per " +
+                 "Tick (responsiveness knob: bounds AddLayer/entity-add + GPU upload per frame). This budget makes " +
                  "consume MESH-by-mesh, so a single rich tile no longer lands in one frame. Pair with " +
                  "MaxVerticesPerTick (whichever binds first stops the frame). Raise for faster fill, lower " +
                  "for smoother FPS while loading. NOTE: 0 BLOCKS consume entirely (not 'uncapped').")]
         public int MaxConsumesPerTick = 4;
 
-        [Tooltip("S55: Max tiles admitted per Tick (build throttle). " +
+        [Tooltip("Max tiles admitted per Tick (build throttle). " +
                  "Caps how many tiles are newly started per frame. Default 2 — " +
                  "tuned against the live Profiler to spread decode/earcut cost across frames.")]
         public int MaxMeshBuildsPerTick = 2;
 
-        [Tooltip("S55/S87: Per-frame VERTEX budget for consume (S87: per-MESH granularity). " +
+        [Tooltip("Per-frame VERTEX budget for consume, at per-MESH granularity. " +
                  "Default 50000. Layer meshes are consumed until the running vertex total hits this budget, " +
                  "then the rest defer to the next frame (one-mesh overshoot). 0 = uncapped.")]
         public int MaxVerticesPerTick = 50000;
@@ -131,7 +131,7 @@ namespace MapRenderer.Unity.Rendering.Map
                  "whole view in lit or unlit mode — assign a Lit set for lit, an Unlit set for unlit.")]
         public Materials.MapMaterialSet MaterialSet;
 
-        [Tooltip("S82: PreparedTileCache knobs — Enabled (master toggle) + ByteBudget/MaxCount (LRU bounds). " +
+        [Tooltip("PreparedTileCache knobs — Enabled (master toggle) + ByteBudget/MaxCount (LRU bounds). " +
                  "See PreparedTileCacheConfig's own field tooltips for detail.")]
         public PreparedTileCacheConfig PreparedCache = new PreparedTileCacheConfig
         {
@@ -157,11 +157,11 @@ namespace MapRenderer.Unity.Rendering.Map
         public int MinZoom = 0;
         public int MaxZoom = 14;
 
-        [Tooltip("S88/S93: the logical-pixel size a selected tile should occupy on screen — the field-standard " +
+        [Tooltip("The logical-pixel size a selected tile should occupy on screen — the field-standard " +
                  "512 convention MapLibre vector tiles are authored for. Enters ONLY as a selection-zoom " +
-                 "offset (log2(TilePixelSize/OnScreenTilePx)); since S93 unified on TilePixelSize=512, the " +
+                 "offset (log2(TilePixelSize/OnScreenTilePx)); TilePixelSize is unified on 512, so the " +
                  "default 512 ⇒ offset 0 ⇒ camera zoom == tile zoom, ~4× fewer/larger tiles than the old 256 " +
-                 "convention. Set 256 for the dense legacy S71 density (offset +1, one level finer).")]
+                 "convention. Set 256 for the dense legacy density (offset +1, one level finer).")]
         public int OnScreenTilePx = 512;
 
         [Tooltip("Tile detail policy for the frustum selector. Flat = uniform single-zoom cover (previous " +

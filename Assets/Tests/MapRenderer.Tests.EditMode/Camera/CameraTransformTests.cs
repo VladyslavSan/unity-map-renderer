@@ -1,11 +1,11 @@
-// Unity EditMode only — tests MapController.ApplyCameraTransform and CameraPoseMath.AltitudeForZoom (S42).
+// Unity EditMode only — tests MapController.ApplyCameraTransform and CameraPoseMath.AltitudeForZoom.
 // Cannot live in Tools/core-tests (needs real Camera / UnityEngine types).
 //
 // Teeth covered:
 //   Tooth 1 (DECISIVE): pitch=0 → camera above origin (y>0) looking straight down (Dot(fwd,down)>0.99)
-//   Tooth 2: higher zoom → lower altitude; z2 altitude >> z16 altitude; pinned against D2 formula.
+//   Tooth 2: higher zoom → lower altitude; z2 altitude >> z16 altitude; pinned against the formula.
 //   Tooth 3: farClipPlane > camera.position.y at low zoom (world not clipped).
-//   D1 sign guard: pitch>0 tilts toward horizon; bearing rotates about +Y.
+//   Sign guard: pitch>0 tilts toward horizon; bearing rotates about +Y.
 
 using NUnit.Framework;
 using UnityEngine;
@@ -52,10 +52,10 @@ namespace MapRenderer.Tests.Cameras
             return (ctrl, cam, rootGo, camGo);
         }
 
-        // ── S92 T-DPI-CAMERA (engine level) — MapCamera frames the logical viewport ──────────────
+        // ── T-DPI-CAMERA (engine level) — MapCamera frames the logical viewport ──────────────────
 
         /// <summary>
-        /// S92 T-DPI-CAMERA (decisive): <see cref="MapCamera"/> frames the LOGICAL viewport (vp ÷ DPR, D1).
+        /// T-DPI-CAMERA (decisive): <see cref="MapCamera"/> frames the LOGICAL viewport (vp ÷ DPR).
         /// At tilt=0/heading=0 the camera sits directly overhead, so <c>position.y ≡ altitude</c>. DPR=2 puts
         /// the camera at HALF the DPR=1 altitude (2× closer ⇒ map 2× bigger); DPR=1 is bit-identical to the
         /// raw <see cref="CameraPoseMath.AltitudeForZoom"/> — the guard that the change never leaked into the
@@ -85,7 +85,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// S108 T3-3 (the ONE named behaviour change of Stage 3): at a non-positive
+        /// The ONE named behaviour change in this area: at a non-positive
         /// <c>DevicePixelRatio</c>, <see cref="MapCamera.ViewportLogicalPx"/> must fall back to the dpr-1
         /// value instead of returning ±∞.
         ///
@@ -96,7 +96,7 @@ namespace MapRenderer.Tests.Cameras
         /// (rejecting nothing) and the tile selector's framing (NaN-poisoned frustum planes: every tile
         /// intersects, the LOD stop never fires, and the planar cover enumerates the whole quadtree).</para>
         ///
-        /// <para>RED against the pre-S108 body <c>ViewportPx / DevicePixelRatio</c>.</para>
+        /// <para>RED against a body that returns <c>ViewportPx / DevicePixelRatio</c> unguarded.</para>
         /// </summary>
         [Test]
         public void MapCamera_ViewportLogicalPx_IsFiniteAtNonPositiveDevicePixelRatio()
@@ -131,10 +131,10 @@ namespace MapRenderer.Tests.Cameras
         // ── Tooth 1 (DECISIVE) — overhead at pitch 0 ─────────────────────────────────────────────
 
         /// <summary>
-        /// S42 tooth 1 (DECISIVE): at pitch=0 the camera must be directly above the origin (y>0)
+        /// Tooth 1 (DECISIVE): at pitch=0 the camera must be directly above the origin (y>0)
         /// and look straight down (Vector3.Dot(forward, down) > 0.99).
         ///
-        /// Fails on the pre-S42 code-base where Quaternion.Euler(90-pitch,…)*up at pitch=0 produces
+        /// Fails on a pose built as Quaternion.Euler(90-pitch,…)*up, which at pitch=0 produces
         /// offset=(0,0,H), placing the camera at y=0 looking horizontally.
         /// </summary>
         [Test]
@@ -157,8 +157,8 @@ namespace MapRenderer.Tests.Cameras
         // ── Tooth 2 — zoom → altitude monotonic and magnitude-pinned ─────────────────────────────
 
         /// <summary>
-        /// S42 tooth 2: higher zoom → lower altitude (y). Low zoom (~2) yields altitude orders of
-        /// magnitude larger than high zoom (~16). Both are pinned against the D2 formula via
+        /// Tooth 2: higher zoom → lower altitude (y). Low zoom (~2) yields altitude orders of
+        /// magnitude larger than high zoom (~16). Both are pinned against the formula via
         /// CameraPoseMath.AltitudeForZoom.
         /// </summary>
         [Test]
@@ -185,7 +185,7 @@ namespace MapRenderer.Tests.Cameras
                 Assert.Greater(ratio, 1000f,
                     $"z2/z16 altitude ratio must be > 1000 (2^14 ≈ 16384). Got {ratio:F1}.");
 
-                // Pin against D2 formula (use the same CameraPoseMath.AltitudeForZoom the runtime uses,
+                // Pin against the formula (use the same CameraPoseMath.AltitudeForZoom the runtime uses,
                 // with relative tolerance to avoid float-precision drift on different machines).
                 float expectedLow  = (float)CameraPoseMath.AltitudeForZoom(2.0,  TestViewportHeight, TestFovDeg);
                 float expectedHigh = (float)CameraPoseMath.AltitudeForZoom(16.0, TestViewportHeight, TestFovDeg);
@@ -201,8 +201,8 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// S42 tooth 2 (reinforcement): tests AltitudeForZoom in isolation against the hand-computed
-        /// D2 value for zoom=10 / height=1080 / FOV=60°. Catches factor-of-2 or radians errors in
+        /// Tooth 2 (reinforcement): tests AltitudeForZoom in isolation against the hand-computed
+        /// value for zoom=10 / height=1080 / FOV=60°. Catches factor-of-2 or radians errors in
         /// the formula without needing a live camera.
         ///
         /// Hand computation:
@@ -220,7 +220,7 @@ namespace MapRenderer.Tests.Cameras
 
             // Hand-computed reference (double arithmetic to avoid float error in the reference itself).
             const double earthCirc    = 40075016.686;
-            const double tileSize     = 512.0; // S93: the 512 convention (was 256)
+            const double tileSize     = 512.0; // the 512 convention
             double metersPerPixel     = earthCirc / (tileSize * System.Math.Pow(2.0, zoom));
             double halfFovRad         = fov * 0.5 * System.Math.PI / 180.0;
             float  expected           = (float)((height * metersPerPixel) / (2.0 * System.Math.Tan(halfFovRad)));
@@ -236,7 +236,7 @@ namespace MapRenderer.Tests.Cameras
         // ── Tooth 3 — clip planes contain the view at low zoom ────────────────────────────────────
 
         /// <summary>
-        /// S42 tooth 3: at low zoom the far clip plane must exceed the camera's altitude so the world
+        /// Tooth 3: at low zoom the far clip plane must exceed the camera's altitude so the world
         /// is not clipped. Also asserts near &lt; far and near &gt; 0.
         /// </summary>
         [Test]
@@ -260,10 +260,10 @@ namespace MapRenderer.Tests.Cameras
                     "nearClipPlane must be less than farClipPlane.");
         }
 
-        // ── D1 sign guard — pitch tilts toward horizon, bearing rotates about +Y ─────────────────
+        // ── Sign guard — pitch tilts toward horizon, bearing rotates about +Y ────────────────────
 
         /// <summary>
-        /// D1 sign guard: at pitch=45 the camera must still be above the origin (y>0) and must be
+        /// Sign guard: at pitch=45 the camera must still be above the origin (y>0) and must be
         /// tilted (Dot(forward,down) in (0, 0.99)) — not overhead (0.99) and not horizontal (≤0).
         /// This pins the pitch sign: a sign inversion would set the camera below the horizon.
         /// </summary>
@@ -287,7 +287,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// D1 sign guard — bearing: at pitch=0 the camera is directly overhead, so bearing changes
+        /// Sign guard — bearing: at pitch=0 the camera is directly overhead, so bearing changes
         /// the camera's "up" direction (LookRotation) but does NOT move the camera's position (rotating
         /// (0,altitude,0) around Y is a no-op). At pitch>0, bearing does move the camera laterally.
         ///

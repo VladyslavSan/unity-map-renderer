@@ -17,7 +17,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Fill
         public const string FillTranslateAnchor = "_FillTranslateAnchor";
         public const string FillPattern         = "_FillPattern";
 
-        // ── fill-pattern sampling (P2) ────────────────────────────────────────────────────────────
+        // ── fill-pattern sampling ─────────────────────────────────────────────────────────────────
         // Deliberately NOT named after a MapLibre style term: the styling layer binds `fill-X` → `_X`,
         // so a `_Pattern*` name that mirrored a spec key could be silently overwritten by a style
         // (the `_Blur`/`line-blur` collision). `fill-pattern` itself already owns `_FillPattern`.

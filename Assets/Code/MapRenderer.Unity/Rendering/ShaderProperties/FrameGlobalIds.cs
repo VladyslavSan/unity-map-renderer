@@ -1,13 +1,9 @@
-// Cached ids for the frame GLOBALS — deliberately OUTSIDE the parity-swept registry files (S110).
+// Cached ids for the frame GLOBALS — OUTSIDE the parity-swept registry files. See FrameGlobalNames.cs for
+// why: a frame global is not a ShaderLab property on either layer, so folding these into
+// ShaderProperties/PropertyNames.cs would red the exact-count and Properties{}-union structural tests.
 //
-// Same reasoning as FrameGlobalNames.cs: these names are frame globals pushed with Shader.SetGlobalFloat,
-// deliberately absent from both shaders' Properties{} blocks and from CBUFFER_START(UnityPerMaterial).
-// The registry-parity contract is "every registry name is a ShaderLab property on both layers", which a
-// global is not — so folding this into ShaderProperties/PropertyNames.cs (or Line/PropertyNames.cs) would
-// red the exact-count and Properties{}-union structural tests.
-//
-// NOT named PropertyId.cs on purpose: NoRawStringMaterialAccessGuardTests.PropertyIdFiles_NoBareLiterals
-// globs that filename recursively under ShaderProperties/. The distinct name keeps the exemption legible.
+// NOT named PropertyId.cs: NoRawStringMaterialAccessGuardTests.PropertyIdFiles_NoBareLiterals globs that
+// filename recursively under ShaderProperties/. The distinct name keeps the exemption legible.
 
 using UnityEngine;
 

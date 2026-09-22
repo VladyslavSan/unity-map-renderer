@@ -123,12 +123,12 @@ namespace MapRenderer.Tests.Cameras
                 "latitude must clamp to the Mercator limit");
         }
 
-        // ── Stage A — Mercator finite-sheet camera (pan/zoom look-at clamp) ────────────────────────
+        // ── Mercator finite-sheet camera (pan/zoom look-at clamp) ──────────────────────────────────
 
         [Test]
         public void ApplyPan_NearEastEdge_ClampsInsteadOfWrapping()
         {
-            // A2-PANCLAMP: Mercator is a finite sheet. A pan that drives the look-at toward/past the world
+            // PAN CLAMP: Mercator is a finite sheet. A pan that drives the look-at toward/past the world
             // edge must CLAMP EXACTLY to the boundary (viewport stays inside the world square), not WRAP the
             // longitude around to the opposite edge (the old WrapLon behaviour).
             const double zoom = 5.0; // world square meaningfully larger than the viewport — real clamp room
@@ -159,7 +159,7 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void ApplyPan_AtFillFloor_LocksBindingAxisToWorldCentre()
         {
-            // A2-MINZOOM-LOCK: at the fill floor the world square exactly matches the viewport's larger
+            // MIN-ZOOM LOCK: at the fill floor the world square exactly matches the viewport's larger
             // (binding) side, so the clamp range on that axis collapses to a single point (world-centre) —
             // no pan can move it off-centre.
             double floorZoom = CameraPoseMath.MinZoomToFill(Vp.x, Vp.y, 0.0); // Vp is 1920x1080 — X is binding
@@ -176,7 +176,7 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void ClampLookAtToWorld_Globe_IsIdentity()
         {
-            // A2-GLOBE-IDENTITY: the cyclic globe has no edges to clamp — ClampLookAtToWorld must return the
+            // GLOBE IDENTITY: the cyclic globe has no edges to clamp — ClampLookAtToWorld must return the
             // look-at UNCHANGED (well away from the antimeridian, where WrapLon-vs-atan2 bit differences
             // are the documented, harmless exception).
             var globe = new SphericalProjection();
@@ -189,25 +189,21 @@ namespace MapRenderer.Tests.Cameras
             Assert.AreEqual(cam.LookAt.Latitude,  result.Latitude,  1e-12, "globe clamp is the identity (latitude)");
         }
 
-        // ── Apply dispatch — split helpers (S73) ─────────────────────────────────────────────────
+        // ── Apply dispatch — split helpers ───────────────────────────────────────────────────────
         //
         // All tests below drive the public seam ViewInput.Apply(intent, view) — not the private
         // helpers — so they pin the seam contract.  A FakeGestureSource (T-SEAM proof) drives the
         // same seam without any Unity/device dependency.
-        //
-        // Former ApplyTilt_AccumulatesPitchAndBearing_WithClamps and ApplyTilt_BearingWrapsTo0_360
-        // are migrated to the split helpers below (D2); their exact assertion values are preserved.
 
         // Helper: build a ViewContext with the test projection + viewport.
         private static ViewContext MakeView(CameraProperties cam)
             => new ViewContext { Camera = cam, ViewportPx = Vp, Projection = Proj };
 
-        // ── TiltBy via Apply — B-SPLIT ────────────────────────────────────────────────────────────
+        // ── TiltBy via Apply ──────────────────────────────────────────────────────────────────────
 
         [Test]
         public void Apply_TiltBy_SetsTilt_HeadingNull()
         {
-            // Migration of ApplyTilt_AccumulatesPitchAndBearing_WithClamps (tilt direction).
             var v    = Cam(0, 0, 5.0);
             var view = MakeView(v);
             var p    = ViewInput.Apply(GestureIntent.TiltBy(20.0, 60.0), view);
@@ -384,7 +380,7 @@ namespace MapRenderer.Tests.Cameras
 
         /// <summary>
         /// T-SEAM proof-of-genericity: a named fake intent source (no Unity/device dependency) drives
-        /// <see cref="ViewInput.Apply"/> and produces correct patches. Demonstrates that S74's touch
+        /// <see cref="ViewInput.Apply"/> and produces correct patches. The touch
         /// backend and any headless test driver are interchangeable sources over the identical seam.
         /// </summary>
         private sealed class FakeGestureSource
@@ -601,12 +597,10 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void MercatorPin_UnderDpr2_HoldsWithLogicalSeam_DriftsWithPhysical()
         {
-            // S92: the logical interaction seam (Controller S92 D3) fixes retina Mercator pan/zoom for FREE —
-            // NO WebMercatorProjection edit (the GroundResolution/MetersPerPixel freeze holds). The render
-            // frames the LOGICAL viewport (MapCamera D1), so GroundToScreen(·, vpLogical) IS the render; the
-            // seam divides BOTH cursor and viewport by DPR before the projection call, so a grabbed point
-            // re-renders under the cursor. Skipping the ÷DPR (physical viewport) drifts it — same failure the
-            // globe D3 tooth pins, here for the planar case.
+            // The logical interaction seam fixes retina Mercator pan/zoom with no WebMercatorProjection edit.
+            // The render frames the LOGICAL viewport, so GroundToScreen(·, vpLogical) IS the render; the seam
+            // divides BOTH cursor and viewport by DPR before the projection call, so a grabbed point re-renders
+            // under the cursor. Skipping the ÷DPR (physical viewport) drifts it.
             const double dpr = 2.0;
             double2 vpPhysical = new double2(1920, 1080);
             double2 vpLogical  = vpPhysical * (1.0 / dpr); // 960×540

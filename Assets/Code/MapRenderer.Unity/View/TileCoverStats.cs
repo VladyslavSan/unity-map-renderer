@@ -7,10 +7,10 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Unity.View
 {
     /// <summary>
-    /// S85: pure cover-dims + zoom-span derivation over a selected tile cover — the near-field grid
+    /// Pure cover-dims + zoom-span derivation over a selected tile cover — the near-field grid
     /// (<c>Columns</c>/<c>Rows</c>) and the zoom span (<c>MinZ</c>/<c>MaxZ</c>) that the mixed-zoom
-    /// <see cref="FrustumTileSelector"/> output doesn't surface directly (decision 5 — the seam itself stays
-    /// unchanged; zoom is derived from the cover's <see cref="TileId.Z"/> values here).
+    /// <see cref="FrustumTileSelector"/> output doesn't surface directly. The seam stays unchanged; zoom is
+    /// derived from the cover's <see cref="TileId.Z"/> values here.
     ///
     /// <para><b>Columns/Rows count distinct X/Y at <c>MaxZ</c> only</b> — counting the whole cover mixes z
     /// and z−1 index spaces under the default <c>ScreenSpaceLodStrategy</c> mixed-zoom cover, so it is

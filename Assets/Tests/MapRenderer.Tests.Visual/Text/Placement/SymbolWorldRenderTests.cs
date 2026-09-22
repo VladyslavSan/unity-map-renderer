@@ -1,4 +1,4 @@
-// World-space symbol render-comparison and halo-color GPU/visual acceptance tests (UMR-176 pack: text/placement sub-topic).
+// World-space symbol render-comparison and halo-color GPU/visual acceptance tests.
 //
 // Split by the bare-`Object` using collision (System.Object vs UnityEngine.Object,
 // CS0104): SymbolWorldMotionTests.cs holds the System-importing (or neutral) members,
@@ -44,46 +44,31 @@ namespace MapRenderer.Tests.Text.Placement
 {
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
     // NOT registered in core-tests.csproj. Modeled on WorldSymbolAbRenderSnapshotTests (T2's point A/B) but for
-    // CURVED (along-line) text — Stage AC's T-AB tooth.
+    // CURVED (along-line) text.
     //
-    // CONVERTED (old-screen-path deletion, §6a): this tooth used to render the SAME asymmetric glyph through
-    // BOTH the OLD screen curved path (a hand-built BillboardMath.BuildQuad mesh through Map/Symbol/Text) and the
-    // NEW world curved path (a real SymbolPlacementSystem.Tick through Map/Symbol/TextWorld), asserting the two
-    // were pixel-equivalent. The OLD arm's oracle (BuildQuad/BillboardVertex) is retired with the dead render
-    // path it built for — this tooth now renders ONLY the NEW world path and asserts its ink signature (centroid
-    // + bounding box, a real shape/orientation fingerprint, not just a coarse centroid) against committed golden
-    // values.
+    // The tooth renders ONLY the world curved path (a real SymbolPlacementSystem.Tick through
+    // Map/Symbol/TextWorld) and asserts its ink signature — centroid + bounding box, a shape/orientation
+    // fingerprint rather than a coarse centroid — against committed golden values. The readback is
+    // deterministic run-to-run on the same hardware and driver.
     //
-    // GOLDEN PROVENANCE (this deletion stage): the goldens were minted from the NEW world render captured during
-    // this stage's gate, which was VERIFIED render-neutral vs the known-good baseline commit f3e8d81c — the
-    // deletion removed only BuildQuad (BuildWorldQuad's body and every world-read PlacedQuad field are byte-
-    // identical; the world emit call is unchanged). So this is a first baseline captured from an unchanged render,
-    // not a rebake over a drift. The render is deterministic (the 45° and NonzeroAnchorLocal cases mint bit-
-    // identical signatures). This still catches a FUTURE regression (a later change that shifts/mirrors the glyph
-    // fails the committed shape), but — unlike the retired A/B — it cannot by itself prove today's rotation SIGN
-    // is correct (a golden from a wrong-signed render would enshrine the wrong sign). The sign is backed instead
-    // by: (1) the orchestrator's independent D-H RED-verify (injecting a negated sdir.y made this A/B fail 4/5),
-    // and (2) a rendered on-screen diagonal-symbol eyeball — a COMMIT PRECONDITION on this stage (design §14
-    // "SEQUENCING GATE"), which the maintainer confirmed before the conversion landed.
+    // WHAT A GOLDEN CANNOT DO. It catches a future change that shifts or mirrors the glyph, but it cannot
+    // prove today's rotation SIGN: a golden minted from a wrong-signed render would enshrine the wrong sign.
+    // The sign rests on an independent RED-verify — injecting a negated sdir.y fails this tooth 4 cases of 5
+    // — and on a rendered diagonal-symbol eyeball.
     //
-    // GOLDEN RE-MINT (Stage 4, §11 D12): all five goldens moved, by a measured PURE TRANSLATION of ~21.33
-    // screen px — a baseline move, not a re-bake over a drift. Why a CURVED tooth is sensitive to a change in
-    // POINT-block anchoring at all: production routes curved symbols through CurvedTextLayout, which takes no
-    // options and no anchor, so no curved symbol on the map moved; but this fixture borrows the point layout as
-    // a quad factory (see BuildGlyphF), so its cell inherits TextLayoutOptions.Default's Center anchor —
-    // precisely the branch D12 redefined. Shape and orientation were verified preserved (every bbox dimension
-    // identical to the pixel, ink within 1.2%) and the delta was attributed to D12 alone by re-running against
-    // the pre-D12 formula, which reproduced the old goldens digit-for-digit. So the property this tooth exists
-    // to guard — rotation sense and glyph shape, which a translation cannot affect — is untouched, and neither
-    // tolerance was loosened. docs/road-shields-design.md §11 (D12) states the shipped optical-centring
-    // formula this re-mint reflects.
+    // WHY A CURVED TOOTH IS SENSITIVE TO POINT-BLOCK ANCHORING. Production routes curved symbols through
+    // CurvedTextLayout, which takes no options and no anchor, so a point-anchoring change moves no curved
+    // symbol on the map; but this fixture borrows the point layout as a quad factory (see BuildGlyphF), so
+    // its cell inherits TextLayoutOptions.Default's Center anchor. Expect the goldens to move — as a pure
+    // translation, which cannot touch rotation sense or glyph shape — whenever that anchor is redefined.
+    // docs/road-shields-design.md states the shipped optical-centring formula.
     //
     // 'F' (a fully asymmetric glyph — no mirror symmetry in x or y) is used so a wrong rotation sense renders
     // visibly different ink (not an aliased 'F'-looking mirror) — a real discriminator, not a tautology against
     // its own mint: a future sign regression moves the bounding box/centroid far outside the tight per-run
     // tolerance below (headless GPU readback is deterministic run-to-run on the same hardware/driver — the
     // tolerance only absorbs legitimate AA-level jitter). Both a 45° diagonal AND a vertical line are swept (a
-    // diagonal alone leaves a residual sign ambiguity only the vertical resolves — see the design's D-H note).
+    // diagonal alone leaves a residual sign ambiguity only the vertical resolves).
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // WorldCurvedAbRenderSnapshotTests — Unity EditMode only
@@ -125,7 +110,7 @@ namespace MapRenderer.Tests.Text.Placement
         // Internal (not private): MapRenderer.Tests.Visual.OffLookAtSymbolScene builds its multi-glyph
         // cross-azimuth symbols out of copies of THIS one cell rather than carrying a second copy of the
         // decoder/shaper bootstrap (test-code-bloat convention — widen and reuse, never duplicate-and-drag;
-        // the same call WorldPointEmitRenderTests.BuildGlyphA already made for Stage T's T4).
+        // the same call WorldPointEmitRenderTests.BuildGlyphA already makes).
         internal static (GlyphAtlasTexture texture, SymbolQuad quad) BuildGlyphF()
         {
             FontStackGlyphs stack = GlyphPbfDecoder.Decode(LoadFixtureBytes("0-255.pbf.bytes")).Stacks[0];
@@ -139,7 +124,7 @@ namespace MapRenderer.Tests.Text.Placement
             // inherits point-block anchoring — TextLayoutOptions.Default.Anchor is Center. Production
             // curved symbols never take this path (CurvedTextLayout has no block anchor at all), so a
             // change to vertical anchoring moves THIS tooth's goldens while moving no curved symbol on the
-            // map. Expect a re-mint here, and only here, whenever the centre anchor is redefined (§11 D12).
+            // map. Expect a re-mint here, and only here, whenever the centre anchor is redefined.
             var layoutQuads = new List<SymbolQuad>();
             TextQuadLayout.Layout(run, atlas, TextLayoutOptions.Default, layoutQuads);
             Assert.AreEqual(1, layoutQuads.Count, "DIAGNOSTIC precondition: a single glyph must lay out to exactly one quad.");
@@ -168,15 +153,15 @@ namespace MapRenderer.Tests.Text.Placement
                     SceneOriginRender = mapCamera.Projection.Project(lookAt),
                     Rebase = float3x3.identity,
                 };
-                long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 14); // Risk R1: a realistic tile, not TileKey=0
+                long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 14); // a realistic tile, not TileKey=0
 
                 (double3 pathA, double3 pathB) = ShortLineAt(uCam, frame, lineAngleDeg);
 
                 {
                     Color32[] newPixels = RenderNewWorldPath(uCam, mapCamera, in frame, pathA, pathB, quad, atlasTexture, tileKey);
 
-                    // Golden values re-minted at Stage 4 (§11 D12) — a pure ~21.33 px translation of the
-                    // conversion-time goldens, shape and orientation unchanged; see the RE-MINT block in
+                    // Golden values re-minted for the optical-centring change — a pure ~21.33 px translation
+                    // of the earlier goldens, shape and orientation unchanged; see the RE-MINT block in
                     // this file's header for the proof.
                     if (lineAngleDeg == 0f)
                         AssertGolden(newPixels, "0°", centroidRow: 234.9f, centroidCol: 250.9f, minRow: 189, maxRow: 302, minCol: 231, maxCol: 294);
@@ -321,7 +306,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── a REAL curved symbol through a REAL SymbolPlacementSystem.Tick (curved routes to the world
-        //    sink since Stage AC) → Map/Symbol/TextWorld. ───────────────────────────────────────────────────
+        //    sink) → Map/Symbol/TextWorld. ────────────────────────────────────────────────────────────────
         private static Color32[] RenderNewWorldPath(Camera uCam, MapCamera mapCamera, in SceneFrame frame,
             double3 pathA, double3 pathB, in SymbolQuad quad, GlyphAtlasTexture atlasTexture, long tileKey)
         {
@@ -341,7 +326,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             using var plan = new TestSymbolPlan(mapCamera.Projection);
             {
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition: the NEW world path must place the label.");
@@ -356,18 +341,18 @@ namespace MapRenderer.Tests.Text.Placement
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, off-screen GPU render + CPU readback.
     // NOT registered in core-tests.csproj.
     //
-    // Epic A / A1 — the two A0-review findings that must run through the REAL production path (not A0's
-    // hand-built test scaffold), plus the no-leak tooth:
+    // The two findings that must run through the REAL production path rather than a hand-built test
+    // scaffold, plus the no-leak tooth:
     //
-    //   A0-F2 (real-emit upright): A0's Y-negation fix lived only in test scaffold (BuildOneGlyphWorldMesh).
+    //   Real-emit upright: the Y-negation fix lived only in test scaffold (BuildOneGlyphWorldMesh).
     //     This renders a point symbol through the REAL SymbolPlacementSystem.Tick (which now produces the world
     //     mesh via BillboardMath.BuildWorldQuad) and asserts the SAME upright check WorldSymbolAbRenderSnapshotTests
     //     already pins for the scaffold — now against production.
     //
-    //   NEW-F1 (nonzero AnchorLocal through the real builder+shader): emits the SAME glyph twice through the
+    //   Nonzero AnchorLocal through the real builder+shader: emits the SAME glyph twice through the
     //     REAL Tick, differing ONLY in TileKey — one whose tile origin equals the anchor (AnchorLocal == 0, the
     //     scaffold's degenerate case) and one whose tile origin does NOT (AnchorLocal != 0, a real Level-1 RTC
-    //     bake) — asserts the two renders are pixel-equivalent (the RTC cancellation, §3.4, running through
+    //     bake) — asserts the two renders are pixel-equivalent (the RTC cancellation, running through
     //     TransformObjectToHClip for real).
     //
     // Both reuse WorldSymbolAbRenderSnapshotTests' fixture-glyph + camera setup and WorldSymbolInkAnalysis's ink
@@ -399,7 +384,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        /// <summary>Internal (not private): Stage T's <c>TiltFixtureSelfTests.ViewportPitchAlignedSymbol_…</c>
+        /// <summary>Internal (not private): <c>TiltFixtureSelfTests.ViewportPitchAlignedSymbol_…</c>
         /// reuses this one-glyph bootstrap under tilt rather than carrying a second copy
         /// (test-code-bloat convention — widen, don't duplicate-and-drag).</summary>
         internal static (GlyphAtlasTexture texture, List<SymbolQuad> quads, TextLayoutBounds bounds) BuildGlyphA()
@@ -416,7 +401,7 @@ namespace MapRenderer.Tests.Text.Placement
             return (texture, quads, bounds);
         }
 
-        // ── A0-F2: real-emit upright ────────────────────────────────────────────────────────────────────
+        // ── Real-emit upright ─────────────────────────────────────────────────────────────────────────
 
         [Test]
         public void RealTick_PointSymbol_RendersUpright_ThroughProductionBuildWorldQuad()
@@ -439,7 +424,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             double altitude = uCam.transform.position.y;
             double3 anchorRender = frame.SceneOriginRender + new double3(0.0, 0.0, altitude * 0.02);
-            long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 14); // Risk R1: a realistic tile, not TileKey=0
+            long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 14); // a realistic tile, not TileKey=0
 
             var buffer = new SymbolTileBuffer();
             TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, bounds.Min, bounds.Max,
@@ -451,7 +436,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             {
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 system.Tick(in frame, plan.Build(buffer), atlasTexture);
                 Assert.AreEqual(1, plan.CollectedCount, "precondition: the collect must yield the label.");
@@ -483,7 +468,7 @@ namespace MapRenderer.Tests.Text.Placement
             // The symbol's anchor is chosen to be EXACTLY a tile's render-space origin (SW corner) — so a
             // symbol whose TileKey names THAT tile bakes AnchorLocal == 0 (the scaffold's degenerate case).
             // A DIFFERENT (neighbour) tile's origin differs from the anchor, so the SAME symbol's AnchorLocal
-            // is genuinely nonzero there — the two must still land on the SAME real-world point (§3.4's RTC
+            // is genuinely nonzero there — the two must still land on the SAME real-world point (the RTC
             // cancellation), hence pixel-equivalent renders.
             TileId zeroTile = TestTileKeys.Containing(lookAt, zoom: 14);
             TileId nonzeroTile = new TileId { X = zeroTile.X + 1, Y = zeroTile.Y, Z = zeroTile.Z };
@@ -518,7 +503,7 @@ namespace MapRenderer.Tests.Text.Placement
                     paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: zeroTileKey);
                 using (var snapZero = new SnapshotRenderer(Size, Size))
                 {
-                    // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                    // Duplicate Tick — the collision verdict is harvested one Tick late.
                     system.Tick(in frame, plan.Build(zeroBuffer), atlasTexture);
                     system.Tick(in frame, plan.Build(zeroBuffer), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (zero-AnchorLocal case): must not be culled.");
@@ -531,7 +516,7 @@ namespace MapRenderer.Tests.Text.Placement
                     paint: SymbolPaint.Default, textSizePx: 220f, sortKey: 0f, featureIndex: 0, tileKey: nonzeroTileKey);
                 using (var snapNonzero = new SnapshotRenderer(Size, Size))
                 {
-                    // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                    // Duplicate Tick — the collision verdict is harvested one Tick late.
                     system.Tick(in frame, plan.Build(nonzeroBuffer), atlasTexture);
                     system.Tick(in frame, plan.Build(nonzeroBuffer), atlasTexture);
                     Assert.AreEqual(1, system.LastQuadCount, "DIAGNOSTIC precondition (nonzero-AnchorLocal case): must not be culled.");
@@ -592,16 +577,16 @@ namespace MapRenderer.Tests.Text.Placement
                 {
                     long tileKey = SymbolTileKey.Pack(new TileId { Z = 12, X = 100 + i, Y = 200 });
                     var buffer = new SymbolTileBuffer();
-                    // R3 (Edit 8b): all three symbols share AnchorRender, and PointFadeId hashes
+                    // All three symbols share AnchorRender, and PointFadeId hashes
                     // (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey — so leaving
                     // Text at its default would give all three the SAME FadeId. Only one candidate is ever
-                    // live per Tick, so that's not an Edit 7 (same-frame) violation, but under R3 iterations
+                    // live per Tick, so that is not a same-frame violation, but iterations
                     // 1 and 2 would then be satisfied by the id the PREVIOUS iteration's harvested collision
                     // already put in _placedLastFrame, instead of validating their own tile's placement —
                     // green for the wrong reason. Distinct text per iteration keeps each id unique.
                     TestSymbolTileBuffer.AddPoint(buffer, frame.SceneOriginRender, quads, bounds.Min, bounds.Max,
                         text: "T" + i, paint: SymbolPaint.Default, textSizePx: 40f, sortKey: 0f, featureIndex: i, tileKey: tileKey);
-                    // R3: collision verdicts apply one Tick late (HarvestCollision consumes the PREVIOUS Tick's
+                    // Collision verdicts apply one Tick late (HarvestCollision consumes the PREVIOUS Tick's
                     // scheduled job) — a fresh candidate's own Tick shows nothing, so a second, identical Tick is
                     // needed before its placement can be asserted. The duplicate is fade-neutral (deltaTime
                     // defaults to +inf, snapping to target either way) and does not move any expectation.
@@ -628,19 +613,18 @@ namespace MapRenderer.Tests.Text.Placement
     }
 
     // Unity EditMode only — real Camera/RenderTexture/Material/Mesh, GPU render + CPU readback. Fixture/harness
-    // modeled on WorldSymbolMotionTests (T3) but does NOT touch that file — this is Stage AC's T-MOT regression
-    // tooth: build the NEW world-anchored CURVED mesh ONCE (frozen — AnchorLocal/Tangent never rebaked, exactly
+    // modeled on WorldSymbolMotionTests but does NOT touch that file — the motion regression
+    // tooth: build the world-anchored CURVED mesh ONCE (frozen — AnchorLocal/Tangent never rebaked, exactly
     // like WorldSymbolMotionTests' point case), then PAN AND ROTATE (heading) the camera and re-render the SAME
     // frozen mesh with only the per-frame object transform updated — the glyph
     // must (a) track its WORLD anchor (position) and (b) RE-ORIENT to the live screen tangent (the whole point
-    // of Stage AC's shader-side projection — a shallow impl that baked a screen rotation would pass (a) and fail
-    // (b)). Uses a NONZERO per-glyph AnchorLocal (a tile-corner bake, mirrors WorldPointEmitRenderTests' NEW-F1
-    // pattern) and a NON-axis-aligned (diagonal) world Tangent, per T-MOT's explicit requirements.
+    // of the shader-side projection — a shallow impl that baked a screen rotation would pass (a) and fail
+    // (b)). Uses a NONZERO per-glyph AnchorLocal (a tile-corner bake, mirroring WorldPointEmitRenderTests)
+    // and a NON-axis-aligned (diagonal) world Tangent.
     //
-    // RED-VERIFIED (2026-07-20) — the two failure modes were actually INJECTED and observed to fail, not argued
-    // by analogy:
+    // RED-VERIFIED — the two failure modes were INJECTED and observed to fail, not argued by analogy:
     //   (b) RE-ORIENTATION (the novel curved-only assertion): injecting a static-angle defect into the shader's
-    //       along-line branch (SymbolTextWorld_ForwardPass.hlsl — force `ang = 0.0`, skipping the D-E Jacobian)
+    //       along-line branch (SymbolTextWorld_ForwardPass.hlsl — force `ang = 0.0`, skipping the Jacobian)
     //       makes this test FAIL after the pan+rotate (Failed(Child) on a filtered run). So the re-orient check
     //       genuinely discriminates — a shallow impl that baked a static screen rotation does NOT slip past.
     //   (a) POSITION tracking: rides the SHARED anchor line `clip = TransformObjectToHClip(input.anchorOS)`
@@ -826,7 +810,7 @@ namespace MapRenderer.Tests.Text.Placement
             return pixels;
         }
 
-        /// <summary>Places the presenter GameObject at Level-2 (§3.4): the mesh's baked AnchorLocal is
+        /// <summary>Places the presenter GameObject at Level-2: the mesh's baked AnchorLocal is
         /// relative to <paramref name="tileOriginRender"/> — recomputed against <paramref name="frame"/> —
         /// so the object's position alone carries the tile placement to its per-frame place. Mirrors exactly
         /// how a real world symbol renderer re-places a FROZEN mesh every frame; the mesh itself is never
@@ -844,7 +828,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// rotation-by-tangent has no simpler independent form worth re-deriving here; BuildWorldQuad's own
         /// corner/rotation math is separately pinned by BillboardMathTests). Unrotated corners
         /// (rotationRadians: 0f) + AlignFlags bit1 set — the shader rotates <c>Offset</c> live from
-        /// <paramref name="tangentLocal"/>'s projected screen angle (D-E).</summary>
+        /// <paramref name="tangentLocal"/>'s projected screen angle.</summary>
         private static Mesh BuildOneGlyphWorldMeshCurved(in SymbolQuad quad, float textSizePx, float3 colorRgb,
             in float3 anchorLocal, in float3 tangentLocal)
         {
@@ -884,11 +868,11 @@ namespace MapRenderer.Tests.Visual
     // Unity-only: render test requiring a GPU context (SnapshotRenderer).
     // NOT included in Tools/core-tests/core-tests.csproj.
     //
-    // UMR-135, now answered on BOTH sides — read this before "fixing" either arm. The question is unchanged
+    // Answered on BOTH sides — read this before "fixing" either arm. The question is unchanged
     // (does text-halo-color reach the screen converted sRGB->linear exactly ONCE?) but there are two carriers to
     // ask it of, and the conversion lives in a different place on each:
     //   * CONSTANT text-halo-color rides the Color-TYPED `_HaloColor` uniform, which Unity converts on upload —
-    //     so SymbolRenderLayer.BindColorTint must NOT pre-convert (that was UMR-135's original finding), and the
+    //     so SymbolRenderLayer.BindColorTint must NOT pre-convert, and the
     //     vertex stream carries WHITE.
     //   * every other kind bakes into the vertex COLOR stream on a second copy of the label's glyphs, which
     //     Unity does NOT convert — so SymbolPlacementSystem.LinearHaloColor MUST pre-convert, the exact sibling
@@ -990,7 +974,7 @@ namespace MapRenderer.Tests.Visual
         /// binds <c>_HaloColor</c>) over a quad whose vertex COLOR is <paramref name="streamSrgb"/> taken
         /// through <c>SymbolPlacementSystem.LinearHaloColor</c> — the caller spells out that payload so the
         /// carrier under test is explicit, never derived from the production predicate. Optionally followed
-        /// by a <see cref="SymbolRenderLayer.Restyle"/> to <paramref name="restyleToHex"/> — T7 (UMR-147).
+        /// by a <see cref="SymbolRenderLayer.Restyle"/> to <paramref name="restyleToHex"/> — T7.
         /// Returns the centre sample in linear RGB.
         /// </summary>
         private static double3 RenderHalo(string haloColorJson, in float4 streamSrgb,
@@ -1097,7 +1081,7 @@ namespace MapRenderer.Tests.Visual
         /// The rendered albedo of a halo whose <c>text-halo-color</c> is a NON-WHITE constant (0.5 grey) must
         /// be the authored colour, converted sRGB->linear exactly ONCE — now by
         /// <c>SymbolPlacementSystem.LinearHaloColor</c>, because the vertex COLOR stream it rides is one Unity
-        /// does not convert. See this file's header for why that is the opposite of what UMR-135 concluded.
+        /// does not convert. See this file's header for the two carriers and where each converts.
         /// </summary>
         [Test]
         public void HaloColor_RenderedPixel_MatchesAuthored()
@@ -1115,7 +1099,7 @@ namespace MapRenderer.Tests.Visual
                     $"channel {c}: text-halo-color must reach the fragment converted sRGB->linear ONCE. " +
                     $"measured={measured} authored(linear)={expect3}. Far BELOW authored means " +
                     $"BindColorTint pre-converted on top of Unity's own upload conversion of the " +
-                    $"Color-typed _HaloColor (UMR-135); far ABOVE means the uniform never reached the " +
+                    $"Color-typed _HaloColor; far ABOVE means the uniform never reached the " +
                     $"fragment and the white vertex stream is all that is left.");
         }
 
@@ -1150,11 +1134,11 @@ namespace MapRenderer.Tests.Visual
                     $"stream Unity never converts; far BELOW means it was applied twice.");
         }
 
-        // #808080 -> #4099C0: no shared channel, none at 0/1 (plan §4 colour choice for the halo pair).
+        // #808080 -> #4099C0: no shared channel, none at 0/1.
         private const string RestyledHaloHex = "#4099C0";
 
         /// <summary>
-        /// <b>T7 (UMR-147).</b> A RESTYLED <c>text-halo-color</c> must reach the fragment as the NEW
+        /// <b>T7.</b> A RESTYLED <c>text-halo-color</c> must reach the fragment as the NEW
         /// authored colour, converted sRGB->linear exactly once — <see cref="HaloColor_RenderedPixel_MatchesAuthored"/>
         /// only guards the initial <c>Create</c> write; this is the missing assertion over a restyle
         /// re-bind. RED-verify: <c>Restyle</c> omits the halo re-bind — the pixel stays <c>#808080</c> and

@@ -8,7 +8,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// Slice C — <c>text-translate</c>: shifts a symbol's projected screen anchor by a paint-time pixel offset
+    /// <c>text-translate</c>: shifts a symbol's projected screen anchor by a paint-time pixel offset
     /// (moving its collision box AND its quads together). Pure and engine-free so the sign convention is
     /// unit-testable in isolation (the same factoring as <see cref="SymbolScreenProjection"/>).
     /// </summary>

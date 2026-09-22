@@ -32,14 +32,13 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
     /// Styling is per-layer (the shared material, written each frame by <c>ZoomStyleApplier</c> directly on
     /// the Material) plus per-feature (vertex colours baked into the mesh), so <see cref="Rebuild"/> does no
     /// material work — same as the instanced backends. <paramref name="layerMaterials"/> is the FULL-WIDTH,
-    /// global-SLOT-aligned material list (fill/line/symbol/background in one slot order, §3.3), so
+    /// global-SLOT-aligned material list (fill/line/symbol/background in one slot order), so
     /// <c>materialIndex</c> matches <see cref="BRG.TileRenderer.AddTileLayer"/> /
-    /// <see cref="Entities.TileRenderer.AddTileLayer"/>. E1 audit: this ctor only STORES the list (no
-    /// registration, no index-0 seed), so a null entry at a symbol/background slot needs no guard here —
-    /// verified safe (design risk 3).
+    /// <see cref="Entities.TileRenderer.AddTileLayer"/>. This ctor only STORES the list (no registration,
+    /// no index-0 seed), so a null entry at a symbol/background slot needs no guard here.
     ///
     /// Mesh lifetime: this backend creates and destroys only GameObjects. The Mesh assets are owned by
-    /// <c>TileManager</c> (its S51 leak guard) and must NOT be destroyed here — <see cref="RemoveItem"/> and
+    /// <c>TileManager</c> (its leak guard) and must NOT be destroyed here — <see cref="RemoveItem"/> and
     /// <see cref="Dispose"/> destroy GameObjects only.
     ///
     /// Clean-room: design follows the floating-origin tile math (<see cref="FloatingOrigin.TileLocalToScene"/>)
@@ -54,7 +53,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         {
             public MeshNode Node;
             public TileId   TileId;   // which tile container this layer hangs under
-            public int      MaterialIndex; // the layer slot this child was bound at — UMR-151: lets
+            public int      MaterialIndex; // the layer slot this child was bound at — lets
                                             // SetLayerMaterials find every item a retired slot must retire
         }
 
@@ -230,9 +229,9 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
             return handle;
         }
 
-        /// <summary>UMR-151 restyle-time material update — re-points a changed slot's live
+        /// <summary>Restyle-time material update — re-points a changed slot's live
         /// <c>sharedMaterial</c>s, and retires (pool-releases) a slot going null; see
-        /// `docs/tile-pipeline-design.md` §1.10.</summary>
+        /// `docs/tile-pipeline-design.md`.</summary>
         public void SetLayerMaterials(
             IReadOnlyList<Material> layerMaterials, IReadOnlyList<ShadowCastingMode> layerShadowModes)
         {
@@ -292,7 +291,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         /// <see cref="SceneTileTree"/>. One transform write per tile, not per layer — the layer children sit
         /// at the container origin and move with it. Does no material work (<c>ZoomStyleApplier</c> mutates
         /// the shared materials live, same as the instanced backends). For Mercator the rebase is identity,
-        /// so this reduces to the pre-S91 translation write.
+        /// so this reduces to a translation write.
         /// </summary>
         public void Rebuild(in SceneFrame frame)
         {

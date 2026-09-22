@@ -8,7 +8,7 @@
 //   MapTelemetryTests              — render/tile telemetry, PlayMode half: async-settle teeth over real frames.
 //   MapViewAsyncMeshBuildTests     — async non-blocking tile mesh build, PlayMode half: async-settle teeth over real frames.
 //   MapViewBackgroundRestyleTests  — a restyle keeps the previous background + identity valid until the synchronous commit.
-//   MapViewLiveLoopTests           — the S40 live loop's cover-drives-selection + eviction-releases tooth, settled over real frames.
+//   MapViewLiveLoopTests           — the live loop's cover-drives-selection + eviction-releases tooth, settled over real frames.
 //   MapViewSetStyleTests           — the live MapView.SetStyle path over real frames.
 //   MapViewSourceSpecTests         — MapView.BuildSourceSpecs resolves specs to only the MVT-fetching layers.
 
@@ -51,7 +51,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
-            ""version"": 8, ""name"": ""S85"",
+            ""version"": 8, ""name"": ""multi-source"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
                            ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
@@ -60,7 +60,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         /// <summary>Two distinct rendered sources — the S83b multi-source discriminator (each gets its own
         /// TileManager pipeline / <c>_loaded</c> record per cover tile).</summary>
         private static StyleDocument TwoSourceStyle() => StyleParser.Parse(@"{
-            ""version"": 8, ""name"": ""S85-multi"",
+            ""version"": 8, ""name"": ""multi-source-b"",
             ""sources"": {
                 ""src-a"": { ""type"": ""vector"", ""tiles"": [""https://example.com/a/{z}/{x}/{y}.pbf""] },
                 ""src-b"": { ""type"": ""vector"", ""tiles"": [""https://example.com/b/{z}/{x}/{y}.pbf""] }
@@ -89,7 +89,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
 
         /// <summary>A fetch that stays in-flight until <paramref name="release"/> is cancelled, then resolves
         /// absent — mirrors <c>TileFetchCancellationTests.SpinThenFault</c>, but resolves cleanly instead of
-        /// faulting (this stage wants a deterministic pending window, not a cancellation race). A blocking
+        /// faulting — the caller needs a deterministic pending window, not a cancellation race. A blocking
         /// wait on the cancellation token's WaitHandle is a fetch-latency SIM (inside the UniTask body after
         /// SwitchToThreadPool), not a settle-poll — it stays as-is, parked rather than polled.</summary>
         private static async UniTask<TileResponse> SpinUntilReleased(CancellationTokenSource release)
@@ -152,7 +152,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                     "— a shallow impl returning a constant or 0 diverges here.");
 
                 // Must CHANGE between two materially different views (a zoom change). NOTE: zoom 4 → 8 does
-                // NOT change the count here — the S88 512-px on-screen-tile convention keeps the near-field
+                // NOT change the count here — the 512-px on-screen-tile convention keeps the near-field
                 // grid size roughly CONSTANT across zoom for a fixed square viewport (by design: altitude and
                 // tile ground size scale together), so a zoom change only "changes" VisibleTileCount below the
                 // saturation point. Confirmed directly (FrustumTileSelector over this viewport): z0=1, z1=4,
@@ -286,7 +286,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             }
         }
 
-        // ── S82: PreparedTileCache utilization on the telemetry surface ───────────────────────────
+        // ── PreparedTileCache utilization on the telemetry surface ────────────────────────────────
 
         [UnityTest]
         public IEnumerator PreparedCache_Snapshot_ReflectsHitsEntryCountBytesHeld_AfterEvictAndRevisit()
@@ -418,7 +418,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 Assert.AreEqual(snap.LoadedTileCount, panel.LoadedTileCount);
                 Assert.AreEqual(snap.ConsumeBacklog, panel.ConsumeBacklog);
 
-                // S82: the cache section forwards too — positive control on Misses (the first prepare) so
+                // The cache section forwards too — positive control on Misses (the first prepare) so
                 // this isn't a vacuous 0==0 comparison.
                 Assert.Greater(snap.PreparedCacheMisses, 0, "positive control: the first prepare must register a miss");
                 Assert.AreEqual(snap.PreparedCacheEnabled, panel.PreparedCacheEnabled);
@@ -439,7 +439,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         }
 
         /// <summary>
-        /// docs/telemetry-design.md §2 under the pull model: a panel that is never pulled is never written — which
+        /// docs/telemetry-design.md's pull model: a panel that is never pulled is never written — which
         /// is exactly a DISABLED panel, because a disabled MonoBehaviour gets no <c>Update</c>. Pulling once fills
         /// it (the positive control: without it this would also pass if the pull were simply broken), and a panel
         /// whose reference is cleared stops updating again.
@@ -508,11 +508,11 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             }
         }
 
-        // ── Each owner publishes its own telemetry (docs/telemetry-design.md §3) ──────────────────
+        // ── Each owner publishes its own telemetry (docs/telemetry-design.md) ─────────────────────
         //
         // The two LABEL providers are tested where they are actually driven — SymbolSubsystemPumpTests
         // and SymbolFadeTests — because LoadTestStyle never wires the symbol subsystem, so no MapView-level
-        // test can reach CurrentBatch / SymbolPlacementSystem.Tick at all (see the design doc's §6 note).
+        // test can reach CurrentBatch / SymbolPlacementSystem.Tick at all (see the design doc's note).
 
         /// <summary>
         /// A CLEAN tick must not blank the readout. <c>TileManager.Tick</c> returns early when the cover is
@@ -678,10 +678,9 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         /// Behavioral test for tooth 1: on the same frame the fetch completes, the tile must NOT
         /// transition to Built == true (mesh build is deferred to a later frame / poll cycle).
         ///
-        /// Setup: FixtureSource returns synchronously (Task.FromResult), so after the first Tick()
-        /// the fetch task IsCompleted == true. If mesh build were synchronous (old behavior), the
-        /// tile would be Built == true on that same Tick(). With S47 async, mesh build is kicked
-        /// as a background Task and must NOT be consumed in the same Tick().
+        /// Setup: the source returns synchronously (Task.FromResult), so after the first Tick() the fetch
+        /// task IsCompleted == true. Mesh build is kicked as a background Task and must NOT be consumed in
+        /// that same Tick().
         /// </summary>
         [UnityTest]
         public IEnumerator Tooth1_MeshBuildDeferred_TileNotBuiltInSameFetchFrame()
@@ -735,13 +734,12 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         /// The async MapView live loop (build off-main + upload on main) must produce the same
         /// vertex count AND vertex positions as a direct synchronous call to StyledFillTileBuilder.BuildMesh.
         ///
-        /// Note: S47 replaced the Burst <c>ProjectTileToWebMercatorJob</c> (which required
-        /// <c>.Schedule().Complete()</c> and therefore had main-thread affinity) with a scalar managed C#
-        /// loop (<c>ProjectVerticesManaged</c>) that replicates the same double-precision arithmetic.
-        /// This test verifies that no ULP difference was introduced: positions must be exactly equal.
+        /// The async arm projects vertices with a scalar managed C# loop
+        /// (<c>ProjectVerticesManaged</c>), which replicates the builder's double-precision arithmetic. This
+        /// test pins that no ULP difference exists: positions must be exactly equal.
         ///
-        /// This mirrors MapViewLiveLoopTests.MapView_GoLive_ProducesSameGeometryAsDirectBuilder
-        /// but exercises the S47 async path explicitly by waiting for async settle.
+        /// This mirrors MapViewLiveLoopTests.MapView_GoLive_ProducesSameGeometryAsDirectBuilder but
+        /// exercises the async path explicitly by waiting for async settle.
         /// </summary>
         [UnityTest]
         public IEnumerator Tooth3_AsyncPath_ProducesSameGeometryAsSyncPath()
@@ -822,13 +820,13 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             }
         }
 
-        // ── Tooth 4: cancellation (S04) — released mid-flight tile is discarded ───────────────
+        // ── Tooth 4: cancellation — released mid-flight tile is discarded ─────────────────────
 
         /// <summary>
         /// Request tiles at z=5, kick mesh build mid-flight, pan far away to evict original tiles,
         /// then verify no stale GameObjects are created for the evicted tiles after settle.
         ///
-        /// Verifies the S04 contract: a mesh build completing after ReleaseTile must not
+        /// Verifies the cancellation contract: a mesh build completing after ReleaseTile must not
         /// create a GameObject for the released tile.
         ///
         /// Strategy:
@@ -1029,7 +1027,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapViewLiveLoopTests — S40 live loop — cover-drives-selection + eviction-releases over real frames
+    // MapViewLiveLoopTests — the live loop's cover-drives-selection + eviction-releases over real frames
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -1088,8 +1086,8 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: style);
                 yield return PumpUntilSettled(view);
 
-                // S71: the cover now tracks the framing viewport span (no longer a magic 3×3); assert the
-                // behaviour (center built, far pan evicts + re-covers), not a frozen count.
+                // The cover tracks the framing viewport span, so assert the behaviour (center built, far
+                // pan evicts + re-covers), never a frozen count.
                 Assert.Greater(view.LoadedTileCount(), 0, "z5 center cover must be non-empty");
                 Assert.IsTrue(view.TryGetBuiltTile(new TileId { Z = 5, X = 16, Y = 16 }),
                     "the center tile must be built");

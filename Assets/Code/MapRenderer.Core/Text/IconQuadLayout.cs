@@ -6,17 +6,16 @@ using MapRenderer.Core.Text.Sprites;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// I3 — turns one resolved <see cref="SpriteEntry"/> + <c>icon-*</c> layout properties into a single
+    /// Turns one resolved <see cref="SpriteEntry"/> + <c>icon-*</c> layout properties into a single
     /// symbol-local, anchor-relative <see cref="SymbolQuad"/> in the sprite sheet's own pixel space. The
     /// icon analogue of <see cref="TextQuadLayout"/> — reuses the SAME horizontal hAlign factor and the
     /// SAME y-down→y-up single-negation offset convention, but a sprite is exactly one quad (no glyph run,
     /// no wrap, no baseline) so this is a single pure function rather than a stateful forward pass.
-    /// <b>The vertical half deliberately differs</b> from <see cref="TextQuadLayout"/>: a sprite has no
-    /// baseline or ascent slack, so its box IS its ink — centring the box (<c>vAlign = 0.5</c>) already
-    /// centres the ink exactly, which is exactly what <see cref="TextQuadLayout"/>'s centre case now
-    /// reproduces for text via an optical-centre formula instead (<c>docs/road-shields-design.md</c> §11
-    /// D12). Do not "restore consistency" by giving this a three-valued vertical anchor to match — it would
-    /// re-break this.
+    /// <b>The vertical half differs</b> from <see cref="TextQuadLayout"/>: a sprite has no baseline or
+    /// ascent slack, so its box IS its ink — centring the box (<c>vAlign = 0.5</c>) already centres the
+    /// ink, which is what <see cref="TextQuadLayout"/>'s centre case reproduces for text via an
+    /// optical-centre formula (<c>docs/road-shields-design.md</c>). Do not "restore consistency" by
+    /// giving this a three-valued vertical anchor to match — it would re-break this.
     /// </summary>
     public static class IconQuadLayout
     {

@@ -8,7 +8,7 @@ using MapRenderer.Jobs.Fill;
 namespace MapRenderer.Tests.Meshing
 {
     /// <summary>
-    /// Single-polygon <see cref="EarcutJob"/> driver for hand-built rings — the H1 harness A0 uses to
+    /// Single-polygon <see cref="EarcutJob"/> driver for hand-built rings — the harness used to
     /// re-home the former managed-<c>Earcut</c> unit tests onto the Burst job. Any number of holes:
     /// multiple hole rings are sorted by (leftmost-x, min-y, ring-index) with the production
     /// <c>FillMeshPipeline.HoleRingComparer</c> — the same tie-break the real gather step uses — so this

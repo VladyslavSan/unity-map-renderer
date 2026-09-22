@@ -8,7 +8,7 @@ using MapRenderer.Core.Text;
 namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
-    /// S18 Unity-side batch: <see cref="IGlyphSource"/> implementation over <see cref="UnityWebRequest"/>,
+    /// <see cref="IGlyphSource"/> implementation over <see cref="UnityWebRequest"/>,
     /// mirroring <see cref="UnityWebRequestDataSource"/> almost exactly (cancellation, absent-vs-error
     /// mapping, UniTask). Builds the fetch URL from a glyph-PBF <c>glyphs</c> template
     /// (<c>{fontstack}/{range}.pbf</c> tokens, per the MapLibre Style Spec) and fetches raw bytes — it

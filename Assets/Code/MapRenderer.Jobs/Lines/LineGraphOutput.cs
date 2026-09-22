@@ -7,8 +7,8 @@ using MapRenderer.Core.Geometry;
 namespace MapRenderer.Jobs.Lines
 {
     /// <summary>
-    /// One line layer's graph output — the write-side contract mirror of <see cref="FillGraphOutput"/>
-    /// (job-scheduling-design.md §8 stage 5). Returned by <see cref="LineMeshGraph.Schedule"/> with
+    /// One line layer's graph output — the write-side contract mirror of
+    /// <see cref="FillGraphOutput"/>. Returned by <see cref="LineMeshGraph.Schedule"/> with
     /// <see cref="Handle"/> UNCOMPLETED: the caller polls <c>Handle.IsCompleted</c>, calls
     /// <see cref="Dispose"/> (which completes first) or reads outputs only after its own
     /// <c>Handle.Complete()</c>.
@@ -23,9 +23,8 @@ namespace MapRenderer.Jobs.Lines
         public NativeList<int> VertexFeatureIdx;
 
         /// <summary>Triangle indices into <see cref="Vertices"/> — already offset per ring and
-        /// winding-swapped for stock Cull Back BY <see cref="RibbonAggregateJob"/> (unlike fill,
-        /// where the write job does the swap — see <see cref="RibbonAggregateJob"/>'s own doc for
-        /// why).</summary>
+        /// winding-swapped for stock Cull Back by <see cref="RibbonAggregateJob"/>, where fill leaves the
+        /// swap to its write job.</summary>
         public NativeList<int> Indices;
 
         /// <summary>Non-zero ⇒ one of <see cref="LineGraphCounts"/>'s <c>Error*</c> codes;
@@ -40,8 +39,8 @@ namespace MapRenderer.Jobs.Lines
         /// empty-input fast-out.</summary>
         public bool IsCreated;
 
-        // ── Leak/balance counters — public, like FillGraphOutput's own three (:80/:84/:92) ──────────
-        // Mirrors FillGraphOutput's static allocate-and-count idiom.
+        // ── Leak/balance counters ────────────────────────────────────────────────────────────────
+        // A static allocate-and-count helper pairs with Dispose's decrement, as in FillGraphOutput.
 
         private static long _liveCount;
         private static long _buffersAllocated;

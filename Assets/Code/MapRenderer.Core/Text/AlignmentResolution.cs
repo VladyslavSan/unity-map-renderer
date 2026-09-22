@@ -3,7 +3,7 @@
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// D3 (road-shields epic, docs/road-shields-design.md §3) — resolves the Style Spec's <c>auto</c>
+    /// Resolves the Style Spec's <c>auto</c>
     /// <see cref="AlignmentMode"/> default for BOTH the rotation-alignment keys
     /// (<see cref="Resolve"/>) and the pitch-alignment keys (<see cref="ResolvePitch"/>) against the owning
     /// symbol layer's <c>symbol-placement</c>. <c>Resolve</c>: <c>auto</c> resolves to
@@ -37,8 +37,7 @@ namespace MapRenderer.Core.Text
         /// exactly one place (<see cref="Resolve"/>); this method never re-tests <paramref name="placement"/>
         /// itself. The return value is never <see cref="AlignmentMode.Auto"/>.
         ///
-        /// <para><b>WIRED as of W1</b> (pitch-alignment epic; landed with no production caller in P1, which
-        /// this paragraph used to describe). <c>SymbolFeatureExtractor.Extract</c> calls this once per symbol
+        /// <para><b>WIRED.</b> <c>SymbolFeatureExtractor.Extract</c> calls this once per symbol
         /// layer for each of the text and icon key pairs, and stamps the RESOLVED value onto the emitted
         /// <c>SymbolFeature</c>; it travels to <c>CurvedStageInput.PitchAlignment</c>, where
         /// <see cref="AlignmentMode.Map"/> selects the world-metre arc walk in
@@ -46,7 +45,7 @@ namespace MapRenderer.Core.Text
         ///
         /// <para><b>The CURVED (along-line) arm only.</b> The point arm does not consume this yet — there is
         /// no pitch-alignment field on <c>PointStageInput</c> — so a map-pitched POINT symbol still billboards.
-        /// That is a deliberate scope fence, not an oversight; it is the next stage of the same epic.</para></summary>
+        /// That is a scope fence, not an oversight.</para></summary>
         public static AlignmentMode ResolvePitch(AlignmentMode pitchMode, AlignmentMode rotationMode, SymbolPlacement placement)
         {
             if (pitchMode != AlignmentMode.Auto) return pitchMode;

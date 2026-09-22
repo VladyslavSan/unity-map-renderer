@@ -5,14 +5,13 @@ using UnityEngine.Rendering;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// S89 Stage B — the single per-<c>(tile, layer)</c> mesh payload: a writable
+    /// The single per-<c>(tile, layer)</c> mesh payload: a writable
     /// <see cref="Mesh.MeshDataArray"/> (count 1) the worker populated, applied to a fresh <see cref="Mesh"/>
-    /// at consume. Replaces Stage A's per-type fill/line payload handles —
-    /// once the worker has written the <c>MeshData</c>, the payload is layer-type-agnostic.
+    /// at consume. Once the worker has written the <c>MeshData</c>, the payload is layer-type-agnostic.
     ///
-    /// <para><b>Lifecycle (the S89 choreography):</b> the array is allocated on the MAIN THREAD
-    /// (<see cref="AllocateTracked"/>) — since job-scheduling-design.md §8 stage 5 Group B, by the graph's
-    /// WRITE step (<c>MeshWriteOutput</c>'s <c>ScheduleWrite</c>), not at kick — written on the WORKER, then
+    /// <para><b>Lifecycle:</b> the array is allocated on the MAIN THREAD
+    /// (<see cref="AllocateTracked"/>) by the graph's WRITE step (<c>MeshWriteOutput</c>'s
+    /// <c>ScheduleWrite</c>), not at kick — written on the WORKER, then
     /// either <see cref="Upload"/>d (applied + disposed) or <see cref="Dispose"/>d (unapplied — disposed) on
     /// the MAIN THREAD at consume. Exactly one of Upload/Dispose frees the native array; both are guarded by
     /// <see cref="_consumed"/>.</para>
@@ -20,16 +19,15 @@ namespace MapRenderer.Unity.Rendering.Style
     /// <para><b>Leak guard:</b> <see cref="DebugLiveAllocCount"/> counts allocated-but-not-yet-freed
     /// <c>MeshDataArray</c>s (an unapplied array is a native leak Unity tracks). Incremented at
     /// <see cref="AllocateTracked"/>, decremented on Upload or Dispose. Net-zero after every load+release
-    /// cycle; the S51 positive control asserts it goes positive on a deliberate leak. Pooling the WRAPPER
+    /// cycle; a positive control asserts it goes positive on an injected leak. Pooling the WRAPPER
     /// (below) does not touch this counter — it still counts live native arrays, not live instances.</para>
     ///
-    /// <para><b>perf/gc-elimination — pooled, not `new`d:</b> instances are rented from
+    /// <para><b>Pooled, not <c>new</c>d:</b> instances are rented from
     /// <see cref="MeshDataPayloadPool"/> (<see cref="Reset"/>) rather than constructed fresh per layer per
     /// tile-build, and returned there from <see cref="Dispose"/> — see that method's doc for why the return
     /// is placed there and nowhere else.</para>
     ///
-    /// <para><b>Reference type on purpose</b> (vestige sweep: moved here from the retired
-    /// <c>IRenderLayerPayload</c>, one-implementer interface): the <see cref="_consumed"/> flag that makes
+    /// <para><b>Reference type on purpose:</b> the <see cref="_consumed"/> flag that makes
     /// Upload/Dispose exactly-once lives on the instance. A struct would be copied into the dense
     /// <c>MeshDataPayload[]</c> slot and into every local that reads it, so <see cref="Upload"/>'s flip would
     /// land on one copy while the consume loop's <see cref="Dispose"/> saw <c>_consumed == false</c> on
@@ -37,9 +35,9 @@ namespace MapRenderer.Unity.Rendering.Style
     /// (Allocated at mesh-build time only — load-time, never the steady-state per-frame path — so the
     /// allocation is not a no-GC concern.)</para>
     ///
-    /// <para><b>The consume-loop contract</b> (vestige sweep: moved here from the same interface): every
-    /// source-tile layer settles into a dense <c>MeshDataPayload[]</c>, one entry per layer, in SLOT order —
-    /// the consume loop reads <see cref="VertexCount"/> (charged against the S87 per-frame vertex budget),
+    /// <para><b>The consume-loop contract:</b> every source-tile layer settles into a dense
+    /// <c>MeshDataPayload[]</c>, one entry per layer, in SLOT order —
+    /// the consume loop reads <see cref="VertexCount"/> (charged against the per-frame vertex budget),
     /// calls <see cref="Upload"/> or <see cref="Dispose"/> (exactly one, never both), and reads
     /// <see cref="MaterialIndex"/> for the layer's global slot.</para>
     /// </summary>
@@ -74,32 +72,26 @@ namespace MapRenderer.Unity.Rendering.Style
         private Bounds             _bounds;
         private string             _meshName;
 
-        // Guards the pool-return, independently of _consumed: Dispose() is called TWICE in the normal
-        // complete-tile flow (once per-payload during TileManager.ConsumeMeshBuild's budgeted loop, again —
-        // idempotently, by design — from DisposeWholePayloads's unconditional sweep over every payload). Both
-        // calls must reach the pool-return exactly ONCE in total: _consumed alone can't guard it, because
-        // _consumed is ALREADY true by the time the (successful) Upload() case reaches its own Dispose() —
-        // that call would be skipped entirely by the `if (_consumed) return;` early-out below, and this
-        // payload — the common, successful-upload case, not just the degenerate ones — would never make it
-        // back to the pool at all.
+        // Guards the pool-return independently of _consumed: Dispose() is called TWICE in the normal
+        // complete-tile flow (per-payload during TileManager.ConsumeMeshBuild's budgeted loop, then again
+        // from DisposeWholePayloads's unconditional sweep). The pool-return must fire ONCE in total, and
+        // _consumed cannot guard it: _consumed is already true when the successful Upload() case reaches
+        // its Dispose(), so that payload — the common case — would never return to the pool.
         private bool _returnedToPool;
 
         /// <summary>Vertex count written by the worker (0 = empty layer — allocated but never populated).</summary>
         public int VertexCount { get; private set; }
 
-        /// <summary>Global SLOT / material index of the render layer this payload belongs to (S89 C).</summary>
+        /// <summary>Global SLOT / material index of the render layer this payload belongs to.</summary>
         public int MaterialIndex { get; private set; }
 
         // Pool-only: real construction happens via Reset, called from MeshDataPayloadPool.Rent()'s fallback
         // and from MeshWriteOutput.TakePayload after renting. Never invoked directly outside the pool.
         internal MeshDataPayload() { }
 
-        /// <summary>Non-pooled direct construction — test-only-constructed now: the source-less background
-        /// processor that used to call this directly retired with job-scheduling-design.md §8 stage 3 (a
-        /// background tile schedules its measure graph, no processor of its own), so the sole remaining
-        /// callers are tests that build a payload directly over real worker-written <c>MeshData</c>. A
-        /// payload minted this way still returns to the shared pool on <see cref="Dispose"/>, exactly like a
-        /// pooled one — pooling is transparent to how an instance was first created.</summary>
+        /// <summary>Non-pooled direct construction — its only callers are tests that build a payload over
+        /// real worker-written <c>MeshData</c>. A payload minted this way still returns to the shared pool
+        /// on <see cref="Dispose"/>: pooling is transparent to how an instance was first created.</summary>
         internal MeshDataPayload(Mesh.MeshDataArray mda, int vertexCount, Bounds bounds, string meshName,
             int materialIndex)
         {
@@ -133,7 +125,7 @@ namespace MapRenderer.Unity.Rendering.Style
             if (_consumed || VertexCount == 0) return null;
 
             var mesh = new Mesh { name = _meshName, indexFormat = IndexFormat.UInt32 };
-            // Perf-parity with the retired UploadMesh: no index re-validation, no RecalculateBounds scan.
+            // No index re-validation, no RecalculateBounds scan.
             Mesh.ApplyAndDisposeWritableMeshData(_mda, mesh,
                 MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds);
             _consumed = true;
@@ -149,7 +141,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// itself the redundant second Dispose <c>TileManager.DisposeWholePayloads</c>'s unconditional sweep
         /// performs over an already-consumed payload (see <see cref="_returnedToPool"/>'s comment).
         ///
-        /// <para>The return is placed here, never in <see cref="Upload"/>, deliberately: <c>ConsumeMeshBuild</c>
+        /// <para>The return is placed here, never in <see cref="Upload"/>: <c>ConsumeMeshBuild</c>
         /// calls <c>payload.Upload(); payload.Dispose();</c> back-to-back on the same reference — if Upload's
         /// success path already returned this instance to the pool, a concurrent build could Rent+Reset it in
         /// the gap before the caller's own following Dispose() call, corrupting cross-build state.</para></summary>

@@ -1,11 +1,10 @@
-// Unity EditMode only — Stage G-V0, the declarative visual-test authoring kit.
+// Unity EditMode only — the declarative visual-test authoring kit.
 // NOT registered in Tools/core-tests/core-tests.csproj.
 //
 // The composer: assembles VisualSource/VisualLayer into a REAL style JSON string, drives it through the
-// production MapView.SetStyle path (plan §1 decision 1 — no StyleDocument shortcut), and renders the
-// MapView's OWN MapCamera (plan §2 — the ONE camera, both the tile-selection viewport and the snapshotted
-// camera). Reuse map (plan §5): MapView construction + pump mirrors GeoJsonSourceTests.NewView /
-// PumpUntilSettled / SpinToCompleted; the lit-ambient recipe mirrors TiltedGroundScene.Create.
+// production MapView.SetStyle path (no StyleDocument shortcut), and renders the MapView's OWN MapCamera —
+// the ONE camera, both the tile-selection viewport and the snapshotted camera. MapView construction and the
+// pump mirror GeoJsonSourceTests; the lit-ambient recipe mirrors TiltedGroundScene.Create.
 
 #if UNITY_EDITOR
 using System;
@@ -26,7 +25,7 @@ namespace MapRenderer.Tests
     /// them BY ID, and a camera pose — assembled into a real style JSON string, parsed by the REAL
     /// <see cref="StyleParser"/>, and rendered through a live <see cref="MapViewComponent"/>.
     ///
-    /// <para><b>The kit owns exactly one camera</b> (plan §2/§8.1, settled — not a fork): the
+    /// <para><b>The kit owns exactly one camera.</b> The
     /// <see cref="MapCamera"/> built from <see cref="Camera(GeoCoordinate3D,double,double,double)"/> is BOTH
     /// what selects the tile cover (wired via <c>MapViewComponent.SetCamera</c>) AND what
     /// <see cref="SnapshotRenderer"/> renders — so the rendered frame is provably what the selector saw.</para>
@@ -38,7 +37,7 @@ namespace MapRenderer.Tests
     /// </summary>
     internal sealed class VisualScene : IDisposable
     {
-        /// <summary>The mandated non-black background (plan §7): a black frame can only mean "no GPU
+        /// <summary>The mandated non-black background: a black frame can only mean "no GPU
         /// context", never "background only" — this is what makes the empty-dataset negative control
         /// (<c>IsBlank</c>) meaningful instead of vacuous.</summary>
         public static readonly Color BackgroundColor = new Color(0.10f, 0.11f, 0.15f, 1f);
@@ -51,11 +50,10 @@ namespace MapRenderer.Tests
         /// is already renderable.</summary>
         private const int WarmupFrames = 10;
 
-        /// <summary>Bounded ceiling for <see cref="SpinUntilSymbolsReady"/> (plan Risk R1/R5): the symbol
-        /// kick crosses a thread pool, so a fixed pump count is a flake generator — this bounds the spin
-        /// instead of guessing a frame count. 300 mirrors <c>SymbolProcessorParityTests.DriveProductionBuild</c>'s
-        /// own pump ceiling (200) with margin for the extra MapView-level plumbing this composer drives
-        /// through.</summary>
+        /// <summary>Bounded ceiling for <see cref="SpinUntilSymbolsReady"/>: the symbol kick crosses a thread
+        /// pool, so a fixed pump count is a flake generator — this bounds the spin instead of guessing a
+        /// frame count. 300 is <c>SymbolProcessorParityTests.DriveProductionBuild</c>'s own ceiling of 200
+        /// plus margin for the extra MapView-level plumbing this composer drives through.</summary>
         private const int SymbolReadinessCeiling = 300;
 
         private readonly List<VisualSource> _sources = new List<VisualSource>();
@@ -144,8 +142,8 @@ namespace MapRenderer.Tests
 
         /// <summary>Injects a fixture glyph source keyed <c>(fontStack, rangeStart)</c> — wired onto the
         /// MapView-owned <c>SymbolSubsystem</c> in <see cref="Render"/>, between <c>SetCamera</c> and
-        /// <c>SetStyle</c> (G-V1 plan §0). A scene that never calls this leaves the glyph factory null, so a
-        /// fill-only scene is unaffected — this is additive, not a reordering of the existing path.</summary>
+        /// <c>SetStyle</c>. A scene that never calls this leaves the glyph factory null, so a fill-only scene
+        /// takes the unchanged production path.</summary>
         /// <param name="ranges">Fixture glyph-range bytes, keyed the same way
         /// <c>TestGlyphSource.FromRanges</c> serves them.</param>
         public VisualScene Glyphs(IReadOnlyDictionary<(string fontName, int rangeStart), byte[]> ranges)
@@ -163,7 +161,7 @@ namespace MapRenderer.Tests
             => Glyphs(new Dictionary<(string, int), byte[]> { [(fontName, 0)] = range0Bytes });
 
         /// <summary>The placed-quad count <see cref="SpinUntilSymbolsReady"/> pumps <c>LateUpdate</c> toward
-        /// before <see cref="Render"/> snapshots (plan §1 Edit 3.2) — the number of authored symbols times the
+        /// before <see cref="Render"/> snapshots — the number of authored symbols times the
         /// glyph count of their text (a single-character symbol is 1 quad). Required whenever the scene
         /// declares a <see cref="SymbolTextVisualLayer"/>; a symbol scene that never calls this has no
         /// readiness target and <see cref="Render"/> throws rather than guessing a frame count
@@ -232,7 +230,7 @@ namespace MapRenderer.Tests
             light.type      = LightType.Directional;
             light.intensity = 1f;
 
-            // ── MapView (WithTestMaterials, tile-selection clamped to this scene's zoom — plan §7). ────────
+            // ── MapView (WithTestMaterials, tile-selection clamped to this scene's zoom). ──────────────────
             _mapGo   = new GameObject("VisualScene_MapView");
             _mapView = _mapGo.AddComponent<MapViewComponent>().WithTestMaterials(_renderMode);
             int tileZoom = _cameraProperties.IntegerZoom;
@@ -247,9 +245,9 @@ namespace MapRenderer.Tests
             // test-assembly configuration choice, not a production change.
             _mapView.Config.Backend = _backend;
 
-            // ── This scene's OWN camera + off-screen RT + MapCamera (plan §2 — the one camera). Seeded with
-            // the requested pose at construction (MapCamera's ctor calls SyncToCamera itself), THEN wired —
-            // so the camera is correct before SetStyle builds render layers at the current zoom. ────────────
+            // ── This scene's OWN camera + off-screen RT + MapCamera — the one camera. Seeded with the
+            // requested pose at construction (MapCamera's ctor calls SyncToCamera itself), THEN wired, so the
+            // camera is correct before SetStyle builds render layers at the current zoom. ──────────────────
             _cameraGo    = new GameObject("VisualScene_Camera");
             _unityCamera = _cameraGo.AddComponent<UnityEngine.Camera>();
             _rt          = new RenderTexture(px, px, 24, RenderTextureFormat.ARGB32);
@@ -261,9 +259,9 @@ namespace MapRenderer.Tests
             _mapCam = new MapCamera(_unityCamera, _cameraProperties);
             _mapView.SetCamera(_mapCam);
 
-            // Glyph seam (plan §0): AFTER SetCamera builds View, BEFORE SetStyle below consumes it. Guarded —
-            // only wired when a glyph source was supplied, so a fill-only scene leaves this null and takes
-            // the unchanged production GlyphSourceFactory.Create path.
+            // Glyph seam: AFTER SetCamera builds View, BEFORE SetStyle below consumes it. Only wired when a
+            // glyph source was supplied, so a fill-only scene leaves this null and takes the production
+            // GlyphSourceFactory.Create path.
             if (_glyphSourceFactory != null)
                 _mapView.View.SymbolSubsystem.GlyphSourceFactoryOverride = _ => _glyphSourceFactory();
 
@@ -277,16 +275,15 @@ namespace MapRenderer.Tests
             // cullable before the snapshot — rendering on the settle frame itself is blank (see WarmupFrames).
             for (int f = 0; f < WarmupFrames; f++) _mapView.LateUpdate();
 
-            // Bounded symbol-readiness settle (plan §1 Edit 3.2), LAST before the snapshot: a style with a
-            // symbol layer needs its symbols STAGED, not merely tile-settled — pump until LastQuadCount/
-            // LastSurvivorCount reach the authored count, snapshotting the very next frame (no extra pump
-            // after — an inserted frame is a flake source, lessons flaky-tilesymbolkick-settle). Guarded on
-            // the scene actually declaring a symbol layer, so a fill-only scene never spins here.
+            // Bounded symbol-readiness settle, LAST before the snapshot: a style with a symbol layer needs
+            // its symbols STAGED, not merely tile-settled — pump until LastQuadCount/LastSurvivorCount reach
+            // the authored count, snapshotting the very next frame. An inserted frame after that is a flake
+            // source. Only a scene declaring a symbol layer spins here.
             if (_layers.Exists(l => l is SymbolTextVisualLayer))
                 SpinUntilSymbolsReady();
 
             // ── Render. Re-sync FIRST — SyncToCamera's last act pushes the process-global
-            // _MapFrameMetersPerDevicePixel ruler (TiltedGroundScene.cs:184-193), so a scene that renders
+            // _MapFrameMetersPerDevicePixel ruler (see TiltedGroundScene.Render), so a scene that renders
             // always pushes its own ruler immediately before rendering. ────────────────────────────────────
             _mapCam.SyncToCamera();
             using var snapshot = new SnapshotRenderer(px, px);
@@ -308,17 +305,16 @@ namespace MapRenderer.Tests
 
         /// <summary>Pumps <c>LateUpdate</c> until every loaded tile has settled — mirrors
         /// <c>GeoJsonSourceTests.PumpUntilSettled</c>. A multi-tile cover still settles even though the
-        /// geojson probe returns definitively-absent null handles for disjoint tiles (plan §7) —
+        /// geojson probe returns definitively-absent null handles for disjoint tiles, and
         /// <c>AllTilesSettled</c> treats those as settled too.
         ///
-        /// <para>The real <c>LateUpdate</c> Tick does the consume + symbol harvest every iteration (unlike
-        /// <c>TileManager.DrainMeshBuilds</c>, which is deliberately "symbol-silent" — its two call sites pass
-        /// no <c>symbolPass</c>, so the per-consumed-layer symbol harvest never fires). Between ticks,
-        /// <see cref="TileManager.AwaitInFlightMeshBuilds"/> only supplies the ThreadPool wall-clock — it
-        /// consumes and harvests nothing itself, so it cannot reintroduce the symbol-silent regression
-        /// (RED-verified: three <c>GeoJsonPointSymbolFixtureTests</c> failed with LastInputSymbolCount=0 when this
-        /// loop was converted to DrainMeshBuilds instead). This helper is shared by every <see cref="VisualScene"/>
-        /// consumer, symbol and fill-only alike, so it stays on the real per-frame Tick path.</para></summary>
+        /// <para>The real <c>LateUpdate</c> Tick does the consume + symbol harvest every iteration, unlike
+        /// <c>TileManager.DrainMeshBuilds</c>, which is "symbol-silent" — its two call sites pass no
+        /// <c>symbolPass</c>, so the per-consumed-layer symbol harvest never fires. Between ticks,
+        /// <see cref="TileManager.AwaitInFlightMeshBuilds"/> only supplies the ThreadPool wall-clock; it
+        /// consumes and harvests nothing, so it cannot reintroduce the symbol-silent regression. Every
+        /// <see cref="VisualScene"/> consumer shares this helper, symbol and fill-only alike, so it stays on
+        /// the real per-frame Tick path.</para></summary>
         private static void PumpUntilSettled(MapViewComponent view, int maxFrames = 2500)
         {
             for (int f = 0; f < maxFrames; f++)
@@ -333,7 +329,7 @@ namespace MapRenderer.Tests
         /// STAGED and SURVIVED <see cref="_expectedSymbolQuads"/> quads, or fails loud at
         /// <see cref="SymbolReadinessCeiling"/> (always-bound-loops) — never silently renders a symbol-less
         /// frame. Checks <c>LastSurvivorCount</c> alongside <c>LastQuadCount</c>: the collision verdict is
-        /// harvested one tick late (mirrors <c>OffLookAtSymbolScene</c>'s "R3: duplicate Tick" note), so a
+        /// harvested one tick late (see <c>OffLookAtSymbolScene</c>'s duplicate-Tick note), so a
         /// spin that stopped at quad-count-reached alone could snapshot a frame whose survivor count is still
         /// stale.</summary>
         private void SpinUntilSymbolsReady()
@@ -359,10 +355,9 @@ namespace MapRenderer.Tests
                 "(geojson→symbol produced fewer labels than authored), not a flake to retry around.");
         }
 
-        /// <summary>Tears down in the mandated order (plan §5): view → camera GO → RT → light/ambient → MapView
-        /// GO. <c>DestroyImmediate(_mapGo)</c> also fires <c>MapViewComponent.OnDestroy</c> → a second
-        /// <c>Teardown()</c> — the same double-call idiom every other fixture in this suite already relies on
-        /// (harmless; <c>MapView.Teardown</c> is safe to call twice).</summary>
+        /// <summary>Tears down in order: view → camera GO → RT → light/ambient → MapView GO.
+        /// <c>DestroyImmediate(_mapGo)</c> also fires <c>MapViewComponent.OnDestroy</c> → a second
+        /// <c>Teardown()</c>, which is harmless: <c>MapView.Teardown</c> is safe to call twice.</summary>
         public void Dispose()
         {
             _mapView?.Teardown();

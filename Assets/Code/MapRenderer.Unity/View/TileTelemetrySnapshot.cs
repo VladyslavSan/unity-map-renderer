@@ -1,13 +1,13 @@
 // Engine-free: compiled by both the Unity EditMode runner and the fast dotnet core-tests project.
-// No UnityEngine references — plain int/double/bool fields only (S85 decision 1).
+// No UnityEngine references — plain int/double/bool fields only.
 
 namespace MapRenderer.Unity.View
 {
     /// <summary>
-    /// S85: a pull-based snapshot of runtime tile/render telemetry — <see cref="Tile.TileManager.CaptureTelemetry"/>
+    /// A pull-based snapshot of runtime tile/render telemetry — <see cref="Tile.TileManager.CaptureTelemetry"/>
     /// computes one of these on demand (never published per-tick). Every field is an instantaneous
     /// <b>level</b> (a count or a zoom number at the instant of capture) — never a duration or a per-tick
-    /// rate (those are S46/<c>*LastTick</c> territory). A plain data carrier: <c>init</c>-only, engine-free,
+    /// rate (those are <c>*LastTick</c> territory). A plain data carrier: <c>init</c>-only, engine-free,
     /// so it compiles in the fast <c>dotnet</c> core-tests project and the Unity runner alike.
     /// </summary>
     public readonly struct TileTelemetrySnapshot
@@ -51,19 +51,18 @@ namespace MapRenderer.Unity.View
 
         /// <summary>Loaded records whose mesh build is COMPLETE but consume is budget-deferred (a subset
         /// of <see cref="PendingTileCount"/>, which also lumps fetch-/mesh build-in-flight records) — the
-        /// un-drained per-frame build backlog depth. The <c>s95-residual-tile-load-frame-stall</c>
-        /// "measure first" signal.</summary>
+        /// un-drained per-frame build backlog depth.</summary>
         public int ConsumeBacklog { get; init; }
 
         /// <summary>Loaded records currently in the SOURCE tile's managed PROLOGUE step
-        /// (job-scheduling-design.md §8 stage 3) — a subset of <see cref="PendingTileCount"/>, disjoint from
+        /// (job-scheduling-design.md) — a subset of <see cref="PendingTileCount"/>, disjoint from
         /// <see cref="GraphMeasureInFlight"/>/<see cref="GraphWriteInFlight"/>. A background tile never
         /// appears here — it starts directly at Measure.</summary>
         public int PrologueInFlight { get; init; }
 
         /// <summary>Loaded records currently in the graph arm's MEASURE step — a subset of
-        /// <see cref="PendingTileCount"/>. Every tile passes through here now (job-scheduling-design.md §8
-        /// stage 3); a background tile arrives directly, a source tile arrives from
+        /// <see cref="PendingTileCount"/>. Every tile passes through here (job-scheduling-design.md);
+        /// a background tile arrives directly, a source tile arrives from
         /// <see cref="PrologueInFlight"/>.</summary>
         public int GraphMeasureInFlight { get; init; }
 
@@ -83,7 +82,7 @@ namespace MapRenderer.Unity.View
         /// <summary>Lifetime count of genuine (non-cancellation) fetch errors.</summary>
         public int FetchErrorCount { get; init; }
 
-        // ── S82: PreparedTileCache utilization ────────────────────────────────────────────────
+        // ── PreparedTileCache utilization ─────────────────────────────────────────────────────
 
         /// <summary>Whether the <c>PreparedTileCache</c> is active (see
         /// <see cref="Map.PreparedTileCacheConfig.Enabled"/>). <see langword="false"/> means every revisit

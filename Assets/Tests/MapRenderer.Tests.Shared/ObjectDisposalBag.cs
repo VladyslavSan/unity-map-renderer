@@ -4,8 +4,7 @@ using UnityEngine;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// A LIFO bag of <see cref="Object"/>s a test constructed and must destroy. Replaces a hand-written
-    /// <c>try</c>/<c>finally</c> that calls <c>DestroyImmediate</c> on each one.
+    /// A LIFO bag of <see cref="Object"/>s a test constructed and must destroy.
     ///
     /// <para>Track only what the test CONSTRUCTED. A loaded asset (<c>AssetDatabase.LoadAssetAtPath</c>,
     /// <c>Resources.Load</c>) is borrowed: destroying one throws from <see cref="Dispose"/> during unwind,

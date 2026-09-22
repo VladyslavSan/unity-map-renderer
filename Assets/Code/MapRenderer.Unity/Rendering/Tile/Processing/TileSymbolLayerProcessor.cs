@@ -9,7 +9,7 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Epic A / A3: the <see cref="ITileWorkerThenMainLayerProcessor"/> adapter around one symbol STYLE
+    /// The <see cref="ITileWorkerThenMainLayerProcessor"/> adapter around one symbol STYLE
     /// LAYER's share of a symbol tile build — one instance per symbol style layer per (source, tile) build
     /// (matching the mesh side's per-layer granularity). This is parity-safe because
     /// <see cref="StyledSymbolTileBuilder.ExtractLayers"/> and <see cref="StyledSymbolTileBuilder.Shape"/>
@@ -31,8 +31,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         private readonly SymbolStyle.StyleLayer[] _layerWrapper;
         private readonly int[]                    _materialIndexWrapper;
         private readonly SymbolTileBuffer       _sharedBuffer;
-        // I5b/D6: forwarded verbatim to ExtractLayers' spriteAtlas param. D6 (docs/road-shields-design.md §3
-        // D6): a build's worker step (this class) only ever runs once SymbolSubsystem.SpritesSettled is
+        // Forwarded verbatim to ExtractLayers' spriteAtlas param (docs/road-shields-design.md):
+        // a build's worker step (this class) only ever runs once SymbolSubsystem.SpritesSettled is
         // true — TryBeginBuild PARKS a build kicked before the sprite fetch settles instead of constructing
         // this processor at all. `_spriteAtlas` is non-null here whenever the style actually resolved a
         // sheet; it is null (and stays inert — every icon draw/extract path downstream already guards on it)
@@ -63,7 +63,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         /// <summary>WORKER-SAFE: SELECT + project this layer's <see cref="SymbolStyle.StyleLayer"/>
         /// off the main thread.</summary>
-        /// <remarks>IR C1 P3: no store parameter. The extractor reads each symbol layer's source-layer buffer
+        /// <remarks>No store parameter. The extractor reads each symbol layer's source-layer buffer
         /// off the decoded tile itself, so every symbol layer of this build — and every mesh layer of the
         /// same kick — reads the SAME buffer per source-layer with nothing to thread through.</remarks>
         public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context)

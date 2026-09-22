@@ -1,5 +1,5 @@
 // No `using UnityEngine` — but this file is NO LONGER compiled by Tools/core-tests and must not be re-added
-// to core-tests.csproj (tile-geometry IR B4). It calls SymbolFeatureExtractor.Extract, which now materializes
+// to core-tests.csproj. It calls SymbolFeatureExtractor.Extract, which materializes
 // a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections transitively; core-tests has no
 // Unity.Collections and deliberately gets no shim (a hand-written one would be a second implementation of
 // Collections' ownership semantics, and disposing an AsArray() view there is a SILENT no-op — the fast loop
@@ -19,9 +19,9 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// S105 Slice 3 — turns one decoded MVT tile's symbol layers into rendered-ready
+    /// Turns one decoded MVT tile's symbol layers into rendered-ready
     /// <see cref="ShapedSymbol"/>s, the symbol analogue of <c>StyledLineTileBuilder</c> (but it emits symbols,
-    /// never a <c>Mesh</c> — symbols are the placed-every-frame class, S20 T5). The Core half
+    /// never a <c>Mesh</c> — symbols are the placed-every-frame class). The Core half
     /// (<see cref="SymbolFeatureExtractor"/>) already did the worker-safe work (select → resolve text →
     /// project anchor → <see cref="SymbolFeature"/>); this adds the Unity-side shaping the symbols need to
     /// render.
@@ -46,7 +46,7 @@ namespace MapRenderer.Unity.Text
         internal SymbolStringTable StringTable { get; }
 
         /// <summary>Monotonic count of symbols skipped because their build threw a non-cancellation exception
-        /// (e.g. S18's deferred mixed-direction bidi). Surfaced as SymbolSubsystem telemetry. Main-thread
+        /// (e.g. deferred mixed-direction bidi). Surfaced as SymbolSubsystem telemetry. Main-thread
         /// only (Shape is the main tail) — no synchronization.</summary>
         internal int SkippedSymbolCount { get; private set; }
 
@@ -76,7 +76,7 @@ namespace MapRenderer.Unity.Text
         }
 
         /// <summary>
-        /// WORKER-SAFE (Stage B): SELECT + project each symbol layer's <see cref="SymbolFeature"/>s off the main
+        /// WORKER-SAFE: SELECT + project each symbol layer's <see cref="SymbolFeature"/>s off the main
         /// thread. Touches only <see cref="SymbolFeatureExtractor"/> + immutable parsed layers + the stateless
         /// <see cref="IProjection"/> — no glyph cache, no atlas, no <c>UnityEngine.Object</c> — so the caller
         /// may run it on the thread pool. Returns the shaping inputs <see cref="Shape"/> consumes on main.
@@ -84,10 +84,10 @@ namespace MapRenderer.Unity.Text
         /// <param name="spriteAtlas">Forwarded verbatim to <see cref="SymbolFeatureExtractor.Extract"/>;
         /// <c>null</c> (the default) yields no icon symbols, so omitting this argument is behaviour-preserving.
         /// Production callers still omit it — icon draw is not yet wired, so it stays inert.</param>
-        /// <remarks>IR C1 P3: no store parameter and no private fallback store. Every layer's geometry is
+        /// <remarks>No store parameter and no private fallback store. Every layer's geometry is
         /// read off the decoded tile itself (<c>ITileLayer.Geometry</c>), so N symbol layers naming one
         /// source-layer read ONE buffer with nothing threaded through and nothing to dispose — and they share
-        /// it with the mesh layers of the same kick, which the pass-scoped store never could.</remarks>
+        /// it with the mesh layers of the same kick.</remarks>
         public List<ExtractedLayer> ExtractLayers(
             IDecodedTile tile, TileId tileId, IReadOnlyList<StyleLayer> symbolLayers,
             double zoom, IProjection projection, IReadOnlyList<int> materialIndices = null,
@@ -112,9 +112,9 @@ namespace MapRenderer.Unity.Text
         /// <summary>Convenience (tests + the demo path): extract then shape in one call — collects every
         /// needed glyph range, ensures it (async), then shapes + lays out + emits every symbol of <paramref
         /// name="symbolLayers"/> over <paramref name="tile"/> into <paramref name="buffer"/> (caller-owned —
-        /// the per-build reused buffer of F5's lifecycle). Emission order matches
+        /// the per-build reused buffer). Emission order matches
         /// <see cref="SymbolFeatureExtractor"/>'s per-tile ordinal, so <see cref="ShapedSymbol.FeatureIndex"/>
-        /// stays the stable S20 tiebreak. The subsystem's live path instead runs <see cref="ExtractLayers"/>
+        /// stays the stable tiebreak. The subsystem's live path instead runs <see cref="ExtractLayers"/>
         /// on a worker and the collect/ensure/<see cref="Shape"/> sequence on main.
         ///
         /// <para>Correct incremental layout relies on a FIXED-size shared atlas (the subsystem builds the
@@ -123,7 +123,7 @@ namespace MapRenderer.Unity.Text
         /// invalidate earlier tiles' UVs.</para></summary>
         /// <param name="materialIndices">Optional per-layer owning-material index (parallel to
         /// <paramref name="symbolLayers"/>) stamped onto each symbol's <see cref="ShapedSymbol.MaterialIndex"/>
-        /// for the per-layer draw grouping (S105 F1). Null → all 0 (single-material / demo path).</param>
+        /// for the per-layer draw grouping. Null → all 0 (single-material / demo path).</param>
         public async UniTask BuildAsync(
             IDecodedTile tile,
             TileId tileId,
@@ -179,7 +179,7 @@ namespace MapRenderer.Unity.Text
                 FontStack            fontStack = layerEx.FontStack;
                 if (fontStack?.Names == null) continue;
 
-                // I5a: an icon symbol carries no Text (null) — skip it here BEFORE dereferencing .Length, or
+                // An icon symbol carries no Text (null) — skip it here BEFORE dereferencing .Length, or
                 // an icon-only layer NREs on its very first symbol.
                 for (int i = 0; i < extracted.Count; i++)
                 {
@@ -226,8 +226,8 @@ namespace MapRenderer.Unity.Text
         /// MAIN-THREAD, synchronous, no suspension point: shapes + lays out + emits each
         /// <see cref="ShapedSymbol"/> into <paramref name="buffer"/>, reading the shared glyph cache/atlas that
         /// <see cref="EnsureGlyphRangesAsync"/> already finished populating for this build — this method never
-        /// mutates the atlas. Reads the shared glyph cache/atlas, so it runs on the main thread (Stage C moves
-        /// shaping to a worker via an immutable snapshot). Emission order matches the extractor's per-tile
+        /// mutates the atlas. Reads the shared glyph cache/atlas, so it runs on the main thread. Emission
+        /// order matches the extractor's per-tile
         /// ordinal (stable FeatureIndex).
         ///
         /// <para><b>No new cancellation checks were added here.</b> This method's only cancellation-observation
@@ -263,7 +263,7 @@ namespace MapRenderer.Unity.Text
                 FontStack         fontStack     = layerEx.FontStack;
 
                 // The glyphs are already in the shared atlas (EnsureGlyphRangesAsync ran before this call):
-                // shape + lay out + emit. I5a: the resolver is only needed by TEXT symbols (an icon-only
+                // shape + lay out + emit. The resolver is only needed by TEXT symbols (an icon-only
                 // layer may carry no text-font at all), so it is built lazily on first use rather than
                 // unconditionally — an icon-only layer never touches the font stack / GlyphManager resolver
                 // machinery.
@@ -275,10 +275,10 @@ namespace MapRenderer.Unity.Text
                         SymbolFeature s = extracted[i];
                         if (s.Kind == SymbolKind.Icon && s.Placement == SymbolPlacement.Point)
                         {
-                            // I5a: an icon is a single pre-laid-out quad (SymbolFeatureExtractor already
-                            // resolved sprite + icon-size/-offset/-anchor) — no shaping, just the SkirtPx-inset
-                            // min/max-corner bounds formula (inlined here, no allocation), so it rides the SAME
-                            // point-placement path downstream (§5.4: SymbolPlacementKind.Point + AtlasKind, no
+                            // An icon is a single pre-laid-out quad (SymbolFeatureExtractor already resolved
+                            // sprite + icon-size/-offset/-anchor) — no shaping, just the SkirtPx-inset
+                            // min/max-corner bounds formula (inlined here, no allocation), so it rides the
+                            // SAME point-placement path downstream (SymbolPlacementKind.Point + AtlasKind, no
                             // parallel path). The quad carries the transparent border; the bounds (i.e. the
                             // collision box) must not — placement runs on the ink, not on the skirt.
                             float2 iconSkirt = new float2(s.IconSkirtPx, s.IconSkirtPx);
@@ -296,7 +296,7 @@ namespace MapRenderer.Unity.Text
                                 BoundsMax = iconBoundsMax,
                                 QuadStart = iconQuadStart,
                                 QuadCount = 1,
-                                IconImageId = StringTable.Intern(s.IconImage), // I6: cross-tile icon identity, interned
+                                IconImageId = StringTable.Intern(s.IconImage), // cross-tile icon identity, interned
                                 Paint = s.Paint,
                                 TextSizePx = TextQuadLayout.OneEm, // scale 1 — IconQuadLayout already baked icon-size in
                                 PaddingPx = s.PaddingPx,
@@ -317,7 +317,7 @@ namespace MapRenderer.Unity.Text
 
                         if (s.Kind == SymbolKind.Icon)
                         {
-                            // P-B: a map-resolved LINE icon is the same pre-laid-out quad, but shaped as a
+                            // A map-resolved LINE icon is the same pre-laid-out quad, but shaped as a
                             // ONE-GLYPH CURVED symbol — the icon cell is already horizontally centred on 0
                             // (icon-anchor: center), which is exactly the CurvedGlyph.Cell contract, so the
                             // whole curved machinery (per-anchor candidates, the arc walk, the rotated
@@ -338,7 +338,7 @@ namespace MapRenderer.Unity.Text
                                 GlyphStart = iconGlyphStart, GlyphCount = 1,
                                 AnchorStart = iconAnchorStart, AnchorCount = iconAnchorCount,
                                 PathStart = iconPathStart, PathCount = iconPathCount,
-                                IconImageId = StringTable.Intern(s.IconImage), // I6: cross-tile icon identity, interned
+                                IconImageId = StringTable.Intern(s.IconImage), // cross-tile icon identity, interned
                                 Paint = s.Paint,
                                 TextSizePx = TextQuadLayout.OneEm,
                                 PaddingPx = s.PaddingPx,
@@ -351,7 +351,7 @@ namespace MapRenderer.Unity.Text
                                 IgnorePlacement = s.IgnorePlacement,
                                 MaterialIndex = materialIndex,
                                 IconRotateRadians = s.IconRotateRadians,
-                                // W1: the resolved icon-pitch-alignment — the curved arm's world-arc predicate.
+                                // The resolved icon-pitch-alignment — the curved arm's world-arc predicate.
                                 PitchAlignment = s.PitchAlignment,
                             });
                             continue;
@@ -389,7 +389,7 @@ namespace MapRenderer.Unity.Text
                                 BoundsMax = bounds.Max,
                                 QuadStart = textQuadStart,
                                 QuadCount = quadCorners.Count,
-                                TextId = StringTable.Intern(s.Text), // A-3: cross-tile identity, interned
+                                TextId = StringTable.Intern(s.Text), // cross-tile identity, interned
                                 Paint = s.Paint,
                                 TextSizePx = s.TextSizePx,
                                 PaddingPx = s.PaddingPx,
@@ -422,9 +422,9 @@ namespace MapRenderer.Unity.Text
                                 Placement = s.Placement,
                                 Kind = SymbolKind.Text,
                                 GlyphStart = textGlyphStart, GlyphCount = curvedPlacements.Count,
-                                AnchorStart = textAnchorStart, AnchorCount = textAnchorCount, // A-2: build-time zoom-invariant anchors
+                                AnchorStart = textAnchorStart, AnchorCount = textAnchorCount, // build-time zoom-invariant anchors
                                 PathStart = textPathStart, PathCount = textPathCount,
-                                TextId = StringTable.Intern(s.Text), // A-3: carried for parity (line symbols are excluded from dedup in v1)
+                                TextId = StringTable.Intern(s.Text), // carried for parity (line symbols are excluded from dedup in v1)
                                 Paint = s.Paint,
                                 TextSizePx = s.TextSizePx,
                                 PaddingPx = s.PaddingPx,
@@ -438,14 +438,14 @@ namespace MapRenderer.Unity.Text
                                 MaterialIndex = materialIndex,
                                 TranslatePx = s.TranslatePx,
                                 TranslateAnchor = s.TranslateAnchor,
-                                // W1: the resolved text-pitch-alignment — the curved arm's world-arc predicate.
+                                // The resolved text-pitch-alignment — the curved arm's world-arc predicate.
                                 PitchAlignment = s.PitchAlignment,
                             });
                         }
                     }
                     catch (System.Exception ex) when (!(ex is System.OperationCanceledException) && !ct.IsCancellationRequested)
                     {
-                        // Layer 1 robustness: one symbol's build failure (e.g. S18's deferred mixed-direction bidi
+                        // Layer 1 robustness: one symbol's build failure (e.g. a deferred mixed-direction bidi
                         // NotSupportedException) must never blank the whole tile. Skip THIS symbol; the rest still
                         // build and commit. buffer.AddSymbol is the last statement of every guarded emit branch,
                         // so no partial RECORD was added — a throw before it can leave at most an orphaned tail

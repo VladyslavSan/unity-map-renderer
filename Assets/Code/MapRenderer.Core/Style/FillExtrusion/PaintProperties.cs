@@ -12,7 +12,7 @@ namespace MapRenderer.Core.Style.FillExtrusion
     /// <see cref="Expressions.Expression"/>, one typed default, and a <c>Value → T</c> projection — mirrors
     /// <see cref="Fill.PaintProperties"/>.
     ///
-    /// <para><b>fill-extrusion-translate is parsed via the expression engine (I2b).</b> Its value is a px
+    /// <para><b>fill-extrusion-translate is parsed via the expression engine.</b> Its value is a px
     /// offset that (per the Style Spec) can itself be a zoom-interpolated expression, and a raw-array read
     /// (<c>Items[0]/[1]</c>, the pattern <see cref="Fill.PaintProperties.Translate"/> still uses, since Fill
     /// never supports a zoom-varying translate) would silently collapse a <c>["interpolate", ...]</c>
@@ -23,8 +23,8 @@ namespace MapRenderer.Core.Style.FillExtrusion
     /// already lerps <c>Array</c>-typed values element-wise (<c>Ops/Ramps.cs</c>'s <c>Lerp</c>), so a
     /// zoom-interpolated translate is preserved and classified rather than collapsed. Render (needing the
     /// shared <c>PixelsToWorld</c> px→world measurement) lands alongside the mesh + shader in the same
-    /// increment. <see cref="TranslateAnchor"/> was already parsed (I1) — it is a plain two-value string enum
-    /// with no expression form, so there was never an equivalent landmine.</para>
+    /// increment. <see cref="TranslateAnchor"/> is a plain two-value string enum with no expression form,
+    /// so it carries no equivalent landmine.</para>
     ///
     /// Absent properties use the spec defaults; <see cref="IsInertFallback"/> is true when all are absent.
     /// Engine-free; clean-room (public Style Spec, no MapLibre source).
@@ -34,39 +34,39 @@ namespace MapRenderer.Core.Style.FillExtrusion
         /// <summary>
         /// fill-extrusion-height: the extruded geometry's height in metres, measured from
         /// <see cref="Base"/>. Default 0.
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12, I2).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<float> Height { get; init; }
 
         /// <summary>
         /// fill-extrusion-base: the extruded geometry's base height in metres above ground. Default 0.
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12, I2).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<float> Base { get; init; }
 
         /// <summary>
         /// fill-extrusion-color: the extruded geometry's base color. Default opaque black rgba(0,0,0,1).
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12, I2).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<Color> Color { get; init; }
 
         /// <summary>
         /// fill-extrusion-opacity: opacity multiplier [0,1]. Default 1.0.
-        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake (S12, I2).
+        /// Constant/Zoom → material uniform; Feature/Composite → per-vertex bake.
         /// </summary>
         public StyleProperty<float> Opacity { get; init; }
 
         /// <summary>
         /// fill-extrusion-vertical-gradient: whether a vertical gradient is applied to the sides of the
         /// extruded geometry. Encoded as float: 1.0 = true (default), 0.0 = false. Constant only;
-        /// data-driven or malformed values fall back to 1.0 (true) — render use deferred to I4.
+        /// data-driven or malformed values fall back to 1.0 (true). Not yet consumed by the renderer.
         /// </summary>
         public StyleProperty<float> VerticalGradient { get; init; }
 
         /// <summary>
         /// fill-extrusion-translate: pixel-space [x, y] translation offset. Default [0, 0]. Unlike
         /// <see cref="Fill.PaintProperties.Translate"/> / <see cref="Line.PaintProperties.Translate"/>, this
-        /// one is parsed THROUGH the expression engine (I2b), so Constant AND Zoom kinds are both preserved
+        /// one is parsed THROUGH the expression engine, so Constant AND Zoom kinds are both preserved
         /// (see the class doc). Feature/Composite (data-driven) is spec-invalid for a layer-level property —
         /// falls back to the [0, 0] default, mirroring <see cref="VerticalGradient"/>'s guard.
         /// </summary>
@@ -171,8 +171,8 @@ namespace MapRenderer.Core.Style.FillExtrusion
                 verticalGradient = new StyleProperty<float>(1f);
             }
 
-            // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (I2b — see
-            // the class doc) so a zoom-interpolate translate classifies as Zoom instead of collapsing to
+            // fill-extrusion-translate: [x, y] px offset, parsed through the expression engine (see the
+            // class doc) so a zoom-interpolate translate classifies as Zoom instead of collapsing to
             // [0,0]. WrapBareArrayLiterals handles the common constant form (a bare [x,y] array, which the
             // strict parser would otherwise reject as "operator must be a string").
             JsonValue translateJson = paint?.Get(PropertyNames.FillExtrusionTranslate);

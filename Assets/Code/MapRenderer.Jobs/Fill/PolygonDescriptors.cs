@@ -5,10 +5,9 @@ namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
     /// <see cref="RingAssemblyJob"/>'s six polygon-descriptor outputs, grouped as one value
-    /// <see cref="FillMeshGraph.Schedule"/> allocates and disposes as a unit (job-scheduling-design.md §8
-    /// stage 4's R2 reshape). A <c>FillMeshGraph</c>-LOCAL grouping only — <see cref="RingAssemblyJob"/>'s own
-    /// six fields are untouched: reshaping its field list would touch every caller of a job several test
-    /// fixtures still construct directly, for a saving this cycle's duplication complaint does not name.
+    /// <see cref="FillMeshGraph.Schedule"/> allocates and disposes as a unit. A <c>FillMeshGraph</c>-LOCAL
+    /// grouping only: <see cref="RingAssemblyJob"/>'s own six fields stay separate, because several test
+    /// fixtures construct that job directly.
     /// </summary>
     internal struct PolygonDescriptors
     {
@@ -19,9 +18,8 @@ namespace MapRenderer.Jobs.Fill
         public NativeArray<int> PolyCountArr;
         public NativeArray<int> HoleCountArr;
 
-        /// <summary>Plain <see cref="NativeArray{T}"/>s, not scratch <see cref="NativeList{T}"/>s — matches
-        /// <c>FillMeshGraph.cs</c>'s existing convention that only the <see cref="TriangulationBuffers"/> allocations
-        /// are counted by the leak/balance counters.</summary>
+        /// <summary>Plain <see cref="NativeArray{T}"/>s, not scratch <see cref="NativeList{T}"/>s. Only the
+        /// <see cref="TriangulationBuffers"/> allocations are counted by the leak/balance counters.</summary>
         internal static PolygonDescriptors Allocate(int maxPolygons, int maxHoles) => new PolygonDescriptors
         {
             PolyOuterRingIdx  = new NativeArray<int>(maxPolygons, Allocator.Persistent, NativeArrayOptions.UninitializedMemory),

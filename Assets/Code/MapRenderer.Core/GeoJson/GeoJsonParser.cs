@@ -286,7 +286,7 @@ namespace MapRenderer.Core.GeoJson
 
             // RFC §3.1: an empty coordinates array is an empty geometry. No ringCounts entry is added, so a
             // MultiPolygon containing an empty polygon ends up with FEWER PolygonRingCounts entries than the
-            // RFC array had polygons. That is deliberate and safe: the counts exist only to walk Paths in
+            // RFC array had polygons. That is safe: the counts exist only to walk Paths in
             // polygon-sized strides (GeoJsonTileSlicer.ClipPolygons' `ring += ringCount`), and a zero-ring
             // polygon contributes nothing to Paths either way. The two lists index Paths, not the wire array.
             if (rings.Count == 0) return;

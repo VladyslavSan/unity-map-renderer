@@ -14,14 +14,12 @@ namespace MapRenderer.Unity.View
     ///
     /// <para><b>Not algorithm config.</b> This is view <i>state</i> (what the camera sees), never an
     /// algorithm knob (how tiles are chosen). Tuning constants — pad, zoom clamps — live on the concrete
-    /// selector's constructor, not here. In particular <see cref="Projection"/> is the swappable S63
-    /// pixel↔ground <i>service</i> (Web-Mercator today, globe later); it belongs with the per-frame view
-    /// inputs because it changes at runtime and every selector impl needs it.</para>
+    /// selector's constructor, not here. <see cref="Projection"/> is the swappable pixel↔ground
+    /// <i>service</i> (Web-Mercator today, globe later); it belongs with the per-frame view inputs because
+    /// it changes at runtime and every selector impl needs it.</para>
     ///
-    /// <para><b>Passed by <c>in</c>.</b> A <c>readonly struct</c> with <c>init</c>-only members (the
-    /// data-carrier convention): <c>in ViewContext</c> takes a reference with no defensive copy. It carries
-    /// a managed <see cref="IProjection"/> reference, so it is a small managed carrier — fine for this
-    /// once-per-frame seam, NOT a Burst/blittable struct.</para>
+    /// <para><b>Passed by <c>in</c>.</b> It carries a managed <see cref="IProjection"/> reference, so it is
+    /// a small managed carrier for this once-per-frame seam, NOT a Burst/blittable struct.</para>
     /// </summary>
     public readonly struct ViewContext
     {
@@ -31,18 +29,18 @@ namespace MapRenderer.Unity.View
         /// <summary>
         /// The viewport size in pixels. Usage depends on the consumer:
         /// <list type="bullet">
-        ///   <item><b>Camera-interaction seam (S73)</b> — the <b>live</b> interaction viewport
+        ///   <item><b>Camera-interaction seam</b> — the <b>live</b> interaction viewport
         ///     (<c>Camera.pixelWidth, Camera.pixelHeight</c>); must be in the same pixel scale as
         ///     the cursor positions fed to the gesture mapping so the pin invariants hold.</item>
-        ///   <item><b>Tile-selection seam (S71)</b> — the framing viewport, which is now the camera's
-        ///     live pixel size (<c>MapCamera.ViewportPx</c>); the camera IS the viewport
+        ///   <item><b>Tile-selection seam</b> — the framing viewport, which is the camera's live pixel
+        ///     size (<c>MapCamera.ViewportPx</c>); the camera IS the viewport
         ///     (see <see cref="IVisibleTileSelector"/>).</item>
         /// </list>
         /// The type is usage-neutral; each consumer fills this field with the appropriate scale.
         /// </summary>
         public double2 ViewportPx { get; init; }
 
-        /// <summary>The active pixel↔ground projection service (S63). Web-Mercator today; globe later.</summary>
+        /// <summary>The active pixel↔ground projection service. Web-Mercator today; globe later.</summary>
         public IProjection Projection { get; init; }
     }
 }

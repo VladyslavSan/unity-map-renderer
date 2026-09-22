@@ -3,9 +3,9 @@
 // Fetch gating, then sheet decode, then source.
 //
 // Contents:
-//   SpriteFetchGatingTests  — P2 regression — the sprite sheet must be fetched for a style that has no symbol layers.
-//   SpriteSheetTests        — I4 acceptance: SpriteSheet decodes the fixture sprite PNG, repacks it with a one-texel transparent border per sprite, and flips its rows so a top-left-origin sprite-JSON coord (x,y) — of the repacked index — reads back at Texture2D.GetPixel(x,y).
-//   SpriteSourceTests       — I4 acceptance: FixtureSpriteSource serves the committed fixture sheet (mirrors FixtureGlyphSource's role for glyphs), and SpriteSourceFactory's missing-URL resilience seam (a style with no sprite URL returns null rather than throwing — icons are optional,…
+//   SpriteFetchGatingTests  — the sprite sheet must be fetched for a style that has no symbol layers.
+//   SpriteSheetTests        — SpriteSheet decodes the fixture sprite PNG, repacks it with a one-texel transparent border per sprite, and flips its rows so a top-left-origin sprite-JSON coord (x,y) — of the repacked index — reads back at Texture2D.GetPixel(x,y).
+//   SpriteSourceTests       — FixtureSpriteSource serves the committed fixture sheet (mirrors FixtureGlyphSource's role for glyphs), and SpriteSourceFactory's missing-URL resilience seam (a style with no sprite URL returns null rather than throwing — icons are optional,…
 
 using System.Collections;
 using NUnit.Framework;
@@ -33,7 +33,7 @@ namespace MapRenderer.Tests.Text.Sprites
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// P2 regression — the sprite sheet must be fetched for a style that has <b>no symbol layers</b>.
+    /// The sprite sheet must be fetched for a style that has <b>no symbol layers</b>.
     ///
     /// <para>The sheet used to be an icons-only resource, so <c>SymbolSubsystem.SetStyle</c> returned
     /// early ("no symbol layers — stay idle") <i>before</i> kicking off the fetch. Once <c>fill-pattern</c>
@@ -103,7 +103,7 @@ namespace MapRenderer.Tests.Text.Sprites
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// I4 acceptance: <see cref="SpriteSheet"/> decodes the fixture sprite PNG, repacks it with a one-texel
+    /// <see cref="SpriteSheet"/> decodes the fixture sprite PNG, repacks it with a one-texel
     /// transparent border per sprite, and flips its rows so a top-left-origin sprite-JSON coord
     /// <c>(x,y)</c> — of the <b>repacked</b> index — reads back at <c>Texture2D.GetPixel(x,y)</c>. That is
     /// the SAME contract <see cref="GlyphAtlasTexture"/> establishes for the glyph atlas (see
@@ -278,7 +278,7 @@ namespace MapRenderer.Tests.Text.Sprites
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// I4 acceptance: <see cref="FixtureSpriteSource"/> serves the committed fixture sheet (mirrors
+    /// <see cref="FixtureSpriteSource"/> serves the committed fixture sheet (mirrors
     /// <c>FixtureGlyphSource</c>'s role for glyphs), and <see cref="SpriteSourceFactory"/>'s
     /// missing-URL resilience seam (a style with no <c>sprite</c> URL returns <c>null</c> rather than
     /// throwing — icons are optional, unlike glyphs).
@@ -341,7 +341,7 @@ namespace MapRenderer.Tests.Text.Sprites
         [Test]
         public void SpriteSourceFactory_NullSpriteUrl_ReturnsNullAndWarnsOnce()
         {
-            // The "warn once" latch is process-wide, and as of P2 the sprite fetch runs for far more styles
+            // The "warn once" latch is process-wide, and the sprite fetch runs for far more styles
             // (it is no longer gated on a style having symbol layers — fill-pattern resolves against the same
             // sheet). Any earlier test that applies a sprite-less style consumes the one warning, so clear
             // the latch here rather than let this assertion depend on test order.

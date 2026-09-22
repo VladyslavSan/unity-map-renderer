@@ -10,12 +10,10 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Epic A / A1: the <see cref="ITileMeshLayerProcessor"/> adapter around one existing
-    /// <see cref="ITileMeshRenderLayer"/> — the moved form of the per-layer body
-    /// <c>TileManager.KickMeshBuild</c> used to run directly (feature select → source-layer resolve →
-    /// build the graph request). Behaviour-preserving: same order, same arguments (A1 invariant).
-    /// job-scheduling-design.md §8 stage 5 Group B: the graph is the only mesher — this adapter has no
-    /// kick-allocated <see cref="Mesh.MeshDataArray"/> and no seam branch any more.
+    /// The <see cref="ITileMeshLayerProcessor"/> adapter around one <see cref="ITileMeshRenderLayer"/>:
+    /// the per-layer body <c>TileManager.KickMeshBuild</c> fans out to — feature select → source-layer
+    /// resolve → build the graph request. The graph is the only mesher, so this adapter has no
+    /// kick-allocated <see cref="Mesh.MeshDataArray"/> and no seam branch.
     /// </summary>
     internal sealed class TileMeshLayerProcessor : ITileMeshLayerProcessor
     {
@@ -49,9 +47,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             _build = null;
         }
 
-        /// <summary>Called from <c>TileManager.KickMeshBuild</c> — no main-thread allocation any more
-        /// (job-scheduling-design.md §8 stage 5 Group B): every layer's mesh is allocated later, by the
-        /// graph's write step.</summary>
+        /// <summary>Called from <c>TileManager.KickMeshBuild</c> — no main-thread allocation: every
+        /// layer's mesh is allocated later, by the graph's write step.</summary>
         internal static TileMeshLayerProcessor AllocateForKick(ITileMeshRenderLayer layer, int materialIndex)
         {
             TileMeshLayerProcessor processor = TileMeshLayerProcessorPool.Rent();
@@ -92,7 +89,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     selected = list;
                 }
 
-                // Preserves the pre-B7 "no selected features ⇒ do nothing" gate. Since IR C1 P3 it no longer
+                // The "no selected features ⇒ do nothing" gate. It no longer
                 // avoids any materialization (the decode already did that, once, for every layer) — it stays
                 // because it is what keeps a filter that matches nothing from calling BuildGraphRequest at
                 // all.
@@ -106,9 +103,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     // zero-vertex result the pipeline reaches by scheduling over an uncreated buffer.
                     if (geometry.IsCreated)
                     {
-                        // job-scheduling-design.md §8 stage 5 Group B: the graph is the only mesher — build
-                        // the request, the graph's write step allocates and writes later. The layer itself
-                        // picks its kind's Rent (DIV-A1) and its own emptiness gate; this adapter only stores
+                        // The graph is the only mesher — build the request, and the graph's write step
+                        // allocates and writes later. The layer itself picks its kind's Rent and its own
+                        // emptiness gate; this adapter only stores
                         // the result — null when there is nothing to build.
                         _build = _layer.BuildGraphRequest(
                             selected, geometry, in context, _materialIndex, _layer.StyleLayer?.Id ?? "TileMesh");

@@ -8,7 +8,7 @@ namespace MapRenderer.Unity.Rendering.Materials
     /// Fill-extrusion is the first <b>elevated-3D</b> layer, so unlike the FILL/LINE painter contracts
     /// (transparent, <c>ZWrite Off</c>) it WRITES depth and composites opaque: overlapping buildings — and a
     /// single building's own near/far walls, which share one mesh and cannot be back-to-front sorted — occlude
-    /// via the depth buffer instead of draw order. See <c>docs/depth-and-render-regimes-design.md</c> §5.
+    /// via the depth buffer instead of draw order. See <c>docs/depth-and-render-regimes-design.md</c>.
     /// </summary>
     public static class FillExtrusionTweaker
     {

@@ -6,7 +6,7 @@ using System;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// #5 (B3): one collision candidate spanning a CONTIGUOUS range of <see cref="SymbolBox"/>es —
+    /// One collision candidate spanning a CONTIGUOUS range of <see cref="SymbolBox"/>es —
     /// all-or-nothing. A POINT symbol is a single-box candidate (its whole-symbol AABB); a CURVED along-line
     /// symbol is an N-box candidate (one AABB per glyph). <c>CollisionJob</c> places a candidate iff EVERY
     /// box in its range is free, and — if placed — reserves ALL of them; so a curved symbol drops entirely
@@ -24,34 +24,33 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>Number of boxes in this candidate's range (1 for a point symbol, N glyphs for a curved one).</summary>
         public int BoxCount;
 
-        /// <summary>Road-shields §10 D8: index of this candidate's FIRST <see cref="CandidateEmit"/> in the
-        /// staged emit pool — mirrors <see cref="BoxStart"/>. Emits are no longer keyed by <see cref="SymbolIndex"/>:
-        /// that member keeps ONLY its survivor-identity role (<c>CollisionJob.cs:34</c>).</summary>
+        /// <summary>Index of this candidate's FIRST <see cref="CandidateEmit"/> in the staged emit pool —
+        /// mirrors <see cref="BoxStart"/>. Emits are NOT keyed by <see cref="SymbolIndex"/>, which carries
+        /// only its survivor-identity role.</summary>
         public int EmitStart;
 
-        /// <summary>Road-shields §10 D8: number of emits in this candidate's range — 1 for an ordinary symbol,
-        /// 2 for a centred icon+text pair (its icon and text each keep their own <c>(Slot, AtlasKind)</c>
+        /// <summary>Number of emits in this candidate's range — 1 for an ordinary symbol, 2 for a centred
+        /// icon+text pair (its icon and text each keep their own <c>(Slot, AtlasKind)</c>
         /// <see cref="CandidateEmit"/>). An ordinary candidate satisfies <c>EmitCount == 1 &amp;&amp;
-        /// EmitStart == SymbolIndex</c> (asserted by tooth, not enforced by code). <see cref="TryFindRangeTilingViolation"/>
-        /// is unchanged — it covers BOXES only, and a pair's two boxes are appended contiguously by one call.</summary>
+        /// EmitStart == SymbolIndex</c>, asserted by a test rather than enforced by code.
+        /// <see cref="TryFindRangeTilingViolation"/> covers BOXES only.</summary>
         public int EmitCount;
 
-        /// <summary>Stage C (`icon-optional` / `text-optional`) — INPUT: bit <c>b</c> set ⇒ box
+        /// <summary>`icon-optional` / `text-optional` — INPUT: bit <c>b</c> set ⇒ box
         /// <c>BoxStart + b</c> (and, 1:1, emit <c>EmitStart + b</c>) may be DROPPED rather than dropping the
         /// whole candidate when it overlaps a placed blocker. The box↔emit correspondence holds because
         /// <c>SymbolStagingMath.AppendPointHalf</c> appends a box and its emit together, one per pair half —
         /// which is also why only a POINT PAIR (<c>BoxCount &lt;= 2</c>) may carry a non-zero mask; a curved
         /// symbol's N glyph boxes share ONE emit, so bits would not address them.
         ///
-        /// <para>0 on every lone point symbol, every icon-only/text-only symbol and every curved symbol ⇒ the
-        /// collision loop is byte-identical to the pre-Stage-C all-or-nothing rule for all of them, and for a
-        /// pair whose style leaves both properties at their <c>false</c> spec default.</para></summary>
+        /// <para>0 on every lone point symbol, every icon-only/text-only symbol and every curved symbol, so
+        /// the collision loop keeps the all-or-nothing rule for all of them.</para></summary>
         public byte OptionalBoxMask;
 
-        /// <summary>Stage C — VERDICT: bit <c>b</c> set ⇒ box <c>BoxStart + b</c> overlapped a placed blocker
+        /// <summary>VERDICT: bit <c>b</c> set ⇒ box <c>BoxStart + b</c> overlapped a placed blocker
         /// and was dropped, so it was neither reserved in the grid nor drawn; always a subset of
         /// <see cref="OptionalBoxMask"/>, and always 0 on a candidate that did not place at all.
-        /// Two writers, one frame apart and deliberately aliased:
+        /// Two writers, one frame apart, aliased on purpose:
         /// <c>SymbolStagingMath.StagePointPair</c> SEEDS it with last frame's verdict (carried by
         /// <c>SymbolPlacementSystem</c>'s dropped-halves map, keyed by <see cref="FadeId"/>) so the emit loop
         /// can skip the dropped half's quads, and the collision pass OVERWRITES it with this frame's verdict.
@@ -78,11 +77,11 @@ namespace MapRenderer.Core.Text.Placement
         /// (<see cref="SymbolPlacementSystem"/> keys its per-candidate emit data by this).</summary>
         public int SymbolIndex;
 
-        /// <summary>A-4: this candidate's cross-frame FADE identity (stable across frames + tile swaps) —
+        /// <summary>This candidate's cross-frame FADE identity (stable across frames + tile swaps) —
         /// <see cref="SymbolPlacementSystem"/> keys its persistent opacity record by this so a symbol eases in/out
         /// instead of popping. It must be UNIQUE per live candidate (one opacity read-modify-write per id per frame),
         /// or two candidates sharing it fight over one opacity and stick at a partial value. Point symbols: a
-        /// fixed-grid quantized-anchor hash folding in the layer (zoom-STABLE, unlike the A-3 display-zoom dedup
+        /// fixed-grid quantized-anchor hash folding in the layer (zoom-STABLE, unlike the display-zoom dedup
         /// key); line symbols: a (tile, LAYER, feature, anchor) hash — the layer term is load-bearing because
         /// <c>FeatureIndex</c> restarts per layer (see <see cref="SymbolStagingMath.LineFadeId"/>).</summary>
         public long FadeId;
@@ -93,11 +92,11 @@ namespace MapRenderer.Core.Text.Placement
         /// thread just before the collision pass (<c>SymbolPlacementSystem.ApplySuppression</c>) against the live zoom
         /// — NOT the tile build zoom — so overzoomed tiles reveal/hide layers as the camera crosses a boundary. A
         /// suppressed candidate is still STAGED (its quads ease to 0, fading out); only its collision role is removed
-        /// — so it fades without blocking the genuine winner. Default false ⇒ every in-zoom candidate participates
-        /// exactly as before.</summary>
+        /// — so it fades without blocking the genuine winner. Default false ⇒ every in-zoom candidate
+        /// participates.</summary>
         public bool Suppressed;
 
-        /// <summary>A-5: this candidate was a SURVIVOR last frame (looked up by <see cref="FadeId"/> against the
+        /// <summary>This candidate was a SURVIVOR last frame (looked up by <see cref="FadeId"/> against the
         /// placement system's kept-set). It biases <see cref="SymbolCollision.ComparePlacementOrder(in SymbolCandidate,in SymbolCandidate)"/>
         /// as a sticky-placement (hysteresis) tiebreak — at EQUAL <see cref="SortKey"/>, an incumbent places before
         /// a newcomer, so the arbitrary <see cref="FeatureIndex"/>/<see cref="TileKey"/> tiebreak can no longer

@@ -518,7 +518,7 @@ namespace MapRenderer.Core.Expressions
             return new VarExpression(name, bound);
         }
 
-        // ---- bare array literals (S23 I2b, hoisted from the former LineDash-private helper) --------
+        // ---- bare array literals ------------------------------------------------------------------
 
         /// <summary>
         /// Wrap a bare array (first element not an operator string) as <c>["literal", array]</c>. For an

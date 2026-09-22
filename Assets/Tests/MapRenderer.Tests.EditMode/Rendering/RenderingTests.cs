@@ -300,12 +300,12 @@ namespace MapRenderer.Tests.Rendering
     // BackendNullSlotTests — every backend tolerates a null material-list entry
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // E1 tooth (design §3.3 risk 3): once symbol/background layers take a draw slot with a NULL Material, the
+    // E1 tooth: once symbol/background layers take a draw slot with a NULL Material, the
     // full-width per-layer material list every backend indexes by materialIndex carries null entries at those
     // slots. A missed guard is a hard NRE on the first symbol/background-bearing style. This test constructs
     // each backend with a [null, realMaterial] list and proves AddTileLayer at the REAL slot (index 1) still
     // works and Rebuild/Dispose stay clean — the null slot itself is never AddTileLayer'd (the tile produce
-    // path filters to ITileMeshRenderLayer slots, §6 of the E1 plan), so this is a construction-time guard test.
+    // path filters to ITileMeshRenderLayer slots), so this is a construction-time guard test.
     [TestFixture]
     public class BackendNullSlotTests : BaseTestFixture
     {
@@ -701,14 +701,14 @@ namespace MapRenderer.Tests.Rendering
     // FillExtrusionRenderLayerTests — factory dispatch + fetch source for fill-extrusion
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // S23 I1 — T4: a style with a fill-extrusion layer (a) TryGetFetchSource returns true with its source, and
-    // (b) RenderLayerFactory.Create returns a non-null IRenderLayer taking a slot. RED-verified against the
-    // pre-I1 code (both returned false/null) — see the dev report for the RED-verify evidence.
+    // T4: a style with a fill-extrusion layer (a) TryGetFetchSource returns true with its source, and
+    // (b) RenderLayerFactory.Create returns a non-null IRenderLayer taking a slot. RED-verified
+    // against the previous code, where both returned false/null.
     //
-    // S23 I2b: the render layer now clones its OWN Map/FillExtrusion base material
-    // (MapMaterialSet.FillExtrusionMaterial), not the flat FILL base I1 reused. This suite builds its own
+    // The render layer clones its OWN Map/FillExtrusion base material
+    // (MapMaterialSet.FillExtrusionMaterial), not the flat FILL base fill reuses. This suite builds its own
     // synthetic settings via Shader.Find (mirroring MaterialTweakerTests' NewFill()/NewLine() precedent) so it
-    // stays independent of the committed asset. As of I3 the committed production (Lit) MapMaterialSet DOES carry a
+    // stays independent of the committed asset. The committed production (Lit) MapMaterialSet DOES carry a
     // FillExtrusionMaterial (the depth-writing render-state wiring it exercises is guarded by
     // MaterialTweakerTests.CreateFillExtrusionMaterial_AppliesElevatedContract_NotFlatPainter).
     [TestFixture]
@@ -776,7 +776,7 @@ namespace MapRenderer.Tests.Rendering
     // RenderLayerCompatibilitySummaryTests — an unpainted/unsupported layer is named, not silent
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // UMR-116: a style layer of an unsupported kind used to vanish with no explanation
+    // A style layer of an unsupported kind used to vanish with no explanation
     // (RenderLayerFactory.Create returned a bare null; RenderLayerSet.Build's "if (layer == null) continue;"
     // dropped it on the floor). These teeth pin the style-load compatibility summary that replaces the
     // silence: every skipped layer's id, raw type and WHY, collected once per Build — never per tile, never
@@ -829,7 +829,7 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreEqual(LayerSkipReason.GenuinelyUnpainted, set.SkippedLayers[0].Reason);
         }
 
-        /// <summary>Acceptance tooth 1 (UMR-116 DONE WHEN): the unsupported circle layer is named
+        /// <summary>The unsupported circle layer is named
         /// explicitly in the summary — id, raw type, reason — while the fill and line layers either side of
         /// it still render. RED recipe: revert <see cref="RenderLayerFactory"/>'s reason-reporting overload
         /// to the original bare-null <c>_ =&gt; null</c> arm (or otherwise stop threading
@@ -870,7 +870,7 @@ namespace MapRenderer.Tests.Rendering
         }
 
         /// <summary>MapView.LogSkippedLayers must warn for an actual compatibility gap but stay silent for a
-        /// by-design skip — the exact distinction UMR-116 asked the reason enum (not the log site) to carry.
+        /// by-design skip — the distinction the reason enum (not the log site) carries.
         /// RED recipe: remove the <c>GenuinelyUnpainted</c> filter in <see cref="MapView.LogSkippedLayers"/>
         /// — the second call below then also warns, and <see cref="LogAssert.NoUnexpectedReceived"/> fails it.</summary>
         [Test]
@@ -891,7 +891,7 @@ namespace MapRenderer.Tests.Rendering
             LogAssert.NoUnexpectedReceived(); // a by-design skip must not produce ANY warning
         }
 
-        /// <summary>Acceptance tooth 2: a skipped layer consumes no draw slot and does not create a gap —
+        /// <summary>A skipped layer consumes no draw slot and does not create a gap —
         /// the two rendering layers keep DrawIndex 0 and 1 (declared order, compacted), exactly as they
         /// would if circle-b were absent from the style entirely. RED recipe: increment <c>drawIndex</c> in
         /// <see cref="RenderLayerSet.Build"/>'s skipped-layer branch (as well as the real-layer branch) —
@@ -908,7 +908,7 @@ namespace MapRenderer.Tests.Rendering
                 "line-c must land at slot 1 — the skipped circle-b in between must not have reserved a slot.");
         }
 
-        /// <summary>Acceptance tooth 3: the summary is a style-load snapshot, not a per-frame log — pumping
+        /// <summary>The summary is a style-load snapshot, not a per-frame log — pumping
         /// the per-frame call (<see cref="RenderLayerSet.ApplyZoom"/>) many times over must never grow it.
         /// RED recipe: append to the skipped-layers list from ANY per-frame method instead of only from
         /// <see cref="RenderLayerSet.Build"/> — this test's repeated-count assertion catches the growth
@@ -927,7 +927,7 @@ namespace MapRenderer.Tests.Rendering
                 "50 simulated frames must not change the compatibility summary — it is bounded to style load.");
         }
 
-        // ── UMR-95 stage 1: the numbering fold's granularity (MapView.LayerNumbering) ──────────────────
+        // ── The numbering fold's granularity (MapView.LayerNumbering) ──────────────────────────────────
 
         // Extrusion present; the OTHER layer (circle-b, an unsupported kind) is skipped — the lone survivor
         // is the extrusion layer, at dense index 0.
@@ -1119,7 +1119,7 @@ namespace MapRenderer.Tests.Rendering
 
     // T6 (the per-layer build-object stage): the relocated emptiness gate — each
     // ITileMeshRenderLayer.BuildGraphRequest now decides "nothing to build" itself (job-
-    // scheduling-design.md §3.2's HasWork, moved out of TileMeshLayerProcessor and up into the
+    // scheduling-design.md's HasWork, moved out of TileMeshLayerProcessor and up into the
     // three render layers) — must match HasWork's old semantics exactly: null for an empty
     // selection, a rented build for a real one. Calls BuildGraphRequest DIRECTLY on each of the three
     // production layers (NIT 7) — not through the pipeline, which already gates emptiness upstream
@@ -1246,10 +1246,10 @@ namespace MapRenderer.Tests.Rendering
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // RenderLayerSetTests — one ordered set over every painted kind (D7 global numbering)
+    // RenderLayerSetTests — one ordered set over every painted kind (global numbering)
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // E1 (the render-layer model): D7 global numbering supersedes Stage A's
+    // E1 (the render-layer model): global numbering supersedes the older
     // "non-renderable takes no slot" contract — background/symbol now take slots too. These teeth fail if the
     // old type-bucketing (fills then lines) or a second ordering creeps back, if a genuinely unpainted type
     // (raster/unknown) takes a slot, or if a symbol/background slot's queue math desyncs the tile-mesh layers
@@ -1305,9 +1305,9 @@ namespace MapRenderer.Tests.Rendering
         {
             using var set = Build(InterleavedStyleJson);
 
-            // D7: EVERY painted layer takes a slot now — background and symbol included. Five declared
+            // EVERY painted layer takes a slot — background and symbol included. Five declared
             // layers → five slots, in declared order (not bucketed by type).
-            Assert.AreEqual(5, set.Count, "background/symbol/fill/line all take slots under D7 global numbering.");
+            Assert.AreEqual(5, set.Count, "background/symbol/fill/line all take slots under global numbering.");
 
             Assert.IsInstanceOf<BackgroundRenderLayer>(set[0], "index 0 = declared background");
             Assert.IsInstanceOf<Fill.StyleLayer>(set[1].StyleLayer, "index 1 = declared fill-a");
@@ -1324,9 +1324,9 @@ namespace MapRenderer.Tests.Rendering
         {
             using var set = Build(InterleavedStyleJson);
 
-            // Epic A / A2: background is now a source-less per-covered-tile TileMesh layer — ViewGeometry
-            // is REMOVED (design §B "The RenderLayerBuild.ViewGeometry enum decision").
-            Assert.AreEqual(RenderLayerBuild.TileMesh, set[0].Build, "background is TileMesh (A2).");
+            // Background is a source-less per-covered-tile TileMesh layer — ViewGeometry
+            // is REMOVED (design: "The RenderLayerBuild.ViewGeometry enum decision").
+            Assert.AreEqual(RenderLayerBuild.TileMesh, set[0].Build, "background is TileMesh.");
             Assert.AreEqual(RenderLayerBuild.TileMesh,     set[1].Build, "fill is TileMesh.");
             Assert.AreEqual(RenderLayerBuild.FramePlaced,  set[2].Build, "symbol is FramePlaced.");
             Assert.AreEqual(RenderLayerBuild.TileMesh,     set[3].Build, "line is TileMesh.");
@@ -1354,7 +1354,7 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreEqual(LayerSubSlot.Base,  set[3].MaterialSubSlot, "line — Base.");
             Assert.AreEqual(LayerSubSlot.Base,  set[4].MaterialSubSlot, "fill — Base.");
 
-            // G7/D7 (Stage 2): renderQueue = LayerDrawOrder.QueueFor(DrawIndex, MaterialSubSlot) — DrawIndex
+            // renderQueue = LayerDrawOrder.QueueFor(DrawIndex, MaterialSubSlot) — DrawIndex
             // == the slot's own declared-order index, uniformly for EVERY slot (RenderLayerSet.Build
             // increments drawIndex once per slot regardless; the QUEUE WRITE is skipped only when that
             // slot's own base material is unconfigured); MaterialSubSlot is Base for background/fill/line and
@@ -1362,10 +1362,10 @@ namespace MapRenderer.Tests.Rendering
             // over its own icon. E3 made background material-bearing too, so slot 0 (bg) now carries its own
             // queue same as every other slot — the last E1/E2 null-material slot is gone.
             Assert.AreEqual(LayerDrawOrder.QueueFor(0, set[0].MaterialSubSlot), set[0].Material.renderQueue,
-                "bg — slot 0, Base, material-bearing as of E3 so it gets a queue like every other slot.");
+                "bg — slot 0, Base, material-bearing so it gets a queue like every other slot.");
             Assert.AreEqual(LayerDrawOrder.QueueFor(1, set[1].MaterialSubSlot), set[1].Material.renderQueue, "fill-a — slot 1, Base.");
             Assert.AreEqual(LayerDrawOrder.QueueFor(2, set[2].MaterialSubSlot), set[2].Material.renderQueue,
-                "symbol-b — slot 2, Above (its Material IS WorldTextMaterial), material-bearing (E2, D11) so it gets a queue like every other slot.");
+                "symbol-b — slot 2, Above (its Material IS WorldTextMaterial), material-bearing so it gets a queue like every other slot.");
             Assert.AreEqual(LayerDrawOrder.QueueFor(3, set[3].MaterialSubSlot), set[3].Material.renderQueue, "line-c — slot 3, Base.");
             Assert.AreEqual(LayerDrawOrder.QueueFor(4, set[4].MaterialSubSlot), set[4].Material.renderQueue, "fill-d — slot 4, Base.");
 
@@ -1387,9 +1387,9 @@ namespace MapRenderer.Tests.Rendering
 
             // E3: background is now material-bearing too (a fill-base clone, MaterialFactory
             // .CreateBackgroundMaterial) — no slot is null when the material set is configured.
-            Assert.IsNotNull(set[0].Material, "bg now owns a material (E3) — BackgroundRenderLayer.Create clones MapMaterialSet.FillMaterial.");
+            Assert.IsNotNull(set[0].Material, "bg now owns a material — BackgroundRenderLayer.Create clones MapMaterialSet.FillMaterial.");
             Assert.IsNotNull(set[1].Material);
-            Assert.IsNotNull(set[2].Material, "symbol-b now owns a material (E2, D11) — SymbolRenderLayer.Create clones MapMaterialSet.SymbolTextWorld.");
+            Assert.IsNotNull(set[2].Material, "symbol-b now owns a material — SymbolRenderLayer.Create clones MapMaterialSet.SymbolTextWorld.");
             Assert.IsNotNull(set[3].Material);
             Assert.IsNotNull(set[4].Material);
             Assert.AreNotSame(set[0].Material, set[1].Material, "bg and fill-a must be distinct instances.");
@@ -1402,7 +1402,7 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreNotSame(set[3].Material, set[4].Material, "line-c and fill-d must be distinct instances.");
         }
 
-        // Commit-2 deletion (§0.1): the world icon material's renderQueue used to be set SOLELY by
+        // The world icon material's renderQueue used to be set SOLELY by
         // WorldSymbolRenderer.ResolveMaterial's per-frame sync (deleted this commit) — this style, with two
         // symbol layers at distinct draw indices, pins that BOTH world materials now carry the correct
         // Build-time queue with NO Tick at all.
@@ -1415,8 +1415,8 @@ namespace MapRenderer.Tests.Rendering
     ]
 }";
 
-        // U1 — G7/D7 contract correction, NOT a re-bake. The version this replaces asserted BOTH materials
-        // equal LayerDrawOrder.QueueFor(i) — i.e. it PINNED the G7 bug (icon and text sharing one queue,
+        // A contract correction, NOT a re-bake. The version this replaces asserted BOTH materials
+        // equal LayerDrawOrder.QueueFor(i) — i.e. it PINNED the bug (icon and text sharing one queue,
         // coplanar + ZWrite off ⇒ no tiebreak ⇒ the badge can paint over its own number). The "Build-time,
         // no Tick" intent survives verbatim; what changes is the asserted VALUE — icon at its own layer's
         // Base sub-slot, text at Above, and (the strict inequality below) icon < text ASSERTED EXPLICITLY,
@@ -1448,7 +1448,7 @@ namespace MapRenderer.Tests.Rendering
                     $"slot {i}'s WorldTextMaterial queue must be set by RenderLayerSet.Build (via Material, §0.2), " +
                     "with NO Tick, at its own layer's Above sub-slot.");
 
-                // The tooth a re-bake cannot fake: icon strictly below its own layer's text (G7/D7).
+                // The tooth a re-bake cannot fake: icon strictly below its own layer's text.
                 Assert.Less(iconQueue, textQueue,
                     $"slot {i}: the icon must draw strictly BEFORE (below) its own text — otherwise the badge " +
                     "can paint over the number it frames, the exact bug this stage fixes.");
@@ -1487,7 +1487,7 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreEqual(HideFlags.DontSave, set.Root.gameObject.hideFlags,
                 "the root is not serialised into a scene/build, but IS visible/inspectable in the Hierarchy.");
 
-            // Epic A / A2: background no longer owns a scene GameObject (its geometry is per-tile, produced
+            // Background does not own a scene GameObject (its geometry is per-tile, produced
             // by BackgroundQuad and owned by the backend) — only symbol presenters still take
             // the shared-root parenting path (lazily, on first Present), so there is nothing eager left to
             // assert here for background; this test now only pins the shared root's own visibility contract.
@@ -1498,7 +1498,7 @@ namespace MapRenderer.Tests.Rendering
         {
             // Extensibility contract: RenderLayerFactory maps a StyleLayer subtype → IRenderLayer. Genuinely
             // unpainted/unsupported-for-now types (raster) map to null (no slot); background/symbol now DO
-            // produce a render layer (D7) — the axis-bearing placeholders this stage adds.
+            // produce a render layer — the axis-bearing placeholders.
             StyleDocument style = StyleParser.Parse(RasterAndFillStyleJson);
             var settings = MapMaterialSetTestUtil.Load();
 

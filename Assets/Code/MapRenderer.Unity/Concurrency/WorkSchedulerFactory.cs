@@ -2,7 +2,7 @@ namespace MapRenderer.Unity.Concurrency
 {
     /// <summary>The single platform-selection SSOT: Inline on a real WebGL player (no background threads),
     /// ThreadPool everywhere else (editor, desktop, standalone). Schedulers are stateless, so one cached
-    /// instance per policy is correct. Stage 2's TileManager selection reuses this — one #if, one place.</summary>
+    /// instance per policy is correct. <c>TileManager</c>'s selection reuses this — one #if, one place.</summary>
     internal static class WorkSchedulerFactory
     {
         public static IWorkScheduler ForCurrentPlatform() => Instance;

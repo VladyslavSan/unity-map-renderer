@@ -20,13 +20,12 @@ namespace MapRenderer.Core.Text
     /// atlas width — and therefore every already-blitted row's byte offsets — never changes, so no reflow
     /// of previously appended glyphs is ever needed.
     ///
-    /// <para><b>Stage M — multi-page (fixed mode only).</b> A classic grow-mode atlas (<c>fixedHeight ==
-    /// 0</c>) never pages — it just keeps growing taller, exactly as before (byte-identical). A FIXED atlas
-    /// (<c>fixedHeight &gt; 0</c>, S105) used to DROP a glyph that didn't fit (counted in
-    /// <see cref="OverflowCount"/>). Now, when the CURRENT page's packer can't fit a cell, a NEW fixed page
+    /// <para><b>Multi-page (fixed mode only).</b> A classic grow-mode atlas (<c>fixedHeight ==
+    /// 0</c>) never pages — it just keeps growing taller. In a FIXED atlas (<c>fixedHeight &gt; 0</c>),
+    /// when the CURRENT page's packer can't fit a cell, a NEW fixed page
     /// (own pixel buffer + fresh packer) opens and becomes current — older pages are never revisited (this
     /// mirrors the packer's own append-only shelf policy: once a page's packer fails a cell, it never
-    /// "un-fails" for a same-or-larger cell later). <see cref="OverflowCount"/> now means genuine overflow:
+    /// "un-fails" for a same-or-larger cell later). <see cref="OverflowCount"/> means genuine overflow:
     /// a cell that doesn't fit even a brand-new empty page (wider than a full fixed-height column of
     /// shelves — GlyphAtlasPacker.TryPack itself throws for a cell wider than the atlas; this is the
     /// height-exceeds-a-fresh-page case). Every page shares the SAME fixed <c>(width, fixedHeight)</c>
@@ -38,8 +37,7 @@ namespace MapRenderer.Core.Text
         /// <summary>
         /// Hard ceiling on the number of fixed-mode pages (Texture2DArray layers) before a glyph that
         /// would need a NEW page is surfaced as <see cref="OverflowCount"/> overflow instead of allocating
-        /// (Stage M robustness — no unbounded page growth → OOM / exceeding the platform's Texture2DArray
-        /// layer limit).
+        /// (no unbounded page growth → OOM / exceeding the platform's Texture2DArray layer limit).
         ///
         /// <para><b>16, justified.</b> At the production 4096² R8 atlas (16 MB/page — <c>SymbolSubsystem
         /// .AtlasDimension</c>), one page holds ~17k typical ~30px SDF glyph cells, so 16 pages ≈ 270k glyph
@@ -73,11 +71,10 @@ namespace MapRenderer.Core.Text
         /// <param name="width">Atlas width in pixels.</param>
         /// <param name="fixedHeight">0 = classic height-grows atlas (single page, never pages); a positive
         /// value = a FIXED-capacity <c>width x fixedHeight</c> PAGE whose <see cref="Size"/> never changes
-        /// (its pixel buffer is pre-allocated in full) — S105 uses a big fixed atlas so incremental
-        /// per-tile layout never invalidates earlier tiles' UVs.
-        /// Stage M: a glyph that no longer fits the current page opens a NEW page (own buffer + packer)
-        /// instead of dropping — see the class doc's multi-page section. <see cref="OverflowCount"/> now
-        /// only counts a cell that doesn't fit even a fresh empty page.</param>
+        /// (its pixel buffer is pre-allocated in full) — a big fixed atlas keeps incremental per-tile
+        /// layout from invalidating earlier tiles' UVs. A glyph that no longer fits the current page opens
+        /// a NEW page (own buffer + packer) instead of dropping — see the class doc's multi-page section.
+        /// <see cref="OverflowCount"/> only counts a cell that doesn't fit even a fresh empty page.</param>
         public GlyphAtlas(int width, int fixedHeight)
         {
             _fixedHeight = fixedHeight;
@@ -221,10 +218,9 @@ namespace MapRenderer.Core.Text
                 return true;
             }
 
-            // Current page full — a NEW page is needed. Cap page growth (Stage M robustness): at MaxPages,
-            // surface the glyph as overflow instead of allocating unboundedly (OOM / Texture2DArray layer
-            // limit). The preflight above guarantees the cell fits a fresh page, so the TryPack below always
-            // succeeds once we commit to opening one.
+            // Current page full — a NEW page is needed. Cap page growth: at MaxPages, report the glyph as
+            // overflow instead of allocating unboundedly (OOM / Texture2DArray layer limit). The preflight
+            // above guarantees the cell fits a fresh page, so the TryPack below always succeeds.
             if (_packers.Count >= MaxPages)
             {
                 origin = default;

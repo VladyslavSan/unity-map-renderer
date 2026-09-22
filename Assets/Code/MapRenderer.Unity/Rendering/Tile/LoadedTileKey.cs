@@ -3,7 +3,7 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>
-    /// A-1 pull surface: a neutral <c>(source, tile)</c> membership record handed out by
+    /// A neutral <c>(source, tile)</c> membership record handed out by
     /// <see cref="TileManager.CollectLoadedTileKeys"/> so a consumer (the symbol subsystem) can PULL the
     /// currently-loaded tile set each frame and reconcile against it, instead of being pushed fragile
     /// release/restore lifecycle callbacks. A plain data DTO — carries no behaviour and no reference to the

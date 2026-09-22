@@ -8,24 +8,24 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// A-3: a stable CROSS-TILE identity for a point symbol — <c>(quantized world anchor, layer, text, icon
+    /// A stable CROSS-TILE identity for a point symbol — <c>(quantized world anchor, layer, text, icon
     /// image)</c> — so the SAME symbol appearing in more than one loaded tile (a parent + its child during a
-    /// zoom transition) is recognised as one symbol (deduped now; carried through the A-4 fade so a tile swap
-    /// is a seamless no-op, not a fade-out/fade-in). I6: <see cref="IconImage"/> extends the identity to icon
-    /// symbols (whose <see cref="Text"/> is always null, I3) so two distinct co-located icons (same anchor
-    /// cell + layer, different sprite) stay distinct instead of colliding.
+    /// zoom transition) is recognised as one symbol (deduped, and carried through the fade so a tile swap is
+    /// a seamless no-op). <see cref="IconImage"/> extends the identity to icon symbols (whose
+    /// <see cref="Text"/> is always null) so two distinct co-located icons (same anchor cell + layer,
+    /// different sprite) stay distinct instead of colliding.
     ///
     /// <para><b>Why quantize, and to what.</b> The same geo feature is MVT-quantized to each tile's own extent
     /// grid, so a parent (coarser) and child (finer) tile place its anchor a few metres apart. Snapping the
     /// render-space (Mercator-metre) anchor to a grid of <c>quantizeMeters</c> collapses that difference to one
-    /// cell. <c>For</c> is a general primitive parameterised by <c>quantizeMeters</c>; its production callers now
-    /// pass the FIXED <see cref="CanonicalGridMeters"/> (Stage 3: the store dedup; Stage 3b: the point fade id).
-    /// A fixed grid is correct because parent/child tile OVERLAP does not happen today (design §1.2) — the only
-    /// real dup is the SAME feature in adjacent/overlapping tiles, whose anchor is identical, so any small fixed
-    /// grid collapses it; separating two genuinely distinct symbols that are close on screen is the COLLISION
-    /// pass's job, not this key's. (FUTURE, when parent/child overlap lands (design §6): the grid goes back to a
-    /// zoom-scaled value — pick the coarser band's grid + finest-zoom-wins — a change localised to the caller's
-    /// <c>quantizeMeters</c> input and <see cref="CanonicalGridMeters"/>'s use.)</para>
+    /// cell. <c>For</c> is a general primitive parameterised by <c>quantizeMeters</c>; its production callers
+    /// pass the FIXED <see cref="CanonicalGridMeters"/>. A fixed grid is correct because parent/child tile
+    /// OVERLAP does not happen today — the only real dup is the SAME feature in adjacent/overlapping tiles,
+    /// whose anchor is identical, so any small fixed grid collapses it; separating two genuinely distinct
+    /// symbols that are close on screen is the COLLISION pass's job, not this key's. When parent/child
+    /// overlap lands the grid goes back to a zoom-scaled value — pick the coarser band's grid +
+    /// finest-zoom-wins — a change localised to the caller's <c>quantizeMeters</c> input and
+    /// <see cref="CanonicalGridMeters"/>'s use.</para>
     ///
     /// <para><b>Boundary caveat.</b> Grid snapping misses when the two anchors straddle a cell edge; that yields
     /// a rare one-frame double-symbol, not a persistent error (neighbour-cell matching is a future refinement).
@@ -40,9 +40,9 @@ namespace MapRenderer.Core.Text.Placement
         public readonly int LayerId;
         public readonly string Text;
 
-        /// <summary>I6: the resolved sprite name — the icon's cross-tile identity. Null for a text symbol
-        /// (every pre-I6 caller), so a text key's hash/equality is UNCHANGED (a guard-skip fold, not
-        /// <c>?? 0</c> — see <see cref="GetHashCode"/>).</summary>
+        /// <summary>The resolved sprite name — the icon's cross-tile identity. Null for a text symbol, whose
+        /// hash/equality must not change: <see cref="GetHashCode"/> skips the fold rather than folding
+        /// <c>?? 0</c>.</summary>
         public readonly string IconImage;
 
         public CrossTileSymbolKey(long gridX, long gridZ, long gridY, int layerId, string text, string iconImage)
@@ -50,16 +50,14 @@ namespace MapRenderer.Core.Text.Placement
             GridX = gridX; GridZ = gridZ; GridY = gridY; LayerId = layerId; Text = text; IconImage = iconImage;
         }
 
-        /// <summary>The single canonical dedup+fade grid (metres). Stage 3: the cross-tile dedup key
-        /// (<see cref="MapRenderer.Unity.Text.SymbolTileStore"/>) quantizes to this grid — so a point
-        /// symbol's dedup cell is a pure function of the tile set (Stage 3b will fold the point fade id onto it
-        /// too, making dedup cell == fade cell). Fixed (zoom-independent) because parent/child tile overlap does
-        /// not happen today (design §1.2): the only real dup is the SAME feature in adjacent/overlapping tiles,
+        /// <summary>The single canonical dedup+fade grid (metres). The cross-tile dedup key
+        /// (<see cref="MapRenderer.Unity.Text.SymbolTileStore"/>) quantizes to this grid, so a point symbol's
+        /// dedup cell is a pure function of the tile set. Fixed (zoom-independent) because parent/child tile
+        /// overlap does not happen today: the only real dup is the SAME feature in adjacent/overlapping tiles,
         /// whose anchorRender is identical, so any fixed grid collapses it; distinct-feature visual overlap is
-        /// the COLLISION pass's job, not the dedup's. 4 m (matching today's fade grid — one tuning knob, see
-        /// design §8). FUTURE (parent/child overlap, design §6): go back to a zoom-scaled grid — pick the coarser
-        /// band's grid + finest-zoom-wins; change the store's grid input + this const's use, nothing
-        /// downstream.</summary>
+        /// the COLLISION pass's job, not the dedup's. 4 m, matching the fade grid — one tuning knob. When
+        /// parent/child overlap lands, go back to a zoom-scaled grid (pick the coarser band's grid +
+        /// finest-zoom-wins): change the store's grid input and this const's use, nothing downstream.</summary>
         public const double CanonicalGridMeters = 4.0;
 
         /// <summary>
@@ -82,10 +80,8 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// The shared anchor→grid quantization: snaps all three render-space axes to a
-        /// <paramref name="quantizeMeters"/> grid (<c>≤ 0</c> ⇒ a defensive 1-metre grid). Extracted (Stage 2)
-        /// so the string-keyed <see cref="For"/> and the integer-keyed dedup key produce BIT-IDENTICAL grids
-        /// from one code path. Behaviour-preserving: the <c>q ≤ 0 → 1.0</c> fallback + <c>math.round</c> are
-        /// exactly as <see cref="For"/> did them inline.
+        /// <paramref name="quantizeMeters"/> grid (<c>≤ 0</c> ⇒ a defensive 1-metre grid). One code path, so
+        /// the string-keyed <see cref="For"/> and the integer-keyed dedup key produce BIT-IDENTICAL grids.
         /// </summary>
         public static void QuantizeAnchor(in double3 anchorRender, double quantizeMeters,
             out long gridX, out long gridZ, out long gridY)
@@ -112,9 +108,8 @@ namespace MapRenderer.Core.Text.Placement
                 h = h * 31 + GridY.GetHashCode();
                 h = h * 31 + LayerId;
                 h = h * 31 + (Text?.GetHashCode() ?? 0);
-                // I6 guard-skip fold: only fold IconImage when non-null, so a text key (IconImage always
-                // null) hashes IDENTICALLY to before this field existed — an unconditional `?? 0` fold would
-                // still change every text hash (folding an extra constant term), breaking the #1 invariant.
+                // Guard-skip fold: only fold IconImage when non-null, so a text key (IconImage always null)
+                // keeps its hash — an unconditional `?? 0` fold would change every text hash.
                 if (IconImage != null) h = h * 31 + IconImage.GetHashCode();
                 return h;
             }

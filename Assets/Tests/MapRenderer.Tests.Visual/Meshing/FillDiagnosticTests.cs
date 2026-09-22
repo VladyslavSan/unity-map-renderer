@@ -1,4 +1,4 @@
-// Fill-diagnostic and alternate-source-path GPU/visual acceptance tests (UMR-176 pack: meshing topic).
+// Fill-diagnostic and alternate-source-path GPU/visual acceptance tests.
 //
 // The three-way split follows TWO using collisions, not the line cap: `CameraProperties`
 // (MapRenderer.Core.Geo vs UnityEngine.Rendering) and bare `Object` (System.Object vs
@@ -9,10 +9,10 @@
 // band cost/compare diagnostics and the GeoJson-sourced fill proof.
 //
 // Contents:
-//   MapViewStyledFillTests           — S40 decisive tests for per-layer styled fill rendering in MapView.
+//   MapViewStyledFillTests           — decisive tests for per-layer styled fill rendering in MapView.
 //   FillBandFrameCostDiagnostic      — Measures the fill boundary band's cost, band-on versus band-off, over real MVT fixtures.
 //   FillBandVisualCompareDiagnostic  — Produces before/after image pairs of the fill boundary band over real MVT fixtures, plus the graded-pixel counts that go with each pair.
-//   GeoJsonFillVisualProofTests      — Unity EditMode only — Stage G-V0, the declarative visual-test authoring kit's proof fixture.
+//   GeoJsonFillVisualProofTests      — Unity EditMode only — the declarative visual-test authoring kit's proof fixture.
 
 using System;
 using System.Collections.Generic;
@@ -42,17 +42,17 @@ namespace MapRenderer.Tests.Visual
     // Unity EditMode only — uses MonoBehaviour, Mesh, per-layer material inspection.
     // NOT included in Tools/core-tests.
     //
-    // S40 decisive acceptance tests for per-layer styled fill rendering.
+    // Decisive acceptance tests for per-layer styled fill rendering.
     //
     // ALL decisive assertions here are CPU-side (mesh.GetColors() or per-layer material inspection).
     // They CANNOT degrade to Inconclusive — no GPU context is required for the decisive teeth.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapViewStyledFillTests — S40 decisive tests for per-layer styled fill rendering in MapView.
+    // MapViewStyledFillTests — decisive tests for per-layer styled fill rendering in MapView.
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S40 decisive tests for per-layer styled fill rendering in <see cref="MapView"/>.
+    /// Decisive tests for per-layer styled fill rendering in <see cref="MapView"/>.
     ///
     /// Acceptance teeth (all CPU-side, cannot degrade to Inconclusive):
     ///
@@ -73,7 +73,7 @@ namespace MapRenderer.Tests.Visual
     ///
     /// #4 — Gamma correct baked colors (DECISIVE):
     ///   The baked vertex colors in the mesh are closer to their expected linear value than to
-    ///   their raw sRGB value — MeshBuilder.Build() applied Color.linear (the D2 gamma fix).
+    ///   their raw sRGB value — MeshBuilder.Build() applied Color.linear.
     ///   Uses a constant-color 1-fill-layer style with a known sRGB color to get a deterministic
     ///   expected linear value.
     ///
@@ -579,7 +579,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ─── #6: fill-color Stage 1 — zoom retint does not rebuild the mesh (DECISIVE) ──────────
+        // ─── #6: fill-color — a zoom retint does not rebuild the mesh (DECISIVE) ────────────────
 
         private static void AssertColorClose(Color expected, Color actual, string what)
         {
@@ -589,7 +589,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// A Zoom-kind fill-color must retint the MATERIAL, not rebake the MESH — that is Stage 1's whole
+        /// A Zoom-kind fill-color must retint the MATERIAL, not rebake the MESH — that is the carrier split's
         /// deliverable. Pins the tile set fixed across the zoom move so a rebuild (if one happened) could
         /// only be the colour change, never a different cover.
         /// </summary>
@@ -1735,13 +1735,13 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Unity EditMode only — Stage G-V0, the declarative visual-test authoring kit's proof fixture.
+    // Unity EditMode only — the declarative visual-test authoring kit's proof fixture.
     // NOT registered in Tools/core-tests/core-tests.csproj.
     //
-    // The single fill-only proof fixture carrying the kit's three acceptance teeth (plan §6): T-Fill (the fill
-    // actually renders where authored, background where empty), T-Parse (the kit routes through the REAL
-    // StyleParser.Parse — two arms), T-Binding (layers bind by source id; a dangling id yields no geometry AND
-    // wires no source). Fill only — no symbols, no lines, no seam-dedup (plan §10 scope fence).
+    // The single fill-only proof fixture carrying the kit's three acceptance teeth: the fill renders where
+    // authored and background where empty; the kit routes through the REAL StyleParser.Parse (two arms);
+    // layers bind by source id, and a dangling id yields no geometry AND wires no source. Fill only — no
+    // symbols, no lines, no seam-dedup.
 
     // ───────────────────────────────────────────────────────────────────────────────────
     // GeoJsonFillVisualProofTests — Unity EditMode only
@@ -1761,7 +1761,7 @@ namespace MapRenderer.Tests.Visual
 
         // Polygon spans the tile-local unit square [0.2,0.8]² (60% of the tile, centered) — comfortably
         // inside GeoJsonSliceOptions.Default's ~1.5%-of-tile buffer, so no tile-edge interaction (seam-dedup
-        // is deferred, plan §10).
+        // is out of scope here).
         private const double PolyLo = 0.2, PolyHi = 0.8;
 
         // Center sample box: unit square [0.45,0.55]² — well inside the filled [0.2,0.8]² region.
@@ -1769,7 +1769,7 @@ namespace MapRenderer.Tests.Visual
 
         // Corner sample boxes: 51×51 px (~0.1 of the tile) at each frame corner — well outside the filled
         // region, and origin-symmetric (all four corners as a SET, never "the top-left corner" — the frame is
-        // bottom-left origin, plan §7).
+        // bottom-left origin).
         private const int CornerSize = 51;
 
         private static (double west, double south, double east, double north) ProofRectangle()
@@ -1804,7 +1804,7 @@ namespace MapRenderer.Tests.Visual
             centerMean = frame.RegionMeanColor(CenterLo, CenterLo, CenterHi, CenterHi);
         }
 
-        // ── Compile checkpoint A (plan §4) — JSON assembly compiles before the render path is exercised ──
+        // ── JSON assembly compiles before the render path is exercised ─────────────────────────────────
 
         [Test]
         public void BuildStyleJson_ContainsAuthoredSourceAndLayerIds()
@@ -1878,8 +1878,8 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void Fill_ZeroOpacity_RendersBackgroundOnly()
         {
-            // Secondary, de-risked negative control (plan §6, optional arm): fills declare
-            // _SURFACE_TYPE_TRANSPARENT and opacity 0 is proven invisible (FillPaintSnapshotTests.cs:158-171).
+            // Secondary negative control: fills declare _SURFACE_TYPE_TRANSPARENT, and opacity 0 is proven
+            // invisible by FillPaintSnapshotTests.
             var (west, south, east, north) = ProofRectangle();
             using var scene = VisualScene.New()
                 .Source("cities", GeoJson.Polygon(west, south, east, north))
@@ -1894,13 +1894,11 @@ namespace MapRenderer.Tests.Visual
         // ── G-VR: golden reference-image regression (change detector, layered ALONGSIDE the analytic
         // teeth above — those stay the correctness oracle; this only catches "different from last bake") ──
 
-        // Reference re-baked 2026-09-08 for the fill boundary band, on the maintainer's authorisation and
-        // only after the direction was verified. Measured against the previous bake: 1236 differing px in
-        // bbox [101,101]-[410,410] — a ~310 px square whose perimeter is ~1240 px, so the changed pixels ARE a
-        // one-pixel ring on the silhouette. All 1236 moved TOWARD the fill colour and none away, and none sits
-        // farther than 1.5 px from the boundary, leaving the ~96,000 px interior untouched. That is softened
-        // edges, not displaced geometry — had geometry moved, the count would be in the tens of thousands.
-        // Recorded because a re-baked golden with no reason is indistinguishable from one re-baked to go green.
+        // Reference re-baked 2026-09-08 for the fill boundary band, recorded because a re-bake with no
+        // reason is indistinguishable from one done to go green. Against the previous bake: 1236 differing
+        // px, all on a one-pixel ring on the silhouette (a ~310 px square, ~1240 px of perimeter), all moved
+        // TOWARD the fill colour, none farther than 1.5 px out, ~96,000 px of interior untouched — softened
+        // edges, not displaced geometry, which would have moved tens of thousands of pixels.
         [Test]
         public void Golden_Gv0Fill_MatchesBakedReference()
         {

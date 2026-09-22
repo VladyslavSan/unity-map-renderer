@@ -10,7 +10,7 @@ namespace MapRenderer.Tests.Meshing
     /// Verifies outer/hole classification by signed-area sign and multipolygon handling.
     ///
     /// Winding note: geometry is canonical CCW in tile space (Y-up, positive shoelace) — see
-    /// docs/coordinates-and-projections.md §7. Classification is by shoelace SIGN, not by frame:
+    /// docs/coordinates-and-projections.md. Classification is by shoelace SIGN, not by frame:
     ///   Positive shoelace area (area2 > 0) = EXTERIOR ring.
     ///   Negative shoelace area (area2 &lt; 0) = HOLE ring (opposite winding).
     /// (The same vertex order reads CW on a Y-down screen; that is a frame, not the convention.)

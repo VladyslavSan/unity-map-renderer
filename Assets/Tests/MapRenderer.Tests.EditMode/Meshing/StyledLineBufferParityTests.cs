@@ -3,11 +3,11 @@
 // No single production area dominates this file; kept in the order the topic-and-lane pack assembled them, each fixture independent of its neighbours.
 //
 // Contents:
-//   StyledLineBufferParityTests  — IR stage B3: the teeth on moving StyledLineTileBuilder off its own managed MvtGeometry.Decode and onto the shared TileGeometryBuffers.
-//   FillLayerKindGateTests       — IR stage B3, T10: the observer for the precondition B3's deferral rests on.
-//   WallQuadJobParityTests       — Two-part comparison, same shape as StyledFillExtrusionGraphWriteTests and grounded in the SAME measurement (docs/job-scheduling-design.md §8 stage 5's opening invariant block + the wall-tail addendum):   - Position, ExtrudeUpAndT.w (t), BakedBaseHeight,…
+//   StyledLineBufferParityTests  — the teeth on moving StyledLineTileBuilder off its own managed MvtGeometry.Decode and onto the shared TileGeometryBuffers.
+//   FillLayerKindGateTests       — the observer for the precondition the RingAssemblyJob kind-gate deferral rests on.
+//   WallQuadJobParityTests       — Two-part comparison, the same shape as StyledFillExtrusionGraphWriteTests and grounded in the same measurement (docs/job-scheduling-design.md).
 //   WaterTriangulationTests      — Mesh-triangulation testbench over real OpenFreeMap water tiles (many-holed polygons — the case that breaks a hand-rolled ear-clipper).
-//   LineBuildAllocTests          — Rank 3 (GC-allocation fix, rapid-zoom stutter) F2 closer: after the three per-layer attribution columns (featColors/featWidths/featSelected) moved from managed T[] to NativeArray, a CONSTANT style (paint.Width/Opacity.DependsOnFeature both false) makes…
+//   LineBuildAllocTests          — with the three per-layer attribution columns (featColors/featWidths/featSelected) native rather than managed T[], a CONSTANT style (paint.Width/Opacity.DependsOnFeature both false) makes the line build allocation-free.
 
 using System;
 using System.Collections.Generic;
@@ -44,11 +44,11 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR stage B3: the teeth on moving <c>StyledLineTileBuilder</c> off its own managed
+    /// The teeth on moving <c>StyledLineTileBuilder</c> off its own managed
     /// <c>MvtGeometry.Decode</c> and onto the shared <see cref="TileGeometryBuffers"/>.
     ///
-    /// <para><b>Why a differential oracle rather than a snapshot.</b> B1 and B2 could argue byte-identity by
-    /// construction — only a call path moved. B3 cannot: two different decoder implementations
+    /// <para><b>Why a differential oracle rather than a snapshot.</b> A move that only relocates a call
+    /// path can argue byte-identity; this one cannot — two different decoder implementations
     /// (managed <c>List&lt;List&lt;double2&gt;&gt;</c> vs Burst flat <c>NativeArray</c>), a different ring
     /// iteration shape, and a new per-feature kind gate. Equality is therefore <b>measured</b>: the same tile,
     /// the same features, decoded both ways in the same test run and compared element-wise at the exact seam
@@ -83,7 +83,7 @@ namespace MapRenderer.Tests.Meshing
             ITileLayer geolines = GeolinesLayer();
             IReadOnlyList<IFeature> features = geolines.Features;
             // Arm A's input comes from the BYTES, through the independent fixture reader — not from the
-            // decoded features, which carry no command stream since IR C1 P3 (and reading production's own
+            /// decoded features, which carry no command stream (and reading production's own
             // buffer would make the differential compare production with itself).
             MvtFixtureStreams.Layer fixture = MvtFixtureStreams.ReadLayer(LoadFixture(), "geolines");
             Assert.AreEqual(fixture.Kinds.Count, features.Count,
@@ -107,7 +107,7 @@ namespace MapRenderer.Tests.Meshing
 
             // ── Arm B — the new path, with EXACTLY the production gates.
             var actual = new List<(int featureIdx, double2[] points)>();
-            // IR C1 P3: arm B reads the DECODED LAYER's own buffer — the very object production consumes —
+            // Arm B reads the DECODED LAYER's own buffer — the very object production consumes —
             // rather than re-materializing. Borrowed: the tile owns it and the TearDown frees it.
             TileGeometryBuffers geometry = geolines.Geometry;
             {
@@ -252,7 +252,7 @@ namespace MapRenderer.Tests.Meshing
         // ── T3: line's OWN length threshold — `< 2`, never fill's `< 3` ────────────────────────────
 
         /// <summary>
-        /// T3 — a two-point polyline is the boundary value of line's own filter and must still render. B2's
+        /// T3 — a two-point polyline is the boundary value of line's own filter and must still render. The
         /// seam tooth observes that the shared <i>buffer</i> stays unfiltered; this observes <b>the line
         /// consumer's own threshold</b>, which is the direction that is actually observable downstream:
         /// <c>RibbonJob.Execute</c> already early-returns on <c>PointCount &lt; 2</c>, so a short ring
@@ -396,7 +396,7 @@ namespace MapRenderer.Tests.Meshing
             return layer;
         }
 
-        /// <summary>IR C1 P3: the decoded fixture tile owns Allocator.Persistent buffers.</summary>
+        /// <summary>The decoded fixture tile owns Allocator.Persistent buffers.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
 
@@ -455,17 +455,16 @@ namespace MapRenderer.Tests.Meshing
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // FillLayerKindGateTests — the observer for the precondition B3's deferral rests on
+    // FillLayerKindGateTests — the observer for the precondition the kind-gate deferral rests on
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR stage B3, T10: the observer for the precondition B3's <b>deferral</b> rests on.
+    /// The observer for the precondition the kind-gate <b>deferral</b> rests on.
     ///
-    /// <para>B3 deliberately does NOT gate <c>RingAssemblyJob</c> on <c>FeatureGeometryType</c>: every
+    /// <para><c>RingAssemblyJob</c> is NOT gated on <c>FeatureGeometryType</c>: every
     /// production path into it is polygon-filtered upstream by <c>StyledFillTileBuilder</c>, so the gate would
-    /// be dead on every live path. That deferral is only defensible while the upstream filter actually holds —
-    /// and until now the filter had <b>no observer at all</b>, which is the "recorded limitation with no
-    /// observing tooth" failure family. This is the observer.</para>
+    /// be dead on every live path. That deferral is only defensible while the upstream filter holds, so
+    /// this is the filter's observer.</para>
     /// </summary>
     [TestFixture]
     public class FillLayerKindGateTests : BaseTestFixture
@@ -696,7 +695,7 @@ namespace MapRenderer.Tests.Meshing
                     AssertBounded(pn.Normal.z, golden.NormHex[i * 3 + 2], WallNormalTangentMaxUlp, fixtureName, label, i, "Normal.z");
 
                     // ExtrudeUpAndT.xyz = upA * factor: BOUNDED, not bit-exact — upA is math.normalize(Up[idx]),
-                    // and normalize was measured (this file's header + §8's wall-tail addendum) to diverge
+                    // and normalize was measured (see this file's header) to diverge
                     // from managed data-dependently on SOME inputs. It happened to be bit-exact on every edge
                     // of the square+courtyard fixture but is NOT bit-exact on high-latitude/Spherical (found
                     // running this exact tooth, RED-verified by the discovery itself — a 1-ULP divergence at
@@ -732,7 +731,7 @@ namespace MapRenderer.Tests.Meshing
         }
 
         /// <summary>
-        /// The wall chain honours the tile-buffer clip (UMR-93): it takes the SAME select-or-clip branch on
+        /// The wall chain honours the tile-buffer clip: it takes the SAME select-or-clip branch on
         /// <c>LayerInput.Clip</c> the roof takes, so a building crossing the tile-buffer window is extruded
         /// from the CLIPPED footprint, not the full one. Before the fix the walls ran
         /// <c>RingSelectJob</c> unconditionally, and with the shipped <c>FillTileBufferClip: 0</c> config —
@@ -754,7 +753,7 @@ namespace MapRenderer.Tests.Meshing
         /// included, because what is extruded is the clipped polygon; the cut quads are hidden inside the
         /// opaque solid in steady state and are what keeps a building at the edge of the loaded cover CLOSED
         /// rather than a hollow shell. The one condition that reopens the alternative is translucent
-        /// fill-extrusion (<c>depth-and-render-regimes-design.md</c> §6.E) — until then, a "simplification"
+        /// fill-extrusion (<c>depth-and-render-regimes-design.md</c>) — until then, a "simplification"
         /// to 8 is a regression, and this number is what stops it landing silently.</para>
         ///
         /// <para><b>The disabled-arm control (32/48) is not decoration.</b> Without it assertion 1 would be a
@@ -921,7 +920,7 @@ namespace MapRenderer.Tests.Meshing
     /// Mesh-triangulation testbench over real OpenFreeMap water tiles (many-holed polygons — the case that
     /// breaks a hand-rolled ear-clipper). See docs/mesh-triangulation-robustness-design.md.
     ///
-    /// A0 (Core oracle cleanup) re-homed this corpus onto the REAL jobified fill path —
+    /// This corpus runs on the REAL jobified fill path —
     /// <see cref="FillMeshGraph.Schedule"/>, the Burst <see cref="EarcutJob"/> — the same production
     /// dispatch <c>JobifiedWaterTriangulationTests</c> already proves for water-8-135-80 (kept there,
     /// not duplicated here; together the two files cover all 8 corpus tiles on the Burst arm, none on
@@ -929,7 +928,7 @@ namespace MapRenderer.Tests.Meshing
     /// here — the boundary band's outer vertices share their inner twin's coordinate (see
     /// <c>FillMeshGraph</c>'s own comment), so every band triangle has near-zero area, sign 0, and is
     /// ignored by <see cref="MeshCoverageValidator.ValidateTriangulation"/>'s winding majority and raster
-    /// coverage — this is the only place in A0 where band-on is correct (§6.6 needs it off).
+    /// coverage — this is the only place where band-on is correct.
     ///
     /// Always-on (green): the validator is correct on a clean synthetic polygon, and the corpus tiles decode,
     /// assemble, and triangulate their OUTER rings cleanly — so any regression in decode/assemble/outer is
@@ -993,7 +992,7 @@ namespace MapRenderer.Tests.Meshing
             double extent = layer.Extent;
             var (bMin, _) = tileId.MercatorBounds();
 
-            TileGeometryBuffers geometry = layer.Geometry; // BORROWED (IR C1 P3)
+            TileGeometryBuffers geometry = layer.Geometry; // BORROWED
             NativeArray<int> visitOrder = TestTileMeshBuilder.FullVisitOrder(geometry);
             var pipelineInput = new FillMeshPipeline.LayerInput
             {
@@ -1059,7 +1058,7 @@ namespace MapRenderer.Tests.Meshing
         {
             foreach (string name in Corpus)
             {
-                // IR C1 P3: the command streams come from the test-side fixture reader, not from a decoded
+                // The command streams come from the test-side fixture reader, not from a decoded
                 // MvtFeature — a decoded feature carries no geometry now, and reading production's buffer
                 // instead would make this oracle audit itself.
                 var layer = MvtFixtureStreams.ReadLayer(LoadFixture(name), "water");
@@ -1090,18 +1089,18 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // ---- acceptance teeth for the hole-handling fix (stage 2/3) — Burst arm ----------------------
+        // ---- acceptance teeth for the hole-handling fix — Burst arm ----------------------------------
         // water-8-135-80 is proven by JobifiedWaterTriangulationTests (not duplicated here).
 
         [Test]
         public void Corpus_Water_6_32_20_TriangulatesFaithfully()
         {
             // water-6-32-20's poly 0 (outer=879, 13 holes) hits ONE locus the cure -> split cascade cannot
-            // resolve, and drops it cleanly. Measured at the drop site (UMR-106, managed arm): 5 live
+            // resolve, and drops it cleanly. Measured at the drop site (managed arm): 5 live
             // vertices, residual signed area +33.5 tile-space units^2 in a 4096^2 tile — sub-pixel at z6,
             // ~13x below MeshCoverageValidator's raster resolution, so ForceClips is the only instrument
             // that observes it (that argument survives the arm change unchanged). Re-measured for the
-            // Burst arm in A0: ForceClips=1, byte-identical to the managed pin — the two arms agree on
+            // Burst arm: ForceClips=1, byte-identical to the managed pin — the two arms agree on
             // this tile's cascade. The count is pinned EXACTLY, not bounded, to keep that sentinel armed.
             var rep = RunOnBurstArm("water-6-32-20.pbf.bytes", new TileId { Z = 6, X = 32, Y = 20 }, "water");
             TestContext.WriteLine($"water-6-32-20 (Burst arm): {rep.Summary}");
@@ -1119,7 +1118,7 @@ namespace MapRenderer.Tests.Meshing
         // ---- real coastline-dense tiles (fjords / archipelagos) — the case the fix targets --------------
         // These are real OpenFreeMap water tiles chosen for pathological hole counts. The 4 CLEAN ones
         // triangulate perfectly (the strict bar); the 2 HARD ones exercise the design's graceful-
-        // degradation path (§3.1) — a bounded, SURFACED clean drop, never a fold.
+        // degradation path — a bounded, SURFACED clean drop, never a fold.
 
         // CLEAN real tiles — strict bar: ForceClips==0, WindingFlips==0, area+coverage within 1%.
         private static readonly (string File, TileId Id)[] CleanRealCorpus =
@@ -1142,10 +1141,10 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // HARD real tiles — graceful-degradation bar (design §3.1): the critical invariant is
+        // HARD real tiles — graceful-degradation bar: the critical invariant is
         // WindingFlips==0 (NO fold/inversion — the visible-corruption failure mode is impossible), with
         // area conserved to <1% and a bounded, surfaced clean-drop count. Measured for the Burst arm in
-        // A0: croatia-dalmatia ForceClips=1, indonesia-rajaampat ForceClips=1 — both at the bound, same
+        // croatia-dalmatia ForceClips=1, indonesia-rajaampat ForceClips=1 — both at the bound, same
         // as the managed arm's own `<=1` allowance (the design's own tolerance, not a placeholder copied
         // from a tighter managed value). A clean drop is a VISIBLE signal (it is counted), never silent
         // garbage. This documents that the fix degrades correctly on the hardest real input rather than

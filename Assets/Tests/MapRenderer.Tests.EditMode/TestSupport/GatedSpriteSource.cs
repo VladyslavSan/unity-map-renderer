@@ -9,7 +9,7 @@ using MapRenderer.Core.Text.Sprites;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// D6 (road-shields, docs/road-shields-design.md §3 D6) test double: an <see cref="ISpriteSource"/> whose
+    /// A road-shields test double: an <see cref="ISpriteSource"/> whose
     /// <see cref="FetchAsync"/> defers entirely to a caller-supplied delegate — typically a held
     /// <c>UniTaskCompletionSource</c>'s <c>.Task</c>, so a test can drive a symbol build INTO the "sprite fetch
     /// still pending" state and then release it on demand. Mirrors <see cref="TestGlyphSource"/>'s delegate-ctor

@@ -1,4 +1,4 @@
-// Fill-pattern GPU/visual acceptance tests (UMR-176 pack: meshing topic).
+// Fill-pattern GPU/visual acceptance tests.
 //
 // The three-way split follows TWO using collisions, not the line cap: `CameraProperties`
 // (MapRenderer.Core.Geo vs UnityEngine.Rendering) and bare `Object` (System.Object vs
@@ -9,14 +9,14 @@
 // that share the same collision profile.
 //
 // Contents:
-//   FillPatternSnapshotTests            — P2 acceptance — the black-region fix, at the pixel level.
+//   FillPatternSnapshotTests            — the black-region fix, at the pixel level.
 //   FillPatternPeriodDiagnostic         — Measures what a pattern fill actually puts on screen, for a single tile under a top-down camera.
 //   FillPatternThroughSpriteSheetTests  — U4 — a fill-pattern resolved through the REAL SpriteSheet never samples outside its own content rect.
-//   LitFillSnapshotTests                — S32 + S34 acceptance tests — Lit material foundation for fills.
+//   LitFillSnapshotTests                — acceptance tests — Lit material foundation for fills.
 //   FillOutwardBandProbeTests           — Unity EditMode only — the OUTWARD-BAND mechanism probe.
 //   GlobeFillBandRenderTests            — The fill boundary band, observed in rendered pixels on the curved (globe) arm.
-//   WorldFillSnapshotTests              — Headless visual snapshot tests: render the S02 world-fill map to an off-screen RenderTexture, write PNGs to Logs/snapshots/, and run a tolerant coverage assertion.
-//   FillTranslateSnapshotTests          — P5 acceptance — fill-translate as a real SCREEN-PIXEL offset, and fill-translate-anchor as a real branch.
+//   WorldFillSnapshotTests              — Headless visual snapshot tests: render the world-fill map to an off-screen RenderTexture, write PNGs to Logs/snapshots/, and run a tolerant coverage assertion.
+//   FillTranslateSnapshotTests          — fill-translate as a real SCREEN-PIXEL offset, and fill-translate-anchor as a real branch.
 
 using NUnit.Framework;
 using UnityEngine;
@@ -41,19 +41,19 @@ namespace MapRenderer.Tests.Visual
     // file's `MapRenderer.Tests.Visual` namespace), not the global `Unity` root — CS0234.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // FillPatternSnapshotTests — P2 acceptance — the black-region fix
+    // FillPatternSnapshotTests — the black-region fix
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// P2 acceptance — the black-region fix, at the pixel level.
+    /// The black-region fix, at the pixel level.
     ///
     /// <para><b>The defect.</b> A <c>fill-pattern</c> layer characteristically declares no
     /// <c>fill-color</c>, so it inherits the spec default <c>rgba(0,0,0,1)</c>, which
-    /// <c>StyledFillTileBuilder</c> bakes per-feature into the COLOR stream. Before this stage nothing
-    /// consulted the pattern at all, so those layers painted solid opaque black — Liberty's
-    /// <c>road_area_pattern</c> plazas and <c>landcover_wetland</c>. See docs/fill-parity-design.md §1.</para>
+    /// <c>StyledFillTileBuilder</c> bakes per-feature into the COLOR stream. A renderer that never
+    /// consults the pattern paints those layers solid opaque black — Liberty's
+    /// <c>road_area_pattern</c> plazas and <c>landcover_wetland</c>. See docs/fill-parity-design.md.</para>
     ///
-    /// <para><b>RED-verify.</b> <see cref="UnresolvedPattern_PaintsNothing"/> fails on the pre-P2 tree:
+    /// <para><b>RED-verify.</b> <see cref="UnresolvedPattern_PaintsNothing"/> fails without the fix:
     /// <c>_FillPattern</c> was a declared-but-unread uniform, so setting it changed nothing and the black
     /// vertex colour reached the framebuffer. The assertion is on the BACKGROUND fraction, so a shader that
     /// ignores the pattern cannot pass it by accident.</para>
@@ -255,7 +255,7 @@ namespace MapRenderer.Tests.Visual
                 "alpha is being discarded and every pattern renders as a solid block.");
         }
 
-        // ── §2.2's claim, made falsifiable: resolving late does NOT re-mesh ──────────────────────
+        // ── The claim, made falsifiable: resolving late does NOT re-mesh ─────────────────────────
 
         [Test]
         public void ResolvingTheSheetLate_DoesNotRebuildTheMesh()
@@ -279,7 +279,7 @@ namespace MapRenderer.Tests.Visual
 
             // The whole reason late resolve is cheap: the mesh already carries tile-normalized UVs in
             // stream 1, so nothing about the geometry depends on the sprite. If this ever fails, the
-            // "pure material-uniform change" claim in docs/fill-parity-design.md §2.2 is void and the
+            // "pure material-uniform change" claim in docs/fill-parity-design.md is void and the
             // resolve path needs a tile rebuild.
             Assert.AreSame(before, filter.sharedMesh,
                 "resolving a pattern must not replace the Mesh instance (no re-mesh).");
@@ -587,17 +587,17 @@ namespace MapRenderer.Tests.Visual
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // LitFillSnapshotTests — S32 + S34 acceptance tests
+    // LitFillSnapshotTests — acceptance tests
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S32 + S34 acceptance tests — Lit material foundation for fills.
+    /// Acceptance tests — the Lit material foundation for fills.
     ///
-    /// S32 tests (carried over):
+    /// Material-foundation tests:
     ///   Test 1: PBR lighting is active (acceptance #1).
     ///   Test 2: Restyle with no mesh rebuild (acceptance #2).
     ///
-    /// S34 teeth (new — a shallow/stripped shader CANNOT pass these):
+    /// Shader teeth (a shallow or stripped shader CANNOT pass these):
     ///   Test 3: Shader validity — Map/Fill compiles without shader errors.
     ///   Test 4: Normal map changes shading (tooth #1).
     ///   Test 5: Base map samples (tooth #2).
@@ -637,7 +637,7 @@ namespace MapRenderer.Tests.Visual
         });
 
         /// <summary>
-        /// Build the fill GO via FillSceneHelper (StyledFillTileBuilder-backed, S54).
+        /// Build the fill GO via FillSceneHelper (StyledFillTileBuilder-backed).
         /// Returns (mapGO, the live lit material on the MeshRenderer).
         /// </summary>
         private static (GameObject mapGo, Material liveMaterial) BuildFillGo()
@@ -736,7 +736,7 @@ namespace MapRenderer.Tests.Visual
                 $"After SetColor to red, mean R channel ({redR:F3}) should be >= green render R ({greenR:F3}).");
         }
 
-        // ─── Test 3: Shader validity (S34 tooth — shader must compile) ────────────
+        // ─── Test 3: Shader validity — the shader must compile ────────────────────
 
         [Test]
         public void LitFill_FillShader_CompilesWithoutErrors()
@@ -758,7 +758,7 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ─── Test 4: Normal map changes shading (S34 tooth #1) ────────────────────
+        // ─── Test 4: Normal map changes shading ───────────────────────────────────
         // A hand-assembled constant-normal surface cannot fake this.
 
         [Test]
@@ -816,17 +816,17 @@ namespace MapRenderer.Tests.Visual
                 Assert.Fail(
                     $"Flat render is near-max (lum={lumFlat:F4}) — both renders may be saturated. " +
                     $"absPixelDiff={absPixelDiff:F4}. If absPixelDiff is 0, the normal map has no effect; " +
-                    "re-run with lower light intensity. S34 tooth #1 requires a non-saturated render.");
+                    "re-run with lower light intensity. this tooth requires a non-saturated render.");
             }
 
             Assert.That(absPixelDiff, Is.GreaterThan(0.005),
                 $"Binding a normal map with alternating ±X deflections must produce a per-pixel " +
-                $"luminance difference vs the flat render (S34 tooth #1 — mean abs diff = {absPixelDiff:F4}). " +
+                $"luminance difference vs the flat render (mean abs diff = {absPixelDiff:F4}). " +
                 "A hand-assembled constant-normal surface (shallow shader) gives diff ≈ 0. " +
                 "Check that _NORMALMAP keyword is enabled and InitializeStandardLitSurfaceData is called.");
         }
 
-        // ─── Test 5: Base map samples (S34 tooth #2) ──────────────────────────────
+        // ─── Test 5: Base map samples ─────────────────────────────────────────────
         // Binding an albedo texture must produce spatial color variance (pattern visible).
 
         [Test]
@@ -874,17 +874,17 @@ namespace MapRenderer.Tests.Visual
             if (varianceR < 0.001 && varianceB < 0.001)
             {
                 Assert.Fail(
-                    "Base map checkerboard shows near-zero spatial variance (S34 tooth #2). " +
+                    "Base map checkerboard shows near-zero spatial variance (the checker tooth). " +
                     "The base map pattern should be visible — check that InitializeStandardLitSurfaceData " +
                     "is called (not a hand-assembled constant albedo).");
             }
 
             // At least one of R or B should show the checker pattern.
             Assert.That(varianceR + varianceB, Is.GreaterThan(0.001),
-                "Base map (checker texture) must produce spatial color variance across the fill (S34 tooth #2).");
+                "Base map (checker texture) must produce spatial color variance across the fill (the checker tooth).");
         }
 
-        // ─── Test 6: Metallic/smoothness produce specular delta (S34 tooth #3) ────
+        // ─── Test 6: Metallic/smoothness produce a specular delta ─────────────────
 
         [Test]
         public void LitFill_MetallicSmoothness_ProduceSpecularDelta()
@@ -926,7 +926,7 @@ namespace MapRenderer.Tests.Visual
             // Metallic+high-smoothness must produce a measurably different (usually brighter)
             // luminance than matte. The delta proves PBR BRDF is live.
             Assert.That(System.Math.Abs(lumMatte - lumSpecular), Is.GreaterThan(0.02),
-                $"Metallic=1/Smoothness=0.95 must produce a specular highlight vs matte (S34 tooth #3). " +
+                $"Metallic=1/Smoothness=0.95 must produce a specular highlight vs matte (the specular tooth). " +
                 $"lum(matte)={lumMatte:F4}, lum(metallic)={lumSpecular:F4}. " +
                 "Check that _Metallic / _Smoothness feed into InitializeStandardLitSurfaceData " +
                 "and that UniversalFragmentPBR is called in the forward pass.");
@@ -1040,8 +1040,7 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // Unity EditMode only — the OUTWARD-BAND mechanism probe. Answers, on rendered pixels, the questions the
-    // costing left open before any plan is written against them.
+    // Unity EditMode only — the OUTWARD-BAND mechanism probe, answered on rendered pixels.
     // NOT registered in Tools/core-tests/core-tests.csproj (engine-bound: it renders).
     //
     // THE MECHANISM. Leave the filled region where it is; grow a ~1 device-px band OUTWARD from the boundary
@@ -1493,9 +1492,9 @@ namespace MapRenderer.Tests.Visual
         /// band: do two fragments of the SAME layer, same mesh, same draw, blend twice at one pixel, or does
         /// depth state reject the second?
         ///
-        /// <para>Two overlapping polygons in one layer answer it directly and need no shader. The costing's
-        /// §1 lemma is about the BACKGROUND's surviving weight and is correct; this measures the composited
-        /// alpha, which is a different quantity and the one a rim is made of.</para>
+        /// <para>Two overlapping polygons in one layer answer it directly and need no shader. This measures
+        /// the composited alpha — the quantity a rim is made of, not the background's surviving
+        /// weight.</para>
         /// </summary>
         [Test]
         public void OverlappingPolygonsInOneLayer_ReportsWhetherTheyCompositeTwice()
@@ -1773,7 +1772,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// The same contract straight down the polar axis, which is the pose that actually exercises the
-        /// grazing-incidence hazard of UMR-105, if anything does. Pole-on, the equator IS the silhouette,
+        /// grazing-incidence hazard, if anything does. Pole-on, the equator IS the silhouette,
         /// so equatorial coastline runs ALONG the limb and its outward band direction points down the view
         /// ray — the geometry that drives <c>MapPixelsToWorld</c>'s probe span to zero, where its
         /// <c>max(refPx, 0.1)</c> clamp stops the scale exploding but cannot stop a finite step along a
@@ -1784,7 +1783,7 @@ namespace MapRenderer.Tests.Visual
         /// suppression guard lived in <c>Fill_VertexModify.hlsl</c> and was deleted after measurement:
         /// disabling it entirely left BOTH poses pixel-for-pixel identical on every field, here included, so
         /// nothing it could have suppressed was ever drawn. The arithmetic behind the hazard is real and is
-        /// recorded in UMR-105; its manifestation was not reachable from any camera tried, and this is the
+        /// real; its manifestation was not reachable from any camera tried, and this is the
         /// pose that tried hardest. A guard nobody can trigger is superstition, and the difference is a pose
         /// where removing it changes the picture — there is none.</para>
         ///
@@ -1887,7 +1886,7 @@ namespace MapRenderer.Tests.Visual
                         detail.Append($" ({x},{y}) sep={nearest} r={math.length(new double2(x - 256.0, y - 256.0)):F1}");
                 }
 
-            // How much band ink lands at the limb, where UMR-105 says the px->world differential is least
+            // How much band ink lands at the limb, where the px->world differential is least
             // trustworthy. Reported, not asserted — it is a quantity to know, not a contract.
             int nearLimb = 0;
             for (int i = 0; i < n; i++)
@@ -1926,7 +1925,7 @@ namespace MapRenderer.Tests.Visual
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Headless visual snapshot tests: render the S02 world-fill map to an off-screen
+    /// Headless visual snapshot tests: render the world-fill map to an off-screen
     /// <c>RenderTexture</c>, write PNGs to <c>Logs/snapshots/</c>, and run a tolerant
     /// coverage assertion.
     ///
@@ -1934,7 +1933,7 @@ namespace MapRenderer.Tests.Visual
     /// NOT to the screen/framebuffer. This works in batchmode without a display (subject to the GPU
     /// context being available — see the all-black guard below).
     ///
-    /// Acceptance criteria (S30):
+    /// Acceptance criteria:
     ///   - PNGs are written under <c>Logs/snapshots/</c>.
     ///   - The world-fill render passes the tolerant coverage assertion.
     ///   - The blank-render control FAILS the coverage assertion (gate has teeth).
@@ -2089,7 +2088,7 @@ namespace MapRenderer.Tests.Visual
         /// Builds the fill scene: FillSceneHelper + camera + directional light, ready to render.
         /// Returns (mapGameObject, camera, cameraGameObject). Caller must destroy both GOs.
         ///
-        /// S54: MapFillBootstrap retired; uses FillSceneHelper (StyledFillTileBuilder-backed).
+        /// Uses FillSceneHelper (StyledFillTileBuilder-backed).
         /// Directional light: required because Map/Fill (URP Lit) renders near-black
         /// at ambient-only.
         /// </summary>
@@ -2116,11 +2115,11 @@ namespace MapRenderer.Tests.Visual
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // FillTranslateSnapshotTests — P5 acceptance — fill-translate as a real SCREEN-PIXEL offset
+    // FillTranslateSnapshotTests — fill-translate as a real SCREEN-PIXEL offset
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// P5 acceptance — <c>fill-translate</c> as a real SCREEN-PIXEL offset, and <c>fill-translate-anchor</c>
+    /// <c>fill-translate</c> as a real SCREEN-PIXEL offset, and <c>fill-translate-anchor</c>
     /// as a real branch.
     ///
     /// <para><b>What was wrong.</b> <c>Fill_VertexModify</c> applied <c>_FillTranslate.xy</c> as world units
@@ -2133,7 +2132,7 @@ namespace MapRenderer.Tests.Visual
     /// (<see cref="Translate_DisplacesTheSameScreenDistance_AtDifferentZooms"/>): a screen-pixel offset moves
     /// the geometry by the same number of PIXELS regardless of camera scale, whereas a world-unit offset
     /// moves it by half as many pixels when the view covers twice the world. No parse test can catch that,
-    /// and the pre-P5 shader cannot pass it.</para>
+    /// and a world-unit shader cannot pass it.</para>
     ///
     /// Camera + background match the sibling fill snapshot fixtures (top-down ortho 512², dark slate).
     ///
@@ -2248,7 +2247,7 @@ namespace MapRenderer.Tests.Visual
             Assert.Greater(Mathf.Abs(nearShift), 5f,
                 "precondition: a 40 px translate must visibly move the fill, or the comparison is vacuous.");
 
-            // Screen-pixel semantics ⇒ equal pixel shift at both scales. World-unit semantics (the pre-P5
+            // Screen-pixel semantics ⇒ equal pixel shift at both scales. World-unit semantics (the
             // behaviour) would make farShift half of nearShift, since the far camera covers 2× the world.
             Assert.AreEqual(nearShift, farShift, 4f,
                 $"a screen-pixel fill-translate must displace by the SAME pixel count at any camera scale " +

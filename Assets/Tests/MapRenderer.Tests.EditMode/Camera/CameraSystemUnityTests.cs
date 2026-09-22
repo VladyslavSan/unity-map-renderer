@@ -1,10 +1,10 @@
-// Unity EditMode only — tests the merged MapCamera integration with MapView (S89).
+// Unity EditMode only — tests the MapCamera integration with MapView.
 // Cannot live in Tools/core-tests (needs UnityEngine.Camera, UnityEngine.Quaternion, MapView, etc.).
 //
 // Covered:
 //   • MapView.Camera.CurrentProperties reflects the camera state (single camera-state type, no bridge).
 //   • Instant Apply allocates zero GC (struct patch over the readonly-struct state).
-//   • Pose / clip-plane / perspective correctness of the Unity camera transform (D6 fixes).
+//   • Pose / clip-plane / perspective correctness of the Unity camera transform.
 
 using NUnit.Framework;
 using Unity.Mathematics;
@@ -87,7 +87,7 @@ namespace MapRenderer.Tests.Cameras
                     "Apply must not allocate (struct patch over readonly-struct state; native transform writes).");
         }
 
-        // ── Pose — D6 fixes ─────────────────────────────────────────────────────────────────────────
+        // ── Pose ────────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>MapCamera at pitch=0 → camera overhead looking straight down.</summary>
         [Test]
@@ -111,7 +111,7 @@ namespace MapRenderer.Tests.Cameras
         }
 
         /// <summary>
-        /// D6b: at pitch=0, different bearings produce different camera orientations (up-vectors) —
+        /// At pitch=0, different bearings produce different camera orientations (up-vectors) —
         /// deterministic north-up without degeneracy.
         /// </summary>
         [Test]
@@ -201,10 +201,10 @@ namespace MapRenderer.Tests.Cameras
                     $"Bearing 0→90 at pitch=45 must move camera laterally. Δ(x+z)={lateralDiff:F2}.");
         }
 
-        // ── Stage U: floating-origin single owner ────────────────────────────────────────────────
+        // ── Floating-origin single owner ─────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Stage U teeth: <see cref="MapCamera.CameraRelativePosition"/> is the single owner of the camera's
+        /// <see cref="MapCamera.CameraRelativePosition"/> is the single owner of the camera's
         /// pose relative to the floating origin — stored straight off <see cref="CameraPoseMath.ComputeRelativePose"/>'s
         /// <c>pos</c>, never read back off <c>Camera.transform.position</c>. A non-trivial pose (heading AND
         /// tilt both non-zero, so no axis degenerates to zero and a swapped/rounded value would show) proves:

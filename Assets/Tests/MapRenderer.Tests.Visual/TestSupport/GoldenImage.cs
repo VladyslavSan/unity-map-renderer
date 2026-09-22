@@ -1,16 +1,16 @@
-// Unity EditMode only — Stage G-VR, the golden reference-image regression layer.
+// Unity EditMode only — the golden reference-image regression layer.
 // NOT registered in Tools/core-tests/core-tests.csproj (engine-bound: Texture2D encode/decode).
 //
 // A CHANGE DETECTOR layered ALONGSIDE the visual kit's existing analytic teeth (SnapshotCoverage / InkStatsIn
 // / the oracle in GeoJsonPointSymbolFixtureTests) — it does not replace them. A golden can only say "different
 // from the last bake" and will happily lock in a WRONG image; the analytic assertions stay the correctness
-// oracle. Two traps guarded here (both from the plan, both load-bearing — see docs/lessons-learned.md):
+// oracle. Two traps guarded here, both load-bearing — see docs/lessons-learned.md:
 //   1. Vacuous all-black golden: a nonzero-ink precondition (frame-wide, via VisualFrame.InkStatsIn — NOT
 //      SnapshotCoverage.IsBlank, which reads TRUE on a sparse symbol frame too, see
 //      GeoJsonPointSymbolFixtureTests.Neg_) runs before every compare, so an all-black frame fails
 //      rather than passing vacuously.
-//   2. Orientation-blind compare: the frame is bottom-left; a Texture2D.LoadImage'd PNG must be read back the
-//      SAME way. RED-verified empirically (T-RED-flip) rather than assumed — see the dev report.
+//   2. Orientation-blind compare: the frame is bottom-left; a Texture2D.LoadImage'd PNG must be read back
+//      the SAME way. RED-verified empirically against a deliberately flipped reference.
 
 #if UNITY_EDITOR
 using System;
@@ -32,14 +32,14 @@ namespace MapRenderer.Tests
     internal static class GoldenImage
     {
         /// <summary>Per-pixel max-channel byte delta above which a pixel counts as "differing". Tuned on this
-        /// host — widen only with a recorded reason (plan §Edit 2).</summary>
+        /// host — widen only with a recorded reason.</summary>
         private const int MaxChannelDelta = 4;
 
         /// <summary>Fraction of differing pixels above which the frame fails the golden. Tuned on this host —
-        /// widen only with a recorded reason (plan §Edit 2).</summary>
+        /// widen only with a recorded reason.</summary>
         private const double MaxDifferingFraction = 0.002;
 
-        /// <summary>Env var gating the bake path (plan §Edit 2 step 3) — set to <c>"1"</c> to (re)write the
+        /// <summary>Env var gating the bake path — set to <c>"1"</c> to (re)write the
         /// reference PNG for every golden this run touches. Baking NEVER counts as a pass.</summary>
         private const string BakeEnvVar = "MAPRENDERER_BAKE_GOLDENS";
 
@@ -52,9 +52,9 @@ namespace MapRenderer.Tests
         public static void Assert(VisualFrame frame, string referenceName)
         {
             // Nonzero-ink precondition — frame-wide, the SAME background predicate SnapshotCoverage uses
-            // (InkStatsIn delegates to SnapshotCoverage.Tolerance). Deliberately NOT frame.Coverage().IsBlank:
-            // IsBlank fires at >=97% background, which reads TRUE on a legitimate sparse symbol frame (measured
-            // 0.27% filled in GeoJsonPointSymbolFixtureTests) and would resolve Inconclusive forever.
+            // (InkStatsIn delegates to SnapshotCoverage.Tolerance). NOT frame.Coverage().IsBlank: IsBlank
+            // fires at >=97% background, which reads TRUE on a legitimate sparse symbol frame and would
+            // resolve Inconclusive forever.
             frame.InkStatsIn(0, 0, frame.Width, frame.Height, out _, out int totalInk);
             if (totalInk == 0)
             {

@@ -14,7 +14,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// The map camera — a neat wrapper around a <b>non-null</b> <see cref="UnityEngine.Camera"/> that holds
     /// the current <see cref="CameraProperties"/> and drives the camera transform from them. Correct by
     /// construction: the wrapped camera is never null, so there is no fallback path for aspect / viewport /
-    /// pose. (S89: absorbed the former Core <c>CameraSystem</c>; there is no separate model↔binding split.)
+    /// pose.
     ///
     /// <para><b>State vs. propagation are separated.</b> <see cref="Apply"/> / <see cref="SetProperties"/>
     /// only mutate <see cref="CurrentProperties"/> — the live "most recent state" — and do NOT touch the Unity
@@ -25,7 +25,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// <c>MapView.LateUpdate</c> — which is exactly the ordered camera→tiles→symbols pipeline there. Smooth,
     /// animated control is a separate <c>CameraController</c> (future), layered on top.</para>
     ///
-    /// <para><b>Camera-relative rendering (S52):</b> the scene origin tracks the look-at, so the camera
+    /// <para><b>Camera-relative rendering:</b> the scene origin tracks the look-at, so the camera
     /// orbits the origin and its transform is a pure function of <see cref="CameraProperties"/> — recomputed
     /// once per frame at the commit. At tilt=0 the camera sits directly above the look-at looking
     /// straight down; tilt&gt;0 orbits toward the horizon; heading rotates in the horizontal plane. Clip
@@ -44,7 +44,7 @@ namespace MapRenderer.Unity.Rendering.Map
         // ── Wrapped Unity camera (never null — ctor-enforced) ───────────────────────────────────────
         public readonly UnityEngine.Camera Camera;
 
-        // ── Active projection (S63: default WebMercator; injectable for tests / future globe) ─────────
+        // ── Active projection (default WebMercator; injectable for tests / future globe) ──────────────
         public IProjection Projection { get; }
 
         /// <summary>Far-plane policy — set by MapView from config so the render far matches the tile selector's
@@ -55,7 +55,7 @@ namespace MapRenderer.Unity.Rendering.Map
         public readonly float AltitudeMultiplier;
 
         /// <summary>
-        /// Device pixel ratio (physical ÷ logical px, S92 D1). The altitude is framed from the <b>logical</b>
+        /// Device pixel ratio (physical ÷ logical px). The altitude is framed from the <b>logical</b>
         /// viewport (<see cref="ViewportPx"/>.y ÷ this) so the map is the right size — and DPR-independent — on
         /// a high-DPI panel, matching the tile selector's logical framing. Default 1; refreshed live from
         /// <c>MapViewComponent.Config.DevicePixelRatio</c> each frame before <see cref="SyncToCamera"/>.
@@ -64,17 +64,6 @@ namespace MapRenderer.Unity.Rendering.Map
         /// makes ground geometry DPR-independent. A style's <c>px</c> values are LOGICAL px and are converted
         /// to their consumer's space exactly once, at <c>ZoomStyleApplier</c> via
         /// <see cref="MapRenderer.Unity.View.DeviceScaling.LogicalToDevicePx"/> — never here, and never twice.</para>
-        ///
-        /// <para><b>Correction (S107) — the previous text was right when it was written.</b> This comment used
-        /// to read <i>"PAINT is NOT DPI-scaled … never ÷DPR the paint path"</i>, and under S92 D1 that was
-        /// TRUE: line width reached the shader through the <c>_MetersPerPixel</c> uniform, fed from
-        /// <c>CameraPoseMath.MetersPerPixel(zoom)</c> — metres per LOGICAL pixel — so the altitude
-        /// normalization alone carried the whole convention and a second division really would have
-        /// double-applied. <c>d5406d40</c> deleted that uniform and resolved width against
-        /// <c>_ScreenParams</c>, the PHYSICAL framebuffer, which silently rebased the entire line family from
-        /// logical to device px. The claim outlived the code path it described, and stayed green because
-        /// every test runs at DPR 1. Read it as a lesson about comments that name a mechanism, not a
-        /// reversal of judgement.</para>
         /// </summary>
         public double DevicePixelRatio;
 
@@ -154,7 +143,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// framing below, and <c>MapView.BuildTileSelectionConfig</c>'s framing viewport).
         /// <para>The division and its unusable-ratio fallback live in <see cref="DeviceScaling"/>, shared with the
         /// paint conversion — so an unconfigured ratio cannot frame the camera and scale the paint differently
-        /// (S108 D9; before it, this member had no fallback at all and returned ±∞).</para></summary>
+        /// — see <see cref="DeviceScaling"/>.</para></summary>
         public double2 ViewportLogicalPx => DeviceScaling.DeviceToLogicalPx(ViewportPx, DevicePixelRatio);
 
         /// <summary>
@@ -183,7 +172,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <c>MapView.LateUpdate</c>.
         /// </summary>
         /// <summary>The camera orbit altitude in render metres for the current properties+viewport — the LOGICAL
-        /// viewport height (S92 D1: ÷DPR brings the camera ~DPR× closer on a high-DPI panel, DPR-independent size),
+        /// viewport height (÷DPR brings the camera ~DPR× closer on a high-DPI panel, for DPR-independent size),
         /// the <see cref="AltitudeMultiplier"/>, and a 0.1 m floor. Computed on demand so readers do not depend on
         /// a <see cref="SyncToCamera"/> having run; <see cref="SyncToCamera"/> reads the same property.</summary>
         internal double CurrentAltitudeMetres

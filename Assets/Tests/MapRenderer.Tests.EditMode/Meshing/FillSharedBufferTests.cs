@@ -4,21 +4,21 @@
 //
 // Contents:
 //   BoundaryGlitchMeshTests          — Rung 2 (EditMode, the source of truth): build the REAL boundary_3 line mesh through the production path — projection (TileToGeoJob → managed ProjectPoint) + the actual Burst RibbonJob + the Mercator bake — for the three maintainer-reported "line/polygon…
-//   EarcutDegenerateTriangleTests    — Unit tests for PointInTriangle's degenerate-candidate branch (UMR-106 Stage 1).
-//   EarcutEarTestScanBoundTests      — Acceptance teeth for UMR-106 Stage 2's bounding-box index over the ear-clip scan (see docs/mesh-triangulation-robustness-design.md §2.1/§6.1): the scan must visit a small, machine-independent number of candidates (T2.1), and the index arm must be…
-//   EarcutTests                      — EditMode tests for EarcutJobPolygonRunner, the H1 driver for EarcutJob (Unity EditMode only — NativeArray/Burst; not registered in Tools/core-tests).
-//   FillMeshBuildBuffersPoolTests    — perf/gc-elimination: StyledFillTileBuilder.WriteMeshData now runs FillMeshGraph.Schedule (job-scheduling-design.md §8 stage 4 Group B retired the synchronous FillMeshPipeline.Schedule this comment used to name), which itself allocates schedule-time managed…
-//   FillMeshGraphAllocationTests     — job-scheduling-design.md §8 stage 4 Group B: FillMeshPipeline.Schedule (the synchronous entry point this tooth used to drive) is retired — the graph (FillMeshGraph.Schedule + Handle.Complete()) is the only mesher left, so this measures schedule-time…
-//   FillMeshPipelineBoundsTests      — S06 Batch A, item (a): exact sizing pre-count + its never-fired capacity backstop.
-//   FillSharedBufferTests            — IR B7a — fill reads a buffer it shares with other layers, and joins its per-feature side arrays by the source-layer ordinal rather than by its own selected-list position.
-//   FillSortKeyAndOpacityTests       — P3 + P4 — the two build-time fill behaviours that show up in the MESH rather than in a uniform: fill-sort-key ordering and data-driven fill-opacity.
-//   GlobeSubdivisionJobParityTests   — Stage 0 (globe-fill-subdivision epic), Edit 4 — Unity-only source-of-truth parity tooth.
-//   GlobeSubdivisionTests            — Globe-fill SUBDIVISION testbench (design §6.2), driving SubdivisionCoverageValidator.
-//   JobifiedWaterTriangulationTests  — mesh-triangulation-robustness Stage 3 acceptance tooth (plan Edit 4): drives the REAL jobified fill path — Schedule, the Burst EarcutJob — over the committed corpus water tile, and validates the output has no folds and conserves area.
-//   LayerMeshBuildPoolingTests       — T3 (the per-layer build-object stage): a pooled ILayerMeshBuild instance is never handed to two renters at once — the hazard LayerMeshBuildPool{T} introduces that the retired struct LayerRequest did not have (§2.2 of the stage's own plan): a class can be…
-//   LineExtentRoutingTests           — Closes IR C1 P2's recorded finding 0: line's own TileToGeoJob extent routing had no observing tooth.
+//   EarcutDegenerateTriangleTests    — Unit tests for PointInTriangle's degenerate-candidate branch.
+//   EarcutEarTestScanBoundTests      — Acceptance teeth for the bounding-box index over the ear-clip scan (see docs/mesh-triangulation-robustness-design.md): the scan must visit a small, machine-independent number of candidates (T2.1), and the index arm must be…
+//   EarcutTests                      — EditMode tests for EarcutJobPolygonRunner, the driver for EarcutJob (Unity EditMode only — NativeArray/Burst; not registered in Tools/core-tests).
+//   FillMeshBuildBuffersPoolTests    — perf/gc-elimination: StyledFillTileBuilder.WriteMeshData runs FillMeshGraph.Schedule (there is no synchronous FillMeshPipeline.Schedule), which itself allocates schedule-time managed…
+//   FillMeshGraphAllocationTests     — FillMeshPipeline.Schedule (the synchronous entry point this tooth used to drive) is retired — the graph (FillMeshGraph.Schedule + Handle.Complete()) is the only mesher left, so this measures schedule-time…
+//   FillMeshPipelineBoundsTests      — Exact sizing pre-count + its never-fired capacity backstop.
+//   FillSharedBufferTests            — fill reads a buffer it shares with other layers, and joins its per-feature side arrays by the source-layer ordinal rather than by its own selected-list position.
+//   FillSortKeyAndOpacityTests       — the two build-time fill behaviours that show up in the MESH rather than in a uniform: fill-sort-key ordering and data-driven fill-opacity.
+//   GlobeSubdivisionJobParityTests   — Unity-only source-of-truth parity tooth.
+//   GlobeSubdivisionTests            — Globe-fill SUBDIVISION testbench (mesh-triangulation-robustness-design.md), driving SubdivisionCoverageValidator.
+//   JobifiedWaterTriangulationTests  — drives the REAL jobified fill path — Schedule, the Burst EarcutJob — over the committed corpus water tile, and validates the output has no folds and conserves area.
+//   LayerMeshBuildPoolingTests       — A pooled ILayerMeshBuild instance is never handed to two renters at once — the hazard LayerMeshBuildPool{T} introduces that the retired struct LayerRequest did not have: a class can be…
+//   LineExtentRoutingTests           — line's own TileToGeoJob extent routing, which had no observing tooth.
 //   LineGraphParityTests             — Step 1 (this file's non-negotiable gate): the per-ring SUBDIVIDED POINT COUNT, exact, element for element — a quantiser (LineCurvatureSubdivision.SegmentSteps), so a 1-ULP input difference across a ceil boundary can shift every downstream vertex.
-//   LineGraphSchedulingTests         — job-scheduling-design.md §8 stage 5 (line graph) — acceptance teeth (a), (b), (d), (e), (g), (h).
+//   LineGraphSchedulingTests         — job-scheduling-design.md (line graph) — acceptance teeth (a), (b), (d), (e), (g), (h).
 //   RightHandedSphereTestProjection  — Test-only helper (not a fixture): a right-handed mirror of SphericalProjection, used to pin winding independently of the production projection's own handedness.
 
 using System.Collections.Generic;
@@ -90,7 +90,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.IsNotNull(layer, "boundary_3 must be a Line.StyleLayer");
 
             byte[] bytes = File.ReadAllBytes(Path.Combine(Application.dataPath, "Fixtures", fixture));
-            // IR C1 P3: decoded at the SAME id the build bakes from — the buffer is the only copy now.
+            // Decoded at the SAME id the build bakes from — the buffer is the only copy now.
             using MvtTile tile = MvtDecoder.Decode(id, bytes);
             ITileLayer mvtLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
             Assert.IsNotNull(mvtLayer, "boundary_3's source-layer must resolve in this fixture");
@@ -166,15 +166,15 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Unit tests for <see cref="EarcutJob.PointInTriangle"/>'s degenerate-candidate branch (UMR-106
-    /// Stage 1). A degenerate (collinear) candidate triangle is a segment, not the whole plane through
+    /// Unit tests for <see cref="EarcutJob.PointInTriangle"/>'s degenerate-candidate branch.
+    /// A degenerate (collinear) candidate triangle is a segment, not the whole plane through
     /// it — these pin the bounding-box containment test that replaces the bare cross-product sign check
     /// on that branch.
     ///
     /// This calls the managed-IL copy of the job's method directly (a direct static call is not
     /// Burst-compiled), so it is not itself a Burst-kernel tooth. The Burst-compiled half is covered by
     /// <c>FillGraphBurstProbeTests</c> plus the <c>run-tests.sh</c> log grep for Burst compile errors
-    /// (docs/job-scheduling-design.md §7).
+    /// (docs/job-scheduling-design.md).
     /// </summary>
     public class EarcutDegenerateTriangleTests
     {
@@ -218,11 +218,11 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Acceptance teeth for UMR-106 Stage 2's bounding-box index over the ear-clip scan (see
-    /// docs/mesh-triangulation-robustness-design.md §2.1/§6.1): the scan must visit a small,
+    /// Acceptance teeth for the bounding-box index over the ear-clip scan (see
+    /// docs/mesh-triangulation-robustness-design.md): the scan must visit a small,
     /// machine-independent number of candidates (T2.1), and the index arm must be byte-identical to
     /// the full-linear-scan fallback arm on the whole water corpus (T2.2). Re-homed onto
-    /// <see cref="EarcutJobGatherHarness"/> in A0 — both arms now drive the real production dispatch
+    /// <see cref="EarcutJobGatherHarness"/> — both arms now drive the real production dispatch
     /// chain (RingSelect → RingAssembly → gather → EarcutJob), not the managed twin.
     /// </summary>
     public class EarcutEarTestScanBoundTests
@@ -251,11 +251,11 @@ namespace MapRenderer.Tests.Meshing
             // results before the day it reds, not discovered only in a failure message.
             TestContext.WriteLine($"Stockholm ear-test scan visited {totalVisits} candidates (Burst arm).");
 
-            // Re-measured for the Burst arm in A0 (RingAssemblyJob + FillGatherJob upstream, not
+            // Re-measured for the Burst arm (RingAssemblyJob + FillGatherJob upstream, not
             // PolygonAssembler + List.Sort): 884,455 candidates measured on this fixture. Bound set with
             // headroom comparable to the managed arm's own margin (5,000,000 against a measured 756,893,
             // ~6.6x) — 3,000,000 against 884,455 is ~3.4x, still far below the un-indexed linear-scan
-            // order of magnitude. RED-verified (T-A0.2): flipping forceLinearEarScan to true on this same
+            // order of magnitude. RED-verified: flipping forceLinearEarScan to true on this same
             // fixture visits 1,538,896,078 candidates — ~1740x the indexed arm's 884,455, same order of
             // magnitude as the managed arm's own forced-linear measurement (1,201,497,972). Note the Burst
             // arm is not bit-identical to the managed one here — it visits ~17% more indexed (884,455 vs
@@ -326,11 +326,11 @@ namespace MapRenderer.Tests.Meshing
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // EarcutTests — EarcutJobPolygonRunner, the H1 driver for EarcutJob
+    // EarcutTests — EarcutJobPolygonRunner, the driver for EarcutJob
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// EditMode tests for <see cref="EarcutJobPolygonRunner"/>, the H1 driver for
+    /// EditMode tests for <see cref="EarcutJobPolygonRunner"/>, the driver for
     /// <see cref="MapRenderer.Jobs.Fill.EarcutJob"/> (Unity EditMode only — NativeArray/Burst; not
     /// registered in Tools/core-tests).
     /// All geometry is defined in tile-space double2 (Y-down, origin top-left).
@@ -591,7 +591,7 @@ namespace MapRenderer.Tests.Meshing
             return list;
         }
 
-        // Data-driven over the fixture's own "sk" property (not a literal): Stage 1 leaves a CONSTANT
+        // Data-driven over the fixture's own "sk" property (not a literal): the constant-colour guard leaves a CONSTANT
         // fill-color's vertices white, which would make the pooled-vs-reference colour comparison below
         // vacuous — both arms would carry the same white regardless of a pooling desync.
         private static readonly Fill.PaintProperties Paint =
@@ -852,7 +852,7 @@ namespace MapRenderer.Tests.Meshing
         }
 
         /// <summary>
-        /// The flatten's headline tooth: Stage 3's per-polygon handle-arrays measured 2,023,424 B/build on
+        /// The flatten's headline tooth: per-polygon handle-arrays measured 2,023,424 B/build on
         /// this exact fixture before the flatten (~43,000 allocations). RED-verify by restoring the retired
         /// `new NativeArray&lt;T&gt;[polyCount]` shape and confirming this blows the ceiling.
         /// </summary>
@@ -878,7 +878,7 @@ namespace MapRenderer.Tests.Meshing
 
         /// <summary>
         /// The pre-flatten cost scaled ~linearly with ring count (one managed NativeArray handle allocated
-        /// per polygon, per stream). Flattened, Stage 3 allocates a FIXED set of buffers sized once — so
+        /// per polygon, per stream). Flattened, it allocates a FIXED set of buffers sized once — so
         /// bytes/build must stay near its floor across meaningfully different ring counts, not grow with them.
         /// RED-verify the same way as the ceiling tooth: restoring the per-polygon arrays reintroduces the
         /// scaling and blows this spread by roughly two orders of magnitude.
@@ -925,7 +925,7 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S06 Batch A, item (a): exact sizing pre-count + its never-fired capacity backstop.
+    /// Exact sizing pre-count + its never-fired capacity backstop.
     ///
     /// The pipeline now sizes its NativeArray decode buffers from
     /// <see cref="FillMeshPipeline.PrecountRingsAndVertices"/> — an exact walk of the command stream
@@ -976,7 +976,7 @@ namespace MapRenderer.Tests.Meshing
                 () => FillMeshPipeline.EnsureCapacity(int.MaxValue, 4096, "polygon"));
         }
 
-        // ── Exact pre-count: the real fix for S06 item (a). ──────────────────────────────────────
+        // ── Exact pre-count. ─────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// The malformed-stream counterexample: a single Polygon feature whose geometry is ONE multi-point
@@ -1087,13 +1087,13 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR B7a — fill reads a buffer it <b>shares</b> with other layers, and joins its per-feature side arrays
+    /// Fill reads a buffer it <b>shares</b> with other layers, and joins its per-feature side arrays
     /// by the source-layer <b>ordinal</b> rather than by its own selected-list position.
     ///
     /// <para><c>FillSortKeyAndOpacityTests</c> is the draw-order instrument (and the only one in the repo:
     /// <c>fill-sort-key</c> appears in no committed fixture style, so the whole snapshot corpus is blind to
     /// fill draw order). Its harness has <c>selected == the whole buffer</c> and no non-polygon features,
-    /// which makes it structurally unable to see three of B7's four new failure modes. This file is the
+    /// which makes it structurally unable to see three of the four new failure modes. This file is the
     /// arm that can: it drives the same three features through a buffer that <b>also</b> holds features this
     /// layer does not select and one it selects but cannot draw.</para>
     /// </summary>
@@ -1135,7 +1135,7 @@ namespace MapRenderer.Tests.Meshing
         /// <summary>
         /// The same comparison run down the <b>clip</b> branch — which is the branch production takes.
         ///
-        /// <para><b>Why this exists (B7a review R1/B1).</b> <c>MapViewConfig.FillTileBufferClip = 0.0</c> →
+        /// <para><b>Why this exists.</b> <c>MapViewConfig.FillTileBufferClip = 0.0</c> →
         /// <c>TileBufferClip.FromInspectorUnits(0.0)</c> → <c>KeepTileUnits(0.0)</c> → <c>IsEnabled == true</c>,
         /// so <c>FillMeshPipeline.DeriveVisitedRings</c> runs <c>RingClipJob</c>, not <c>RingSelectJob</c>, for
         /// every fill layer of a real style. The test above — the only fixture in the repo with a genuinely
@@ -1230,11 +1230,11 @@ namespace MapRenderer.Tests.Meshing
         /// <c>TileMeshBuffers.VertexFeatureIdx</c>. Three sort-keyed coincident squares must paint in the same
         /// order on the globe as on the flat sheet.
         ///
-        /// <para><b>Why it exists — measured.</b> B7a's RED sweep injected an off-by-one into that read alone
+        /// <para><b>Why it exists — measured.</b> A RED sweep injected an off-by-one into that read alone
         /// and the whole gate stayed green at 2278/2278. A sweep of the test tree found the reason: <b>no
         /// globe fill test reads vertex colours at all</b>. The one globe fixture that does
         /// (<c>TileBackgroundQuadProjectionTests</c>) has exactly one feature, so any mis-join clamps back to
-        /// the same entry. That is the "silent globe-only miscolour" the B7 plan named as the thing a
+        /// the same entry. That is the "silent globe-only miscolour" that is the thing a
         /// flat-only tooth cannot see — this closes it rather than recording it a second time.</para>
         /// </summary>
         [Test]
@@ -1289,21 +1289,21 @@ namespace MapRenderer.Tests.Meshing
                     "renders perfectly and is simply the wrong colour.");
         }
 
-        // ── T1c — WITHIN-feature ring order (the blind spot R2 measured) ──────────────────────────
+        // ── T1c — WITHIN-feature ring order (the measured blind spot) ──────────────────────────
 
         /// <summary>
         /// A single polygon feature whose rings are <b>outer then hole</b> must still be triangulated with the
         /// hole cut out. This pins the visit order's <b>within-rank</b> ordering, which the sort-key tests
         /// cannot see because every feature they use has exactly one ring.
         ///
-        /// <para><b>Why it exists — measured, not anticipated.</b> B7a's RED sweep injected the real defect
+        /// <para><b>Why it exists — measured, not anticipated.</b> A RED sweep injected the real defect
         /// (bucket the counting sort in descending ring index, so a feature's rings come out reversed) and the
         /// <b>entire gate stayed green at 2277/2277</b> — while a diagnostic proved the defect was firing hard:
         /// 923 fill builds in the suite reach a rank <b>450 rings wide</b>, and the produced fill dropped from
         /// 30638 to 29982 vertices on the flat path and from 164535 to 137379 on the globe path. Every
         /// corpus-scale fill oracle in the repo is either a differential between two arms that would BOTH be
         /// injected (cache vs fresh, sync vs async, view vs direct) or drives <c>FillMeshGraph.Schedule</c>
-        /// (job-scheduling-design.md §8 stage 4 Group B retired the synchronous <c>FillMeshPipeline.Schedule</c>
+        /// (there is no synchronous <c>FillMeshPipeline.Schedule</c>
         /// this paragraph originally named) with an identity visit order, bypassing this code entirely. So
         /// this was a genuine blind surface,
         /// not a redundant one.</para>
@@ -1340,7 +1340,7 @@ namespace MapRenderer.Tests.Meshing
 
             Mesh holed = Track(TestTileMeshBuilder.BuildFill(withHole, paint, 0.0, Extent, Tile));
             Mesh full  = Track(TestTileMeshBuilder.BuildFill(solid,    paint, 0.0, Extent, Tile));
-            // The same claim on the branch production actually takes (B7a review R1): with the clip
+            // The same claim on the branch production actually takes: with the clip
             // enabled the rings reach assembly through RingClipJob rather than RingSelectJob. Every ring
             // here lies inside the b = 0 window, so the clip is inert and the area must not move.
             Mesh holedOnTheClipBranch = Track(TestTileMeshBuilder.BuildFill(
@@ -1398,8 +1398,8 @@ namespace MapRenderer.Tests.Meshing
         ///
         /// <para><b>What this adds.</b> <c>TileGeometryMaterializerSeamTests</c> already pins extent routing
         /// through the pipeline's clip window and its tile→geodetic stage. Neither can see
-        /// <c>WriteGeometry</c>'s own <c>extentInv</c>, which is the parameter B7 <i>removed</i> from the
-        /// signature (§"extent stops travelling beside the buffer"): world positions come out of the Burst
+        /// <c>WriteGeometry</c>'s own <c>extentInv</c>, which is the parameter <i>removed</i> from the
+        /// signature ("extent stops travelling beside the buffer"): world positions come out of the Burst
         /// chain and would stay correct while the UVs silently halved. A literal <c>4096.0</c> substituted for
         /// <c>geometry.Extent</c> here doubles the 2048 arm's pattern coordinates and nothing else in the repo
         /// notices.</para>
@@ -1434,7 +1434,7 @@ namespace MapRenderer.Tests.Meshing
                     "2048 arm exactly 2x.");
         }
 
-        // ── T8 — the tile ADDRESS is routed too (B7a review N1) ───────────────────────────────────
+        // ── T8 — the tile ADDRESS is routed too ───────────────────────────────────────────────────
 
         /// <summary>
         /// The pattern stream's world span comes from <c>geometry.Tile</c>, the buffer's own address. The same
@@ -1628,7 +1628,7 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// P3 + P4 — the two build-time fill behaviours that show up in the MESH rather than in a uniform:
+    /// The two build-time fill behaviours that show up in the MESH rather than in a uniform:
     /// <c>fill-sort-key</c> ordering and data-driven <c>fill-opacity</c>.
     ///
     /// <para>Ordering is asserted on the INDEX buffer (draw order) and opacity on the COLOR stream, because
@@ -1694,7 +1694,7 @@ namespace MapRenderer.Tests.Meshing
             return runs;
         }
 
-        // ── P3: fill-sort-key orders features within the layer ───────────────────────────────────
+        // ── fill-sort-key orders features within the layer ───────────────────────────────────────
 
         [Test]
         public void SortKey_HigherKeyIsEmittedLast_SoItDrawsOnTop()
@@ -1754,7 +1754,7 @@ namespace MapRenderer.Tests.Meshing
         public void SortKey_Absent_LeavesDeclaredOrderAndMeshUntouched()
         {
             // The byte-identity guarantee: no sort key ⇒ no reorder, so every pre-existing fill mesh (and
-            // every snapshot baked from one) is unaffected by P3.
+            // every snapshot baked from one) is unaffected by it.
             var features = new List<IFeature>
             {
                 Feature(0, 0, "first",  sortKey: 99.0), // key present in the DATA but not referenced by the style
@@ -1778,11 +1778,11 @@ namespace MapRenderer.Tests.Meshing
         }
 
         /// <summary>
-        /// IR B5 T5b — <c>fill-sort-key</c> reorders the GEOMETRY and the COLOURS <b>together</b>. Both come
+        /// T5b — <c>fill-sort-key</c> reorders the GEOMETRY and the COLOURS <b>together</b>. Both come
         /// off the same loop over the sorted list, so a build that sorted only one of them would paint each
         /// feature's colour onto its neighbour's polygon.
         ///
-        /// <para><b>Why this test exists</b> (RED-verify row D4): every other sort-key case in this file
+        /// <para><b>Why this test exists.</b> Every other sort-key case in this file
         /// stacks its features at <c>(0, 0)</c> with an IDENTICAL square, because they assert draw ORDER
         /// under the painter's algorithm and coincident polygons are the point. That makes them structurally
         /// blind to a geometry/colour desync — permuting identical geometry changes nothing. The two cases
@@ -1844,7 +1844,7 @@ namespace MapRenderer.Tests.Meshing
         }
 
         /// <summary>
-        /// IR B5 T5 — the fill ordinal join survives a geometry-less feature. Before B5 the builder skipped a
+        /// T5 — the fill ordinal join survives a geometry-less feature. The builder used to skip a
         /// Polygon whose command stream was null, so such a feature took no position in the list handed to
         /// the materializer; now it occupies an ordinal (there is no interface member left to test it by, and
         /// the materializer treats a null stream as zero commands). It contributes no ring, so
@@ -1880,7 +1880,7 @@ namespace MapRenderer.Tests.Meshing
                 "the polygon AFTER the gap must still paint BLUE — an off-by-one would paint it green");
         }
 
-        // ── P4: data-driven fill-opacity bakes into the COLOR stream's alpha ─────────────────────
+        // ── Data-driven fill-opacity bakes into the COLOR stream's alpha ─────────────────────────
 
         [Test]
         public void DataDrivenOpacity_BakesDistinctPerFeatureAlpha()
@@ -1899,7 +1899,7 @@ namespace MapRenderer.Tests.Meshing
             var alphas = new HashSet<float>();
             foreach (Color c in mesh.colors) alphas.Add(Mathf.Round(c.a * 100f) / 100f);
 
-            // Before P4 a data-driven fill-opacity silently reverted to the default: every vertex would
+            // A data-driven fill-opacity used to silently revert to the default: every vertex would
             // carry alpha 1 and this set would be {1.00}.
             CollectionAssert.AreEquivalent(new[] { 0.25f, 0.75f }, alphas,
                 "each feature's evaluated fill-opacity must be baked into its vertices' alpha. " +
@@ -1927,7 +1927,7 @@ namespace MapRenderer.Tests.Meshing
         [Test]
         public void DataDrivenOpacity_IsTheStreamsOnlyAlphaCarrier()
         {
-            // fill-color here is CONSTANT (a literal, not data-driven), so Stage 1's guard leaves the
+            // fill-color here is CONSTANT (a literal, not data-driven), so the constant-colour guard leaves the
             // COLOR stream white and its authored alpha (0.4) rides _BaseColor.a instead — see
             // PaintColorSingleApplyTests.ConstantFillColorAlpha_IsNotAppliedTwice for that composed product.
             // This test's own carrier is the data-driven fill-opacity alone.
@@ -1965,12 +1965,12 @@ namespace MapRenderer.Tests.Meshing
         }
 
         // Earcut-only, tile-space root-triangle extraction is shared with GlobeSubdivisionTests via
-        // EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph (A0) — see that method's doc for why
+        // EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph — see that method's doc for why
         // extraction always runs under a non-curved projection regardless of the target projection under
         // test here, and why the countries-z0 case below must use the REAL per-source-feature index, not
         // an all-zero placeholder: zeros are dishonest input regardless of what the fence below catches.
-        // A0 measured that the fence does NOT in fact detect Feature being dropped from the merge key
-        // (UMR-187) — see that assert's own comment; do not read this file as proof it does.
+        // Measurement shows the fence does NOT in fact detect Feature being dropped from the merge key
+        // (tracked separately) — see that assert's own comment; do not read this file as proof it does.
 
         // -----------------------------------------------------------------------------------------------
         // Shared ordered-parity assertion: dispatches the REAL Burst job AND the managed mirror over the
@@ -2024,7 +2024,7 @@ namespace MapRenderer.Tests.Meshing
             try
             {
                 // Explicit constants — no implicit defaults (Schedule has none, but be explicit at every call
-                // site). job-scheduling-design.md §8 stage 4 Group B: the synchronous Run entry point is
+                // site). The synchronous Run entry point is
                 // retired — srcVertCount/srcIndexCount are unused by the scheduled form (it reads the lists'
                 // own lengths) but stay as parameters, still read by the mirror/roots build below.
                 JobHandle handle = GlobeFillSubdivideDispatch.Schedule(
@@ -2112,7 +2112,7 @@ namespace MapRenderer.Tests.Meshing
         {
             var id = new TileId { Z = 6, X = 32, Y = 20 };
             var proj = new SphericalProjection();
-            // IR C1 P3's "independent of the decoded feature" property is superseded here (A0): this now
+            // The "independent of the decoded feature" property is superseded here: this now
             // decodes through the production MvtDecoder as part of the real FillMeshGraph earcut
             // extraction, not an independent MvtFixtureStreams read — fine for this test's own property
             // (ordered-stream parity given identical input arrays to both arms), which never depended on
@@ -2146,7 +2146,7 @@ namespace MapRenderer.Tests.Meshing
 
         // -----------------------------------------------------------------------------------------------
         // T-C4 (vertex sharing): the z0 "countries" fixture is the measurement corpus, fed through the REAL
-        // FillMeshGraph earcut extraction (A0) with SuppressBoundaryBand = true — an explicit choice, not
+        // FillMeshGraph earcut extraction with SuppressBoundaryBand = true — an explicit choice, not
         // an incidental "no band" (these triangles become the mirror's root list; a degenerate band quad
         // would inflate it, same reasoning as GlobeSubdivisionTests). The measured emitted/unique split for
         // THIS arm is in the stage report and restated at the fence below.
@@ -2162,10 +2162,10 @@ namespace MapRenderer.Tests.Meshing
             var proj = new SphericalProjection();
             // T-C3 (vertex sharing): the REAL per-source-feature index off the graph output — see
             // BuildEarcutRootsFromFillGraph's doc. NOT a single constant 0: zeroing every vertex's
-            // feature is dishonest input regardless of what the fence below is proven to catch — A0
+            // feature is dishonest input regardless of what the fence below is proven to catch — the
             // measured that the fence's lower bound does NOT in fact detect the drop (UniqueVertexCount
             // moves only 45,268 → 44,772 under an all-zero array, nowhere near the 35,000 bound —
-            // tracked as UMR-187). Use the real index anyway; do not rely on this comment as proof the
+            // tracked separately). Use the real index anyway; do not rely on this comment as proof the
             // bound guards it.
             var (tileVerts, triangleIndices, vertexFeatureIdx, extent) =
                 EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph(LoadFixture("sample-tile.bytes"), "countries", id);
@@ -2195,20 +2195,12 @@ namespace MapRenderer.Tests.Meshing
             TestContext.WriteLine($"countries z0 (Burst arm, SuppressBoundaryBand=true): " +
                 $"emitted={run.EmittedCount} unique={run.UniqueVertexCount}");
 
-            // T-C2 ("it actually shares"): a fence with headroom bracketing the measured value —
-            // re-measured for the Burst-arm FillMeshGraph extraction in A0: 45,268 unique of 164,112
-            // emitted (SuppressBoundaryBand=true) — different from the pre-A0 raw-decode-loop figures
-            // (161,676 / 44,915) since the upstream is now the real gather chain, not a hand-rolled loop.
+            // T-C2 ("it actually shares"): a fence with headroom around the measured value. The upstream is
+            // the real gather chain, not a hand-rolled decode loop.
             //
-            // T-A0.7 RED check, RUN and its result RECORDED here rather than left implied: substituting
-            // an all-zero vertexFeatureIdx array on this same extraction measures unique=44,772 — NOT
-            // below the 35,000 lower bound (it barely moves off the real-feature 45,268). On THIS
-            // fixture/pipeline, the lower bound does not actually discriminate on Feature being dropped
-            // from the merge key; whatever the prior expectation, this fence is not proven to catch that
-            // regression. Flagged, not silently patched (A0 plan §10 — escalate, do not invent): fixing
-            // the fence itself is outside A0's mandate (re-home the triangulator, not redesign the
-            // subdivision-parity oracle) — tracked as UMR-187, left as an open, explicitly recorded
-            // finding rather than a bound quietly widened or a claim quietly kept.
+            // KNOWN GAP, measured: substituting an all-zero vertexFeatureIdx array leaves the unique count
+            // ABOVE the 35,000 lower bound, so on this fixture the bound does not discriminate on Feature
+            // being dropped from the merge key. Recorded rather than quietly widened.
             Assert.Less(run.UniqueVertexCount, 55_000,
                 $"sharing must collapse the countries z0 tile's unique vertex count well below its emitted " +
                 $"count: emitted={run.EmittedCount} unique={run.UniqueVertexCount}");
@@ -2345,10 +2337,10 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Globe-fill SUBDIVISION testbench (design §6.2), driving <see cref="SubdivisionCoverageValidator"/>.
+    /// Globe-fill SUBDIVISION testbench (mesh-triangulation-robustness-design.md), driving <see cref="SubdivisionCoverageValidator"/>.
     /// The 3 real-tile tests re-home onto the REAL jobified fill path via
     /// <see cref="EarcutJobGatherHarness.BuildEarcutRootsFromFillGraph"/>; the 2 synthetic tests earcut
-    /// via <see cref="EarcutJobPolygonRunner"/> (H1).
+    /// via <see cref="EarcutJobPolygonRunner"/>.
     /// </summary>
     public class GlobeSubdivisionTests
     {
@@ -2383,7 +2375,7 @@ namespace MapRenderer.Tests.Meshing
                 tileVerts, triangleIndices, vertexFeatureIdx, id, mirrorProjection, extent);
         }
 
-        // ---- always-on guard — Mercator is a pass-through no-op (design §6.2: "Mercator moves zero pixels") ----
+        // ---- always-on guard — Mercator is a pass-through no-op ("Mercator moves zero pixels") ----
 
         [Test]
         public void Mercator_IsPassThrough_NoOp()
@@ -2407,7 +2399,7 @@ namespace MapRenderer.Tests.Meshing
             // A whole-tile square at the SAME z6/32/20 tile as the corpus, earcut into 2 triangles along its
             // diagonal. Being one convex, near-symmetric polygon (no coastline complexity), both triangles
             // subdivide to the SAME depth (verified: maxDepthReached=1, 0 T-junctions) — a case with NO depth
-            // mismatch, unlike the real water corpus at this same tile/zoom (design §6.2's artefact).
+            // mismatch, unlike the real water corpus at this same tile/zoom (the design's artefact).
             var outer = new List<double2>
             {
                 new double2(0, 0), new double2(4096, 0), new double2(4096, 4096), new double2(0, 4096),
@@ -2423,7 +2415,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.IsTrue(rep.Passes(), "clean synthetic globe input must pass: " + rep.Summary);
         }
 
-        // ---- acceptance tooth — the artefact (design §6.2) ------------------------------------------------
+        // ---- acceptance tooth — the artefact --------------------------------------------------------------
         // RED-verified against the un-fixed (per-triangle 1→4) job: MaxGapFracTile ≈ 0.00697 (maxGap≈3612m —
         // matches the design doc's measured 3612m; the PERCENTAGE differs from the design doc's 1.03% because
         // this validator normalizes by the tile's render-space DIAGONAL, not its top edge — see
@@ -2441,7 +2433,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.IsFalse(rep.BudgetFired, "a conforming result must not have relied on the Budget cutoff: " + rep.Summary);
         }
 
-        // ---- DEEP conformity tooth — depth>=2 (design §6.2) -------------------------------------------------
+        // ---- DEEP conformity tooth — depth>=2 ---------------------------------------------------------------
         // The corpus + clean-synthetic guards are all depth-1; a conformity bug that first appears in DEEP,
         // template-mixed recursion (depth>=2) would slip past them. A whole-tile quad at z2/0/0 (top of the
         // globe → strong curvature) subdivides to depth 5 — 2 earcut triangles, so it exercises BOTH
@@ -2466,7 +2458,7 @@ namespace MapRenderer.Tests.Meshing
             Assert.IsFalse(rep.BudgetFired, "a conforming result must not have relied on the Budget cutoff: " + rep.Summary);
         }
 
-        // ---- NON-UNIFORM-curvature deep tooth on a REAL z0 tile (design §6.2) ----------------------------
+        // ---- NON-UNIFORM-curvature deep tooth on a REAL z0 tile ------------------------------------------
         // The corpus (depth-1) and z2-quad (uniform curvature → caps in lockstep) teeth both miss the regime
         // that bit us: a real z0 tile mixes well-formed fills, antimeridian earcut NEEDLE slivers, and
         // zero-area bridge slits, recursing to the depth cap NON-uniformly. The conforming fix keeps the
@@ -2490,7 +2482,7 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// mesh-triangulation-robustness Stage 3 acceptance tooth (plan Edit 4): drives the REAL jobified
+    /// Drives the REAL jobified
     /// fill path — <see cref="FillMeshGraph.Schedule"/>, the Burst <see cref="EarcutJob"/> — over the
     /// committed corpus water tile, and validates the output has no folds and conserves area. This is
     /// the tooth that actually proves the VISIBLE render path is fixed, since production fill meshes
@@ -2535,7 +2527,7 @@ namespace MapRenderer.Tests.Meshing
             double extent = layer.Extent;
             var (bMin, _) = tileId.MercatorBounds();
 
-            TileGeometryBuffers geometry = layer.Geometry; // BORROWED (IR C1 P3) — the decoded tile owns it
+            TileGeometryBuffers geometry = layer.Geometry; // BORROWED — the decoded tile owns it
             NativeArray<int> visitOrder   = TestTileMeshBuilder.FullVisitOrder(geometry);
             var pipelineInput = new FillMeshPipeline.LayerInput
             {
@@ -2572,7 +2564,7 @@ namespace MapRenderer.Tests.Meshing
             {
                 buffers.Dispose();
                 visitOrder.Dispose();
-                // geometry is BORROWED from the decoded layer (IR C1 P3) — the `using` frees it.
+                // geometry is BORROWED from the decoded layer — the `using` frees it.
             }
         }
     }
@@ -2584,7 +2576,7 @@ namespace MapRenderer.Tests.Meshing
     /// <summary>
     /// T3 (the per-layer build-object stage): a pooled <see cref="ILayerMeshBuild"/> instance is never
     /// handed to two renters at once — the hazard <see cref="LayerMeshBuildPool{T}"/> introduces that the
-    /// retired struct <c>LayerRequest</c> did not have (§2.2 of the stage's own plan): a class can be
+    /// retired struct <c>LayerRequest</c> did not have: a class can be
     /// returned to its pool twice (once per redundant <c>Dispose()</c> call), landing the same reference in
     /// the <c>ConcurrentBag</c> twice, so two independent <c>Rent</c> calls then observe the identical
     /// instance. <see cref="FillLayerBuild.Dispose"/>'s own <c>if (_disposed) return;</c> guard is what
@@ -2648,7 +2640,7 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Closes IR C1 P2's <b>recorded finding 0</b>: line's own <c>TileToGeoJob</c> extent routing had
+    /// Line's own <c>TileToGeoJob</c> extent routing had
     /// <b>no observing tooth</b>. A hardcoded <c>Extent = 4096.0</c> in
     /// <c>StyledLineTileBuilder.WriteMeshData</c>'s two subdivided-projection calls passed the ENTIRE
     /// 2286-test gate — discovered by accident when a review agent's injection was left live in the tree.
@@ -2661,10 +2653,10 @@ namespace MapRenderer.Tests.Meshing
     /// were ever changed back to 4096 this tooth would be vacuous by construction. That is the whole
     /// point.</para>
     ///
-    /// <para><b>Why P3 is where it lands.</b> P3 makes the buffer the sole authority for both <c>Tile</c>
+    /// <para><b>Why it lands here.</b> The buffer is the sole authority for both <c>Tile</c>
     /// and <c>Extent</c> (the decoder stamps them; <c>ITileDecoder.Decode</c> takes the id), and tooth B
     /// pins the <c>Tile</c> half. Pinning one half structurally and leaving the identically-routed other
-    /// half to convention is the asymmetry this epic exists to remove. And P3 makes the fixture cheap: a
+    /// half to convention is an asymmetry worth removing. A borrowed buffer makes the fixture cheap: a
     /// layer owns its buffer, so its extent is a constructor argument.</para>
     ///
     /// <para><b>How the observation works.</b> Tile-local coordinates are geo-referenced by
@@ -2747,7 +2739,7 @@ namespace MapRenderer.Tests.Meshing
                 "geo-referenced by x/extent, so the same integer ring at extent 2048 sits at twice the tile " +
                 "fraction it does at 4096. If the two builds agree, StyledLineTileBuilder's TileToGeoJob " +
                 "calls are NOT reading `geometry.Extent` — they are using a literal, which is precisely the " +
-                "injection that survived a full green 2286-test gate in IR C1 P2 (recorded finding 0).");
+                "injection that survived a full green 2286-test gate (a recorded finding).");
         }
     }
 
@@ -2835,7 +2827,7 @@ namespace MapRenderer.Tests.Meshing
                 }
                 Assert.AreEqual(golden.GetString("indicesDigest"), Sha256(idxBytes),
                     $"[{tag}/{label}] Indices diverge from the captured oracle — a real regression, not a re-bake candidate.");
-                // Re-captured 2026-09-07 (UMR-96): these tiles style a CONSTANT line-color, which is no
+                // Re-captured 2026-09-07: these tiles style a CONSTANT line-color, which is no
                 // longer baked here — it rides _BaseColor and the vertex carries white. Unlike the Indices
                 // digest above, this one is therefore NOT "never a re-bake candidate": it is a live oracle
                 // for the opposite fact, and reading a styled colour means the bake came back.
@@ -2881,7 +2873,7 @@ namespace MapRenderer.Tests.Meshing
                 // Normal (Up): NO computed hazard — ProjectPointsJob writes it as a straight trig
                 // evaluation/copy (ProjectPointsJob.cs:58, Normals[index] = pp.Up), never a difference of
                 // two comparable-magnitude quantities, so there is nothing to AMPLIFY a rounding difference.
-                // Reconciling with job-scheduling-design.md §8 stage 5's invariant block, which says Up's
+                // Reconciling with job-scheduling-design.md's invariant block, which says Up's
                 // raw DOUBLE-precision divergence (2-3 ULP, Spherical) "reaches the narrowed float3
                 // un-amplified and un-erased": that line is about the SUBTRACTION mechanism specifically —
                 // Up is never origin-subtracted, so it gets neither Position's cancellation penalty NOR its
@@ -2914,7 +2906,7 @@ namespace MapRenderer.Tests.Meshing
                 //   (2) `across = math.normalize(math.cross(along, up))` (RibbonJob.cs:249) — Burst's
                 //       relaxed-math `normalize` does not guarantee managed IEEE rounding on every input,
                 //       the SAME mechanism the wall-job stage measured diverging ~1-2 ULP at three call
-                //       sites, data-dependently (job-scheduling-design.md §8 stage 5's invariant block).
+                //       sites, data-dependently (job-scheduling-design.md's invariant block).
                 //       Contributes a small, roughly-constant few-ULP floor UNDER the miter amplification,
                 //       not the 1000x spread itself.
                 // AcrossUlpCeiling (4000) is 4x the largest observed (1000, z6/WebMercator) — margin for a
@@ -2942,7 +2934,7 @@ namespace MapRenderer.Tests.Meshing
                 // Position: origin-relative cancellation (ProjectPointsJob.cs:57, WorldPositions[index] =
                 // pp.World - OriginWorld — a planetary-magnitude, ~6.378e6 m, subtraction) is the textbook
                 // hazard for this quantity, and the SAME mechanism the wall-job stage measured for its own
-                // Position/Tangent split (job-scheduling-design.md §8 stage 5's invariant block). There it
+                // Position/Tangent split (job-scheduling-design.md's invariant block). There it
                 // narrows to float32 STRUCTURALLY, not by luck of one fixture: the origin-relative double
                 // error at tile-local magnitude (~1e4) is six orders of magnitude below a float32 ULP there,
                 // for any tile-local geometry (RTC's whole purpose). MEASURED bit-exact (0 ULP) here too,
@@ -3161,7 +3153,7 @@ namespace MapRenderer.Tests.Meshing
         // ── Tooth (b): the ring gate is the line gate, through the GRAPH ─────────────────────────────
 
         /// <summary>
-        /// (b) job-scheduling-design.md §8 stage 5 — extends <c>StyledLineBufferParityTests</c> T2's mixed
+        /// (b) extends <c>StyledLineBufferParityTests</c> T2's mixed
         /// buffer (a polygon ring, a selected LineString, an exterior/hole pair) with the two cases it
         /// lacked, retargeted at <see cref="LineMeshGraph.Schedule"/> instead of the managed seam: a
         /// 2-POINT LineString (selected — line's own <c>&gt;= 2</c> threshold, never fill's <c>&gt;= 3</c>)

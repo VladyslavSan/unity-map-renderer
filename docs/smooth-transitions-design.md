@@ -1,7 +1,7 @@
 # Smooth transitions — design & SSOT
 
 **Status:** §1 (style switching) is shipped through the style-transitions epic (UMR-151/152 — see
-`docs/tile-pipeline-design.md` §1.10/§7.5 for the mechanism); §3 (shared easing) was built as part of that
+`docs/tile-pipeline-design.md`, "Partial-survival restyle" and "The draw gate", for the mechanism); §3 (shared easing) was built as part of that
 work and is described below. §2 (camera-driven property re-evaluation) is not started. Two epics that
 change **rendered properties smoothly over time** and
 deliberately **share one easing/animation mechanism**: (1) **style switching** — transition between compatible
@@ -27,7 +27,7 @@ changes (different sources, different source-layers, structural layer changes).
 
 ## Current state (shipped)
 
-`MapView.SetStyle` now runs one of two arms (`docs/tile-pipeline-design.md` §1.10):
+`MapView.SetStyle` now runs one of two arms (`docs/tile-pipeline-design.md`, "Partial-survival restyle"):
 
 - **In-place restyle.** `RenderLayerSet.TryRestyleInPlace` runs an ID-keyed diff over the old/new style's
   layers; when it proves the change is not mesh-affecting, the existing render layers, materials, and warm
@@ -52,7 +52,7 @@ changes (different sources, different source-layers, structural layer changes).
 2. **Compatibility detection — delivered.** `RenderLayerSet.TryRestyleInPlace` + `SurvivingLayerGate` classify
    an (old style, new style) pair by an ID-keyed diff: a mesh-affecting change (source, layer add/remove/
    reorder, structural) refuses the in-place arm and falls through to the full rebuild; anything else (paint-
-   only) patches in place. See `docs/tile-pipeline-design.md` §1.10.
+   only) patches in place. See `docs/tile-pipeline-design.md`, "Partial-survival restyle".
 3. **Warm reuse beyond sources — delivered.** The in-place arm above keeps every render layer, material, and
    prepared mesh when the diff says geometry is unchanged; `TileManager.SetSources`' teardown loop no longer
    unconditionally clears `PreparedTileCache` (`_prepared.Clear()` now runs only on a `BufferClip` change).

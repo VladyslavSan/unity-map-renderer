@@ -6,7 +6,8 @@ namespace MapRenderer.Core.Geo
     /// <summary>
     /// A slippy-map tile address (z/x/y) plus conversions from tile-local feature coordinates to
     /// lon/lat and Web Mercator. Tile-local origin is top-left; the lon/lat formula already encodes
-    /// the Y-down convention, so callers must NOT pre-flip Y (see docs §4).
+    /// the Y-down convention, so callers must NOT pre-flip Y
+    /// (see <c>docs/coordinates-and-projections.md</c>).
     /// </summary>
     public readonly struct TileId : IEquatable<TileId>
     {

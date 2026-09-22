@@ -18,10 +18,10 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// Line <see cref="ITileMeshRenderLayer"/>: a MapLibre <c>line</c> layer as a runtime render object.
-    /// Wraps the managed <see cref="Meshing.StyledLineTileBuilder"/> (unchanged). Line width in pixel mode
-    /// is resolved in screen space by the shader (S104); the per-frame work here is a zoom-dependent
-    /// dasharray re-evaluated in <see cref="ApplyZoom"/>.
-    /// Axes (design §"Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
+    /// Wraps <see cref="Meshing.StyledLineTileBuilder"/>. Line width in pixel mode is resolved in screen
+    /// space by the shader; the per-frame work here is a zoom-dependent dasharray re-evaluated in
+    /// <see cref="ApplyZoom"/>.
+    /// Axes (design "Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
     /// </summary>
     internal sealed class LineRenderLayer : ITileMeshRenderLayer, IFadeableRenderLayer
     {
@@ -31,8 +31,7 @@ namespace MapRenderer.Unity.Rendering.Style
         internal static class ProfilerMarkerNames
         {
             // Nested under MapRenderer.View.ApplyZoom — the line applier loop (eval + per-line dash re-eval).
-            // LineDash isolates the per-line zoom-step dasharray re-evaluation. Preserved verbatim from the
-            // retired StyledLayerSet so the S46 greppable-marker set is intact.
+            // LineDash isolates the per-line zoom-step dasharray re-evaluation.
             internal const string ApplyZoomLines    = "MapRenderer.View.ApplyZoom.Lines";
             internal const string ApplyZoomLineDash = "MapRenderer.View.ApplyZoom.LineDash";
         }
@@ -139,8 +138,8 @@ namespace MapRenderer.Unity.Rendering.Style
                 Material.renderQueue = LayerDrawOrder.QueueFor(declaredOrder, MaterialSubSlot);
         }
 
-        // job-scheduling-design.md §8 stage 5: builds the prologue's graph build — the graph's write step
-        // does the mesh write. `context.BufferClip` is never read here, BY DECISION (see
+        // Builds the prologue's graph build — the graph's write step does the mesh write.
+        // `context.BufferClip` is never read here, BY DECISION (see
         // ITileMeshRenderLayer.BuildGraphRequest): clipping the input polyline turns the join at the
         // boundary vertex into a cap, trading the seam band for a seam notch.
         public Meshing.ILayerMeshBuild BuildGraphRequest(

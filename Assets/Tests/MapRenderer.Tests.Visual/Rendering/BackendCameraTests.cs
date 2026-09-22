@@ -1,4 +1,4 @@
-// Rendering-backend GPU/visual acceptance tests driven through a real camera view (UMR-176 pack: backends topic).
+// Rendering-backend GPU/visual acceptance tests driven through a real camera view.
 //
 // Split from BackendTests.cs by a using collision (MapRenderer.Core.Geo.CameraProperties vs
 // UnityEngine.Rendering.CameraProperties, CS0104): every member here builds its test camera
@@ -6,10 +6,10 @@
 // UnityEngine.Rendering — the backend tests that do are in BackendTests.cs instead.
 //
 // Contents:
-//   BrgBackendSnapshotTests        — S49 acceptance tests for the BRG render backend.
+//   BrgBackendSnapshotTests        — acceptance tests for the BRG render backend.
 //   GameObjectTileRendererTests    — GameObject render backend tests — the restored RenderBackend.GameObject path.
 //   MapViewGameObjectBackendTests  — GameObject backend wired through the live MapView/TileManager path, not the hand-driven engine unit tests.
-//   MapViewEntitiesBackendTests    — S53b increment 2 — Entities backend wired through MapView/TileManager.
+//   MapViewEntitiesBackendTests    — Entities backend wired through MapView/TileManager.
 
 using System.IO;
 using Cysharp.Threading.Tasks;
@@ -32,7 +32,7 @@ using GameObjectTileRenderer = MapRenderer.Unity.Rendering.Backend.GameObjects.T
 
 namespace MapRenderer.Tests.Visual
 {
-    // S49 BRG backend tests.
+    // BRG backend tests.
     //
     // Maps acceptance teeth to assertions:
     //
@@ -44,7 +44,7 @@ namespace MapRenderer.Tests.Visual
     //               and style B is the proof; a broken renderQueue sort makes A == B and the assertion fails.
     //   Tooth 3 — per-layer paint on BRG: _BaseColor non-white → red fill red-channel dominates green/blue
     //               in the fill region (not just coverage). Zoom-dependent line width renders on BRG pixels
-    //               and produces more fill when width is larger (S11/S13/S14 intact on BRG path).
+    //               and produces more fill when width is larger.
     //   Tooth 4 — floating-origin (GPU-independent): instance matrix translation == TileLocalToScene.
     //   Tooth 5 — teardown: BRG.IsDisposed == true after Teardown; buffer released.
     //   Tooth 6 — headless green: all GPU-independent assertions pass under ./Tools/run-tests.sh.
@@ -53,11 +53,11 @@ namespace MapRenderer.Tests.Visual
     // culling call that never fires — a real regression, not a vacuous skip.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // BrgBackendSnapshotTests — S49 acceptance tests for the BRG render backend.
+    // BrgBackendSnapshotTests — acceptance tests for the BRG render backend.
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S49 acceptance tests for the BRG render backend.
+    /// Acceptance tests for the BRG render backend.
     ///
     /// GPU-independent assertions are HARD (always run, never skipped); GPU-dependent (pixel)
     /// assertions fail loudly on a blank render rather than skipping.
@@ -146,7 +146,7 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth 3: zoom-dependent line width style ──────────────────────────────────────────────
         // A line-only style with a zoom-interpolated line-width: narrower at low zoom, much wider at
         // high zoom. Rendering at two zoom levels with a fixed-size camera frame should yield different
-        // pixel coverages — wider at the high zoom (S13/S14 intact on the BRG path).
+        // pixel coverages — wider at the high zoom.
 
         private static StyleDocument StyleZoomDependentLine() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -171,7 +171,7 @@ namespace MapRenderer.Tests.Visual
         /// <summary>
         /// Deterministic settle: one <c>LateUpdate</c> kicks fetch + mesh build, <c>DrainMeshBuilds</c>
         /// blocks on the in-flight UniTasks and consumes them inline (after it returns
-        /// <c>AllTilesSettled()</c> is guaranteed true — S47), and a final <c>LateUpdate</c> lets the
+        /// <c>AllTilesSettled()</c> is guaranteed true), and a final <c>LateUpdate</c> lets the
         /// backend rebuild its sorted draw list over the now-complete draw-item set.
         ///
         /// <para>This replaced a <c>LateUpdate</c> + <c>Thread.Sleep(1)</c> poll bounded by a frame
@@ -192,9 +192,8 @@ namespace MapRenderer.Tests.Visual
         // ── Tooth 1: toggle OFF (default) → BRG never constructed ─────────────────────────────
 
         /// <summary>
-        /// Backend selection: with the DEFAULT backend (Entities, S53c), BrgRenderer must be null and the
-        /// EntitiesRenderer must be constructed — i.e. the BRG backend is only built when explicitly
-        /// selected. (Replaces the S49 GameObject-default toggle-off test; the GO backend was retired.)
+        /// Backend selection: with the DEFAULT backend (Entities), BrgRenderer must be null and the
+        /// EntitiesRenderer must be constructed — the BRG backend is built only when explicitly selected.
         /// </summary>
         [Test]
         public void Backend_Default_IsEntities_NotBrg()
@@ -240,7 +239,7 @@ namespace MapRenderer.Tests.Visual
         /// structural/mechanical assertion that does not require GPU readback.
         ///
         /// With one fill layer, the single draw command's renderQueue must equal the material's
-        /// renderQueue (LayerDrawOrder.QueueFor(drawIndex) — fill uses LayerSubSlot.Base only, G7/D7).
+        /// renderQueue (LayerDrawOrder.QueueFor(drawIndex) — fill uses LayerSubSlot.Base only).
         /// No re-ordering must occur.
         /// </summary>
         [Test]
@@ -254,7 +253,7 @@ namespace MapRenderer.Tests.Visual
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
-            view.Config.Backend = RenderBackend.Brg; // S49 BRG path
+            view.Config.Backend = RenderBackend.Brg;
 
             try
             {
@@ -659,8 +658,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Teardown tooth: after Teardown, BrgRenderer.IsDisposed must be true and the
-        /// GraphicsBuffer must be released (HasBuffer == false). This is the S49 extension of
-        /// the S51 leak guard to the BRG path.
+        /// GraphicsBuffer must be released (HasBuffer == false) — the leak guard on the BRG path.
         ///
         /// GPU-independent (no pixel readback required).
         /// </summary>
@@ -694,12 +692,12 @@ namespace MapRenderer.Tests.Visual
                 // IsDisposed must be true after Teardown.
                 Assert.IsTrue(brg.IsDisposed,
                     "BrgTileRenderer must be disposed after MapView.Teardown. " +
-                    "S49 tooth 5: BRG + every GraphicsBuffer released on teardown.");
+                    "BRG + every GraphicsBuffer released on teardown.");
 
                 // HasBuffer must be false (GraphicsBuffer released).
                 Assert.IsFalse(brg.HasBuffer(),
                     "GraphicsBuffer must be released (HasBuffer=false) after BrgTileRenderer.Dispose. " +
-                    "S49 tooth 5: no leaked GraphicsBuffer after teardown.");
+                    "no leaked GraphicsBuffer after teardown.");
 
                 go = null; // already destroyed by Teardown (MapView's OnDestroy via explicit Teardown)
             }
@@ -950,8 +948,8 @@ namespace MapRenderer.Tests.Visual
         /// the tile fills the camera equally in both renders. Under per-tile framing, line coverage
         /// scales as (lineWidthPx × metersPerPixel) / tileWidth, which is ~100x larger at zoom=5.
         /// The zoom=5 render should therefore cover FAR MORE pixels than the zoom=1 render.
-        /// This proves S11/S13/S14 (zoom-dependent line width, ZoomStyleApplier wired, the _Width uniform
-        /// reaching the shader) are intact on the BRG path — falsifiable because a broken ApplyZoom or
+        /// This proves zoom-dependent line width — ZoomStyleApplier wired, the _Width uniform
+        /// reaching the shader — on the BRG path. Falsifiable, because a broken ApplyZoom or a
         /// wrong _Width uniform would yield equal (≈ zoom=1) coverage at zoom=5.
         ///
         /// Fails loudly (Assert.Fail) on a blank render.
@@ -1128,7 +1126,7 @@ namespace MapRenderer.Tests.Visual
                     "produce a 100x wider line at zoom=5 vs zoom=1 in pixel units, translating to " +
                     "~6x more world-space coverage at the same camera framing. " +
                     "If this fails, ZoomStyleApplier or the _Width uniform is not updating on the BRG path " +
-                    "(S11/S13/S14 regression).");
+                    "(regression).");
             }
             finally
             {
@@ -1138,18 +1136,17 @@ namespace MapRenderer.Tests.Visual
             }
         }
 
-        // ── S76: GPU cross-backend line parity ────────────────────────────────────────────────
+        // ── GPU cross-backend line parity ─────────────────────────────────────────────────────
 
         /// <summary>
-        /// S76 GPU cross-backend line parity: renders the geolines line-only style via Entities
+        /// GPU cross-backend line parity: renders the geolines line-only style via Entities
         /// (default) and BRG and asserts that BRG line coverage is within 20% of Entities coverage
         /// AND above a non-degenerate floor.
         ///
-        /// Falsifiability: before S76, BRG line props (_Width, _Opacity, etc.) read garbage from
-        /// byte offset 0 (the transform matrix). The BRG line coverage would then be near-zero (wrong
-        /// width) while Entities coverage is correct — the BRG/Entities ratio would fail the
-        /// within-tolerance assertion. After S76, the plan provides correct SoA slots → BRG matches
-        /// Entities within tolerance.
+        /// Falsifiability: a BRG plan that omits the line props makes them read garbage from
+        /// byte offset 0 (the transform matrix). BRG line coverage is then near-zero (wrong
+        /// width) while Entities coverage is correct, and the BRG/Entities ratio fails the
+        /// within-tolerance assertion.
         ///
         /// Fails loudly (Assert.Fail) when either render is blank or the coverage diverges more
         /// than 20%.
@@ -1221,7 +1218,7 @@ namespace MapRenderer.Tests.Visual
                         // Entities backend uses GameObjects, so ComputeChildBounds applies — but for
                         // simplicity we use a fixed large orthoSize (tiles are at scene-relative positions).
                         // Render through MapView's OWN camera (production path). A hand-rolled ortho camera is
-                        // an unsupported configuration for the screen-space line width (S104): the shader
+                        // an unsupported configuration for the screen-space line width: the shader
                         // MEASURES px->world from the live projection matrix and _ScreenParams, so only the
                         // camera the pipeline actually renders through yields the scale the styling assumed.
                         view.Camera.SyncToCamera();
@@ -1291,15 +1288,15 @@ namespace MapRenderer.Tests.Visual
                 // ── Parity assertion: BRG within 20% of Entities ──────────────────────────────
                 // The 20% tolerance accommodates slight camera-framing differences between the two backends
                 // (Entities places tiles via GameObject transform; BRG via SoA O2W). The key signal is that
-                // BRG coverage is in the same ballpark as Entities — before S76, BRG line width was garbage
-                // → near-zero coverage, while Entities rendered wide lines (100x difference).
+                // BRG coverage is in the same ballpark as Entities. With the line props missing from the BRG
+                // plan, BRG line width is garbage → near-zero coverage against Entities' wide lines.
                 Debug.Log($"[BrgParity] Entities filled={filledEntities:P2}, BRG filled={filledBrg:P2}");
 
                 float ratio = filledEntities > 0f ? filledBrg / filledEntities : float.NaN;
                 Assert.That(ratio, Is.InRange(0.20f, 5.0f),
                     $"BRG line coverage ({filledBrg:P2}) must be within 5× of Entities coverage ({filledEntities:P2}). " +
                     $"Ratio = {ratio:F2}. " +
-                    "A ratio near 0 means BRG is not rendering lines (missing _Width SoA slot — S76 bug). " +
+                    "A ratio near 0 means BRG is not rendering lines (missing _Width SoA slot). " +
                     "Re-run as PlayMode or inspect brg-parity-*.png.");
             }
             finally
@@ -1575,12 +1572,9 @@ namespace MapRenderer.Tests.Visual
             Assert.IsTrue(rootGo == null, "Dispose must destroy the backend root GameObject (and its children).");
             Assert.DoesNotThrow(() => r.Dispose(), "Dispose must be idempotent.");
 
-            // Two assertions used to live here — "Root accessor must read null after dispose" and
-            // "ContainerCount must read 0, not throw, after Dispose". They pinned a leniency that existed
-            // ONLY to let this test read a torn-down backend: neither accessor had a production caller. The
-            // real post-dispose invariant is the line above (the root GameObject is destroyed) plus the
-            // ObjectDisposedException asserted below. Reading a disposed object is a caller bug, not a
-            // supported query, so it is no longer answered with a plausible-looking null/0.
+            // The post-dispose invariant is the line above (the root GameObject is destroyed) plus the
+            // ObjectDisposedException below. Reading a disposed backend is a caller bug, not a supported
+            // query, so no accessor answers it with a plausible-looking null or 0.
             Assert.Throws<System.ObjectDisposedException>(() => r.AddTileLayer(
                 mesh, FloatingOrigin.TileLocalOriginMercator(tid).ToRenderOrigin(), 0, tid),
                 "a disposed backend must reject use, not absorb it.");

@@ -8,7 +8,7 @@ namespace MapRenderer.Unity.Rendering.Map
     /// The telemetry consumer that makes the map's levels readable OUTSIDE the Editor: it mirrors each
     /// published snapshot into a <see cref="ProfilerCounterValue{T}"/> under a <c>MapRenderer</c> profiler
     /// category, so every count charts over time in the Profiler window AND in a **Development standalone
-    /// build** — the only measurement the Editor cannot contaminate (<c>docs/telemetry-design.md</c> §1.2/§1.3,
+    /// build** — the only measurement the Editor cannot contaminate (<c>docs/telemetry-design.md</c>,
     /// the reason this consumer exists at all).
     ///
     /// <para><b>Costs nothing when nobody is profiling.</b> Two layers: the whole file compiles out of a
@@ -131,7 +131,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
         /// <summary>
         /// Mirrors this frame's levels into the counters — call once per frame, after the providers have run.
-        /// Returns immediately unless the profiler is recording, which is what keeps §2's "costs nothing when
+        /// Returns immediately unless the profiler is recording, which is what keeps "costs nothing when
         /// nobody is looking" literally true: not profiling ⇒ the provider accessors are never touched ⇒ the tile
         /// provider's cover-stats scan never runs.
         ///

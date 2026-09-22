@@ -1,7 +1,7 @@
 // No `using UnityEngine` — but NOT engine-free any more, and NOT a core-tests file. It consumes
 // Unity.Collections transitively through TileGeometryBuffers (the Waist-1 buffer it materializes and reads),
 // so it cannot compile in Tools/core-tests and must not be re-added to core-tests.csproj. That dependency is
-// why it lives in MapRenderer.Unity at all (tile-geometry IR B4): MapRenderer.Core references only
+// why it lives in MapRenderer.Unity at all: MapRenderer.Core references only
 // Unity.Mathematics + UniTask, and adding Unity.Collections there would erase the Core/Jobs split
 // (Core keeps the managed evaluation surface; Jobs owns the blittable geometry).
 //
@@ -27,21 +27,21 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// S105 Slice 2 (A3) — extracts <see cref="SymbolFeature"/>s from a decoded MVT tile for one symbol style
+    /// Extracts <see cref="SymbolFeature"/>s from a decoded MVT tile for one symbol style
     /// layer. Reuses the existing seams: <see cref="FeatureSelector.SelectFeatures"/> (source-layer resolve
     /// + filter), the Waist-1 tile-geometry buffer (below), and
     /// <see cref="TileId.ToLonLat"/> → <see cref="IProjection.Project"/> (tile → geo → render space, PRE-RTC).
-    /// Point AND LineString geometry (road-shields D2/D4: a LineString anchors at its mid arc-length under
+    /// Point AND LineString geometry (a LineString anchors at its mid arc-length under
     /// point placement, and at along-line anchors under a viewport-resolved line placement — see
     /// <see cref="AlignmentResolution"/>); Polygon is never accepted. One symbol per anchor (a MultiPoint
     /// feature emits one symbol per point; a viewport-resolved line emits one symbol per along-line anchor).
-    /// A MAP-resolved line ICON (P-B) instead emits ONE curved symbol per path, whose single glyph is the icon
+    /// A MAP-resolved line ICON instead emits ONE curved symbol per path, whose single glyph is the icon
     /// quad — the anchors ride inside it rather than each becoming their own symbol.
-    /// Clean-room — the shaping step is Unity-side (Slice 3).
+    /// Clean-room — the shaping step is Unity-side.
     ///
-    /// <para><b>Geometry (tile-geometry IR B4; IR C1 P2/P3).</b> Instead of decoding each feature's command
+    /// <para><b>Geometry.</b> Instead of decoding each feature's command
     /// stream for itself, this reads each feature's path spans out of the source-layer's tile-local
-    /// <see cref="TileGeometryBuffers"/> (Waist 1). Since P3 that buffer is <see cref="ITileLayer.Geometry"/>
+    /// <see cref="TileGeometryBuffers"/> (Waist 1). That buffer is <see cref="ITileLayer.Geometry"/>
     /// — the layer's own, minted once inside the decode — and it is <b>BORROWED</b>: the decoded tile owns
     /// it and frees it when its decode scope closes, so this method must never dispose it. (The buffer is
     /// array-backed, so a second free here would be a loud double free, not a quiet leak.) Because the buffer
@@ -66,9 +66,8 @@ namespace MapRenderer.Unity.Text
         /// <summary>
         /// Append every extracted symbol of <paramref name="layer"/> over <paramref name="tile"/> to
         /// <paramref name="output"/>. Features whose <c>text-field</c> resolves to null/empty AND whose
-        /// <c>icon-image</c> resolves to nothing are skipped; Polygon features are always ignored (road-shields
-        /// D2's fence — LineString is now accepted, see the class doc). <paramref name="output"/> is
-        /// caller-owned (cleared? no — appended, mirroring the tile-accumulation lifecycle in F5).
+        /// <c>icon-image</c> resolves to nothing are skipped; Polygon features are always ignored (LineString
+        /// IS accepted — see the class doc). <paramref name="output"/> is appended to, never cleared.
         /// </summary>
         /// <param name="layer">The symbol style layer (a non-symbol layer is a no-op).</param>
         /// <param name="tile">The decoded tile.</param>
@@ -79,17 +78,17 @@ namespace MapRenderer.Unity.Text
         /// (<see cref="ITileDecoder.Decode"/> enters the address into the pipeline exactly ONCE, at the fetch).
         /// </param>
         /// <param name="zoom">Current zoom, for evaluating zoom-dependent text-size/sort-key/paint AND the
-        /// build-zoom-evaluated <c>symbol-placement</c> (road-shields D1 — frozen for this tile's lifetime,
+        /// build-zoom-evaluated <c>symbol-placement</c> (frozen for this tile's lifetime,
         /// never re-evaluated per frame).</param>
         /// <param name="projection">Geo → render-space projection.</param>
         /// <param name="output">Caller-owned list the extracted symbols are appended to.</param>
         /// <param name="spriteAtlas">
-        /// I3 — the sprite sheet <c>icon-image</c> resolves against; <c>null</c> (the default) yields NO icon
-        /// symbols regardless of the layer's <c>icon-*</c> properties, so every pre-I3 caller (which omits this
-        /// argument) is byte-identical to before I3. Icons resolve at EVERY placement now: point, line with
-        /// <c>icon-rotation-alignment</c> resolving to <c>viewport</c> (road-shields D4 — the upright-at-anchor
-        /// case), and line with it resolving to <c>map</c> (P-B — the along-line case, emitted as a one-glyph
-        /// curved symbol; <c>road_one_way_arrow*</c>). D4's map-aligned fence is LIFTED, not surviving.
+        /// The sprite sheet <c>icon-image</c> resolves against; <c>null</c> (the default) yields NO icon
+        /// symbols regardless of the layer's <c>icon-*</c> properties, so a caller that omits this argument
+        /// never produces icons. Icons resolve at EVERY placement: point, line with
+        /// <c>icon-rotation-alignment</c> resolving to <c>viewport</c> (the upright-at-anchor case), and line
+        /// with it resolving to <c>map</c> (the along-line case, emitted as a one-glyph curved symbol —
+        /// <c>road_one_way_arrow*</c>).
         /// </param>
         public static void Extract(
             MapRenderer.Core.Style.StyleLayer layer,
@@ -115,10 +114,8 @@ namespace MapRenderer.Unity.Text
             ITileLayer tileLayer = MapRenderer.Jobs.Tiles.SourceLayerResolver.ResolveTileLayer(layer, tile);
             if (tileLayer == null) return;
 
-            // IR C1 fix stage: the BUFFER is the sole authority for the address and the extent it was
-            // quantized against — read together, off one object, so no pair of them can drift. Both used to
-            // come from elsewhere (the `tileId` parameter and `tileLayer.Extent`), which is the second-copy
-            // shape P2/P3 removed from the mesh consumers and left standing here alone.
+            // The BUFFER is the sole authority for the address and the extent it was quantized against —
+            // read together, off one object, so no pair of them can drift.
             //
             // Nothing created ⇒ no rings ⇒ no symbol is reachable (every emit below walks the bucketed ring
             // order), so this returns the same empty result the loop would — and it is what makes reading
@@ -129,13 +126,13 @@ namespace MapRenderer.Unity.Text
             TileId tileAddress = geometry.Tile;
             double extent      = geometry.Extent;
 
-            // IR C1 P2: the ORDINAL-returning selection overload, taking the already-resolved layer. The
+            // The ORDINAL-returning selection overload, taking the already-resolved layer. The
             // ordinals are what the shared buffer's RingFeatureIdx names; resolving the layer a second time
             // inside the selector would be a second chance to resolve it differently. Selection order is
             // unchanged — the selector appends in Features order, so selected order IS decode order.
             var selected = new List<SelectedTileFeature>();
             FeatureSelector.SelectFeatures(layer, tileLayer, zoom, selected);
-            // Nothing selected ⇒ no symbol can be emitted. Since IR C1 P3 the decode already materialized
+            // Nothing selected ⇒ no symbol can be emitted. The decode already materialized
             // every layer, so this no longer avoids any work upstream — it is the plain early-out it reads
             // as, mirroring TileMeshLayerProcessor's `selected.Count > 0`.
             if (selected.Count == 0) return;
@@ -149,23 +146,21 @@ namespace MapRenderer.Unity.Text
             // Stored y-down (as authored); the y-flip happens at placement.
             float2 translatePx = paint.Translate;
 
-            // D1 (road-shields): symbol-placement is now expression-capable but evaluated ONCE here, at the
-            // tile's build zoom — never per frame, never re-evaluated as the camera crosses a step boundary
-            // (the accepted D1 known limit). TryEvaluate degrades to Point on a malformed/data-driven
+            // symbol-placement is expression-capable but evaluated ONCE here, at the tile's build zoom —
+            // never per frame, never re-evaluated as the camera crosses a step boundary (an accepted known
+            // limit). TryEvaluate degrades to Point on a malformed/data-driven
             // expression rather than throwing (symbol-placement is never data-driven in a real style).
             SymbolPlacement placement = layout.SymbolPlacement.TryEvaluate(zoom, null, out SymbolPlacement evaluatedPlacement)
                 ? evaluatedPlacement : SymbolPlacement.Point;
             bool isLine = placement != SymbolPlacement.Point;
 
-            // D3/D4 (road-shields): resolve rotation-alignment against placement ONCE per layer (both are
-            // plain parsed enums, not feature-dependent — MapLibre's alignment keys are never data-driven).
-            // D4's reframe of G3/G4: under LINE placement, a symbol whose alignment resolves AWAY from Map is
-            // NOT curved — MapLibre lays it out as an ordinary upright (viewport) block at each along-line
-            // anchor, exactly the road-shield look. Map-aligned line symbols (the pre-shields behaviour) are
-            // untouched — this only lifts the icon fence / switches emit shape for the viewport-resolved case.
+            // Resolve rotation-alignment against placement ONCE per layer (both are plain parsed enums, not
+            // feature-dependent — MapLibre's alignment keys are never data-driven). Under LINE placement, a
+            // symbol whose alignment resolves AWAY from Map is NOT curved — MapLibre lays it out as an
+            // ordinary upright (viewport) block at each along-line anchor, the road-shield look.
             AlignmentMode textAlign    = AlignmentResolution.Resolve(layout.TextRotationAlignment, placement);
             AlignmentMode iconAlign    = AlignmentResolution.Resolve(layout.IconRotationAlignment, placement);
-            // W1: the PITCH twins, resolved on the SAME once-per-layer terms (the spec's pitch `auto` defers
+            // The PITCH twins, resolved on the SAME once-per-layer terms (the spec's pitch `auto` defers
             // to the RESOLVED rotation alignment, which is what ResolvePitch encodes). Unlike the rotation
             // values above — recorded as authored and re-resolved downstream — these are stamped RESOLVED
             // onto the emitted symbol, because the curved staging arm consumes them and has no placement in
@@ -176,18 +171,18 @@ namespace MapRenderer.Unity.Text
                 layout.IconPitchAlignment, layout.IconRotationAlignment, placement);
             bool          textAtAnchors = isLine && textAlign != AlignmentMode.Map;
             bool          iconAtAnchors = isLine && iconAlign != AlignmentMode.Map;
-            // P-B: the third icon mode. A MAP-resolved line icon rides the along-line anchors AND rotates to
+            // The third icon mode. A MAP-resolved line icon rides the along-line anchors AND rotates to
             // the local line tangent — emitted as a one-glyph curved symbol (see EmitAlongLineIcon).
             bool          iconAlongLine = isLine && iconAlign == AlignmentMode.Map;
 
-            // Waist 1 (IR C1 P2/P3): the WHOLE source layer, decoded ONCE into the layer's own tile-local
+            // Waist 1: the WHOLE source layer, decoded ONCE into the layer's own tile-local
             // buffer and BORROWED from it. `RingFeatureIdx[r]` therefore indexes `tileLayer.Features` — the
             // layer's own ordinal — not this layer's selected list, which is why every per-feature array below
             // is sized to the LAYER and addressed by `SelectedTileFeature.Ordinal`. An array sized to the
             // selected count would silently mis-bucket (and, whenever the highest selected ordinal exceeds
             // that count, index out of range).
             //
-            // IR C1 fix stage: sized from `geometry.FeatureCount`, as LINE already sizes its three columns
+            // Sized from `geometry.FeatureCount`, as LINE already sizes its three columns
             // (StyledLineTileBuilder). `RingFeatureIdx`'s values ARE indices into the buffer's own feature
             // column, so that column's length is the domain being bucketed; `Features.Count` is a different
             // list that merely happens to hold the same count. For MVT it always does (OrdinalDomainTests
@@ -197,7 +192,7 @@ namespace MapRenderer.Unity.Text
 
             // RingFeatureIdx joins each ring back to its feature's LAYER ORDINAL. Bucket ONCE, ascending in r,
             // so each feature's paths keep DECODE ORDER (landmine #4 — the extractor's per-tile `ordinal` is
-            // the stable S20 FeatureIndex tiebreak, so path order is observable output, not an implementation
+            // the stable FeatureIndex tiebreak, so path order is observable output, not an implementation
             // detail). Contiguity is NOT assumed: a counting sort is stable and correct either way.
             // RingCount is the DECODED count, not RingCapacity; RingOffsets carries a trailing sentinel.
             // Rank 3 GC fix: the counting-sort scratch is native now (no per-tile managed garbage). `using var`
@@ -226,43 +221,41 @@ namespace MapRenderer.Unity.Text
             // Walks the SELECTION, in selection order — which is decode order, because the selector appends in
             // Features order — and addresses the bucketed rings by each entry's layer ordinal. That pairing is
             // what keeps both the emitted symbol sequence and the `ordinal` counter below byte-identical to the
-            // pre-P2 "iterate the selected list" loop.
+            // plain "iterate the selected list" loop.
             for (int si = 0; si < selected.Count; si++)
             {
                 int      f       = selected[si].Ordinal;
                 IFeature feature = selected[si].Feature;
-                // D2 (road-shields): point placement now ALSO accepts a LineString feature (one anchor at
-                // its mid arc-length, below) — the shields' "point" step branch runs over LineString road
-                // geometry. Polygon stays unaccepted at every placement (the D2 fence).
+                // Point placement ALSO accepts a LineString feature (one anchor at its mid arc-length,
+                // below) — the shields' "point" step branch runs over LineString road geometry. Polygon
+                // stays unaccepted at every placement.
                 if (isLine
                         ? feature.GeometryType != TileGeometryType.LineString
                         : (feature.GeometryType != TileGeometryType.Point &&
                            feature.GeometryType != TileGeometryType.LineString))
                     continue;
 
-                // A6: the feature IS an IFeature (the neutral carrier implements it directly) — no adapter alloc.
-                // I3: text and icon are INDEPENDENT — a feature may resolve either, both, or neither. Only
-                // when NEITHER resolves is the feature skipped (the pre-I3 "text==null -> skip" rule is the
-                // isLine-or-null-atlas special case of this, so line/text-only-atlas behaviour is unchanged).
+                // The feature IS an IFeature (the neutral carrier implements it directly) — no adapter alloc.
+                // Text and icon are INDEPENDENT — a feature may resolve either, both, or neither. Only when
+                // NEITHER resolves is the feature skipped.
                 string text = TextFieldResolver.Resolve(layout.TextField, feature);
                 if (text != null)
                 {
-                    // text-transform (Slice B): case-fold the resolved symbol before it is shaped downstream.
+                    // text-transform: case-fold the resolved symbol before it is shaped downstream.
                     text = layout.TextTransform.Apply(text);
                 }
 
-                // I3/D4/P-B: icons resolve at every placement — point, a viewport-resolved line
-                // (iconAtAnchors) and, since P-B, a map-resolved line (iconAlongLine). Only resolved when the
-                // caller supplied a sprite atlas — a null atlas (every pre-I3 caller) never produces icons.
+                // Icons resolve at every placement — point, a viewport-resolved line (iconAtAnchors) and a
+                // map-resolved line (iconAlongLine). Only resolved when the caller supplied a sprite atlas;
+                // a null atlas never produces icons.
                 bool        hasIcon   = false;
                 SpriteEntry iconEntry = default;
-                // I6: hoisted to feature scope (was block-local + discarded) — the resolved sprite name is the
-                // icon's cross-tile identity, needed at the icon-emit site below (SymbolFeature.IconImage).
+                // At feature scope because the resolved sprite name is the icon's cross-tile identity,
+                // needed at the icon-emit site below (SymbolFeature.IconImage).
                 string iconImage = null;
-                // P-B: D4's map-aligned fence (which this gate used to express as `!isLine || iconAtAnchors`)
-                // is LIFTED. What replaced it is a third emit SHAPE, not a third fence: `iconAlongLine` routes
-                // to EmitAlongLineIcon below, where the icon rides the same along-line anchors as the
-                // viewport case but rotates to the projected tangent instead of staying screen-upright.
+                // There is no map-aligned fence here, only a third emit SHAPE: `iconAlongLine` routes to
+                // EmitAlongLineIcon below, where the icon rides the same along-line anchors as the viewport
+                // case but rotates to the projected tangent instead of staying screen-upright.
                 if ((!isLine || iconAtAnchors || iconAlongLine) && spriteAtlas != null)
                 {
                     iconImage = IconImageResolver.Resolve(layout.IconImage, feature);
@@ -272,14 +265,12 @@ namespace MapRenderer.Unity.Text
 
                 if (text == null && !hasIcon) continue; // neither a text symbol nor an icon → nothing to emit
 
-                // P-A (D-PA-1): the PAIRING predicate is "this feature resolved BOTH a text and an icon",
-                // nothing more. The two halves are stamped ONE placement instance downstream (SymbolPairing /
-                // StagePointPair), not the old D5 icon-owns-collision approximation (the forced overlap flags
-                // were D5's mechanism; D5 is retired — see §10). §10 D8/D9's five extra conjuncts (text/icon
-                // anchor == Center, zero text/icon offset, zero radial offset) are RETIRED: MapLibre's model
-                // is an INSTANCE of icon + text placed together, not two symbols that happen to coincide, so a
-                // bottom-anchored city name is as much one instance with its dot as a shield's centred ref is
-                // with its badge. That gap is what let a dot place while its own name was culled.
+                // The PAIRING predicate is "this feature resolved BOTH a text and an icon", nothing more.
+                // The two halves are stamped ONE placement instance downstream (SymbolPairing /
+                // StagePointPair). There are no extra conjuncts (text/icon anchor == Center, zero text/icon
+                // offset, zero radial offset): MapLibre's model is an INSTANCE of icon + text placed
+                // together, not two symbols that happen to coincide, so a bottom-anchored city name is as
+                // much one instance with its dot as a shield's centred ref is with its badge.
                 //
                 // Coincident boxes were never what made pairing work. Each half's anchor/offset is baked
                 // ANCHOR-RELATIVE upstream — TextQuadLayout.Layout folds text-anchor/-offset/-radial-offset
@@ -290,11 +281,8 @@ namespace MapRenderer.Unity.Text
                 // non-centred pair's two boxes are simply DISJOINT; each is still collision-tested on its own
                 // (the candidate reserves no union box spanning the gap between them).
                 //
-                // D-PA-3: icon-optional/text-optional deliberately still do NOT appear here, and D11 ("pair
-                // only when both are false") stays refuted — but for a NEW reason. Stage C's argument was that
-                // a CENTRED pair's boxes overlap by construction, so un-pairing makes the halves mutually
-                // exclusive rather than independent; that does not transfer to disjoint boxes. The argument
-                // that does is the INSTANCE one: `text-optional` means "this instance may render icon-only",
+                // icon-optional/text-optional do NOT appear in this predicate, and "pair only when both are
+                // false" would be wrong: `text-optional` means "this instance may render icon-only",
                 // which presupposes the instance. liberty's `airport` sets it and nothing else — un-paired,
                 // its halves would be collision-tested independently and the text could place with the icon
                 // culled, the one outcome the flag forbids. Optionality remains a per-BOX verdict inside the
@@ -309,7 +297,7 @@ namespace MapRenderer.Unity.Text
                 float      maxAngle   = layout.TextMaxAngle.Evaluate(zoom, feature);                // degrees (#6)
                 SymbolPaint symbolPaint = EvaluatePaint(paint, zoom, feature);
 
-                // I3: the icon quad/paint are feature-constant (icon-size/-padding/-opacity don't vary per
+                // The icon quad/paint are feature-constant (icon-size/-padding/-opacity don't vary per
                 // point within a MultiPoint feature) — build once here, stamp onto every point symbol below.
                 SymbolQuad iconQuad    = default;
                 SymbolPaint iconPaint   = default;
@@ -320,7 +308,7 @@ namespace MapRenderer.Unity.Text
                 {
                     float iconSize = layout.IconSize.Evaluate(zoom, feature);
                     iconPadding = layout.IconPadding.Evaluate(zoom, feature);
-                    // P-B: degrees→radians ONCE, here — every downstream site reads radians. Build-zoom
+                    // degrees→radians ONCE, here — every downstream site reads radians. Build-zoom
                     // frozen for this tile's lifetime, the same accepted limit as every other icon property.
                     // Unit conversion only: the value keeps MapLibre's clockwise-positive SENSE all the way
                     // down, and enters the staging frame's opposite sense once, at
@@ -346,9 +334,9 @@ namespace MapRenderer.Unity.Text
                 // This feature's decoded paths, as a span of the bucketed ring order (decode order preserved).
                 int pathCount = ringStart[f + 1] - ringStart[f];
 
-                // D4/NIT: LayoutOptions is only built when a point-style text symbol can actually be emitted
+                // LayoutOptions is only built when a point-style text symbol can actually be emitted
                 // (point placement, or a viewport-resolved line — the curved branch never uses it).
-                // AnchorEmitContext itself is built INSIDE each branch below (review NIT 4) rather than once
+                // AnchorEmitContext itself is built INSIDE each branch below rather than once
                 // here — the two branches' contexts differ in two fields (Text/HasIcon suppression under the
                 // line branch's map-aligned fence) and building them separately removes both the line
                 // branch's dead construction (a curved-only feature never reads a context at all) and the
@@ -359,8 +347,8 @@ namespace MapRenderer.Unity.Text
 
                 if (isLine)
                 {
-                    // P-B: the along-line icon's per-FEATURE values, built ONCE and read once per path below.
-                    // Built here (not hoisted above the branch — the NIT-4 precedent): only a map-resolved
+                    // The along-line icon's per-FEATURE values, built ONCE and read once per path below.
+                    // Built here, not hoisted above the branch: only a map-resolved
                     // line icon reads it, so a text-only or viewport-resolved line constructs nothing.
                     AlongLineIconContext alongLineIconCtx = iconAlongLine && hasIcon
                         ? new AlongLineIconContext
@@ -373,7 +361,7 @@ namespace MapRenderer.Unity.Text
                             AllowOverlap = layout.IconAllowOverlap,
                             IgnorePlacement = layout.IconIgnorePlacement,
                             RotationAlignment = layout.IconRotationAlignment,
-                            PitchAlignment = iconPitch, // W1: RESOLVED, unlike RotationAlignment above
+                            PitchAlignment = iconPitch, // RESOLVED, unlike RotationAlignment above
                             SortKey = sortKey,
                             SpacingPx = spacing,
                             MaxAngleDeg = maxAngle,
@@ -385,7 +373,7 @@ namespace MapRenderer.Unity.Text
                     {
                         IReadOnlyList<double2> path = CopyRing(geometry, ringOrder[ringStart[f] + p]);
                         if (path.Count < 2) continue; // need at least one segment to place along
-                        // A-2: anchors computed ONCE here in TILE space (zoom-invariant). symbol-spacing is px
+                        // Anchors computed ONCE here in TILE space (zoom-invariant). symbol-spacing is px
                         // at the tile's on-screen size (512 logical px per tile at integer zoom), so px → tile
                         // units is `spacing · extent / TilePixelSize`. Projection-agnostic: uses only the layer
                         // extent + the 512 convention, no projection scale.
@@ -394,7 +382,7 @@ namespace MapRenderer.Unity.Text
                         // S4: subdivide the tile-local path ONCE so ProjectPath/anchor-resolve and
                         // LineAnchorPlacement.Compute both index against the SAME finer sequence — never
                         // subdivide only one of the two, or LineAnchor.Segment silently desyncs from
-                        // PathRender (docs/labels-and-symbols-design.md §4). On a flat projection
+                        // PathRender (docs/labels-and-symbols-design.md). On a flat projection
                         // (MaxRefineAngleRad == ∞, e.g. Mercator) this bypasses LineCurvatureSubdivision.Subdivide
                         // entirely and passes the ORIGINAL path straight through — the live Mercator
                         // byte-identity guarantee (zero-alloc, unchanged behaviour).
@@ -420,18 +408,17 @@ namespace MapRenderer.Unity.Text
                             densePath = LineCurvatureSubdivision.Subdivide(path, ups, maxRefineAngleRad);
                         }
 
-                        // D4/A-2: anchors computed once, shared by BOTH sub-branches below (today computed
-                        // inline with identical arguments — byte-identical).
+                        // Anchors computed once, shared by BOTH sub-branches below.
                         LineAnchor[] anchors = LineAnchorPlacement.Compute(densePath, spacingTileUnits, placement);
 
-                        // KL-A1: the single-world clip the point path has had since D2, now applied to the LINE
-                        // branch's shared anchors — so an anchor in the MVT buffer strip is emitted by the tile
-                        // that OWNS it and no other.
+                        // The same single-world clip the point path applies, here over the LINE branch's
+                        // shared anchors — so an anchor in the MVT buffer strip is emitted by the tile that
+                        // OWNS it and no other.
                         anchors = KeepAnchorsInsideTile(anchors, densePath, extent);
                         if (anchors.Length == 0) continue; // every anchor belongs to a neighbour — nothing here
 
-                        // Curved text — the pre-shields path, unchanged, but only when this symbol is NOT
-                        // upright-at-anchors (map-aligned, or line-center's textAlign resolves Map by D3).
+                        // Curved text — only when this symbol is NOT upright-at-anchors (map-aligned, or
+                        // line-center's textAlign resolves Map).
                         if (text != null && !textAtAnchors)
                         {
                             double3[] textPathRender = ProjectPath(densePath, tileAddress, extent, projection, out double3[] textPathUps);
@@ -455,11 +442,11 @@ namespace MapRenderer.Unity.Text
                                 Paint           = symbolPaint,
                                 TranslatePx     = translatePx,
                                 TranslateAnchor = paint.TranslateAnchor,
-                                PitchAlignment  = textPitch, // W1: RESOLVED — selects the world-metre arc walk
+                                PitchAlignment  = textPitch, // RESOLVED — selects the world-metre arc walk
                             });
                         }
 
-                        // P-B: a MAP-resolved line icon is a ONE-GLYPH CURVED symbol, riding the SAME anchors
+                        // A MAP-resolved line icon is a ONE-GLYPH CURVED symbol, riding the SAME anchors
                         // the curved text above uses. Its own ProjectPath call (rather than sharing the text
                         // branch's array) keeps each symbol the sole owner of its path; the only cost is a
                         // second projection on a layer carrying map-aligned text AND a map-aligned icon,
@@ -471,13 +458,13 @@ namespace MapRenderer.Unity.Text
                                 anchors, in alongLineIconCtx, tileKey, ref ordinal, output);
                         }
 
-                        // D4: upright-at-anchors — text and/or icon emitted as ordinary POINT symbols at each
+                        // Upright-at-anchors — text and/or icon emitted as ordinary POINT symbols at each
                         // along-line anchor (the road-shield look). Suppress whichever side didn't resolve to
                         // viewport (Map-aligned text/icon on the SAME feature keeps its OWN emit path/fence).
                         if (textAtAnchors || iconAtAnchors)
                         {
-                            // Built here (not hoisted — NIT 4): the side that did NOT resolve to viewport is
-                            // suppressed (the map-aligned fence, D4).
+                            // Built here, not hoisted: the side that did NOT resolve to viewport is
+                            // suppressed by the map-aligned fence.
                             var anchorCtx = new AnchorEmitContext
                             {
                                 Text = textAtAnchors ? text : null,
@@ -505,9 +492,9 @@ namespace MapRenderer.Unity.Text
                                 TranslateAnchor = paint.TranslateAnchor,
                                 // `pairedInstance` is computed from the UN-suppressed text/hasIcon, so on this
                                 // branch it must be re-gated on BOTH fences that can suppress a half. Icon
-                                // side: P-B made `hasIcon` true with `iconAtAnchors` false (the along-line
+                                // side: `hasIcon` can be true with `iconAtAnchors` false (the along-line
                                 // case), which would stamp a viewport-aligned text Rider against a PairId no
-                                // emitted symbol owns. Text side (D-PA-4): a map-aligned text leaves `Text`
+                                // emitted symbol owns. Text side: a map-aligned text leaves `Text`
                                 // null here, which would stamp the icon Owner with no Rider ever following.
                                 // With both conjuncts EmitAtAnchor's "PairedInstance implies both halves" is
                                 // true by construction rather than by convention. Byte-identical wherever
@@ -525,8 +512,8 @@ namespace MapRenderer.Unity.Text
                 }
                 else
                 {
-                    // Built ONCE per feature, read once per anchor by EmitAtAnchor (NIT 4 — was hoisted above
-                    // both branches; moved here since only the point branch reads it).
+                    // Built ONCE per feature, read once per anchor by EmitAtAnchor. Built inside this
+                    // branch because only the point branch reads it.
                     var ctx = new AnchorEmitContext
                     {
                         Text = text,
@@ -557,13 +544,13 @@ namespace MapRenderer.Unity.Text
                     for (int p = 0; p < pathCount; p++)
                     {
                         IReadOnlyList<double2> path = CopyRing(geometry, ringOrder[ringStart[f] + p]);
-                        // D2 (road-shields): a Point feature anchors at every vertex (unchanged); a LineString
+                        // A Point feature anchors at every vertex; a LineString
                         // feature under POINT placement anchors ONCE, at the path's mid arc-length — reusing
                         // LineAnchorPlacement.Compute(_, _, LineCenter), the same "middle of this tile-space
                         // path" topology the LINE branch above already computes. Anchors are resolved on the
                         // BUFFERED DECODED path (unclipped — the same input the curved branch uses); the
                         // existing [0, extent) single-world clip is then applied to the RESOLVED anchor point,
-                        // unchanged (docs/road-shields-design.md §3 D2 — the clip contract).
+                        // unchanged (docs/road-shields-design.md — the clip contract).
                         IReadOnlyList<double2> anchorPoints;
                         if (feature.GeometryType == TileGeometryType.LineString)
                         {
@@ -608,7 +595,7 @@ namespace MapRenderer.Unity.Text
             return ring;
         }
 
-        /// <summary>D4 (road-shields): the per-FEATURE values every anchor of that feature stamps onto its
+        /// <summary>The per-FEATURE values every anchor of that feature stamps onto its
         /// symbols — evaluated once in <see cref="Extract"/>'s feature loop, read once per anchor by
         /// <see cref="EmitAtAnchor"/>. readonly struct + <c>in</c> per docs/conventions-short.md (bigger than
         /// ~16 bytes, read-only at the call site).</summary>
@@ -634,14 +621,14 @@ namespace MapRenderer.Unity.Text
             public bool               IconAllowOverlap { get; init; }
             public bool               IconIgnorePlacement { get; init; }
             public AlignmentMode      IconRotationAlignment { get; init; }
-            /// <summary>P-B <c>icon-rotate</c> in radians — stamped on the ICON half only; text is never
+            /// <summary><c>icon-rotate</c> in radians — stamped on the ICON half only; text is never
             /// rotated by it.</summary>
             public float              IconRotateRadians { get; init; }
-            /// <summary>Stage C <c>icon-optional</c> — stamped on the ICON half's
+            /// <summary><c>icon-optional</c> — stamped on the ICON half's
             /// <see cref="SymbolFeature.PairOptional"/>: the icon is the droppable one, so its text partner can
             /// place without it.</summary>
             public bool               IconOptional { get; init; }
-            /// <summary>Stage C <c>text-optional</c> — stamped on the TEXT half's
+            /// <summary><c>text-optional</c> — stamped on the TEXT half's
             /// <see cref="SymbolFeature.PairOptional"/>: the text is the droppable one, so its icon partner can
             /// place without it.</summary>
             public bool               TextOptional { get; init; }
@@ -649,7 +636,7 @@ namespace MapRenderer.Unity.Text
             public float              SortKey { get; init; }
             public float2             TranslatePx { get; init; }
             public TextTranslateAnchor TranslateAnchor { get; init; }
-            /// <summary>§10 D10 / P-A: true when this feature resolved BOTH a text and an icon and both are
+            /// <summary>True when this feature resolved BOTH a text and an icon and both are
             /// emitted at this anchor — the two halves are ONE placement instance, centred or not. The icon
             /// is stamped <see cref="SymbolPairRole.Owner"/> (emitted first) and the text
             /// <see cref="SymbolPairRole.Rider"/>, sharing a <c>PairId</c>; whether the proposed pair actually
@@ -659,7 +646,7 @@ namespace MapRenderer.Unity.Text
             public bool               PairedInstance { get; init; }
         }
 
-        /// <summary>P-B: the per-FEATURE icon values every along-line icon symbol of that feature stamps —
+        /// <summary>The per-FEATURE icon values every along-line icon symbol of that feature stamps —
         /// evaluated once in <see cref="Extract"/>'s feature loop, read once per decoded path by
         /// <see cref="EmitAlongLineIcon"/>. The icon-side analogue of <see cref="AnchorEmitContext"/>, kept
         /// separate because the two describe different emit SHAPES: that one carries a point block's
@@ -676,18 +663,18 @@ namespace MapRenderer.Unity.Text
             public bool          AllowOverlap { get; init; }
             public bool          IgnorePlacement { get; init; }
             public AlignmentMode RotationAlignment { get; init; }
-            /// <summary>W1 — the RESOLVED <c>icon-pitch-alignment</c>, unlike
+            /// <summary>The RESOLVED <c>icon-pitch-alignment</c>, unlike
             /// <see cref="RotationAlignment"/> beside it (recorded as authored). Consumed: it selects the
             /// world-metre arc walk in the curved staging arm.</summary>
             public AlignmentMode PitchAlignment { get; init; }
             public float         SortKey { get; init; }
             public float         SpacingPx { get; init; }
             public float         MaxAngleDeg { get; init; }
-            /// <summary>P-B <c>icon-rotate</c> in radians, composed on top of the along-line tangent.</summary>
+            /// <summary><c>icon-rotate</c> in radians, composed on top of the along-line tangent.</summary>
             public float         IconRotateRadians { get; init; }
         }
 
-        /// <summary>KL-A1: the along-line twin of <see cref="EmitAtAnchor"/>'s single-world <c>[0, extent)</c>
+        /// <summary>The along-line twin of <see cref="EmitAtAnchor"/>'s single-world <c>[0, extent)</c>
         /// clip — returns the anchors of <paramref name="anchors"/> whose resolved tile-space point
         /// (<c>lerp(tilePath[Segment], tilePath[Segment+1], T)</c>, the same expression every consumer resolves
         /// an anchor with) lies inside this tile, in the original along-line arc order.
@@ -731,7 +718,7 @@ namespace MapRenderer.Unity.Text
             return p.x >= 0.0 && p.x < extent && p.y >= 0.0 && p.y < extent;
         }
 
-        /// <summary>P-B: emits ONE along-line icon symbol for a decoded path — a curved symbol whose single
+        /// <summary>Emits ONE along-line icon symbol for a decoded path — a curved symbol whose single
         /// glyph is the icon quad, riding <paramref name="anchors"/> (the SAME array the curved-text branch
         /// walks) and rotated per-frame to the projected line tangent.
         ///
@@ -741,7 +728,7 @@ namespace MapRenderer.Unity.Text
         /// "upright" would point it the wrong way. See docs/labels-and-symbols-design.md.</para>
         ///
         /// <para>Never paired: a pair is proposed only in <see cref="EmitAtAnchor"/>, on the point path, so
-        /// this symbol's <c>PairRole</c> stays <see cref="SymbolPairRole.None"/> structurally — §10's "a curved
+        /// this symbol's <c>PairRole</c> stays <see cref="SymbolPairRole.None"/> structurally — the "a curved
         /// symbol is never paired" fence holds with no guard here.</para></summary>
         private static void EmitAlongLineIcon(
             SymbolPlacement placement, double3[] pathRender, double3[] pathUpRender, LineAnchor[] anchors,
@@ -770,7 +757,7 @@ namespace MapRenderer.Unity.Text
                 // line tangent, so — exactly like the curved-text emit above — the builder does not forward
                 // this onto the record. It says what the style asked for, nothing downstream reads it.
                 RotationAlignment = ctx.RotationAlignment,
-                // W1: the pitch twin IS forwarded and IS read — it selects StageCurved's world arc walk.
+                // The pitch twin IS forwarded and IS read — it selects StageCurved's world arc walk.
                 PitchAlignment    = ctx.PitchAlignment,
                 IconRotateRadians = ctx.IconRotateRadians,
                 Paint             = ctx.Paint,
@@ -779,9 +766,9 @@ namespace MapRenderer.Unity.Text
             });
         }
 
-        /// <summary>D2+D4: resolves one tile-space anchor point to a symbol anchor and emits its text/icon
+        /// <summary>Resolves one tile-space anchor point to a symbol anchor and emits its text/icon
         /// symbols per <paramref name="ctx"/> — the single emit site shared by point-placement anchors AND
-        /// line-placement upright-at-anchor symbols. Applies the single-world <c>[0, extent)</c> clip (D2) —
+        /// line-placement upright-at-anchor symbols. Applies the single-world <c>[0, extent)</c> clip —
         /// an anchor outside the tile is a source world-copy/buffer duplicate, dropped so the owning tile
         /// emits it exactly once.</summary>
         private static void EmitAtAnchor(
@@ -795,7 +782,7 @@ namespace MapRenderer.Unity.Text
 
             if (ctx.PairedInstance)
             {
-                // §10 D10: the pair's PairId is the OWNER's (icon's) FeatureIndex, captured before either
+                // The pair's PairId is the OWNER's (icon's) FeatureIndex, captured before either
                 // emitter advances `ordinal`. PairedInstance implies both HasIcon and Text != null — every
                 // caller re-gates the predicate on the same fences that suppress a half (the line branch on
                 // `iconAtAnchors && textAtAnchors`) — so both emitters below always run together here.
@@ -866,8 +853,8 @@ namespace MapRenderer.Unity.Text
             });
         }
 
-        // Project a tile-local line string to render-space (PRE-RTC) vertices, plus (P2) the parallel,
-        // index-parallel unit surface normal at each vertex.
+        // Project a tile-local line string to render-space (PRE-RTC) vertices, plus the index-parallel
+        // unit surface normal at each vertex.
         private static double3[] ProjectPath(
             IReadOnlyList<double2> path, TileId tileId, double extent, IProjection projection, out double3[] ups)
         {

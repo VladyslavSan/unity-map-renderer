@@ -23,7 +23,7 @@ namespace MapRenderer.App.Menu
     }
 
     /// <summary>
-    /// PlayerPrefs-backed camera-preset slots for the debug menu (UMR-78) — the app-local persistence behind the
+    /// PlayerPrefs-backed camera-preset slots for the debug menu — the app-local persistence behind the
     /// <see cref="CameraPresetsPage"/>. One string entry per slot, so presets survive a Play-session restart.
     ///
     /// <para>Poses are serialized field-by-field with the round-trip-exact <c>G17</c> format under the invariant

@@ -1,20 +1,11 @@
 // Unity EditMode only — reads a rendered frame produced by OffLookAtSymbolScene. NOT registered in
 // Tools/core-tests/core-tests.csproj.
 //
-// The ink-run segmenter shared by the map-pitch epic's ink teeth. W2 wrote these bodies inside
-// MapPitchedGlyphSizeTests; W3 needs the SAME segmentation for its containment tooth, and a second copy
-// would have been the third ink probe across these suites (P3b's recorded nit N3 predicted exactly that
-// drift). This file is a PURE MOVE of those bodies — no logic change.
+// The ink-run segmenter shared by the map-pitch ink teeth, so a second consumer does not fork a third ink
+// probe across these suites.
 //
-// W2's DELIBERATE, WRITTEN decision is preserved and NOT reversed. Its note read:
-//
-//     "Lives in the test assembly rather than in WorldSymbolInkAnalysis so the shared analyser every
-//      pre-existing snapshot tooth depends on is untouched by this stage."
-//
-// That reason is still valid — WorldSymbolInkAnalysis is depended on by frozen snapshot teeth, and moving
-// these helpers into it would put new code under all of them. W3's addendum is only that a SECOND consumer
-// justifies lifting them out of one test fixture into a test-assembly-internal helper class, which changes
-// neither the analyser nor what any existing tooth reads.
+// It lives here rather than in WorldSymbolInkAnalysis: frozen snapshot teeth depend on that analyser, and
+// moving these helpers into it would put new code under all of them.
 
 #if UNITY_EDITOR
 using System.Collections.Generic;

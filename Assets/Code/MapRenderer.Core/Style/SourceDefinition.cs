@@ -3,9 +3,8 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Style
 {
     /// <summary>
-    /// The source-type discriminator (Style Spec <c>sources[].type</c>). Vector is implemented first
-    /// (S08); the others are modeled here so the discriminator exists, but their loading is later
-    /// stages (S21 geojson, S22 raster, S24 raster-dem, S36 image/video).
+    /// The source-type discriminator (Style Spec <c>sources[].type</c>). The types that have no loader
+    /// yet are still modeled here so the discriminator is complete.
     /// </summary>
     public enum SourceType
     {

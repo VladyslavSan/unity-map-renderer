@@ -7,11 +7,10 @@ namespace MapRenderer.Jobs.Tiles
     /// The two guards every <see cref="ITileLayer"/> implementation applies when it takes ownership of its
     /// decoded buffer — <b>set once</b>, and <b>in lockstep with the feature list</b>.
     ///
-    /// <para><b>Why it is shared and not copied.</b> IR C1's fix stage made the lockstep a property of the
-    /// TYPE rather than of one decoder's discipline, and recorded that the extraction should happen "before a
-    /// second <see cref="ITileLayer"/> exists". It now does (<c>GeoJsonTileLayer</c>), and an invariant that
-    /// three ordinal-indexed consumers depend on must have ONE statement: two copies can drift, and the
-    /// weaker of the two is then the real contract.</para>
+    /// <para><b>Why it is shared and not copied.</b> The lockstep is a property of the TYPE rather than of
+    /// one decoder's discipline, and more than one <see cref="ITileLayer"/> implementation exists. An
+    /// invariant three ordinal-indexed consumers depend on must have ONE statement: two copies drift, and
+    /// the weaker of them is then the real contract.</para>
     ///
     /// <para>Both failures are loud and both happen BEFORE any state is written, so a rejected buffer is
     /// never half-adopted: a second adopt would orphan the first buffer (a native leak nothing can reach,

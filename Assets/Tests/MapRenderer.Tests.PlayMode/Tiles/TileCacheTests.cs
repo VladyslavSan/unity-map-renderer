@@ -7,7 +7,7 @@
 // PumpUntilSettled before every delta read and wraps its body in try/finally { view.Teardown(); }.
 //
 // Contents:
-//   PreparedCacheTests        — S82 — PreparedTileCache MapView-integration teeth: real cover-fetch-build-consume-evict cycles, PlayMode half.
+//   PreparedCacheTests        — PreparedTileCache MapView-integration teeth: real cover-fetch-build-consume-evict cycles, PlayMode half.
 //   Stall2ReleaseBudgetTests  — the deferred-release queue budgets how many (tile, source) records free per Tick.
 
 using System.Collections;
@@ -33,7 +33,7 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.PlayMode.Tiles
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // PreparedCacheTests — S82 — PreparedTileCache MapView-integration teeth, PlayMode half
+    // PreparedCacheTests — PreparedTileCache MapView-integration teeth, PlayMode half
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -51,8 +51,8 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         }
 
         /// <summary>Composite (zoom + feature) fill-color — unlike <see cref="InterpFillStyle"/>'s pure
-        /// Zoom-kind expression, this still bakes a per-feature COLOR stream after Stage 1's fill-color
-        /// carrier split, so <see cref="ZoomBake_AtIdZ_NotStaleCamZoom"/>'s "bake happens at id.Z, not the
+        /// Zoom-kind expression, this bakes a per-feature COLOR stream, so
+        /// <see cref="ZoomBake_AtIdZ_NotStaleCamZoom"/>'s "bake happens at id.Z, not the
         /// fractional camera zoom" claim stays observable on the mesh.</summary>
         private static StyleDocument InterpFillCompositeStyle()
         {
@@ -93,7 +93,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             var tileOrigin = new double3(bMin.x, 0.0, bMin.y);
 
             var mda = MeshDataPayload.AllocateTracked(1);
-            TileGeometryBuffers geometry = mvtLayer.Geometry; // BORROWED (IR C1 P3) — the tile owns it
+            TileGeometryBuffers geometry = mvtLayer.Geometry; // BORROWED — the tile owns it
             int vc; Bounds b;
             SyncMeshWrite.Fill(mda[0], features, geometry, paint, zoom, tileOrigin, out vc, out b);
             Assert.Greater(vc, 0, "Ground-truth build must produce geometry.");
@@ -123,7 +123,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             Assert.AreEqual(expected.b, actual.b, eps, $"{message} (B: expected={expected.b:F4} actual={actual.b:F4})");
         }
 
-        // ── Stall #3: EG mesh registrations balance across the prepared-cache round-trip ─────────────
+        // ── EG mesh registrations balance across the prepared-cache round-trip ───────────────────────
         [UnityTest]
         public IEnumerator Stall3_MeshRegistrations_StableAcrossCacheRoundTrips_Entities()
         {
@@ -325,11 +325,9 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
                 view.LateUpdate();
-                // TileBuildsStartedLastTick counts tiles admitted, not budget units — job-scheduling-design.md
-                // §11 fork 2 deleted the two-units-per-tile charge this assertion used to ride on top of. It
-                // no longer catches a write kick on a DIFFERENT cover tile during this same Tick (started <=
-                // the old kicked count, always); it still asserts exactly what this test claims — a revisit
-                // is a hit, not a re-prepare.
+                // TileBuildsStartedLastTick counts tiles admitted, not budget units, so it does not catch a
+                // write kick on a DIFFERENT cover tile during this same Tick. It still asserts what this
+                // test claims: a revisit is a hit, not a re-prepare.
                 Assert.AreEqual(0, view.TileBuildsStartedLastTick(), "Revisit must be a hit, not a re-prepare.");
                 yield return PumpUntilSettled(view);
                 Assert.AreEqual(baseline, MeshDataPayload.DebugLiveAllocCount,

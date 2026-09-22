@@ -8,80 +8,56 @@ namespace MapRenderer.Jobs.Fill
 {
     /// <summary>
     /// The fill graph's boundary-band node: appends, after <see cref="AggregateJob"/>'s interior geometry, one
-    /// quad per assembled ring edge carrying the attribute the fill shaders ramp coverage across
-    /// (<c>Fill_BandCoverage.hlsl</c>). Two vertices per ring vertex, six indices per ring edge, into the
-    /// SAME vertex columns and the SAME single index buffer — the band is not a second submesh and earcut
-    /// never sees it.
+    /// quad per assembled ring edge carrying the attribute the fill shaders ramp coverage across. Two
+    /// vertices per ring vertex, six indices per ring edge, into the SAME vertex columns and the SAME single
+    /// index buffer — the band is not a second submesh and earcut never sees it.
     ///
     /// <para><b>Nothing is ever displaced inward, and that is the mechanism.</b> Both of a ring vertex's band
     /// vertices are written at the ring vertex's own tile coordinate, bit-identically; the inner one carries
-    /// <c>(0,0,0)</c> and the outer one carries <c>(dirEast, dirNorth, 1)</c>, which the vertex shader turns
-    /// into a one-device-pixel outward displacement. So the band lies strictly OUTSIDE the boundary, coverage
-    /// still reads 1 everywhere the hard fill already was, and two abutting fills still leave zero background
-    /// weight. A ramp placed even partly inside would destroy that at every shared edge and tile seam.</para>
+    /// <c>(0,0,0)</c> and the outer one <c>(dirEast, dirNorth, 1)</c>, which the vertex shader turns into a
+    /// one-device-pixel outward displacement. The band therefore lies strictly OUTSIDE the boundary, and two
+    /// abutting fills still leave zero background weight.</para>
     ///
-    /// <para><b>Outward is derived from the polygon's own winding, never assumed.</b> MVT's ring-winding
-    /// convention is enforced nowhere in this repo — <see cref="RingAssemblyJob"/> derives an exterior sign
-    /// per feature instead. The outward normal of an edge running <c>d</c> is
+    /// <para><b>Outward is derived from the polygon's own winding, never assumed.</b> Nothing in this repo
+    /// enforces MVT's ring-winding convention; <see cref="RingAssemblyJob"/> derives an exterior sign per
+    /// feature instead. The outward normal of an edge running <c>d</c> is
     /// <c>sign(area2(outer)) * (d.y, -d.x)</c>, and that ONE sign serves the polygon's holes too: a hole is
-    /// accepted only when its own signed area has the opposite sign, so "away from the fill" for a hole (into
-    /// the void) is the same expression with the same sign — no outer/hole branch, and no ring is reversed.</para>
+    /// accepted only when its own signed area has the opposite sign.</para>
     ///
-    /// <para><b>Tile space is Y-DOWN</b> (<c>TileToGeoJob.GeoAt</c>: <c>+y</c> grows southward), while the
-    /// attribute is consumed in the mesh's own surface frame, whose <c>north = cross(east, up)</c>. The sign
-    /// flip therefore happens exactly once, here at the write site: <c>dirEast = miter.x</c>,
-    /// <c>dirNorth = -miter.y</c>. Baked straight through, every band mirrors north↔south — and a mirrored
-    /// band is still consistently wound, so only the ramp-placement teeth see it.</para>
+    /// <para><b>Tile space is Y-DOWN</b>, while the attribute is consumed in the mesh's surface frame, whose
+    /// <c>north = cross(east, up)</c>. The sign flip therefore happens once, here at the write site:
+    /// <c>dirEast = miter.x</c>, <c>dirNorth = -miter.y</c>.</para>
     ///
     /// <para><b>Index order interleaves per feature</b>: a feature's band triangles follow that feature's own
     /// interior triangles, never the whole layer's. These fills are <c>ZWrite Off</c> and painter-ordered, so
-    /// appending every band last would put each feature's band over every other feature's interior
-    /// irrespective of <c>fill-sort-key</c>. Interior triangles arrive from <see cref="AggregateJob"/> in
-    /// polygon — therefore feature — order, and a triangle's feature is read straight off
-    /// <see cref="VertexFeatureIdx"/>, so the rebuild needs no per-polygon index table.</para>
+    /// appending every band last would put each feature's band over every other feature's interior whatever
+    /// <c>fill-sort-key</c> says. Interior triangles arrive from <see cref="AggregateJob"/> in polygon, and so
+    /// feature, order, so the rebuild needs no per-polygon index table.</para>
     ///
     /// <para><b>Output winding is CANONICAL, never the ring's own.</b> <see cref="EarcutJob"/> normalises
-    /// every outer ring to CCW-on-screen (<c>area2 &lt; 0</c> in this Y-down space) BEFORE triangulating
-    /// (<c>EarcutJob.cs:142-147</c>), so the interior's winding does not depend on how the source wound its
-    /// rings — and MVT and GeoJSON do not agree on that. A band that inherited the ring's sign would be
-    /// counter-wound against the interior it borders for one of the two conventions, and back-face culled
-    /// wherever culling is on: the fill would look exactly as it did before this stage. The quad's index
-    /// order is therefore reversed for a positively-wound ring. Reversed once more at the mesh-write
-    /// boundary (<c>StyledFillTileBuilder.WriteJob</c>), with everything else.</para>
+    /// every outer ring to CCW-on-screen before triangulating, and MVT and GeoJSON do not agree on source
+    /// winding. A band that inherited the ring's sign would be counter-wound against the interior it borders
+    /// for one of the two, and back-face culled. The quad's index order is therefore reversed for a
+    /// positively-wound ring, then reversed once more at the mesh-write boundary with everything else.</para>
     ///
-    /// <para>A band quad is DEGENERATE in tile space — its outer vertices share their inner twin's coordinate
-    /// — so a winding tooth must reconstruct the shader's displacement before it can read an orientation at
-    /// all. The same degeneracy is what lets this node run on the CURVED arm too, upstream of
-    /// <see cref="GlobeFillSubdivideJob{TProj}"/>: a band quad's long edges have the same two endpoints as
-    /// the interior boundary edge they abut, so both compute the identical subdivision mark and split
-    /// conformingly, while the zero-length radial edges subtend no angle and are never marked. The quad's
-    /// diagonal (<c>innerHere</c>→<c>outerNext</c>, the two triangles' shared edge) is neither long nor
-    /// radial, but its endpoints are that same tile-space pair, so it takes the identical mark and midpoint
-    /// — a midpoint whose <c>side</c> lerps to 0.5, which is why the displacement must not be scaled by
-    /// it.</para>
+    /// <para>A band quad is DEGENERATE in tile space, which is what lets this node run on the CURVED arm too,
+    /// upstream of <see cref="GlobeFillSubdivideJob{TProj}"/>: its long edges share endpoints with the
+    /// interior boundary edge they abut, so both take the identical subdivision mark and split conformingly,
+    /// and the zero-length radial edges subtend no angle. The diagonal takes that same mark, and its midpoint
+    /// lerps <c>side</c> to 0.5 — which is why the shader must not scale the displacement by it.</para>
     ///
-    /// <para><b>The band stops at a tile cut.</b> With clipping on (the shipped
-    /// <c>FillTileBufferClip: 0</c> cuts exactly at the tile boundary), a ring edge whose BOTH endpoints lie
-    /// on the same window line gets no quad: the neighbouring tile carries the mirrored cut and its fill
-    /// abuts exactly there, so a band drawn along that edge is ink laid over a fill that is already
-    /// present — an <c>f(1-f)</c> rim, and at the shipped clip every tile seam is such a pair. The equality
-    /// is exact rather than epsilon-based because <see cref="RingClipJob"/><c>.Intersect</c> writes the
-    /// boundary value verbatim into the clipped axis. Note what the predicate actually says: "both endpoints
-    /// on one window line" is a SUPERSET of "clip-introduced" — a genuine feature edge running exactly along
-    /// the tile boundary is suppressed too, which is measure-zero and abuts its neighbour in the same way.
-    /// The <see cref="ClipEnabled"/> flag is what keeps the unclipped arm out of this entirely.</para>
+    /// <para><b>The band stops at a tile cut.</b> With clipping on, a ring edge whose BOTH endpoints lie on
+    /// the same window line gets no quad: the neighbouring tile carries the mirrored cut and its fill abuts
+    /// exactly there, so a band along that edge is ink over a fill already present. The equality is exact,
+    /// not epsilon-based, because <see cref="RingClipJob"/><c>.Intersect</c> writes the boundary value
+    /// verbatim into the clipped axis. The predicate is a SUPERSET of "clip-introduced": a genuine feature
+    /// edge running along the tile boundary is suppressed too, which is measure-zero and abuts its neighbour
+    /// the same way. <see cref="ClipEnabled"/> keeps the unclipped arm out of this entirely.</para>
     ///
     /// <para>Suppression drops the QUAD, never the vertex pair: both band vertices are written for every ring
     /// vertex regardless, so <c>first + 2 * i</c> stays the index of ring vertex <c>i</c>'s pair and
-    /// <see cref="Counts"/>' band VERTEX count stays <c>2 x</c> the ring total (the flat arm's interior/band
-    /// prefix split reads it). A pair left unreferenced costs a few vertices on the flat arm and nothing at
-    /// all on the curved one, where <see cref="GlobeFillSubdivideJob{TProj}"/> emits per triangle. The band
-    /// INDEX count is the one that varies, so it is taken from the write cursor rather than computed.</para>
-    ///
-    /// <para>The two halves of the attribute are INDEPENDENT: <c>(dirEast, dirNorth)</c> is the displacement
-    /// in device pixels (miter factor in its magnitude) and <c>side</c> is only the coverage coordinate. The
-    /// vertex shader never multiplies one by the other, because subdivision lerps both across a split band
-    /// edge and the product would be quadratic in the split parameter.</para>
+    /// <see cref="Counts"/>' band VERTEX count stays twice the ring total. The band INDEX count is the one
+    /// that varies, so it is taken from the write cursor rather than computed.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     internal struct FillBandJob : IJob
@@ -91,8 +67,8 @@ namespace MapRenderer.Jobs.Fill
         /// band instead. This is a join-geometry limit in the shape <c>RibbonJob.MiterLimit</c> already uses,
         /// NOT a tunable band width — the band is 1 device pixel and that is not a knob.
         /// <para><c>internal</c> so a rendered tooth can DERIVE its reach bound from this number rather than
-        /// pick one: band ink lies at most this many device pixels from the geometry it belongs to. See
-        /// <c>GlobeFillBandRenderTests.TheGlobeFillsSilhouetteGainsInkOutward_WithinTheMiterLimit</c>.</para></summary>
+        /// pick one: band ink lies at most this many device pixels from the geometry it belongs
+        /// to.</para></summary>
         internal const double MiterLimit = 4.0;
 
         // ── Input: the clipped ring columns, plus RingAssemblyJob's polygon descriptors ─────────────
@@ -123,13 +99,12 @@ namespace MapRenderer.Jobs.Fill
         public NativeList<int>     VertexFeatureIdx;
         public NativeList<int>     TriangleIndices;
 
-        /// <summary>Written for the band's own slots with the flat constant <c>(1,0,0)</c>
-        /// <see cref="AggregateJob"/> writes for the interior — the ONLY column here that is not filled by a
-        /// later node ON THE FLAT ARM. <c>WorldPositions</c>/<c>VertexUp</c>/<c>Geo</c> are merely re-sized:
-        /// the tile→geo and projection nodes run after this one over the deferred length and cover the band
-        /// with the interior, which is what makes a band vertex's world position bit-identical to the ring
-        /// vertex it duplicates. The curved arm reads none of these four — <see cref="GlobeFillScatterJob"/>
-        /// replaces them with the subdivider's own per-vertex frame.</summary>
+        /// <summary>Written for the band's own slots with the same flat <c>(1,0,0)</c>
+        /// <see cref="AggregateJob"/> writes for the interior — the ONLY column here that a later node does
+        /// not fill on the flat arm. <c>WorldPositions</c>/<c>VertexUp</c>/<c>Geo</c> are only re-sized: the
+        /// tile→geo and projection nodes run after this one and cover the band with the interior, which is
+        /// what makes a band vertex's world position bit-identical to the ring vertex it duplicates. The
+        /// curved arm reads none of these four.</summary>
         public NativeList<double3> VertexEast;
 
         public NativeList<double3> WorldPositions;
@@ -153,9 +128,7 @@ namespace MapRenderer.Jobs.Fill
             Counts[0] = counts;
 
             // Nothing aggregated ⇒ nothing to band. This is also the guard that inherits SizingJob's capacity
-            // early-return (job-scheduling-design.md §7 rule 2): that path leaves every triangulation column
-            // at length 0, so AggregateJob emits no vertices, and PolyCountArr[0] — a borrowed count that
-            // early return never shrinks — must not be allowed to drive a loop here.
+            // early-return, which leaves PolyCountArr[0] stale and must not be allowed to drive a loop here.
             if (interiorVerts == 0) return;
 
             int polyCount = PolyCountArr[0];

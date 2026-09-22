@@ -6,9 +6,8 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// Test-assembly-only comparator (no production surface) for two <see cref="SymbolBatch"/> mirror
-    /// snapshots — factored out of <c>SymbolGatherParityTests.FirstDifference</c> (Stage 2 order-parity tooth) so
-    /// R1's memoized-gather tests (<c>SymbolGatherMemoTests</c>, <c>SymbolReconcileAsyncTests</c>) reuse the
-    /// SAME field-by-field comparison instead of duplicating it.
+    /// snapshots. The order-parity fixture and the memoized-gather fixtures share this one
+    /// field-by-field comparison, so they cannot drift apart.
     /// </summary>
     internal static class SymbolBatchDiff
     {

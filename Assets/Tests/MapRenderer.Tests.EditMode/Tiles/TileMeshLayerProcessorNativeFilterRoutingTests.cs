@@ -34,7 +34,7 @@ namespace MapRenderer.Tests.Tiles
     [TestFixture]
     public class TileMeshLayerProcessorNativeFilterRoutingTests
     {
-        /// <summary>R1 (review): <paramref name="buffers"/> non-null reaches
+        /// <summary>Review: <paramref name="buffers"/> non-null reaches
         /// <see cref="TileMeshLayerProcessor.ProcessOnWorker"/>'s pooled ARRAY arm (`:85`) — what
         /// <c>TileLayerProcessorRunner.RunWorkerPass</c> always supplies in production
         /// (`TileLayerProcessorRunner.cs:59,72`); null reaches the non-pooled LIST arm (`:91`), what most
@@ -152,7 +152,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // R1 (review): pooled (Buffers != null — production's ONLY arm) and non-pooled (Buffers == null —
+        // Review: pooled (Buffers != null — production's ONLY arm) and non-pooled (Buffers == null —
         // the arm most other EditMode tests reach) share this one spy/oracle. Reverting either of
         // TileMeshLayerProcessor.cs's two call sites alone must red the matching case.
         [TestCase(true)]

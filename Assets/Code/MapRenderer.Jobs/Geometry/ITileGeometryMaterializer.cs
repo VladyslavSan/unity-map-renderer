@@ -17,30 +17,23 @@ namespace MapRenderer.Jobs.Geometry
     /// not dispose it, must not cache it, and must not hand the same buffer out twice; the caller disposes it
     /// on every exit path. This is <b>transfer, not borrow</b>.</para>
     ///
-    /// <para><b>How a two-owner mistake fails — restated per backing mode (IR C1 P3; measured, not argued).</b>
-    /// This paragraph used to say flatly that a double dispose is a "silent no-op" that leaks quietly. That is
-    /// true of only ONE of the two modes, and the blanket wording had been copied onto paths where it is
-    /// false:
+    /// <para><b>How a two-owner mistake fails depends on the backing mode.</b>
     /// <list type="bullet">
     /// <item><b>Array-backed</b> — what <see cref="Materialize"/> returns, and what every consumer borrows:
-    /// <c>Dispose</c> frees three real <c>NativeArray</c>s, so a second owner is a <b>loud double free</b>.
-    /// Measured in P2 (R6): 32 failures across 19 fixtures, including fixtures with no involvement in the
-    /// change — the heap-corruption signature.</item>
+    /// <c>Dispose</c> frees three real <c>NativeArray</c>s, so a second owner is a <b>loud double free</b>
+    /// with the heap-corruption signature.</item>
     /// <item><b>List-backed</b> (<c>TileGeometryBuffers.AdoptDerivedLists</c>, fill's derived buffer): the
     /// public fields are <c>AsArray()</c> <i>views</i>, and disposing a view IS a <b>silent no-op</b> under
     /// Collections 6.5.0 — that mistake leaks quietly and every test stays green. No consumer borrows a
-    /// list-backed buffer, so this is the mode that needs the warning and the one it applies to.</item>
+    /// list-backed buffer, so this is the mode the warning is for.</item>
     /// </list></para>
     ///
-    /// <para><b>IR C1 P3 — who the caller now is.</b> The one production caller of the MVT implementation is
+    /// <para><b>Who the caller is.</b> The one production caller of the MVT implementation is
     /// <c>MvtDecoder</c> itself: the decoded LAYER owns the buffer it is handed, for the life of the decoded
-    /// tile, and <b>lends</b> it to every consumer that names that source-layer — across both the mesh and
-    /// symbol cadences of a kick. (B7's pass-scoped <c>TileGeometryStore</c>, which used to be that caller,
-    /// is gone: it existed only because the geometry belonged to nothing.) Consumers <b>borrow</b> — never
-    /// dispose, never retain past the decode scope, never mutate. The two callers that transfer-and-own
-    /// directly are the ones that are themselves producers: the background quad's
-    /// <c>PathGeometryMaterializer</c>, and fill's per-layer derived buffer (which
-    /// <c>TileGeometryBuffers.AdoptDerivedLists</c> mints from lists rather than from a materializer). See
+    /// tile, and <b>lends</b> it to every consumer that names that source-layer. Consumers <b>borrow</b> —
+    /// never dispose, never retain past the decode scope, never mutate. The two callers that
+    /// transfer-and-own directly are themselves producers: the background quad's
+    /// <c>PathGeometryMaterializer</c>, and fill's per-layer derived buffer. See
     /// <see cref="TileGeometryBuffers"/>'s "two-tier ownership" paragraph for the full contract.</para>
     ///
     /// <para><b>THE NAMED FENCE.</b> The returned buffer must satisfy <see cref="TileGeometryBuffers"/>'

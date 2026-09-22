@@ -2,7 +2,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties
 {
     /// <summary>
     /// Canonical string names for the shader properties shared by both <c>Map/Fill</c> and <c>Map/Line</c>
-    /// (and the base URP Lit surface — S78). Every property in this class appears in both shaders'
+    /// (and the base URP Lit surface). Every property in this class appears in both shaders'
     /// <c>Properties{}</c> blocks and/or the shared <c>CBUFFER_START(UnityPerMaterial)</c> segment.
     ///
     /// <para>Use <see cref="PropertyId"/> for <c>Material.Set/Get/Has</c> calls (cached int ids).

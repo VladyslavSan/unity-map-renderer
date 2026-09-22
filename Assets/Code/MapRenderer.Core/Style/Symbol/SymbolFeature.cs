@@ -16,12 +16,12 @@ namespace MapRenderer.Core.Style.Symbol
     public sealed class SymbolFeature
     {
         /// <summary>The point's anchor in render space, PRE-RTC (the same space
-        /// <see cref="MapRenderer.Core.Geo.IProjection.Project"/> emits — S20's per-frame
+        /// <see cref="MapRenderer.Core.Geo.IProjection.Project"/> emits — the per-frame
         /// <c>SceneOriginRender</c> rebase is applied later, not here). Used for
         /// <see cref="Text.SymbolPlacement.Point"/>; a line symbol uses <see cref="PathRender"/> instead.</summary>
         public double3 AnchorRender { get; init; }
 
-        /// <summary>P2: the unit surface normal at <see cref="AnchorRender"/>, from
+        /// <summary>The unit surface normal at <see cref="AnchorRender"/>, from
         /// <see cref="MapRenderer.Core.Geo.IProjection.ProjectPoint"/>'s <c>Up</c> — same render space
         /// (pre-RTC) as <see cref="AnchorRender"/>. WRITTEN by P2; not yet consumed by any renderer.</summary>
         public double3 UpRender { get; init; }
@@ -36,10 +36,10 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>P2: index-parallel to <see cref="PathRender"/> (same length, same vertices) — each
         /// entry is that vertex's unit surface normal from <see cref="MapRenderer.Core.Geo.IProjection.ProjectPoint"/>.
-        /// Null for point symbols. WRITTEN by P2; not yet consumed by any renderer.</summary>
+        /// Null for point symbols. Not yet consumed by any renderer.</summary>
         public double3[] PathUpRender { get; init; }
 
-        /// <summary>A-2: the along-line anchors, computed ONCE at build time in tile space
+        /// <summary>The along-line anchors, computed ONCE at build time in tile space
         /// (<see cref="LineAnchorPlacement.Compute"/>) as zoom-invariant <see cref="LineAnchor"/> topology so
         /// line symbols stay pinned to fixed world positions instead of sliding on zoom. Null/empty for point
         /// symbols; parallel in meaning to <see cref="PathRender"/> (same polyline the anchors index into).</summary>
@@ -58,15 +58,15 @@ namespace MapRenderer.Core.Style.Symbol
         public float SortKey { get; init; }
 
         /// <summary>Evaluated <c>symbol-spacing</c> in pixels — the along-line repeat distance for
-        /// <see cref="Text.SymbolPlacement.Line"/> (spec default 250; ignored for point / line-center). #5 B4.</summary>
+        /// <see cref="Text.SymbolPlacement.Line"/> (spec default 250; ignored for point / line-center).</summary>
         public float SpacingPx { get; init; }
 
         /// <summary>Evaluated <c>text-max-angle</c> in DEGREES — the max adjacent-glyph curvature a curved line
-        /// symbol may bend before it is dropped at that anchor (spec default 45; line placement only). #6.</summary>
+        /// symbol may bend before it is dropped at that anchor (spec default 45; line placement only).</summary>
         public float MaxAngleDeg { get; init; }
 
         /// <summary><c>text-keep-upright</c> — flip a right-to-left curved symbol so it reads left-to-right
-        /// (default true; line placement only). #6. On an ICON curved symbol (P-B) this is always
+        /// (default true; line placement only). On an ICON curved symbol this is always
         /// <c>false</c>: <c>icon-keep-upright</c>'s spec default is false, and a one-way arrow that flipped
         /// to stay upright would point against the road's direction of travel.</summary>
         public bool KeepUpright { get; init; }
@@ -77,11 +77,11 @@ namespace MapRenderer.Core.Style.Symbol
         /// <summary><c>text-ignore-placement</c>.</summary>
         public bool IgnorePlacement { get; init; }
 
-        /// <summary>Stable per-tile symbol ordinal (over selected features, then points) — the first S20
+        /// <summary>Stable per-tile symbol ordinal (over selected features, then points) — the first
         /// <c>(SortKey, FeatureIndex, TileKey)</c> tiebreak component.</summary>
         public int FeatureIndex { get; init; }
 
-        /// <summary>Packed owning-tile id (z/x/y → opaque <c>long</c>) — the second S20 tiebreak component.</summary>
+        /// <summary>Packed owning-tile id (z/x/y → opaque <c>long</c>) — the second tiebreak component.</summary>
         public long TileKey { get; init; }
 
         /// <summary>Resolved <c>text-color</c>/<c>text-opacity</c>/<c>text-halo-*</c> paint. A CONSTANT
@@ -91,12 +91,12 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>Size-independent layout options (anchor/offset/justify/max-width/line-height/letter-spacing/
         /// radial-offset), assembled per feature by <see cref="TextLayoutOptionsBuilder"/>. The Unity builder
-        /// feeds this straight into <c>TextQuadLayout</c> — the wiring that makes the parsed <c>text-*</c>
-        /// layout keys actually affect the placed quads (Slice A).</summary>
+        /// feeds this straight into <c>TextQuadLayout</c>, so the parsed <c>text-*</c> layout keys affect
+        /// the placed quads.</summary>
         public TextLayoutOptions LayoutOptions { get; init; }
 
         /// <summary>Evaluated <c>text-translate</c> — the paint-time pixel offset (y-down, as authored)
-        /// applied to the placed screen anchor per frame by <c>SymbolPlacementSystem</c> (Slice C).</summary>
+        /// applied to the placed screen anchor per frame by <c>SymbolPlacementSystem</c>.</summary>
         public float2 TranslatePx { get; init; }
 
         /// <summary><c>text-translate-anchor</c> — whether <see cref="TranslatePx"/> is a screen-space
@@ -118,11 +118,11 @@ namespace MapRenderer.Core.Style.Symbol
         public AlignmentMode PitchAlignment { get; init; }
 
         /// <summary>
-        /// I3 — distinguishes a text symbol from an icon symbol. Default <see cref="SymbolKind.Text"/> so
-        /// every pre-I3 symbol (which never sets this) is unaffected. An icon symbol reuses this same carrier's
+        /// Distinguishes a text symbol from an icon symbol. Default <see cref="SymbolKind.Text"/>, so a
+        /// symbol that never sets it is text. An icon symbol reuses this same carrier's
         /// text-named fields for its icon-* counterparts rather than duplicating a parallel set:
         /// <see cref="AnchorRender"/> (icon-anchor point), <see cref="Placement"/> (always
-        /// <see cref="SymbolPlacement.Point"/> — icons are point-placement only, I3), <see cref="SortKey"/>
+        /// <see cref="SymbolPlacement.Point"/> — icons are point-placement only), <see cref="SortKey"/>
         /// (<c>symbol-sort-key</c>, shared with text), <see cref="PaddingPx"/> (<c>icon-padding</c>),
         /// <see cref="AllowOverlap"/>/<see cref="IgnorePlacement"/> (<c>icon-allow-overlap</c>/<c>icon-ignore-placement</c>),
         /// <see cref="RotationAlignment"/> (<c>icon-rotation-alignment</c>), <see cref="Paint"/>.Opacity
@@ -144,7 +144,7 @@ namespace MapRenderer.Core.Style.Symbol
         /// </summary>
         public float IconSkirtPx { get; init; }
 
-        /// <summary>P-B: <c>icon-rotate</c> in RADIANS, positive = clockwise on screen (MapLibre's sense, kept
+        /// <summary><c>icon-rotate</c> in RADIANS, positive = clockwise on screen (MapLibre's sense, kept
         /// verbatim on every carrier — the staging frame's opposite sense is entered once, far downstream, at
         /// <c>SymbolBearing.IconRotationRadians</c>) — the degrees→radians
         /// conversion happens ONCE here, at extract (the <see cref="MapRenderer.Core.Geo.Angle"/> rule). A
@@ -153,27 +153,26 @@ namespace MapRenderer.Core.Style.Symbol
         /// <see cref="SymbolKind.Icon"/> — <c>icon-rotate</c> never rotates text.</summary>
         public float IconRotateRadians { get; init; }
 
-        /// <summary>I6: the resolved sprite name — the icon's cross-tile identity; null for text. Threaded
+        /// <summary>The resolved sprite name — the icon's cross-tile identity; null for text. Threaded
         /// into <see cref="ShapedSymbol"/> and folded into <see cref="CrossTileSymbolKey"/> so distinct
-        /// co-located icons no longer collide (I5b's deferred gap).</summary>
+        /// co-located icons do not collide.</summary>
         public string IconImage { get; init; }
 
-        /// <summary>Road-shields §10 D8/D10, widened by P-A: whether this symbol is one half of an icon+text
-        /// pair — ANY such pair, centred or not; the centred restriction was the predicate P-A retired —
+        /// <summary>Whether this symbol is one half of an icon+text pair — ANY such pair, centred or not —
         /// <see cref="SymbolPairRole.Owner"/> (the icon) or <see cref="SymbolPairRole.Rider"/> (the text), or
         /// <see cref="SymbolPairRole.None"/> for every ordinary symbol. A PROPOSAL: <see cref="Placement.SymbolPairing"/>
         /// resolves whether it actually holds. Default <see cref="SymbolPairRole.None"/> so every pre-pairing
         /// symbol is unaffected.</summary>
         public SymbolPairRole PairRole { get; init; }
 
-        /// <summary>Road-shields §10 D10: the OWNER's <see cref="FeatureIndex"/>, stamped on BOTH halves of a
+        /// <summary>The OWNER's <see cref="FeatureIndex"/>, stamped on BOTH halves of a
         /// proposed pair so <see cref="Placement.SymbolPairing"/> can match them. Only unique within one
         /// <c>SymbolFeatureExtractor.Extract</c> call (per layer, per tile) — the resolver also matches
         /// <c>TileKey</c>/<c>MaterialIndex</c> on the downstream <see cref="ShapedSymbol"/> carrier for that
         /// reason. Meaningless when <see cref="PairRole"/> is <see cref="SymbolPairRole.None"/>.</summary>
         public int PairId { get; init; }
 
-        /// <summary>Stage C: this half may be DROPPED while its partner places — <c>icon-optional</c> on an icon
+        /// <summary>This half may be DROPPED while its partner places — <c>icon-optional</c> on an icon
         /// symbol, <c>text-optional</c> on a text symbol (each property names the half it makes droppable). The
         /// pair still forms and still stages as ONE candidate; only the collision verdict gains per-half
         /// granularity (<see cref="Placement.SymbolCandidate.OptionalBoxMask"/>). Meaningless unless

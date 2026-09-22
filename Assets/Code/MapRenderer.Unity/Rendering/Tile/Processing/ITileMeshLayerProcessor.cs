@@ -4,13 +4,13 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Epic A / A1: the mesh-settlement capability extending <see cref="ITileLayerProcessor"/> — the sibling
-    /// of A3's <see cref="ITileWorkerThenMainLayerProcessor"/> (a main-thread tail, artifact-free). Both
+    /// The mesh-settlement capability extending <see cref="ITileLayerProcessor"/> — the sibling
+    /// of <see cref="ITileWorkerThenMainLayerProcessor"/> (a main-thread tail, artifact-free). Both
     /// capabilities are invoked through their OWN dedicated runner entries
     /// (<see cref="TileLayerProcessorRunner.RunWorkerPass"/> vs
     /// <see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/>) rather than one widened
-    /// <see cref="ITileLayerProcessor"/> surface — mesh and symbol are genuinely separate cadences until A4
-    /// introduces a shared decoded-tile feed (design §B Q1's signed-off deferral).
+    /// <see cref="ITileLayerProcessor"/> surface — mesh and symbol are separate cadences that meet only at
+    /// the shared decoded-tile feed.
     ///
     /// <para><b>Completion contract:</b> <see cref="Release"/> is called EXACTLY ONCE per worker pass, in
     /// dense order, after the worker attempt — even when decode failed, an earlier processor in the same

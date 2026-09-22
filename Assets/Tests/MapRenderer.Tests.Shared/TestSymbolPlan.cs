@@ -2,15 +2,12 @@
 // Unity.Collections. NOT registered in core-tests.csproj.
 //
 // Lets a render/snapshot fixture drive the PRODUCTION Tick(in SceneFrame, SymbolGatherPlan, ...) overload
-// from the same SymbolTileBuffer build buffer it already builds (via TestSymbolTileBuffer), instead of the
-// demo Tick(..., symbols, ...) overload. Motivation: the symbol render fixtures were exercising a path
-// production does not run — the two converge on the same native mirror, but only the plan side is what
-// ships.
+// from the same SymbolTileBuffer build buffer it already builds (via TestSymbolTileBuffer), so the fixture
+// exercises the path that ships.
 //
-// This is the store-and-bake half of what SymbolSubsystem does per frame (bake a block per tile,
-// collect winners, fill the plan). It deliberately does NOT own a camera, RenderTexture, atlas or
-// material: each fixture's baseline was captured against its own, and swapping those in would move every
-// baseline for reasons unrelated to which Tick overload ran.
+// This is the store-and-bake half of what SymbolSubsystem does per frame (bake a block per tile, collect
+// winners, fill the plan). It owns no camera, RenderTexture, atlas or material: each fixture captured its
+// baseline against its own, and supplying them here would move every baseline.
 //
 // Equivalence is not assumed — SymbolGatherParityTests pins that the native gather over a plan fills the
 // mirror field-for-field identically to an independent block-reading oracle over the same winners.
@@ -49,16 +46,14 @@ namespace MapRenderer.Tests
         /// <param name="slotCount">Render-layer slot count; must cover every record's
         /// <see cref="ShapedSymbol.MaterialIndex"/>. Fixtures with no layer list pass 1 (slot 0).</param>
         /// <param name="coverageFadingTiles">Tile keys the coverage cull classified <c>Fade</c> — still
-        /// resident and still drawn, easing out rather than popping. This is how the production path
-        /// expresses what the retired batch builder took as its <c>coverageFadingTiles</c> set.</param>
-        /// <param name="droppedTiles">Tile keys classified <c>Drop</c> — D1 keeps the record resident in
-        /// the plan and MASKS it downstream, so it is counted by <see cref="CollectedCount"/> but not
-        /// staged.</param>
+        /// resident and still drawn, easing out rather than popping.</param>
+        /// <param name="droppedTiles">Tile keys classified <c>Drop</c> — the record stays resident in the
+        /// plan and is MASKED downstream, so <see cref="CollectedCount"/> counts it but nothing stages
+        /// it.</param>
         /// <param name="departingTiles">Tile keys whose records are marked DEPARTING (the tile has left
-        /// cover and is fading out rather than popping). Production fills this from the store's
-        /// per-record <c>IsDeparting</c> flag; stamping it here is the plan-path equivalent of the
-        /// retired batch builder's <c>activeCount</c> knob, and reaches the same
-        /// <see cref="SymbolGatherPlan.Departing"/> field downstream reads.</param>
+        /// cover and is fading out rather than popping). Production fills this from the store's per-record
+        /// <c>IsDeparting</c> flag; it reaches the same <see cref="SymbolGatherPlan.Departing"/> field
+        /// downstream reads.</param>
         public SymbolGatherPlan Build(SymbolTileBuffer buffer, int slotCount = 1,
             HashSet<long> coverageFadingTiles = null, HashSet<long> droppedTiles = null,
             HashSet<long> departingTiles = null)

@@ -7,12 +7,10 @@ using MapRenderer.Core.Text;
 namespace MapRenderer.Core.Style.Symbol
 {
     /// <summary>
-    /// Slice A — the bridge from a parsed symbol <see cref="LayoutProperties"/> to the size-independent
-    /// <see cref="TextLayoutOptions"/> that <c>TextQuadLayout</c> consumes. This is the wiring that lights up
-    /// text-anchor / -offset / -justify / -max-width / -line-height / -letter-spacing / -radial-offset — all
-    /// parsed but, until this builder existed, never threaded (the tile builder hardcoded
-    /// <see cref="TextLayoutOptions.Default"/>). Kept as its own engine-free step so the string→enum + em +
-    /// y-flip reconcile is headless-testable in isolation.
+    /// The bridge from a parsed symbol <see cref="LayoutProperties"/> to the size-independent
+    /// <see cref="TextLayoutOptions"/> that <c>TextQuadLayout</c> consumes: it threads text-anchor /
+    /// -offset / -justify / -max-width / -line-height / -letter-spacing / -radial-offset. Its own
+    /// engine-free step so the string→enum + em + y-flip reconcile is headless-testable in isolation.
     /// </summary>
     public static class TextLayoutOptionsBuilder
     {
@@ -24,8 +22,7 @@ namespace MapRenderer.Core.Style.Symbol
         ///
         /// <para><b>Offset y-flip:</b> MapLibre <c>text-offset</c> is y-DOWN (positive y = down), while
         /// <see cref="TextLayoutOptions.Offset"/> / <c>TextQuadLayout</c> are y-UP (line 0's baseline at y=0,
-        /// lower lines at negative y). So the y component is negated here — the reconcile the
-        /// <see cref="TextLayoutOptions"/> doc deferred to "S20". Consistent with the sign already baked into
+        /// lower lines at negative y). So the y component is negated here, consistent with the sign in
         /// <c>TextQuadLayout.ComputeRadialOffset</c> (a Top anchor pushes toward −y). <c>RadialOffset</c> is a
         /// magnitude (direction is derived from the anchor downstream), so it is passed through unflipped.</para>
         /// </summary>

@@ -10,8 +10,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     {
         /// <summary>
         /// One quad per boundary edge over the flat (pre-earcut) ring vertices <see cref="RingSelectJob"/>
-        /// gathers — the Burst replacement for <c>WriteWalls</c>'s per-point managed loop
-        /// (job-scheduling-design.md §8 stage 5). Reads no tile coordinates: <see cref="Geo"/>/<see cref="World"/>/
+        /// gathers (job-scheduling-design.md). Reads no tile coordinates: <see cref="Geo"/>/<see cref="World"/>/
         /// <see cref="Up"/> are the already-projected per-flat-vertex columns <see cref="TileToGeoJob"/> and
         /// <see cref="ProjectionDispatch"/> produced; this job only walks ring topology and emits quads.
         ///
@@ -24,21 +23,19 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// exactly unit (<c>SphericalProjection.cs</c>'s own comment: "unit by construction, no normalize
         /// needed") — and <see cref="ProjectPointsJob{TProj}"/> passes it straight through
         /// (<c>Normals[index] = pp.Up</c>, no renormalization). This job still casts to <c>float3</c> then
-        /// calls <c>math.normalize</c> on it, matching the managed arm's own order — NOT because the value
-        /// needs normalizing, but for transcription fidelity with the retired loop and to guard the sub-ULP
-        /// length error the <c>(float3)</c> narrowing can introduce into an otherwise-exact unit vector.</para>
+        /// calls <c>math.normalize</c> on it — NOT because the value needs normalizing, but to guard the
+        /// sub-ULP length error the <c>(float3)</c> narrowing can introduce into an otherwise-exact unit
+        /// vector.</para>
         ///
         /// <para><see cref="Globe"/> is computed ONCE on the calling thread
         /// (<c>!double.IsInfinity(proj.MaxRefineAngleRad)</c>) — <c>IProjection</c> is managed, so a job
         /// cannot read the property itself.</para>
         ///
-        /// <para><c>internal</c> (was <c>private</c>), and its five ring/flat-vertex fields
-        /// <see cref="NativeList{T}"/> (was <see cref="NativeArray{T}"/>), resolved directly inside
-        /// <see cref="Execute"/> — job-scheduling-design.md §8 stage 5, the wall-job stage:
-        /// <see cref="FillExtrusionMeshGraph"/> now schedules this job, and <see cref="ProjectionDispatch.Schedule"/>
-        /// requires its world/normal columns as <c>NativeList</c>s. Mirrors <c>RibbonBatchJob</c>'s own
-        /// field-attribute usage — an <c>IJob</c> may hold a <c>NativeList</c> field directly, same as this
-        /// job already does for its <see cref="OutPositionNormal"/> family below.</para>
+        /// <para><c>internal</c>, and its five ring/flat-vertex fields are <see cref="NativeList{T}"/>
+        /// resolved directly inside <see cref="Execute"/>: <see cref="FillExtrusionMeshGraph"/> schedules
+        /// this job, and <see cref="ProjectionDispatch.Schedule"/> requires its world/normal columns as
+        /// <c>NativeList</c>s. An <c>IJob</c> may hold a <c>NativeList</c> field directly, same as this job
+        /// already does for its <see cref="OutPositionNormal"/> family below.</para>
         /// </summary>
         [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
         internal struct WallQuadJob : IJob

@@ -33,9 +33,8 @@ namespace MapRenderer.Tests.Lifetime
     /// Teardown-cancel acceptance teeth: Tooth B (constraint 2 + the actual stall symptom — teardown must
     /// return promptly even while a build is genuinely parked in-flight), Tooth C (regression guard — zero
     /// <see cref="VerifiedDisposable"/> finalizer leaks; NOT RED-verifiable headlessly, since
-    /// <c>Teardown()</c> always runs to completion in this harness — see its own doc). Tooth A (constraint
-    /// 1 — a canceled build must not leak its kick-allocated native payload) is RETIRED as of
-    /// job-scheduling-design.md §8 stage 5 — see the comment where it used to live, just below.
+    /// <c>Teardown()</c> always runs to completion in this harness — see its own doc). Tooth A is
+    /// retired; the comment where it lived, below, states what replaced its coverage.
     /// </summary>
     [TestFixture]
     public class TeardownCancelInflightBuildsTests
@@ -43,11 +42,8 @@ namespace MapRenderer.Tests.Lifetime
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
-        // The LINE layer here is now VESTIGIAL for this file's purposes (job-scheduling-design.md §8 stage
-        // 5 moved it onto the graph arm too, retiring the only tooth — A, below — that needed it on the
-        // seam arm) but is kept: Tooth B/C still exercise a two-layer style, matching every other cover
-        // fixture in this test family, and removing it would be an unrelated fixture change with no tooth
-        // asking for it.
+        // The LINE layer is vestigial for this file's purposes, but is kept: Tooth B/C still exercise a
+        // two-layer style, matching every other cover fixture in this test family.
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
             ""version"": 8,
             ""name"": ""TeardownCancel"",
@@ -73,50 +69,27 @@ namespace MapRenderer.Tests.Lifetime
             ]
         }");
 
-        // ── Tooth A: RETIRED (job-scheduling-design.md §8 stage 5) ──────────────────────────────────
+        // ── Tooth A: RETIRED ────────────────────────────────────────────────────────────────────────
 
-        // CanceledBuild_DisposesKickAllocatedPayload_CounterToBaseline retired here. Its own doc (kept in
-        // history) already named this exact fork: "This claim expires when line moves onto the graph too
-        // (stage 5) — at that point this tooth needs a new seam-arm kind, or retirement." There is no other
-        // seam-arm kind left — line was the last one (PassThrough/Prebuilt itself retires with it) — so
-        // "a new seam-arm kind" is not an available option; this is the sanctioned retirement.
+        // CanceledBuild_DisposesKickAllocatedPayload_CounterToBaseline is retired here. Its precondition
+        // ("the parked build's kick-allocated MeshDataArray sits undisposed right before teardown") is
+        // permanently vacuous: every layer kind is graph-arm, and a graph-arm layer allocates NO
+        // MeshDataArray at kick.
         //
-        // Its precondition ("the parked build's kick-allocated MeshDataArray sits undisposed right before
-        // teardown") is now PERMANENTLY vacuous: every layer kind is graph-arm, and a graph-arm layer
-        // allocates NO MeshDataArray at kick at all (tooth (f) in the line-graph plan observes this
-        // directly).
+        // The real, non-vacuous round-trip for "a MeshDataPayload gets allocated then freed" is
+        // SourceTileGraphBuildTests' ReleasedCompleteButUnconsumed_Write_StashesInThePen_ThenDrains.
         //
-        // CORRECTED (review): the real, non-vacuous round-trip for "a MeshDataPayload gets allocated then
-        // freed" is SourceTileGraphBuildTests.cs:533-568 (ReleasedCompleteButUnconsumed_Write_StashesInThePen_
-        // ThenDrains — `Assert.Greater(MeshDataPayload.DebugLiveAllocCount, payloadBaseline, "non-vacuous
-        // precondition: the completed write must hold a real allocated payload.")` at :546, `AreEqual` back
-        // to baseline at :568) — NOT Teardown_WhileGenuinelyInMeasure_DrainsThePen_WithoutSettling (:592),
-        // which was cited here first: that test's own payload assertion message says "there is none here —
-        // the write step never ran", i.e. baseline==baseline with nothing allocated in between — a real tooth
-        // for TileBuildGraph.DebugLiveCount (graph INSTANCES; that claim it still legitimately covers), but
-        // vacuous for MeshDataArrays specifically — the counter this retired tooth existed to pin.
+        // The honest gap: teardown while a Mesh.MeshDataArray is genuinely LIVE has NO observing tooth
+        // anywhere in this repo. That round-trip is an EVICTION path (a camera pan past the cover), not
+        // TEARDOWN, and the state is only reachable during the WRITE step, whose release path is already
+        // recorded as unobserved.
         //
-        // The honest gap, stated rather than papered over: teardown while a Mesh.MeshDataArray is genuinely
-        // LIVE has NO observing tooth anywhere in this repo. :533-568's round-trip is an EVICTION path (a
-        // camera pan past the cover), not TEARDOWN. Post-stage-5 that state is only reachable during the
-        // WRITE step, and job-scheduling-design.md's stage 2 recorded finding #2 already flagged the
-        // write-in-flight release path as unobserved and deferred it — this retirement does not create that
-        // gap (the retired tooth parked before any work and never covered it either), it just stops implying
-        // the gap is closed.
-        //
-        // The mechanism that actually explains why retiring this ONE tooth cleared two seemingly-unrelated
-        // failures elsewhere (a SharedDisposable<IDecodedTile> finalizer leak, and an unrelated fill-only
-        // test's TileBuildGraph.DebugLiveCount reading elevated) is separate from the vacuous-citation issue
-        // above: this tooth's OWN `finally` released its gate (`gate.Set()`) and disposed it AFTER the try
-        // block's precondition assertion had already failed — meaning the lifetime token was still LIVE
-        // (uncancelled) at that point, so the newly-unblocked worker went on to do a REAL mesh-build kick,
-        // UNAWAITED, after this test method had already returned. That kick moved process-wide static
-        // counters (MeshDataPayload.DebugLiveAllocCount / TileBuildGraph.DebugLiveCount) during whatever test
-        // ran next — this file's ~40 baseline-then-delta assertions across the suite are exactly what that
-        // corrupts. The `gate.Set(); gate.Dispose();`-with-no-wait SHAPE survives in Tooth B below (see its
-        // own fix) — it is a real, independent hazard, but it is NOT what explained these two failures, since
-        // by the time Tooth B's finally releases its gate, Teardown() (which cancels the token FIRST) has
-        // already run.
+        // Hazard worth carrying: a `gate.Set(); gate.Dispose();` with no join, while the lifetime token is
+        // still live, releases a worker that goes on to do a REAL mesh-build kick after the test method has
+        // returned. That kick moves process-wide static counters (MeshDataPayload.DebugLiveAllocCount /
+        // TileBuildGraph.DebugLiveCount) during whatever test runs next, which is exactly what this file's
+        // baseline-then-delta assertions read. Tooth B below keeps the same shape safely: Teardown()
+        // cancels the token before its finally releases the gate.
 
         /// <summary>Wraps a real <see cref="IWorkScheduler"/> and signals <see cref="BodyDone"/> AFTER the
         /// dispatched body returns (success, fault, or early cancellation-exit alike — the <c>finally</c>

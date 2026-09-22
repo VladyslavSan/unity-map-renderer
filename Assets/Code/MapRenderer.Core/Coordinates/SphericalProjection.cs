@@ -7,15 +7,12 @@ namespace MapRenderer.Core.Geo
 {
     /// <summary>
     /// Simple-sphere globe projection: geodetic → ECEF on a sphere of radius <see cref="Radius"/>
-    /// (eccentricity ignored). The strictly-better WGS-84 <c>EllipsoidalProjection</c> is a future drop-in (a
-    /// new <see cref="IProjection"/> impl, zero pipeline edits). ECEF axes are swapped to render space
-    /// <c>(X, Z, Y)</c> (docs §7); the surface up is the radial normal (exactly unit by construction).
+    /// (the WGS-84 ellipsoid's eccentricity ignored). ECEF axes are swapped to render space <c>(X, Z, Y)</c>
+    /// (<c>docs/coordinates-and-projections.md</c>); the surface up is the radial normal, already unit length.
     ///
-    /// <para>Implements the SAME <see cref="IProjection"/> as <see cref="WebMercatorProjection"/> — the second
-    /// implementation that proves the projection abstraction genuinely serves both planar and globe. The
-    /// geometry surface (<see cref="ProjectPoint"/> / <see cref="Project"/> / <see cref="UpAt"/>) is real and
-    /// Burst-callable; the camera-interaction methods (screen↔ground) need a 3D globe-camera pose that is a
-    /// separate future stage and throw until then.</para>
+    /// <para>Implements the SAME <see cref="IProjection"/> as <see cref="WebMercatorProjection"/>, so the
+    /// abstraction serves both planar and globe. The geometry surface (<see cref="ProjectPoint"/> /
+    /// <see cref="Project"/> / <see cref="UpAt"/>) is Burst-callable.</para>
     /// </summary>
     public readonly struct SphericalProjection : IProjection
     {
@@ -45,7 +42,7 @@ namespace MapRenderer.Core.Geo
             double upX = cosPhi * cosLam, upY = cosPhi * sinLam, upZ = sinPhi;
             double rr  = Radius; // surface point (no elevation); elevated GeoCoordinate3D is a future path
 
-            // Axis-swap ECEF (X,Y,Z) → render (X,Z,Y) (docs §7), matching Ecef.Forward. Built via the double3
+            // Axis-swap ECEF (X,Y,Z) → render (X,Z,Y), matching Ecef.Forward. Built via the double3
             // constructor (no double3 arithmetic ops), matching Ecef.Forward and the core-tests shim.
             return new ProjectedPoint
             {
@@ -54,7 +51,7 @@ namespace MapRenderer.Core.Geo
             };
         }
 
-        // ── Geometry (build side; docs §6) — conveniences forwarding to the kernel ─────────────────
+        // ── Geometry (build side) — conveniences forwarding to the kernel ──────────────────────────
 
         /// <inheritdoc/>
         public double3 Project(in GeoCoordinate geo) => ProjectPoint(geo).World;
@@ -84,11 +81,11 @@ namespace MapRenderer.Core.Geo
             renderCentre = new double3(0.0, -Radius, 0.0); radius = Radius; return true;
         }
 
-        // ── Camera interaction (managed side) — globe orbit ray-cast (S91-C) ──────────────────────
+        // ── Camera interaction (managed side) — globe orbit ray-cast ───────────────────────────────
         //
         // Reconstructs the SAME render-space camera the renderer builds (MapCamera.SyncToCamera: altitude from
         // AltitudeForZoom, orbit via CameraPoseMath.ComputeRelativePose, look-at at the render origin, +Y up) and the
-        // look-at ENU frame the geometry is rebased into (S91-C Slice 1). The render-space globe is a sphere of
+        // look-at ENU frame the geometry is rebased into. The render-space globe is a sphere of
         // radius R centred at (0, −R, 0): the look-at surface point sits at the origin (+Y up), so the sphere
         // centre is R straight down. ScreenToGround casts the pixel ray at that sphere; GroundToScreen is the
         // exact inverse (perspective-project the rebased ECEF point). Consistency with the rendered camera is
@@ -211,14 +208,14 @@ namespace MapRenderer.Core.Geo
         }
 
         /// <summary>
-        /// Anchored globe pan via a BOUNDED rotation solve (S91-C) — the globe-correct replacement for the
+        /// Anchored globe pan via a BOUNDED rotation solve — the globe-correct replacement for the
         /// planar affine <c>ViewInput.ApplyPan</c>, which diverges on the globe near the limb (the screen↔ground
         /// Jacobian explodes there, so at low zoom a minor drag spins the earth). Returns the new look-at that
         /// brings <paramref name="grabbedGround"/> (captured at drag-start) toward <paramref name="cursorPx"/>.
         ///
         /// <para>The point currently under the cursor is <c>C = ScreenToGround(cursorPx)</c>; the grabbed point is
         /// <c>G</c>. Rotating the look-at by the rotation that maps C→G (as unit ECEF vectors) moves G under the
-        /// cursor. The step is a rotation by <c>acos(C·G) ≤ π</c> — <b>bounded by construction</b>, so it can
+        /// cursor. The step is a rotation by <c>acos(C·G) ≤ π</c> — <b>bounded</b>, so it can
         /// never spin; as the drag holds, C→G and the rotation → 0 (converges). The ENU rebase references the
         /// fixed north pole, so the pin is approximate (like the planar path), but it is always stable.</para>
         /// </summary>

@@ -14,7 +14,7 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Unity.Rendering.Backend.BRG
 {
     /// <summary>
-    /// S49 BRG render backend (internal, IDisposable).
+    /// BRG render backend (internal, IDisposable).
     ///
     /// Draws tile-layer meshes via <see cref="BatchRendererGroup"/> instead of per-layer GameObjects.
     /// One <see cref="BatchDrawCommand"/> per (tile,layer) mesh, sharing one batch and one
@@ -73,7 +73,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         private readonly List<(BatchMaterialID id, Material mat)> _layerMaterials
             = new List<(BatchMaterialID, Material)>(16);
 
-        // Mesh → BatchMeshID (de-dup; in S49 each tile-layer has a unique Mesh).
+        // Mesh → BatchMeshID (de-dup; each tile-layer has a unique Mesh).
         private readonly Dictionary<Mesh, BatchMeshID> _meshIds
             = new Dictionary<Mesh, BatchMeshID>(64);
 
@@ -110,7 +110,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// <summary>Constructs the BRG and registers each layer material — the one ordered, FULL-WIDTH
         /// per-layer list in SLOT order (<c>index == materialIndex == AddTileLayer index ==
         /// <see cref="Style.IRenderLayer.DrawIndex"/></c>). Materials are referenced, not owned. See
-        /// `docs/tile-pipeline-design.md` §1.10 for the E1 null-placeholder note.</summary>
+        /// `docs/tile-pipeline-design.md` for the null-placeholder note.</summary>
         /// <param name="layerMaterials">The full-width per-layer material list, indexed by slot.</param>
         /// <param name="layerShadowModes">Per-layer shadow declarations; see <see cref="ShadowModeFor"/>.</param>
         public TileRenderer(
@@ -130,7 +130,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             }
         }
 
-        /// <summary>UMR-151 restyle-time material/queue update — see `docs/tile-pipeline-design.md` §1.10.</summary>
+        /// <summary>Restyle-time material/queue update — see `docs/tile-pipeline-design.md`.</summary>
         public void SetLayerMaterials(
             System.Collections.Generic.IReadOnlyList<Material> layerMaterials,
             System.Collections.Generic.IReadOnlyList<ShadowCastingMode> layerShadowModes)
@@ -143,7 +143,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                 var (oldId, oldMat) = _layerMaterials[i];
                 Material newMat = i < layerMaterials.Count ? layerMaterials[i] : null;
                 // Reference-null, NOT `!=` (Unity's fake-null hides a DESTROYED material — see
-                // docs/tile-pipeline-design.md §1.10's SetLayerMaterials note).
+                // docs/tile-pipeline-design.md's SetLayerMaterials note).
                 if (!ReferenceEquals(oldMat, null) && !ReferenceEquals(oldMat, newMat))
                     _brg.UnregisterMaterial(oldId);
             }
@@ -165,7 +165,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
                 for (int i = 0; i < layerShadowModes.Count; i++) _layerShadowModes.Add(layerShadowModes[i]);
 
             // A retired slot's stale DrawItems are removed here (dict-entry drop only) — see
-            // docs/tile-pipeline-design.md §1.10 for why and how this differs from the other two backends.
+            // docs/tile-pipeline-design.md for why and how this differs from the other two backends.
             foreach (int handle in new List<int>(_items.Keys))
             {
                 DrawItem item = _items[handle];
@@ -319,10 +319,10 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             // ── W2O block (12 floats per instance) ──────────────────────────────────────────
             int w2oBase = _plan.W2OFloatOffset * count; // = 12 * count
 
-            // S91-C: place each tile in the look-at's local ENU frame. The rebase is a proper (orthonormal)
+            // Place each tile in the look-at's local ENU frame. The rebase is a proper (orthonormal)
             // rotation, so O2W = [R | pos] and its RIGID inverse W2O = [Rᵀ | -Rᵀ·pos]. Building both directly
-            // from the float3x3 (no quaternion round-trip, no math.inverse) keeps the Mercator identity-rebase
-            // case bit-for-bit the pre-S91 translation-only packing (R = I ⇒ pos.y = 0 ⇒ old p1/p2/p3).
+            // from the float3x3 (no quaternion round-trip, no math.inverse) keeps the Mercator
+            // identity-rebase case a bit-for-bit translation-only packing (R = I ⇒ pos.y = 0).
             float3x3 rebase  = frame.Rebase;
             float3x3 rebaseT = math.transpose(rebase);
 
@@ -705,8 +705,8 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
         /// Releases the BRG, all registered meshes/materials, and the GraphicsBuffer.
         /// Idempotent: safe to call multiple times.
         ///
-        /// Tooth 5 (S49): BRG + every GraphicsBuffer released on teardown. Process-global BRG
-        /// failure to dispose would pollute other cameras/tests; this is load-bearing.
+        /// BRG + every GraphicsBuffer is released on teardown. Failing to dispose a process-global BRG
+        /// pollutes other cameras and tests, so this is load-bearing.
         /// </summary>
         protected override void DoDispose()
         {

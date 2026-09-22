@@ -1,4 +1,4 @@
-// I4: @2x/hi-DPI sprite-sheet URL selection (MapLibre's "sprite@2x.json"/"sprite@2x.png" convention) is
+// @2x/hi-DPI sprite-sheet URL selection (MapLibre's "sprite@2x.json"/"sprite@2x.png" convention) is
 // v1-simplified to always fetch the 1x sheet (base + ".json" / base + ".png") — per-sprite pixelRatio
 // scaling (SpriteEntry.PixelRatio) is handled downstream in IconQuadLayout, not by picking a different
 // sheet resolution here. Deferred: a device-DPI-aware @2x sheet fetch, mirroring how glyph-PBF fetching
@@ -14,7 +14,7 @@ using MapRenderer.Core.Text.Sprites;
 namespace MapRenderer.Unity.Rendering.Source
 {
     /// <summary>
-    /// I4: <see cref="ISpriteSource"/> implementation over <see cref="UnityWebRequest"/>, mirroring
+    /// <see cref="ISpriteSource"/> implementation over <see cref="UnityWebRequest"/>, mirroring
     /// <see cref="UnityWebRequestGlyphSource"/> (cancellation, absent-vs-error mapping, UniTask). Fetches
     /// the sheet's index JSON and PNG bytes from <c>{baseUrl}.json</c> / <c>{baseUrl}.png</c>, per the
     /// MapLibre Style Spec's root <c>sprite</c> URL convention — it does NOT decode the PNG (that is

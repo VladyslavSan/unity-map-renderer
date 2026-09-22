@@ -58,10 +58,10 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>symbol-placement: <see cref="Text.SymbolPlacement.Point"/> (default),
         /// <see cref="Text.SymbolPlacement.Line"/>, or <see cref="Text.SymbolPlacement.LineCenter"/>.
-        /// BUILD-ZOOM-evaluated (road-shields D1): the extractor evaluates this ONCE, at the tile's build
+        /// BUILD-ZOOM-evaluated: the extractor evaluates this ONCE, at the tile's build
         /// zoom, and the result is frozen into that tile's symbols for its lifetime — it is never
-        /// re-evaluated as the camera crosses a step boundary (the accepted, pinned known limit; see
-        /// docs/road-shields-design.md §3 D1). An absent property degrades to point at CONSTRUCTION; a
+        /// re-evaluated as the camera crosses a step boundary (an accepted, pinned known limit; see
+        /// docs/road-shields-design.md). An absent property degrades to point at CONSTRUCTION; a
         /// present-but-non-string EXPRESSION RESULT degrades to point at EVALUATION (the extractor's
         /// <c>TryEvaluate</c> call). A structurally MALFORMED expression (invalid JSON shape) still throws
         /// from <see cref="ExpressionParser.Parse"/> here at construction — consistent with every

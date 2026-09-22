@@ -5,14 +5,14 @@ using MapRenderer.Unity.View.Camera;
 namespace MapRenderer.App.View.Camera
 {
     /// <summary>
-    /// S72: The pure, engine-free two-way reconcile between an Editor authoring surface's
+    /// The pure, engine-free two-way reconcile between an Editor authoring surface's
     /// Zoom / Tilt / Heading sliders and the live Core <see cref="CameraProperties"/>.
     ///
     /// <para>Engine-free (no <c>UnityEngine</c>) so the whole binding runs headless in
     /// <c>Tools/core-tests</c> — the MonoBehaviour shell (<c>CameraControlPanel</c>) is a thin shuttle
     /// that owns no logic. <see cref="Reconcile"/> is the entire mechanism.</para>
     ///
-    /// <para><b>The feedback guard (decision 3):</b> per field, the rule compares the slider field to a
+    /// <para><b>The feedback guard:</b> per field, the rule compares the slider field to a
     /// <b>baseline</b> (the last value the panel synced) — <b>never</b> to the live camera. If the field
     /// differs from its baseline, the user dragged that slider ⇒ emit only that field into the patch. If
     /// the field equals its baseline, the user is idle ⇒ pull that field from the camera. Because the idle
@@ -60,7 +60,7 @@ namespace MapRenderer.App.View.Camera
         {
             CameraPropertiesUpdate patch = default;
 
-            // ── Zoom — field-vs-baseline in zoom levels (decision 3) ───────────────────────────────
+            // ── Zoom — field-vs-baseline in zoom levels ───────────────────────────────────────────
             double displayZoom, baselineZoom;
             if (math.abs(fields.Zoom - baseline.Zoom) > ZoomEpsilon)
             {
@@ -119,8 +119,8 @@ namespace MapRenderer.App.View.Camera
     }
 
     /// <summary>
-    /// S72: A camera authoring triple — zoom level, tilt degrees, heading degrees. Plain doubles,
-    /// object-initializer construction (conventions). Same units everywhere (fields, baseline, display).
+    /// A camera authoring triple — zoom level, tilt degrees, heading degrees. Plain doubles,
+    /// object-initializer construction. Same units everywhere: fields, baseline and display.
     /// </summary>
     public readonly struct SliderValues
     {
@@ -135,7 +135,7 @@ namespace MapRenderer.App.View.Camera
     }
 
     /// <summary>
-    /// S72: The result of one <see cref="CameraSliderBinding.Reconcile"/> pass.
+    /// The result of one <see cref="CameraSliderBinding.Reconcile"/> pass.
     /// </summary>
     public readonly struct ReconcileResult
     {

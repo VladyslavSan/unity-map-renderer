@@ -31,7 +31,7 @@ using Symbol = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Tests.Text
 {
     /// <summary>
-    /// Tooth <b>D2</b> — the sprite-PARKED path end-to-end: the one production site where the decode model's
+    /// The sprite-PARKED path end-to-end: the one production site where the decode model's
     /// hardest promise is kept or broken.
     ///
     /// <para><b>What this tooth used to prove, and what it proves now.</b> Under the scoped lease a parked
@@ -41,9 +41,9 @@ namespace MapRenderer.Tests.Text
     /// <c>SetStyle</c>→<c>SpritesSettled</c> window and the drain reads the SAME decoded tile. Two
     /// assertions therefore INVERT — the decode count 2 → 1, and the kick's tile disposed-while-parked
     /// 1 → 0 — and the inversion is the proof the new model works, not a regression. The symbol differential
-    /// they exist to protect is unchanged. <b>The fixture keeps its name</b> — the epic docs and the stage
-    /// briefs cite it — but "Redecode" is now historical: it names the cost this tooth measured, and then
-    /// measured the deletion of.</para>
+    /// they exist to protect is unchanged. <b>The fixture keeps its name</b> — other docs cite it — but
+    /// "Redecode" is now historical: it names the cost this tooth measured, and then measured the
+    /// deletion of.</para>
     ///
     /// <para><b>The differential.</b> Two arms over the same bytes, style, camera and sprite fixture: one
     /// whose sprite fetch is gated open at kick time (parks) and one whose fetch has already settled (never
@@ -280,10 +280,8 @@ namespace MapRenderer.Tests.Text
             return indices;
         }
 
-        // Reader cutover (4.2) / resident-graph shed (4.4b): the retired subsystem.CollectInto managed-list overload
-        // deduped ACROSS tiles — this suite only ever commits Tile0, so its replacement reads that ONE tile's
-        // baked native block directly (DebugBlockFor — Entry.SymbolPlacementSystem itself is gone as of 4.4b) rather than routing
-        // through the cross-tile winner plan the block-vs-block compare below needs.
+        // The subsystem reads ONE tile's baked native block directly (DebugBlockFor); this suite only ever
+        // commits Tile0, so it does not need the cross-tile winner plan the block-vs-block compare below uses.
         private static SymbolTileBlock Collect(SymbolSubsystem subsystem)
             => subsystem.Store().DebugBlockFor(new SymbolTileStore.Key(SourceId, Tile0));
 
@@ -298,7 +296,7 @@ namespace MapRenderer.Tests.Text
             }
         }
 
-        // ── D2 ────────────────────────────────────────────────────────────────────────────────────────
+        // ── The parked path ───────────────────────────────────────────────────────────────────────────
 
         [UnityTest]
         public IEnumerator AParkedBuild_DecodesOnce_AndCommitsTheSameSymbolsAsAnUnparkedOne()
@@ -507,8 +505,8 @@ namespace MapRenderer.Tests.Text
         /// what deletes the re-decode — but a restyle that arrives during that window drops the entry
         /// without ever dispatching it. Dequeueing it is not enough: <c>DrainAndDiscardParkedBuilds</c> has
         /// to dispose the entry's reference, or the tile's <c>Allocator.Persistent</c> buffers are freed by
-        /// nothing at all. The funnel exists as one method precisely so this obligation has one home; before
-        /// D0 it was two bare <c>while (TryDequeue(out _)) { }</c> loops, i.e. two places to forget it.</para>
+        /// nothing at all. The funnel is one method so this obligation has one home; split across two bare
+        /// <c>while (TryDequeue(out _)) { }</c> loops it was two places to forget it.</para>
         ///
         /// <para><b>RED injection:</b> delete <c>dropped.Decode.Release()</c> from
         /// <c>SymbolSubsystem.DrainAndDiscardParkedBuilds</c>.</para>
@@ -562,7 +560,7 @@ namespace MapRenderer.Tests.Text
         // ── The parked reference's PRE-CONSUMER exits ─────────────────────────────────────────────────
         //
         // Three ways a parked entry's reference can stop being reachable by the mouth that was supposed to
-        // consume it. R1 retired the FIRST of these — a post-drain restyle race modelled by a same-thread
+        // consume it. The FIRST of these is retired — a post-drain restyle race modelled by a same-thread
         // interposing handle (`AcquireInterposingHandle`, since deleted) — because the atomic park
         // (`TryParkBuild`, gated by `_parkGate`) makes that exact interleaving IMPOSSIBLE: the ct-check and
         // the Acquire() now run behind the SAME lock the abandon-drain takes, so a canceller's cancel-then-
@@ -605,15 +603,15 @@ namespace MapRenderer.Tests.Text
             return field.GetValue(subsystem);
         }
 
-        /// <summary>Reflects the refcount field (named <c>_refs</c> on both <c>DecodedTileLease</c> — R1 —
-        /// and its R2 successor <c>SharedDisposable&lt;T&gt;</c>) directly off <paramref name="handle"/>'s
+        /// <summary>Reflects the refcount field (named <c>_refs</c> on both <c>DecodedTileLease</c> —
+        /// and its successor <c>SharedDisposable&lt;T&gt;</c>) directly off <paramref name="handle"/>'s
         /// own runtime type, so this reading survives the type swap untouched: 1 means only the creator's
         /// reference is live (nothing has Acquired), 2 means exactly one more has (Acquire() ran).
         ///
-        /// <para>Substitutes for the plan's sketched <c>probe.AcquireCount</c>: a decoder-level probe cannot
+        /// <para>Substitutes for a <c>probe.AcquireCount</c>: a decoder-level probe cannot
         /// see <c>Acquire()</c> at all (it runs on the wrapping HANDLE, never on the <see cref="IDecodedTile"/>
         /// the decoder produces), and a handle-wrapping test double (the retired <c>AcquireInterposingHandle</c>
-        /// shape) cannot survive R2 — <c>SharedDisposable&lt;T&gt;</c> is a sealed concrete class with no
+        /// shape) cannot survive the move — <c>SharedDisposable&lt;T&gt;</c> is a sealed concrete class with no
         /// interface left to implement. Reading the refcount directly needs neither.</para></summary>
         private static int RefsOf(object handle)
         {
@@ -626,7 +624,7 @@ namespace MapRenderer.Tests.Text
         }
 
         /// <summary>
-        /// <b>The gate-exclusion tooth — R1's mandatory RED tooth (decode-refcount plan §6), successor to
+        /// <b>The gate-exclusion tooth, successor to
         /// the retired <c>AParkEnqueuedAfterItsCancellersDrain_ReleasesItsReference</c>.</b>
         ///
         /// <para>That tooth modelled a race — a same-thread interposing handle running a reentrant restyle
@@ -725,7 +723,7 @@ namespace MapRenderer.Tests.Text
         }
 
         /// <summary>
-        /// <b>The stress balance test (decode-refcount plan §6, F1) — many concurrent park / cancel / drain
+        /// <b>The stress balance test — many concurrent park / cancel / drain
         /// cycles over <see cref="LeaseProbeDecoder"/>, asserting <c>UnbalancedCount == 0</c> under every
         /// interleaving.</b>
         ///

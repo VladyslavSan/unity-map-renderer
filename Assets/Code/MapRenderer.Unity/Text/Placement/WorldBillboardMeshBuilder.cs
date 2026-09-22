@@ -11,18 +11,16 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Unity.Text.Placement
 {
     /// <summary>
-    /// Epic A / A0: the type-explicit builder (naming convention) that assembles a two-stream
-    /// world-anchored symbol <see cref="Mesh"/> from CPU corner data. Reused by A1's real
-    /// per-(tile,DrawIndex,kind) emit and A0's test scaffold.
+    /// The type-explicit builder that assembles a two-stream world-anchored symbol <see cref="Mesh"/> from
+    /// CPU corner data. Shared by the per-(tile,DrawIndex,kind) emit and the test scaffold.
     ///
-    /// <para><b>Two streams</b> (so a per-frame fade update never touches topology, §3.1): stream 0 is
+    /// <para><b>Two streams</b> (so a per-frame fade update never touches topology): stream 0 is
     /// <see cref="WorldBillboardVertex"/> — Position(AnchorLocal)/Color(ColorRGB)/TexCoord0(Uv)/
-    /// TexCoord1(Page)/TexCoord2(Offset)/TexCoord3(AlignFlags)/TexCoord5(Tangent, Stage AC)/TexCoord6(Up, P2),
+    /// TexCoord1(Page)/TexCoord2(Offset)/TexCoord3(AlignFlags)/TexCoord5(Tangent)/TexCoord6(Up),
     /// FROZEN load-bearing byte layout (see <see cref="WorldBillboardVertex"/>'s header). Stream 1 is a single
-    /// <c>float</c> Opacity (TexCoord4) — A0 uploads a constant 1 array; A2 re-uploads this stream alone
-    /// per frame for the fade.</para>
+    /// <c>float</c> Opacity (TexCoord4), re-uploaded alone per frame for the fade.</para>
     ///
-    /// <para>Thin and testable: no projection/collision logic here (that is the decision, A1) — this type
+    /// <para>Thin and testable: no projection/collision logic here — this type
     /// only turns already-computed corner data into a GPU mesh. Main-thread only (touches <see cref="Mesh"/>,
     /// mirrors every other GPU-resource boundary in this codebase).</para>
     /// </summary>
@@ -35,8 +33,8 @@ namespace MapRenderer.Unity.Text.Placement
         // (stream 1!), TexCoord5=9, TexCoord6=10 — declaring them out of order triggers a silent
         // "non-standard order" layout re-adjustment that reads the wrong bytes for the wrong attribute (at
         // worst: 0 ink pixels). TexCoord4 (Opacity) is stream 1 — a SEPARATE vertex buffer, so re-uploading
-        // it per frame (A2) never touches stream 0 — but it still occupies enum slot 8, so Stage AC's
-        // TexCoord5 (Tangent, enum 9, stream 0) MUST be declared after it, and P2's TexCoord6 (Up, enum 10,
+        // it per frame never touches stream 0 — but it still occupies enum slot 8, so
+        // TexCoord5 (Tangent, enum 9, stream 0) MUST be declared after it, and TexCoord6 (Up, enum 10,
         // stream 0) after THAT, and the halo stage's TexCoord7 (SdfWidenPx, enum 11, stream 0) after THAT —
         // the new truly-LAST element — to keep 0,3,4,5,6,7,8,9,10,11 ascending. Putting TexCoord5/6/7 before
         // TexCoord4 would read descending — the exact hazard this codebase's vertex-descriptor convention
@@ -50,8 +48,8 @@ namespace MapRenderer.Unity.Text.Placement
             new VertexAttributeDescriptor(VertexAttribute.TexCoord2, VertexAttributeFormat.Float32, 2, stream: 0), // Offset
             new VertexAttributeDescriptor(VertexAttribute.TexCoord3, VertexAttributeFormat.Float32, 1, stream: 0), // AlignFlags
             new VertexAttributeDescriptor(VertexAttribute.TexCoord4, VertexAttributeFormat.Float32, 1, stream: 1), // Opacity
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord5, VertexAttributeFormat.Float32, 3, stream: 0), // Tangent (Stage AC)
-            new VertexAttributeDescriptor(VertexAttribute.TexCoord6, VertexAttributeFormat.Float32, 3, stream: 0), // Up (P2)
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord5, VertexAttributeFormat.Float32, 3, stream: 0), // Tangent
+            new VertexAttributeDescriptor(VertexAttribute.TexCoord6, VertexAttributeFormat.Float32, 3, stream: 0), // Up
             new VertexAttributeDescriptor(VertexAttribute.TexCoord7, VertexAttributeFormat.Float32, 2, stream: 0), // SdfWidenPx — truly LAST
         };
 
@@ -61,7 +59,7 @@ namespace MapRenderer.Unity.Text.Placement
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
         // A MeshRenderer's CPU frustum cull is evaluated against Mesh.bounds — an anchor can sit off-object
-        // while a glyph/halo extends on-screen (§3.3 "never-cull"), so "never cull" is the only correct
+        // while a glyph/halo extends on-screen, so "never cull" is the only correct
         // choice, mirroring SymbolPlacementSystem.HugeBounds (the screen-space path's identical reasoning).
         public static readonly Bounds HugeBounds = new Bounds(Vector3.zero, new Vector3(1e9f, 1e9f, 1e9f));
 

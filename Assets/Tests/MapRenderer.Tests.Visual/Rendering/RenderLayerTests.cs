@@ -1,13 +1,13 @@
-// Render-layer draw-order and draw-gate GPU/visual acceptance tests, part 1 of 2 (UMR-176 pack: render-layers topic).
+// Render-layer draw-order and draw-gate GPU/visual acceptance tests, part 1 of 2.
 //
 // Split by a using collision, not the line cap: `MapRenderer.Core.Geo.CameraProperties` vs
 // `UnityEngine.Rendering.CameraProperties` (CS0104). Every file with a bare CameraProperties
 // reference is in RenderLayerTests2.cs instead.
 //
 // Contents:
-//   LayerOrderSnapshotTests           — S07 — multi-layer painter's-algorithm "clean composite" snapshot test.
+//   LayerOrderSnapshotTests           — multi-layer painter's-algorithm "clean composite" snapshot test.
 //   FillExtrusionDrawGateTests        — Unity-only: render tests requiring a GPU context (SnapshotRenderer).
-//   RenderModeMaterialSelectionTests  — S4 (unlit epic) — pins that the fill layer's material is cloned from whichever MapMaterialSet the config references, so an unlit set's Map/FillUnlit base reaches the rendered layer (the twin is wired end-to-end), and a lit set's Map/Fill base does under lit.
+//   RenderModeMaterialSelectionTests  — pins that the fill layer's material is cloned from whichever MapMaterialSet the config references, so an unlit set's Map/FillUnlit base reaches the rendered layer (the twin is wired end-to-end), and a lit set's Map/Fill base does under lit.
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -33,21 +33,18 @@ using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 namespace MapRenderer.Tests.Visual
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // LayerOrderSnapshotTests — S07 — multi-layer painter's-algorithm "clean composite" snapshot test.
+    // LayerOrderSnapshotTests — multi-layer painter's-algorithm "clean composite" snapshot test.
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S07 — multi-layer painter's-algorithm "clean composite" snapshot test.
+    /// Multi-layer painter's-algorithm "clean composite" snapshot test.
     ///
-    /// S54 migration: the retired LayerStack MonoBehaviour drove the original three teeth
-    /// (draw-order dominance, reorder-flip, clean composite). The dominance + reorder-flip teeth
-    /// are now covered live by <c>BrgBackendSnapshotTests</c> (Tooth 2 pixel — fill-over-line
-    /// declared-order flip, falsifiable) and the queue-mechanism tooth by Tooth 2
-    /// (ascending renderQueue in declared order). The ONLY tooth without a Gen-2 survivor is the
-    /// no-z-fighting clean-composite (low region-color variance), so it is migrated here onto the
-    /// live material path (MaterialFactory + LayerDrawOrder + SyntheticLineMesh), with a synthetic
-    /// uniform fill quad so the sample region is a single flat colour (a fixture fill would straddle
-    /// polygon edges and inflate variance for reasons unrelated to z-fighting).
+    /// Draw-order dominance and the reorder flip are covered live by
+    /// <c>BrgBackendSnapshotTests</c>. What lives here is the no-z-fighting clean composite (low
+    /// region-color variance), over the live material path (MaterialFactory + LayerDrawOrder +
+    /// SyntheticLineMesh), with a synthetic uniform fill quad so the sample region is a single flat colour
+    /// (a fixture fill would straddle polygon edges and inflate variance for reasons unrelated to
+    /// z-fighting).
     ///
     /// Camera: top-down ortho (512×512, Y=200, orthoSize=70), dark-slate background.
     /// </summary>
@@ -130,13 +127,11 @@ namespace MapRenderer.Tests.Visual
                         "Likely no GPU context or a framing problem.");
                 }
 
-                // ── Non-vacuous guard (§7.11): the TOP layer (red fill, queue 3004 under the G7/D7 sub-slot
-                // band stride — comment-only fix, see road-shields-design.md §9; this file's assertions stay
-                // purely relational and are otherwise UNTOUCHED) must win the composite. ──
-                // Before the winding fix the fill quads rendered NOTHING (front-facing under _Cull:1), so only
-                // the blue line drew — this region read BLUE and the variance tooth below passed vacuously.
-                // Requiring red-dominance proves all three layers render AND that painter order (fill-on-top-
-                // of-line, the keystone case) actually puts the top fill on top.
+                // ── Non-vacuous guard: the TOP layer (red fill, queue 3004 under the sub-slot band stride —
+                // see road-shields-design.md) must win the composite. With fill quads wound the wrong way
+                // they render NOTHING (front-facing under _Cull:1), only the blue line draws, this region
+                // reads BLUE and the variance tooth below passes vacuously. Requiring red-dominance proves
+                // all three layers render AND that painter order puts the top fill on top. ──
                 Assert.That(mean[0], Is.GreaterThan(mean[1]).And.GreaterThan(mean[2]),
                     $"Top layer (red fill) must dominate the composite (meanRGB=" +
                     $"({mean[0]:F3},{mean[1]:F3},{mean[2]:F3})). A blue/green-dominant region means the fill " +
@@ -400,9 +395,9 @@ namespace MapRenderer.Tests.Visual
 
     // Unity EditMode only — uses MonoBehaviour + per-layer material inspection (mirrors MapViewStyledFillTests).
     //
-    // S4 (unlit epic) acceptance: render mode is a property of the MapMaterialSet the config references (the
-    // reshape of D1 = Option B — a Lit set puts the view in lit, an Unlit set in unlit; there is no separate
-    // config flag and no per-material mix). This end-to-end tooth proves the unlit shader twin actually flows
+    // Render mode is a property of the MapMaterialSet the config references: a Lit set puts the view in lit,
+    // an Unlit set in unlit, with no separate config flag and no per-material mix. This end-to-end tooth
+    // proves the unlit shader twin flows
     // through the material pipeline: the material MapView resolves for a fill layer carries the shader of the
     // set's FillMaterial base — Map/Fill from a lit set, Map/FillUnlit from an unlit set.
     //
@@ -411,11 +406,11 @@ namespace MapRenderer.Tests.Visual
     // TileSourceFactoryOverride seam supplies the fixture bytes when SetSources lazily constructs the source.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // RenderModeMaterialSelectionTests — S4 (unlit epic)
+    // RenderModeMaterialSelectionTests — the fill layer's material comes from the configured set
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S4 (unlit epic) — pins that the fill layer's material is cloned from whichever
+    /// Pins that the fill layer's material is cloned from whichever
     /// <see cref="MapMaterialSet"/> the config references, so an unlit set's <c>Map/FillUnlit</c> base
     /// reaches the rendered layer (the twin is wired end-to-end), and a lit set's <c>Map/Fill</c> base does
     /// under lit. Render mode itself lives on the set (<see cref="MapMaterialSet.RenderMode"/>) and drives
@@ -455,9 +450,9 @@ namespace MapRenderer.Tests.Visual
 
             // Under Unlit, build a throwaway set (never the shared production asset — same posture as
             // MapMaterialSetValidationTests.NewSet) whose RenderMode is Unlit and whose FillMaterial is the
-            // real Map/FillUnlit twin (landed by S1). Line/Symbol bases reuse the lit ones — Validate()
-            // (called inside SetStyle) requires all three regardless of mode, and symbols are already unlit
-            // / out of this epic's scope. Under Lit, the shared production set already carries Map/Fill and
+            // real Map/FillUnlit twin. Line/Symbol bases reuse the lit ones — Validate() (called inside
+            // SetStyle) requires all three regardless of mode, and symbols are already unlit.
+            // Under Lit, the shared production set already carries Map/Fill and
             // its default RenderMode.Lit.
             using var bag = new ObjectDisposalBag();
             var isUnlit  = mode == RenderMode.Unlit;

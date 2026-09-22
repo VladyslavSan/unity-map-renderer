@@ -1,9 +1,9 @@
-// Epic A / A2 acceptance — plan §F tooth 9 (DECISION 2, replaces round-1 HIGH 1): MapMaterialSet.Validate()
-// fails LOUD when any base material is unassigned, making a null-material background/fill/line/symbol slot
-// (which would otherwise crash or leak at a backend's AddTileLayer — see BackendNullSlotTests' doc)
-// unrepresentable. RED-verifiable: a stubbed-empty Validate() must fail every "missing base throws" case here.
+// MapMaterialSet.Validate() fails LOUD when any base material is unassigned, making a null-material
+// background/fill/line/symbol slot (which would otherwise crash or leak at a backend's AddTileLayer
+// — see BackendNullSlotTests' doc) unrepresentable. RED-verifiable: a stubbed-empty Validate() must
+// fail every "missing base throws" case here.
 //
-// Stays its own file (UMR-176): its `using System;` (for InvalidOperationException) would collide with
+// Stays its own file: its `using System;` (for InvalidOperationException) would collide with
 // MaterialsTests.cs's bare `Object.DestroyImmediate` calls (System.Object vs UnityEngine.Object, CS0104) —
 // see docs/conventions-short.md's "Plain-import collisions" note.
 
@@ -20,8 +20,8 @@ namespace MapRenderer.Tests.Materials
         // A THROWAWAY MapMaterialSet per test — never the shared production asset (nulling a base here must
         // never mutate the committed asset other tests in the same batch also load via MapMaterialSetTestUtil).
         // symbolWorld defaults true (assigned) so the existing fill/line cases below keep testing exactly
-        // what they tested before — SymbolTextWorld is the only symbol base left (commit 2 retired the
-        // screen SymbolText field), pinned by its own dedicated case.
+        // what they tested before — SymbolTextWorld is the only symbol base left, pinned by its own
+        // dedicated case.
         private static MapMaterialSet NewSet(bool fill, bool line, bool symbolWorld = true)
         {
             var prod = MapMaterialSetTestUtil.Load();
@@ -39,7 +39,7 @@ namespace MapRenderer.Tests.Materials
             Assert.DoesNotThrow(() => set.Validate());
         }
 
-        // ── Epic A / A1 (Codex #2): SymbolTextWorld is REQUIRED; SymbolIconWorld stays optional-with-warn —
+        // ── SymbolTextWorld is REQUIRED; SymbolIconWorld stays optional-with-warn —
         //    pinning the required-vs-optional policy split. ──
 
         [Test]

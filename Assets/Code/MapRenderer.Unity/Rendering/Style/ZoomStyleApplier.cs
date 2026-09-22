@@ -8,32 +8,31 @@ using CoreColor = MapRenderer.Core.Expressions.Color;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// Per-layer zoom → material-uniform applier for S11/S60: "build-once, restyle via uniforms".
+    /// Per-layer zoom → material-uniform applier: "build-once, restyle via uniforms".
     ///
     /// Holds typed binding lists (<see cref="StyleProperty{float}"/> and
     /// <see cref="StyleProperty{CoreColor}"/>) keyed to shader property IDs. On each call to
     /// <see cref="ApplyZoom"/> it evaluates only the Zoom-kind bindings (Constant bindings are set
     /// once at bind-time and never re-evaluated). Drives the per-layer Material instance directly via
     /// <c>SetFloat</c>/<c>SetColor</c> — never <c>MaterialPropertyBlock</c>, which disables the SRP
-    /// Batcher (ARCHITECTURE §2).
+    /// Batcher (ARCHITECTURE).
     ///
-    /// S107: this is also the ONE seam where a px-valued style property meets the device-pixel ratio.
+    /// This is also the ONE seam where a px-valued style property meets the device-pixel ratio.
     /// <see cref="BindDevicePixelFloat"/> / <see cref="BindDevicePixelVector"/> name the consumer's
-    /// <see cref="PixelSpace"/> at the binding site, with no default argument to forget. Note what that
-    /// does and does not buy: a px property routed through these bindings must state its space, but
-    /// nothing stops a new px property being bound via <see cref="BindFloat"/> and silently keeping the
-    /// wrong basis — which is exactly how the line family drifted. Unitless properties have no pixel
-    /// space, so forcing a <see cref="PixelSpace"/> on every binding would be wrong; the guard against a
-    /// missed property is the px-surface table in <c>docs/device-pixel-ratio-design.md</c> §2.4 and its
-    /// teeth, not the compiler. Those bindings always
-    /// queue (the ratio is a per-frame input, not a bind-time constant), which is why a Constant
-    /// <c>line-width</c> now costs one <c>SetFloat</c> per layer per frame instead of one at build.
+    /// <see cref="PixelSpace"/> at the binding site, with no default argument to forget. That does not
+    /// close the hole: a px property routed through these bindings must state its space, but nothing stops
+    /// a new px property being bound via <see cref="BindFloat"/> and keeping the wrong basis. Unitless
+    /// properties have no pixel space, so forcing a <see cref="PixelSpace"/> on every binding would be
+    /// wrong; the guard against a missed property is the px-surface table in
+    /// <c>docs/device-pixel-ratio-design.md</c> and its teeth, not the compiler. Those bindings always
+    /// queue (the ratio is a per-frame input, not a bind-time constant), so a Constant <c>line-width</c>
+    /// costs one <c>SetFloat</c> per layer per frame.
     ///
-    /// S60 design (locked): <c>StyleProperty&lt;float&gt;</c> and <c>StyleProperty&lt;Color&gt;</c>
+    /// <c>StyleProperty&lt;float&gt;</c> and <c>StyleProperty&lt;Color&gt;</c>
     /// are distinct closed generic types and cannot share one binding list without boxing. Four typed
     /// lists guarantee zero boxing in <see cref="ApplyZoom"/>, which is the alloc-free hot path.
     ///
-    /// Style-transitions epic, Stage 2: a rebind (<see cref="SetTransition"/> then a <c>Bind*</c> call
+    /// A rebind (<see cref="SetTransition"/> then a <c>Bind*</c> call
     /// with an id already in the list) re-targets the entry instead of replacing it — both the old and
     /// new endpoint are evaluated at the LIVE zoom every frame; time only moves the mix between them.
     /// A first bind is never a re-target: <see cref="SetTransition"/> is never called before the initial
@@ -43,8 +42,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// per-call string lookup allocations. The binding loops are plain <c>for</c> over typed
     /// <see cref="List{T}"/>s, which use struct enumerators and have no closure overhead.
     ///
-    /// Clean-room: design follows the S11 plan, the style-transitions epic design docs, and the public
-    /// MapLibre Style Spec.
+    /// Clean-room: design follows this repo's own design docs and the public MapLibre Style Spec.
     /// </summary>
     public sealed class ZoomStyleApplier
     {
@@ -68,7 +66,7 @@ namespace MapRenderer.Unity.Rendering.Style
         private readonly List<Binding<float>>     _floatBindings = new List<Binding<float>>();
         private readonly List<Binding<CoreColor>> _colorBindings = new List<Binding<CoreColor>>();
 
-        // ── Device-pixel bindings (S107) — logical px in, the consumer's space out ────────────────
+        // ── Device-pixel bindings — logical px in, the consumer's space out ──────────────────────
         // Separate lists rather than a flag on the two above: these carry the SPACE as part of their
         // identity, and they can never take the bind-time constant shortcut (see BindDevicePixelFloat).
 
@@ -231,7 +229,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// Bind a px-valued <see cref="StyleProperty{float}"/> whose shader consumer measures against the
         /// PHYSICAL framebuffer (<see cref="PixelSpace.Device"/>): the style's logical px are multiplied by
         /// the device-pixel ratio in <see cref="ApplyZoom"/>, so a <c>line-width: 2</c> road is 2 LOGICAL px
-        /// on every panel density (S107 Stage 1).
+        /// on every panel density.
         ///
         /// <para>Unlike <see cref="BindFloat"/> this ALWAYS queues, even for a Constant-kind property: the
         /// value depends on the ratio, which is not known at bind time and can change live (a window dragged
@@ -312,11 +310,11 @@ namespace MapRenderer.Unity.Rendering.Style
                 return;
             }
 
-            // A restyle rebinds EVERY paint property wholesale (§0.3 — no diffing), so a property whose
+            // A restyle rebinds EVERY paint property wholesale (no diffing), so a property whose
             // VALUE did not change still reaches here as a "retarget". Without this check it would arm a
             // pointless transition (Origin != null for the full duration, settling on the same value it
-            // started at) — criterion 4 needs a discriminant-only restyle to arm NOTHING, not just nothing
-            // visible. Scoped to the settled case; an interrupted transition already has a genuine reason
+            // started at) — a discriminant-only restyle must arm NOTHING, not just nothing visible.
+            // Scoped to the settled case; an interrupted transition already has a genuine reason
             // to keep easing. Both sides must be provably Constant to compare cheaply — a Zoom/Feature/
             // Composite property conservatively re-arms rather than risk missing a real change.
             if (b.Origin == null && ValuesEqualIfBothConstant(b.Target, prop))

@@ -10,8 +10,8 @@ namespace MapRenderer.Jobs.Geometry
     /// buffer into fresh length-authoritative lists, <b>in visit order</b> — the clip-disabled twin of
     /// <see cref="RingClipJob"/>.
     ///
-    /// <para><b>Why it exists.</b> Since IR B7 a consumer no longer controls what a materializer decodes; it
-    /// controls which of the shared buffer's rings it visits, and in what order. When the tile-buffer clip is
+    /// <para><b>Why it exists.</b> A consumer does not control what a materializer decodes; it controls
+    /// which of the shared buffer's rings it visits, and in what order. When the tile-buffer clip is
     /// disabled there is nothing to clip, but the selection and the ordering still have to happen — so this
     /// job is exactly <see cref="RingClipJob"/>'s bbox-inside fast path (append the ring's vertices, push the
     /// offset, push the feature index) with the clipping removed.</para>

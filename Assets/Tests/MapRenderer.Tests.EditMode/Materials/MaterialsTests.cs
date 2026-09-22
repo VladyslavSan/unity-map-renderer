@@ -6,21 +6,21 @@
 // CS0104) — see docs/conventions-short.md's "Plain-import collisions" note.
 //
 // Contents:
-//   MapFillMaterialTests                — S34 acceptance: the committed MapFill.mat/MapLine.mat template
+//   MapFillMaterialTests                — the committed MapFill.mat/MapLine.mat template
 //                                          assets (shader reference, paint + URP Lit properties).
-//   MapFillUnlitMaterialTests           — unlit rendering mode epic stage 1: Map/FillUnlit shader twin
+//   MapFillUnlitMaterialTests           — Map/FillUnlit shader twin
 //                                          structural acceptance teeth.
-//   MapFillExtrusionUnlitMaterialTests  — unlit rendering mode epic stage 2: Map/FillExtrusionUnlit shader
+//   MapFillExtrusionUnlitMaterialTests  — Map/FillExtrusionUnlit shader
 //                                          twin structural acceptance teeth.
-//   MapLineUnlitMaterialTests           — unlit rendering mode epic stage 3: Map/LineUnlit shader twin
+//   MapLineUnlitMaterialTests           — Map/LineUnlit shader twin
 //                                          structural acceptance teeth.
-//   MapShaderGUITests                   — S58 acceptance: the map material inspectors subclass the raw
+//   MapShaderGUITests                   — the map material inspectors subclass the raw
 //                                          UnityEditor.ShaderGUI hierarchy directly.
 //   MaterialExtensionsTests             — MaterialExtensions.CloneWithParent contract (independent clone,
 //                                          copied values, Editor variant link).
 //   MaterialRenderStateTests            — the typed render-state layer (ZWrite/ZTest/Cull/Blend) round-trips
 //                                          onto the underlying ShaderLab int properties.
-//   MaterialTweakerTests                — S58: runtime painter/elevated-3D contracts plus the editor
+//   MaterialTweakerTests                — runtime painter/elevated-3D contracts plus the editor
 //                                          keyword sync (ValidateMaterial).
 //   PaintColorSingleApplyTests          — a paint colour has exactly one carrier (uniform xor vertex
 //                                          stream); the fragment must not apply it twice.
@@ -71,7 +71,7 @@ namespace MapRenderer.Tests.Materials
             var mat = AssetDatabase.LoadAssetAtPath<Material>(MatPath);
             Assert.That(mat, Is.Not.Null,
                 $"MapFill.mat must exist at '{MatPath}'. " +
-                "S34 acceptance #7 requires the committed template material asset.");
+                "The committed template material asset is required.");
         }
 
         [Test]
@@ -94,7 +94,7 @@ namespace MapRenderer.Tests.Materials
             Assume.That(mat, Is.Not.Null, "MapFill.mat not found.");
 
             // _BaseColor is the map paint property (MapLibre-style fill-color knob).
-            // Renamed from _Color in S37 so URP's legacy _BaseColor alias has no bare _Color to
+            // Named _BaseColor, not _Color, so URP's legacy _BaseColor alias has no bare _Color to
             // clobber to {1,1,1} on import/Editor-open. Assert the ACTUAL styled RGBA — a white
             // clobber {1,1,1,1} would fail on r/g/b here.
             Color color = mat.GetColor("_BaseColor");
@@ -153,10 +153,10 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void MapLineMat_ResolvesToTransparentQueue()
         {
-            // S37 regression guard, updated for S58. The line is transparent
+            // Regression guard. The line is transparent
             // (lit rendering — Queue=Transparent>=2501 drives the
-            // painter's-algorithm coplanar fill/line ordering; ZWrite Off). Since S58 retired URP's
-            // BaseShaderGUI, the queue is NO LONGER auto-resolved from _Surface/_QueueControl on import
+            // painter's-algorithm coplanar fill/line ordering; ZWrite Off). With no URP
+            // BaseShaderGUI, the queue is NOT auto-resolved from _Surface/_QueueControl on import
             // (our raw-ShaderGUI ValidateMaterial only syncs keywords — it never touches renderQueue).
             // The transparent queue now comes from MapLine.mat's serialized custom render queue (3000)
             // and the SubShader's Queue=Transparent tag. Material.renderQueue returns the resolved value,
@@ -166,7 +166,7 @@ namespace MapRenderer.Tests.Materials
 
             Assert.That(mat.renderQueue, Is.GreaterThanOrEqualTo(2501),
                 $"MapLine.mat must resolve to the Transparent render queue (>=2501) after a fresh "      +
-                $"batch import, got {mat.renderQueue}. Since S58 the queue comes from the material's "   +
+                $"batch import, got {mat.renderQueue}. The queue comes from the material's "   +
                 "serialized custom render queue (3000) + the Line SubShader Queue=Transparent tag — "    +
                 "the raw-ShaderGUI no longer recomputes it. A value of 2000 means the custom queue was " +
                 "lost.");
@@ -175,7 +175,7 @@ namespace MapRenderer.Tests.Materials
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapFillUnlitMaterialTests — unlit rendering mode epic stage 1: Map/FillUnlit twin
+    // MapFillUnlitMaterialTests — Map/FillUnlit twin
     // ───────────────────────────────────────────────────────────────────────────────────
 
     // T1 (property-parity / silent-bind guard): every ShaderProperties.PropertyId that
@@ -284,7 +284,7 @@ namespace MapRenderer.Tests.Materials
             Assert.That(extra, Is.Empty,
                 "Map/FillUnlit's forward Attributes require semantics StyledFillTileBuilder never emits: " +
                 $"{string.Join(", ", extra)}. The unlit twin must consume the SAME mesh the Lit twin does — " +
-                "a vertex-layout fork is impossible by construction (unlit rendering mode epic §1).");
+                "a vertex-layout fork is impossible by construction (unlit rendering mode).");
         }
 
         // ── T3 — no-lighting structural ─────────────────────────────────────────────────────────
@@ -312,7 +312,7 @@ namespace MapRenderer.Tests.Materials
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapFillExtrusionUnlitMaterialTests — unlit rendering mode epic stage 2: FillExtrusionUnlit twin
+    // MapFillExtrusionUnlitMaterialTests — FillExtrusionUnlit twin
     // ───────────────────────────────────────────────────────────────────────────────────
 
     // T1 (property-parity / silent-bind guard): every ShaderProperties.PropertyId that
@@ -430,7 +430,7 @@ namespace MapRenderer.Tests.Materials
             Assert.That(extra, Is.Empty,
                 "Map/FillExtrusionUnlit's forward Attributes require semantics StyledFillExtrusionTileBuilder " +
                 $"never emits: {string.Join(", ", extra)}. The unlit twin must consume the SAME mesh the Lit " +
-                "twin does — a vertex-layout fork is impossible by construction (unlit rendering mode epic §1).");
+                "twin does — a vertex-layout fork is impossible by construction (unlit rendering mode).");
         }
 
         // ── T3 — no-lighting structural ─────────────────────────────────────────────────────────
@@ -528,7 +528,7 @@ namespace MapRenderer.Tests.Materials
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapLineUnlitMaterialTests — unlit rendering mode epic stage 3: Map/LineUnlit twin
+    // MapLineUnlitMaterialTests — Map/LineUnlit twin
     // ───────────────────────────────────────────────────────────────────────────────────
 
     // T1 (property-parity / silent-bind guard): every ShaderProperties.PropertyId that
@@ -546,7 +546,7 @@ namespace MapRenderer.Tests.Materials
     // T3 (no-lighting structural): Line_UnlitForwardPass.hlsl must reference none of SAMPLE_GI /
     //   UniversalFragmentPBR / OUTPUT_SH4 — the textual proof that the fragment dropped lighting rather than
     //   merely gating it behind an always-off keyword.
-    // T4 (AA-preserved, S3's signature tooth): line antialiasing is NOT lighting — it is the LineCoverage(...)
+    // T4 (AA-preserved): line antialiasing is NOT lighting — it is the LineCoverage(...)
     //   straddle/gap/blur/dash formula owned by the shared Line_VertexExtrude.hlsl — so unlike T3, the unlit
     //   forward pass MUST reference it. Asserts (a) Line_UnlitForwardPass.hlsl's code calls LineCoverage( and
     //   (b) LineUnlit.shader declares the same AA/hairline keyword pragmas the Lit twin's ForwardLit pass does
@@ -651,7 +651,7 @@ namespace MapRenderer.Tests.Materials
             Assert.That(extra, Is.Empty,
                 $"LineAttributes requires semantics StyledLineTileBuilder never emits: {string.Join(", ", extra)}. " +
                 "The unlit twin must consume the SAME mesh the Lit twin does — a vertex-layout fork is " +
-                "impossible by construction (unlit rendering mode epic §1).");
+                "impossible by construction (unlit rendering mode).");
         }
 
         // ── T3 — no-lighting structural ─────────────────────────────────────────────────────────
@@ -676,7 +676,7 @@ namespace MapRenderer.Tests.Materials
                 "The unlit fragment must drop lighting entirely, not merely guard it behind a keyword.");
         }
 
-        // ── T4 — AA-preserved (S3's signature tooth) ────────────────────────────────────────────
+        // ── T4 — AA-preserved ───────────────────────────────────────────────────────────────────
         [Test]
         public void LineUnlit_PreservesLineAntialiasing()
         {
@@ -715,14 +715,13 @@ namespace MapRenderer.Tests.Materials
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapShaderGUITests — S58: the map material inspectors subclass the raw ShaderGUI directly
+    // MapShaderGUITests — the map material inspectors subclass the raw ShaderGUI directly
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // S58 acceptance (STRUCTURAL) — the map material inspectors subclass the RAW UnityEditor.ShaderGUI.
+    // STRUCTURAL — the map material inspectors subclass the RAW UnityEditor.ShaderGUI.
     //
-    // Replaces the S35 test that asserted MapLitShaderGUI : URP BaseShaderGUI. S58 retired the
-    // UCL-derived MapLitShaderGUI; the inspectors now subclass the raw ShaderGUI directly (no URP
-    // editor dependency — the test asmdef no longer references Unity.RenderPipelines.Universal.Editor).
+    // There is no UCL-derived MapLitShaderGUI: the inspectors subclass the raw ShaderGUI directly (no
+    // URP editor dependency — the test asmdef does not reference Unity.RenderPipelines.Universal.Editor).
     // The inspector LAYOUT itself is a manual in-editor check; this only pins the type hierarchy.
     [TestFixture]
     public class MapShaderGUITests
@@ -732,7 +731,7 @@ namespace MapRenderer.Tests.Materials
         public void BaseShaderGUI_SubclassesRawShaderGUI_Directly()
         {
             Assert.AreEqual(typeof(ShaderGUI), typeof(MapRenderer.Unity.Editor.BaseShaderGUI).BaseType,
-                "Our BaseShaderGUI must subclass the RAW UnityEditor.ShaderGUI directly (S58) — it is our own " +
+                "Our BaseShaderGUI must subclass the RAW UnityEditor.ShaderGUI directly — it is our own " +
                 "type, distinct from URP's UnityEditor.BaseShaderGUI (no longer referenced).");
         }
 
@@ -759,7 +758,7 @@ namespace MapRenderer.Tests.Materials
 
     /// <summary>
     /// Contract for <see cref="MaterialExtensions.CloneWithParent"/> — the per-layer material cloning
-    /// primitive behind <see cref="MapMaterialSet"/> (S57). A clone must be an independent Material
+    /// primitive behind <see cref="MapMaterialSet"/>. A clone must be an independent Material
     /// that copies the source's values; in the Editor it must also be a Material Variant of the source so
     /// live base-material edits propagate during Play.
     /// </summary>
@@ -816,7 +815,7 @@ namespace MapRenderer.Tests.Materials
     // MaterialRenderStateTests — the typed render-state layer round-trips onto ShaderLab props
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // S58 acceptance — the typed render-state layer maps Unity rendering enums → the underlying ShaderLab
+    // The typed render-state layer maps Unity rendering enums → the underlying ShaderLab
     // int properties (_ZWrite/_ZTest/_Cull/_SrcBlend/_DstBlend/_BlendOp). Pure property round-trip on a
     // Map/Fill material; no GUI, no scene.
     [TestFixture]
@@ -878,10 +877,10 @@ namespace MapRenderer.Tests.Materials
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MaterialTweakerTests — S58: runtime painter/elevated contracts + editor keyword sync
+    // MaterialTweakerTests — runtime painter/elevated contracts + editor keyword sync
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // S58 acceptance — the split of material setup into runtime vs editor:
+    // The split of material setup into runtime vs editor:
     //   1. RUNTIME tweakers (Fill/Line) own only the render-state contract: ApplyPainterContract sets depth +
     //      per-type blend + white colour identity from scratch.
     //   2. EDITOR keyword sync lives in the shader GUIs' ValidateMaterial (BaseShaderGUI + LitShaderGUI), the
@@ -942,7 +941,7 @@ namespace MapRenderer.Tests.Materials
         }
 
         // ── 1b. Elevated-3D contract: fill-extrusion is opaque + depth-writing, NOT the flat painter state ──
-        // These two are the B1 guard: fill-extrusion is the first geometry that must occupy the depth buffer
+        // These two are the guard: fill-extrusion is the first geometry that must occupy the depth buffer
         // (so buildings — and a single building's own near/far walls, one mesh, unsortable — occlude via
         // depth, not draw order). Routing it through the FILL painter contract (ZWrite Off + transparent)
         // silently defeats that. RED-verify: revert ApplyElevatedContract to FillTweaker.ApplyPainterContract
@@ -977,7 +976,7 @@ namespace MapRenderer.Tests.Materials
         public void CreateFillExtrusionMaterial_AppliesElevatedContract_NotFlatPainter()
         {
             // Guards the wiring, not just the tweaker: CreateFillExtrusionMaterial must route through the
-            // ELEVATED contract. (The B1 regression was that it called FillTweaker.ApplyPainterContract.)
+            // ELEVATED contract. (The regression was that it called FillTweaker.ApplyPainterContract.)
             var settings = Track(ScriptableObject.CreateInstance<MapMaterialSet>());
             settings.FillExtrusionMaterial = Track(NewFillExtrusion());
 
@@ -1023,7 +1022,7 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void FillExtrusionShaderGUI_ValidateMaterial_EmissionTogglesFromGI()
         {
-            // S23 I5: fill-extrusion needs a material editor. Map/FillExtrusion mirrors full URP Lit with
+            // Fill-extrusion needs a material editor. Map/FillExtrusion mirrors full URP Lit with
             // shader_feature keywords (_EMISSION, _NORMALMAP, …), so without a ShaderGUI running the editor
             // keyword sync those keywords are never derived from the material's properties and features like
             // emission silently do nothing. FillExtrusionShaderGUI declares no keyword of its own, so this
@@ -1501,7 +1500,7 @@ namespace MapRenderer.Tests.Materials
         // ── Tooth 5 — `fill` runs the same contract as line/fill-extrusion ───────────────────────
 
         /// <summary>Tooth 1, fill kind. Same composition as the line/fill-extrusion rows above — fill's
-        /// constant/zoom colour now rides <c>_BaseColor</c> too (Stage 1), so the same double-apply hazard
+        /// constant/zoom colour rides <c>_BaseColor</c> too, so the same double-apply hazard
         /// applies here and the same headline check pins it.</summary>
         [Test]
         public void ConstantFillColor_EffectiveColor_MatchesAuthored()
@@ -1555,7 +1554,7 @@ namespace MapRenderer.Tests.Materials
         }
 
         /// <summary>
-        /// fill's own P4 wrinkle: a CONSTANT fill-color's alpha rides <c>_BaseColor.a</c>, and a data-driven
+        /// fill's own wrinkle: a CONSTANT fill-color's alpha rides <c>_BaseColor.a</c>, and a data-driven
         /// fill-opacity is baked into the SAME stream a constant colour would have used. This is where the
         /// product <c>FillSortKeyAndOpacityTests.DataDrivenOpacity_IsTheStreamsOnlyAlphaCarrier</c> used to
         /// assert on one carrier now lives — see that test for the mirror.

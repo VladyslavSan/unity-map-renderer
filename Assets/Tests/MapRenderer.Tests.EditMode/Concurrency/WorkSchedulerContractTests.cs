@@ -21,7 +21,7 @@ namespace MapRenderer.Tests.Concurrency
         /// schedulers wrap the body in their own try/catch and route a throw to
         /// <c>TrySetException</c>, so <c>Schedule</c> itself can only throw for a dispatch failure. This is
         /// what lets <c>TileManager.KickMeshBuild</c>'s single <c>catch { decode.Release(); throw; }</c>
-        /// stay an exactly-once release under EITHER policy (§5 of the migration plan) — a scheduler that let
+        /// stay an exactly-once release under EITHER policy — a scheduler that let
         /// a body throw escape would double-release (the body's own <c>finally</c> plus the kick's outer
         /// catch), silently disposing a decoded tile's buffers under a live owner.
         ///
@@ -57,7 +57,7 @@ namespace MapRenderer.Tests.Concurrency
         /// any number of times with the same outcome — no version-token invalidation, no
         /// <c>.Preserve()</c> needed. This is the property the migration relies on instead of the
         /// <c>.Preserve()</c> wrapper it removes: <c>TileManager.ConsumeMeshBuild</c> re-fetches the result on
-        /// every call across a resumable (S87) multi-frame consume.
+        /// every call across a resumable multi-frame consume.
         ///
         /// <para><b>RED injection:</b> in <see cref="InlineWorkScheduler"/>, swap
         /// <c>UniTaskCompletionSource&lt;T&gt;</c> for the pooled, version-tokened

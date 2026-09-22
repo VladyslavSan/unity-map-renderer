@@ -1,8 +1,6 @@
-// Test-only image-analysis helpers shared by WorldSymbolAbRenderSnapshotTests (T2) and
-// WorldSymbolMotionTests (T3) — kept in its own file (rather than duplicated per test, or bolted onto
-// SymbolAtlasOrientationSnapshotTests) so both A0 GPU teeth share ONE ink-analysis implementation without
-// touching that existing, frozen test file. Internal, not public (test-code-bloat convention: a test
-// helper's footprint stays inside the test assembly).
+// Test-only image-analysis helpers shared by WorldSymbolAbRenderSnapshotTests and WorldSymbolMotionTests,
+// so both GPU teeth share ONE ink-analysis implementation. Internal, not public: a test helper's footprint
+// stays inside the test assembly.
 
 using Unity.Mathematics;
 using UnityEngine;
@@ -124,7 +122,7 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Fraction of pixels whose R channel differs by more than <paramref name="threshold"/>
-        /// between two same-size pixel buffers — T2's "changed-pixel fraction" equivalence metric.</summary>
+        /// between two same-size pixel buffers — the "changed-pixel fraction" equivalence metric.</summary>
         public static float ChangedPixelFraction(Color32[] a, Color32[] b, int width, int height, byte threshold = 24)
         {
             int total = width * height;

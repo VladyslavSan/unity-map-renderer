@@ -5,8 +5,8 @@
 // Object.Destroy without importing System, so the two groups must not merge.
 //
 // Contents:
-//   TileFetchCancellationTests  — S84 — rapid zoom/cover churn must not flood the log with unobserved fetch exceptions.
-//   TileSymbolKickTests         — Epic A / A5b — the symbol kick fires via the normal PumpPending path once the off-main decode lands between ticks.
+//   TileFetchCancellationTests  — rapid zoom/cover churn must not flood the log with unobserved fetch exceptions.
+//   TileSymbolKickTests         — the symbol kick fires via the normal PumpPending path once the off-main decode lands between ticks.
 
 using System;
 using System.Collections;
@@ -35,7 +35,7 @@ using MapRenderer.Unity.Text;
 namespace MapRenderer.Tests.PlayMode.Tiles
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // TileFetchCancellationTests — S84 — rapid zoom/cover churn must not flood the log with fetch exceptions
+    // TileFetchCancellationTests — rapid zoom/cover churn must not flood the log with fetch exceptions
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -43,13 +43,13 @@ namespace MapRenderer.Tests.PlayMode.Tiles
     {
         // Unique marker so the UnobservedTaskException handler only reacts to OUR faults, never a stray
         // abandoned task from another test sharing the domain (test-isolation footgun).
-        private const string FaultMarker = "S84-test-fetch-fault";
+        private const string FaultMarker = "test-fetch-fault";
 
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
-            ""version"": 8, ""name"": ""S84"",
+            ""version"": 8, ""name"": ""fetch-fault"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
                            ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
@@ -58,9 +58,9 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         /// <summary>
         /// A fetch that stays IN-FLIGHT (spins on the ThreadPool) until its token is cancelled, then faults
         /// with a NON-OCE exception — mimicking an aborted UnityWebRequest's "Unknown Error". The non-OCE
-        /// fault is deliberate: UniTask tends to suppress unobserved OCE, so an OCE-based fake would let the
-        /// test pass vacuously (with or without the fix). This faults the way the real bug does. Driven
-        /// through the shared <see cref="TestDataSource"/> (S81) via its (id, ct) delegate ctor.
+        /// fault matters: UniTask tends to suppress unobserved OCE, so an OCE-based fake would let the test
+        /// pass vacuously. This faults the way the real bug does. Driven through the shared
+        /// <see cref="TestDataSource"/> via its (id, ct) delegate ctor.
         /// A blocking wait on the cancellation token's WaitHandle simulates the fetch latency ON THE
         /// THREADPOOL (not a test-frame wait) — it stays; the settle waits in the test body yield real
         /// frames. Parks (no poll) until cancelled or the ~60s safety cap.
@@ -91,7 +91,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             UniTaskScheduler.UnobservedTaskException += handler;
 
             var        src  = new TestDataSource(SpinThenFault);
-            GameObject go   = new GameObject("MapView_S84");
+            GameObject go   = new GameObject("MapView_FetchFault");
             MapView    view = go.AddComponent<MapView>();
             view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.WithTestMaterials();
@@ -137,7 +137,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
                 Assert.IsFalse(unobservedFired,
                     "A fetch cancelled mid-flight by cover churn must be OBSERVED, not dropped to UniTask's " +
-                    "unobserved-exception finalizer. If this fires, the S84 console-flood bug is back: " +
+                    "unobserved-exception finalizer. If this fires, the unobserved-exception console flood is back: " +
                     "TileManager.ReleaseTile must stash the in-flight fetch task (_pending.StashFetch) and " +
                     "PendingDisposalQueue.DrainCompleted / FlushAll must observe it.");
             }
@@ -150,7 +150,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // TileSymbolKickTests — A5b — the symbol kick fires via PumpPending once the off-main decode lands between ticks
+    // TileSymbolKickTests — the symbol kick fires via PumpPending once the off-main decode lands between ticks
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -160,7 +160,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
         /// <summary>Spy <see cref="ISymbolTileWorkerFactory"/> — records every <c>TryBeginBuild</c> call and
         /// every pass it issues. <see cref="ParticipatesFor"/> gates which sources get a non-null pass;
-        /// <see cref="PassFactory"/> lets a test substitute the pass (e.g. a throwing spy for F-3).</summary>
+        /// <see cref="PassFactory"/> lets a test substitute the pass (e.g. a throwing spy).</summary>
         private sealed class SpySymbolTileWorkerFactory : ISymbolTileWorkerFactory
         {
             public readonly List<(string SourceId, TileId Tile)> BeginBuildCalls = new();
@@ -255,7 +255,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             }
         }
 
-        // ── F-2: symbol rides the kick, sharing ONE decode ──────────────────────────────────────────────
+        // ── Symbol rides the kick, sharing ONE decode ───────────────────────────────────────────────────
         [UnityTest]
         public IEnumerator F2_SymbolRidesKick_SharingOneDecode()
         {
@@ -294,11 +294,11 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             finally { view.Teardown(); }
         }
 
-        // ── F-3: two fault domains — a contract-violating symbol throw never strands a mesh array ───────
+        // ── Two fault domains — a contract-violating symbol throw never strands a mesh array ────────────
         // AllTilesSettled() is NOT decisive (ConsumeMeshBuild's faulted-task guard settles either way via
         // silent-discard). The decisive observable is MeshDataPayload.DebugLiveAllocCount: WITH the wrap the
         // kick task completes with a real TilePrologueOutput (consume runs, array disposed); WITHOUT it, the
-        // kick-allocated writable array leaks past settle. RED-verified in the A5b stage report.
+        // kick-allocated writable array leaks past settle.
         [UnityTest]
         public IEnumerator F3_SymbolFaultNeverStrandsMeshArray_LambdaWrapCatches()
         {
@@ -345,7 +345,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             // The decisive native-leak tooth above — DebugLiveAllocCount, a code-maintained counter — stands.)
         }
 
-        // ── F-5: a symbol-only source kicks; a mesh-only source runs no symbol pass ────────────────────
+        // ── A symbol-only source kicks; a mesh-only source runs no symbol pass ─────────────────────────
         [UnityTest]
         public IEnumerator F5_SymbolOnlySourceKicks_MeshOnlySourceRunsNoSymbolPass()
         {
@@ -384,7 +384,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
             finally { view.Teardown(); }
         }
 
-        // ── S82 regression: a symbol-only source must STILL fetch+kick with the prepared cache ENABLED ──
+        // ── Regression: a symbol-only source must STILL fetch+kick with the prepared cache ENABLED ──────
         [UnityTest]
         public IEnumerator SymbolOnlySource_FetchesAndKicks_WithPreparedCacheEnabled()
         {
@@ -400,7 +400,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
                 Assert.IsTrue(view.AllTilesSettled(), "sanity: both sources' tiles must settle.");
 
                 Assert.IsTrue(spy.BeginBuildCalls.Exists(c => c.SourceId == "symsrc"),
-                    "S82 REGRESSION: a symbol-only source (zero dense mesh layers) must fetch+kick even with the " +
+                    "REGRESSION: a symbol-only source (zero dense mesh layers) must fetch+kick even with the " +
                     "prepared cache ENABLED — pre-fix the vacuous `allCached` short-circuit sent it down " +
                     "BuildTileFromCache on every cover entry, so it never fetched and its labels never built.");
 

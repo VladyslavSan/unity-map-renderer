@@ -79,8 +79,8 @@ namespace MapRenderer.Core.Text.Placement
         /// <para>Written <c>0f - x</c> rather than <c>-x</c> so an UNROTATED symbol stays at exactly
         /// <c>+0f</c>: <c>-0f</c> is a different bit pattern, it reaches <c>BuildWorldQuad</c> on every curved
         /// TEXT symbol (which leaves <c>icon-rotate</c> at 0), and <c>sincos(-0f)</c> yields <c>sin = -0f</c>,
-        /// which flips a <c>-0f</c> corner offset to <c>+0f</c>. Byte-identity for text is P-B's invariant;
-        /// this keeps it exact instead of nearly so.</para>
+        /// which flips a <c>-0f</c> corner offset to <c>+0f</c>. Text must stay byte-identical; this keeps
+        /// it exact instead of nearly so.</para>
         /// </summary>
         public static float IconRotationRadians(float iconRotateRadians) => 0f - iconRotateRadians;
     }

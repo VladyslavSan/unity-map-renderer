@@ -68,16 +68,11 @@ namespace MapRenderer.Jobs.Geometry
                     vertTotal += paths[p].Count;
             }
 
-            // IR C1 fix stage: the early-out is on the FEATURE count, matching
-            // <see cref="MvtGeometryMaterializer"/>'s. It used to be `ringTotal == 0`, which is reachable with
-            // features PRESENT (every feature carrying no paths — a GeoJSON feature sliced away at this tile,
-            // say) and returned `default`: a buffer whose FeatureCount is 0 beside a non-empty
-            // ITileLayer.Features. Consumers size their per-feature columns from one and index them by
-            // ordinals drawn from the other (StyledLineTileBuilder, SymbolFeatureExtractor), so the two
-            // producers of Waist 1 disagreeing on that count is a mis-bucketing — and, once the highest
-            // ordinal exceeds the column length, an index-out-of-range — waiting for the first non-MVT
-            // ITileLayer. A features-but-no-rings layer now mints a ring-less buffer that still carries the
-            // kind column, which is exactly what the MVT sibling produces for the same input.
+            // The early-out is on the FEATURE count, matching MvtGeometryMaterializer's. On `ringTotal == 0`
+            // a layer with features PRESENT but no paths would return `default` — FeatureCount 0 beside a
+            // non-empty ITileLayer.Features. Consumers size their per-feature columns from one and index
+            // them by ordinals drawn from the other, so the two Waist 1 producers must agree on that count.
+            // A features-but-no-rings layer mints a ring-less buffer that still carries the kind column.
             if (featureCount == 0)
                 return default;
 

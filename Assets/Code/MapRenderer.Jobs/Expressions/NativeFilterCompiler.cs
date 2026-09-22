@@ -14,7 +14,7 @@ namespace MapRenderer.Jobs.Expressions
     /// the managed <see cref="CompiledFilter"/> path.
     /// <para>Two non-obvious facts: it compiles from the normalised expression-dialect JSON, not the parsed
     /// <see cref="Expression"/> tree — whose <c>==</c>/<c>!=</c>/<c>!</c> are indistinguishable opaque
-    /// closures (design doc §5.1) — and it requires a statically-Boolean root (design doc §5.4).</para>
+    /// closures — and it requires a statically-Boolean root.</para>
     /// </summary>
     internal static class NativeFilterCompiler
     {
@@ -201,8 +201,8 @@ namespace MapRenderer.Jobs.Expressions
         }
 
         /// <summary>Emits an ordered comparison (<c>&lt;</c>/<c>&lt;=</c>/<c>&gt;</c>/<c>&gt;=</c>),
-        /// restricted to exactly one <c>get</c> operand and one JSON number literal — the design doc's
-        /// byte-identity argument: any other shape (two <c>get</c>s, <c>get</c> vs a string, a
+        /// restricted to exactly one <c>get</c> operand and one JSON number literal, for byte identity:
+        /// any other shape (two <c>get</c>s, <c>get</c> vs a string, a
         /// <c>geometry-type</c> operand, or literal-vs-literal) could compare strings, whose ordinal
         /// bytes the VM's string-id representation cannot reproduce, so it stays refused (managed
         /// path).</summary>
@@ -238,7 +238,7 @@ namespace MapRenderer.Jobs.Expressions
             }
         }
 
-        /// <summary>Emits <c>all</c>'s short-circuit form (design doc §5.8). Every arg's <c>AllStep</c>
+        /// <summary>Emits <c>all</c>'s short-circuit form. Every arg's <c>AllStep</c>
         /// shares one landing site, back-patched here once the final index is known.</summary>
         private static bool TryEmitAll(IReadOnlyList<JsonValue> items, Builder b)
         {
@@ -312,8 +312,7 @@ namespace MapRenderer.Jobs.Expressions
         /// <summary>Emits a single-arm <c>match</c> (a membership test with complementary boolean outputs).
         /// A <c>get</c>-input, all-string-label match takes the compact <c>InStringSet</c> path; every other
         /// accepted shape rewrites to <c>!=</c>/<c>all</c>/<c>!</c> and recurses through the emitter,
-        /// inheriting its refusal/rebind rules (design doc's match-widening note). The body's guards are what
-        /// stays managed.</summary>
+        /// inheriting its refusal and rebind rules. The body's guards are what stays managed.</summary>
         private static bool TryEmitMatch(IReadOnlyList<JsonValue> items, Builder b)
         {
             // ["match", input, label, output, default] — exactly one arm; a multi-arm match stays managed.

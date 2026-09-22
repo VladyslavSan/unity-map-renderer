@@ -12,7 +12,7 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Jobs.Projection
 {
     /// <summary>
-    /// The single projection job (S91): projects an array of geodetic SURFACE points (<see cref="GeoCoordinate"/>,
+    /// The single projection job: projects an array of geodetic SURFACE points (<see cref="GeoCoordinate"/>,
     /// no elevation) to origin-relative render positions + per-vertex surface normals. Does ONLY projection —
     /// the tile→geodetic step is a separate projection-independent job (<see cref="TileToGeoJob"/>), so this job
     /// is reusable for any geodetic input (tile vertices, symbols). Elevated geometry (GeoCoordinate3D) is a
@@ -26,7 +26,7 @@ namespace MapRenderer.Jobs.Projection
     /// <see cref="ProjectionDispatch"/>). This is the SAME <c>ProjectPoint</c> the OOP <see cref="IProjection"/>
     /// forwards to — no separate copy of the projection math.</para>
     ///
-    /// <para><b>Origin (RTC, docs §5/§8.2):</b> <see cref="OriginWorld"/> is the pre-projected render-space
+    /// <para><b>Origin (RTC):</b> <see cref="OriginWorld"/> is the pre-projected render-space
     /// origin (projected once by the caller — not per vertex). Output stays <c>double3</c> (origin-relative);
     /// the mesh-write casts to <c>float3</c>. The subtract-in-double keeps single-tile precision within float32
     /// range — mandatory on the globe (ECEF ≈ ±6.37 Mm).</para>

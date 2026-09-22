@@ -20,7 +20,7 @@ namespace MapRenderer.Unity.Text.Placement
     /// <para><b>Dense per-symbol mirror.</b> Indexed one slot per <see cref="SymbolTileBuffer.Symbols"/> entry
     /// in the order the baker walked. The source list is itself dense — <c>StyledSymbolTileBuilder</c> skips a
     /// per-symbol build failure outright rather than recording a gap — so <c>localIndex == i</c> is the source
-    /// symbol position and Stage 2's <c>(blockId, localIndex)</c> winner plan indexes straight into these
+    /// symbol position, and the <c>(blockId, localIndex)</c> winner plan indexes straight into these
     /// columns.</para>
     ///
     /// <para><b>Lifetime.</b> Every array is <see cref="Allocator.Persistent"/>, freed exactly once
@@ -47,7 +47,7 @@ namespace MapRenderer.Unity.Text.Placement
         internal NativeArray<int>     Detail;      // index into Points[] or Curveds[] (by Kinds[i])
         internal NativeArray<int>     WorldStart;  // start of this symbol's world points in WorldPoints
         internal NativeArray<int>     WorldCount;  // 1 (point anchor) or path length (curved)
-        internal NativeArray<double3> RepAnchor;   // the B-3 distance-cull point (RepresentativeAnchor)
+        internal NativeArray<double3> RepAnchor;   // the distance-cull point (RepresentativeAnchor)
         // Native-representation migration: per-symbol column in RAW order, mirroring the symbol's MaterialIndex —
         // baked so the off-main reconciler can read it from the block instead of dereferencing the managed source
         // symbol.
@@ -55,7 +55,7 @@ namespace MapRenderer.Unity.Text.Placement
         // Native-representation migration: the RESOLVED pair role per raw slot (None/Owner/Rider), baked from the
         // SAME SymbolPairing resolution the reconciler used to run over the tile list — so the reconciler reads the
         // baked role instead of re-resolving (byte-identical because two computations over the same immutable list
-        // agree). None for every curved symbol (the §10 fence — a curved symbol is never paired).
+        // agree). None for every curved symbol — a curved symbol is never paired.
         internal NativeArray<SymbolPairRole> PairRoles;
         // Native-representation migration (additive): the interned text/icon ids in RAW order — same intern table
         // (SymbolStringTable) the store's CompleteBuild feeds, so TextIds[i] == Intern(symbol.Text) (0 for null
@@ -83,8 +83,7 @@ namespace MapRenderer.Unity.Text.Placement
         internal NativeArray<CurvedGlyph> Glyphs;
         internal NativeArray<LineAnchor>  Anchors;
         internal NativeArray<double3>     WorldPoints; // anchor (point) / path verts (curved) — for projection
-        // P2: the unit surface normal at each WorldPoints entry — index-parallel, same WorldStart/WorldCount.
-        // Written by the bake; not yet consumed by any downstream reader (P3 reads it).
+        // The unit surface normal at each WorldPoints entry — index-parallel, same WorldStart/WorldCount.
         internal NativeArray<float3>      WorldUps;
         internal NativeArray<long>        AnchorFadeIds; // per curved anchor + a trailing fallback slot
 
@@ -98,8 +97,8 @@ namespace MapRenderer.Unity.Text.Placement
         internal long TileKey;
 
         /// <summary>Live (constructed, not yet Disposed) block count — mirrors
-        /// <c>MeshDataPayload.DebugLiveAllocCount</c>'s established leak-guard idiom (S48/S51) for the same
-        /// assertion shape: a deliberately-undisposed block shows a non-zero delta (positive control), and a
+        /// <c>MeshDataPayload.DebugLiveAllocCount</c>'s leak-guard idiom for the same
+        /// assertion shape: an intentionally-undisposed block shows a non-zero delta (positive control), and a
         /// throwing bake (which disposes its own partial block before rethrowing — see
         /// <see cref="SymbolTileBlockBaker.Bake"/>'s (G)) must return this to baseline. Debug/test
         /// instrumentation only — no production logic reads it.</summary>

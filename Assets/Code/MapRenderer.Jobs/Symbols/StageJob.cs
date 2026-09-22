@@ -20,7 +20,7 @@ namespace MapRenderer.Jobs.Symbols
     /// and declared as fixed-length <see cref="NativeArray{T}"/>s, which genuinely cannot grow mid-run — this job's
     /// caller doesn't know the exact per-record counts up front either, so it sizes to the worst case instead.
     /// The dynamic per-frame values (projected
-    /// screen/depth/valid) arrive as native arrays resolved on the main thread before the job; A-5 incumbency (R2)
+    /// screen/depth/valid) arrive as native arrays resolved on the main thread before the job; incumbency
     /// is resolved HERE instead, against the caller's <see cref="Placed"/> set — the point arm inline, the curved
     /// arm into the <see cref="AnchorWasPlaced"/> scratch this job fills.</para>
     /// </summary>
@@ -53,17 +53,17 @@ namespace MapRenderer.Jobs.Symbols
         public NativeArray<float2> Screen;
         public NativeArray<float>  Depth;
         public NativeArray<byte>   Valid;
-        // Stage AC (curved-world): the SAME gathered world polyline Screen was projected FROM — index-aligned
+        // Curved world: the SAME gathered world polyline Screen was projected FROM — index-aligned
         // 1:1 with Screen/Depth/Valid (SymbolPlacementSystem._symbolPoints). The curved arm slices it at the
         // SAME (off, wc) as the screen path so a glyph's world anchor/tangent sample the identical (segment, t)
         // the screen arc walk resolves. Point arm never reads this.
         public NativeArray<double3> WorldPointsRender;
-        // P2: index-parallel to WorldPointsRender (same Slice(off, wc)) — the unit surface normal at each
+        // Index-parallel to WorldPointsRender (same Slice(off, wc)) — the unit surface normal at each
         // gathered world point, from IProjection.ProjectPoint(...).Up. Patched into PointStageInput.SurfaceUp
-        // (point arm) / sliced for StageCurved (curved arm) below. WRITTEN by P2; not yet consumed by
-        // SymbolStagingMath's actual placement math — carried onto CandidateEmit/PlacedQuad for P3.
+        // on the point arm, sliced for StageCurved on the curved arm. Carried onto CandidateEmit/PlacedQuad;
+        // SymbolStagingMath's placement math does not read it yet.
         public NativeArray<float3>  WorldUpsRender;
-        // A-5 incumbency per global anchor-fade index — JOB-OWNED scratch: filled here (below) from
+        // Incumbency per global anchor-fade index — JOB-OWNED scratch: filled here (below) from
         // AnchorFadeIds + Placed, not resolved by the caller. Sized by the caller to _mirrorFadeCount.
         public NativeArray<byte>   AnchorWasPlaced;
         public float   Bearing;
@@ -80,12 +80,12 @@ namespace MapRenderer.Jobs.Symbols
         // and a default-constructed value selects the pre-W3 screen box — see SymbolViewTransform.IsUsable.
         public SymbolViewTransform View;
 
-        // A-5 incumbency: last frame's collision survivors, keyed by fade id. Read from Burst — the reason
+        // Incumbency: last frame's collision survivors, keyed by fade id. Read from Burst — the reason
         // SymbolPlacementSystem._placedLastFrame is a NativeHashSet at all. NEVER stored across frames by the
         // caller (see SymbolPlacementSystem.RunStageJob).
         public NativeHashSet<long>.ReadOnly Placed;
 
-        // Stage C: last frame's per-half collision verdict for optional pairs, keyed by the pair's FadeId
+        // Last frame's per-half collision verdict for optional pairs, keyed by the pair's FadeId
         // (SymbolPlacementSystem._droppedHalvesLastFrame). Probed ONLY when a pair actually declares an optional
         // half, so a style that sets neither property never touches it — the map is empty in that case anyway.
         public NativeHashMap<long, byte>.ReadOnly DroppedHalves;
@@ -110,9 +110,8 @@ namespace MapRenderer.Jobs.Symbols
             Span<float2>         path  = PathPoints.AsSpan();
             Span<float>          cum   = CumulativeLengths.AsSpan();
 
-            // A-5 (R2): resolve every anchor fade id against the placed-set HERE, in Burst, instead of on the main
-            // thread. Whole-range fill (not per-record): the culled records' entries are then defined, and this is
-            // byte-identical to the managed loop it replaces.
+            // Resolve every anchor fade id against the placed-set HERE, in Burst, not on the main thread.
+            // The fill covers the whole range, not just live records, so a culled record's entry is defined.
             for (int i = 0; i < AnchorWasPlaced.Length; i++)
                 AnchorWasPlaced[i] = (byte)(Placed.Contains(AnchorFadeIds[i]) ? 1 : 0);
 
@@ -120,38 +119,35 @@ namespace MapRenderer.Jobs.Symbols
             for (int r = 0; r < Count; r++)
             {
                 int off = PointOffset[r];
-                if (off < 0) continue; // B-3-distance-culled
+                if (off < 0) continue; // distance-culled
                 int d = Detail[r];
 
                 if (Kinds[r] == SymbolPlacementKind.Point)
                 {
                     PointStageInput s = Points[d];
 
-                    // §10 D8/D10: a resolved RIDER stages nothing on its own — its box/quads/emit are staged
-                    // BY its owner (below), so the pair cannot self-block. It still costs its gather/projection
-                    // slot (deliberate — no gather change); if its owner culled first, the rider's iteration
-                    // simply drops here too, which is the pair's atomic cull (StagePointPair gates once, on
-                    // the owner).
+                    // A resolved RIDER stages nothing on its own — its owner stages its box, quads and emit
+                    // below, so the pair cannot self-block. It still costs its gather and projection slot. If
+                    // its owner culled first the rider drops here too, which is the pair's atomic cull.
                     if (s.PairRole == SymbolPairRole.Rider) continue;
 
                     s.ScreenPx = Screen[off];
                     s.Depth = Depth[off];
                     s.Projected = Valid[off] != 0;
-                    s.SurfaceUp = WorldUpsRender[off]; // P2: per-frame patched, like ScreenPx/Depth/Projected
+                    s.SurfaceUp = WorldUpsRender[off]; // per-frame patched, like ScreenPx/Depth/Projected
                     s.WasPlacedLastFrame = Placed.Contains(s.FadeId); // s is the Points[d] copy; FadeId is never patched
 
                     ReadOnlySpan<SymbolQuad> quadSpan = Quads.AsSpan().Slice(PointQuadStart[d], PointQuadCount[d]);
 
-                    // §10 D8/D10: an owner whose rider is the NEXT point record (the reconciler emits them
-                    // adjacently, the gather compacts point records in winner order) stages as ONE pair
-                    // candidate. A broken adjacency (rider missing/moved) degrades to a lone badge via the
-                    // ordinary StagePoint arm below — never a stranger, never a bare number.
+                    // An owner whose rider is the NEXT point record — the reconciler emits them adjacently,
+                    // and the gather compacts point records in winner order — stages as ONE pair candidate.
+                    // A broken adjacency degrades to a lone badge through the StagePoint arm below.
                     if (s.PairRole == SymbolPairRole.Owner && d + 1 < Points.Length && Points[d + 1].PairRole == SymbolPairRole.Rider)
                     {
                         PointStageInput rider = Points[d + 1];
                         ReadOnlySpan<SymbolQuad> riderQuadSpan = Quads.AsSpan().Slice(PointQuadStart[d + 1], PointQuadCount[d + 1]);
-                        // Stage C: only an optional pair can have a per-half verdict to carry, so the hash probe
-                        // is gated on the flags rather than run for every pair.
+                        // Only an optional pair can carry a per-half verdict, so the hash probe is gated on
+                        // the flags rather than run for every pair.
                         byte droppedHalvesLastFrame = 0;
                         if (s.PairOptional || rider.PairOptional)
                             DroppedHalves.TryGetValue(s.FadeId, out droppedHalvesLastFrame);

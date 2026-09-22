@@ -3,27 +3,15 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Unity.View.Camera
 {
     /// <summary>
-    /// S45 D2: A nullable PATCH struct. Every field is optional; only non-null fields are applied
-    /// to the current <see cref="CameraProperties"/> by <see cref="ApplyTo"/>.
+    /// A nullable PATCH struct. Every field is optional; only non-null fields are applied
+    /// to the current <see cref="CameraProperties"/> by <see cref="ApplyTo"/>. Engine-free.
     ///
-    /// <para><b>Value type / zero allocation:</b> this is a <c>struct</c> — passing it on the
-    /// Duration==0 (instant/jumpTo) fast path allocates zero bytes on the heap. No boxing unless
-    /// the caller stores it as an interface (avoid).</para>
+    /// <para>A <c>struct</c>, so the Duration==0 (instant/jumpTo) fast path allocates zero bytes on the
+    /// heap.</para>
     ///
-    /// <para><b>Zoom is the only scale field</b> — D1: zoom is canonical and altitude is derived from it
+    /// <para><b>Zoom is the only scale field</b> — zoom is canonical and altitude is derived from it
     /// (<see cref="CameraPoseMath.AltitudeForZoom"/>), so there is nothing to patch in the other
     /// direction.</para>
-    ///
-    /// <para>Usage — build a patch and hand it to <see cref="ApplyTo"/> (or the MapCamera.Apply seam):</para>
-    /// <code>
-    ///   // Change only tilt (all other fields kept):
-    ///   next = new CameraPropertiesUpdate { Tilt = 45 }.ApplyTo(current);
-    ///
-    ///   // Pan (lon+lat):
-    ///   next = new CameraPropertiesUpdate { Longitude = 13.4, Latitude = 52.5 }.ApplyTo(current);
-    /// </code>
-    ///
-    /// <para>Engine-free; no UnityEngine dependency.</para>
     /// </summary>
     public struct CameraPropertiesUpdate
     {

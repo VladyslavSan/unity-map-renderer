@@ -1,7 +1,7 @@
-// Epic A / A7 acceptance — F-2: a BYTELESS source (no IDataSource, no bytes, no FetchAsync) flows through
-// the UNCHANGED per-layer fan-out — the raise is real, not a rename. PlayMode: drives the real
-// cover→build→settle loop over real frames (yield, never Thread.Sleep). The pure async-Task GetTile teeth
-// live in the EditMode half (MapRenderer.Tests.DataSources.A7TileFeatureSourceTests).
+// A BYTELESS source (no IDataSource, no bytes, no FetchAsync) flows through the UNCHANGED per-layer
+// fan-out. PlayMode: drives the real cover→build→settle loop over real frames (yield, never
+// Thread.Sleep). The pure async-Task GetTile teeth live in the EditMode half
+// (MapRenderer.Tests.DataSources.A7TileFeatureSourceTests).
 
 using System.Collections;
 using System.Collections.Generic;
@@ -28,8 +28,8 @@ namespace MapRenderer.Tests.PlayMode.DataSources
     {
         /// <summary>A <see cref="ITileFeatureSource"/> with NO IDataSource, no bytes, no fetch — every
         /// <see cref="GetTile"/> builds a tile and hands back a fresh <see cref="SharedDisposable{T}"/> over
-        /// it. The F-2 falsifier: a coordinator still routing through the byte-centric boundary cannot
-        /// consume this (compile-impossible — there is no IDataSource anywhere to wrap).</summary>
+        /// it. The falsifier: a coordinator still routing through the byte-centric boundary cannot consume
+        /// this — there is no IDataSource anywhere to wrap, so it would not compile.</summary>
         private sealed class FakeTileFeatureSource : ITileFeatureSource
         {
             private readonly System.Func<IDecodedTile> _tileFactory;
@@ -79,11 +79,11 @@ namespace MapRenderer.Tests.PlayMode.DataSources
             }
         }
 
-        // ── F-2: a bytes-less ITileFeatureSource flows through the UNCHANGED per-layer fan-out ────────────
+        // ── A bytes-less ITileFeatureSource flows through the UNCHANGED per-layer fan-out ─────────────────
         [UnityTest]
         public IEnumerator ByteLessSource_FlowsThroughTheUnchangedFanOut_ProducesTheFullExtentQuad()
         {
-            // The fixture tile: one layer, one feature — the A2 full-extent-ring command stream, carried by
+            // The fixture tile: one layer, one feature — the full-extent-ring command stream, carried by
             // DictionaryFeature. Built per GetTile call, OWNED BY THE LEASE that wraps it.
             IDecodedTile MakeFixtureTile()
             {

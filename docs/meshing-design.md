@@ -58,8 +58,8 @@ overload it replaced.
 
 | Kind | Order | Where |
 |------|-------|-------|
-| **Fill** | Decode → **Clip** → Assemble → **Triangulate** (earcut, flat tile space) → **Project** → *(globe only)* **Subdivide** | `FillMeshGraph.Schedule` (job-scheduling-design.md §8 stage 4 Group B retired the synchronous `FillMeshPipeline.Schedule` this row used to name) schedules Decode→Clip→Assemble→Triangulate→Project, and on the curved arm the globe Subdivide too (`GlobeFillSubdivideDispatch.Schedule` + `GlobeFillScatterJob`, gated by `!double.IsInfinity(proj.MaxRefineAngleRad)` — inside the graph now, not bolted on after it); `StyledFillTileBuilder` schedules the graph then schedules the write step. |
-| **Line** | Decode → **Subdivide** (centerline, tile space) → **Project** → **Triangulate** (ribbon) | `LineMeshGraph.Schedule` (job-scheduling-design.md §8 stage 5 Group B retired the synchronous per-ring loop this row used to name) schedules `RingGatherJob` → `TileToGeoJob`/`ProjectionDispatch` → `SubdivideJob` → `TileToGeoJob`/`ProjectionDispatch` → `RibbonBatchJob`; `LineRenderLayer.BuildGraphRequest` builds the request via `StyledLineTileBuilder.BuildLayerInput`, and `LineStreamWriteJob` writes the mesh. `StyledLineTileBuilder.WriteMeshData` is a synchronous convenience over the same graph, kept public and test-facing. |
+| **Fill** | Decode → **Clip** → Assemble → **Triangulate** (earcut, flat tile space) → **Project** → *(globe only)* **Subdivide** | `FillMeshGraph.Schedule` schedules Decode→Clip→Assemble→Triangulate→Project, and on the curved arm the globe Subdivide too (`GlobeFillSubdivideDispatch.Schedule` + `GlobeFillScatterJob`, gated by `!double.IsInfinity(proj.MaxRefineAngleRad)` — inside the graph now, not bolted on after it); `StyledFillTileBuilder` schedules the graph then schedules the write step. |
+| **Line** | Decode → **Subdivide** (centerline, tile space) → **Project** → **Triangulate** (ribbon) | `LineMeshGraph.Schedule` schedules `RingGatherJob` → `TileToGeoJob`/`ProjectionDispatch` → `SubdivideJob` → `TileToGeoJob`/`ProjectionDispatch` → `RibbonBatchJob`; `LineRenderLayer.BuildGraphRequest` builds the request via `StyledLineTileBuilder.BuildLayerInput`, and `LineStreamWriteJob` writes the mesh. `StyledLineTileBuilder.WriteMeshData` is a synchronous convenience over the same graph, kept public and test-facing. |
 
 **Why fills Triangulate *before* Project.** Ear-clipping is a **planar 2D algorithm**, and triangle
 **connectivity is projection-invariant** — which vertices form a triangle doesn't change when you bend the sheet
@@ -102,7 +102,7 @@ tile-space UV — are all viable and all out of scope.
 
 ## Threading & lifetime (both kinds)
 
-job-scheduling-design.md §8 stage 4 Group B: fill's jobs are scheduled through `FillMeshGraph.Schedule` (the
+Fill's jobs are scheduled through `FillMeshGraph.Schedule` (the
 job graph the pump completes), not run synchronously — the `.Run()`-on-the-mesh-build-worker-thread shape
 below is the line path's, and fill's own retired shape before Group B. Only `Mesh.MeshData` **Allocate** (at
 kick) and **Apply** (at consume) are main-thread, for both kinds. Mesh *data* (`NativeArray` /
@@ -115,7 +115,7 @@ rule in [`conventions-short.md`](conventions-short.md).
 
 | Type | Assembly | Role |
 |------|----------|------|
-| `FillMeshGraph` | `MapRenderer.Jobs` | Fill: schedules the Decode→Clip→Assemble→Triangulate→Project job graph over one `FillMeshPipeline.LayerInput`. Produces an uncompleted `FillGraphOutput`. (`FillMeshPipeline` survives only as the home of `LayerInput` and `HoleRingComparer` — its own `Schedule` retired with Group B, job-scheduling-design.md §8 stage 4.) |
+| `FillMeshGraph` | `MapRenderer.Jobs` | Fill: schedules the Decode→Clip→Assemble→Triangulate→Project job graph over one `FillMeshPipeline.LayerInput`. Produces an uncompleted `FillGraphOutput`. (`FillMeshPipeline` survives only as the home of `LayerInput` and `HoleRingComparer` — its own `Schedule` is gone.) |
 | `RingClipJob` | `MapRenderer.Jobs` | Fill Clip: Sutherland–Hodgman of each ring against the tile-buffer window, in tile space. Winding- and space-preserving. |
 | `TileBufferClip` | `MapRenderer.Core` | The knob: how much buffer to keep, in tile units at extent 4096, converted to the layer's own extent in one place. `default` ⇒ disabled. |
 | `TileRenderOrigin` | `MapRenderer.Core` | The single source of a tile's bake/RTC origin (SW corner projected). Engine-free, shared by fills/lines/symbols/camera — **not** fill-specific, so it lives in Core, not on the fill mesher. |
@@ -538,7 +538,7 @@ internal interface IRenderLayer : IDisposable
 }
 
 // TileMesh capability (fill, line, fill-extrusion; raster still open). Design-stage sketch: the shipped
-// interface (job-scheduling-design.md §8 stage 5 Group B) is BuildGraphRequest, not WriteInto — every
+// interface is BuildGraphRequest, not WriteInto — every
 // implementer meshes on the job graph now, there is no synchronous mesh-write member left on this
 // interface at all.
 internal interface ITileMeshRenderLayer : IRenderLayer

@@ -1,4 +1,4 @@
-// Shader paint-color conversion GPU/visual acceptance test (UMR-176 pack: shaders topic).
+// Shader paint-color conversion GPU/visual acceptance test.
 //
 // Standalone, not merged with ShaderLightingTests.cs: the two collide on bare `Object`
 // (System.Object vs UnityEngine.Object, CS0104) — this file uses the bare
@@ -227,7 +227,7 @@ namespace MapRenderer.Tests.Visual
                     $"authored alpha is gone. 0.25 would mean it is applied twice.");
         }
 
-        // ── fill: the site-2 gamma-convention pin (Stage 1) ──────────────────────────────────────
+        // ── fill: the site-2 gamma-convention pin ────────────────────────────────────────────────
 
         /// <summary>A square polygon well inside the tile, margined for the fill boundary band's feathered
         /// edge — mirrors <see cref="LineFeature"/>'s "fat ribbon, sample the solid core" shape.</summary>
@@ -319,10 +319,10 @@ namespace MapRenderer.Tests.Visual
                     $"authored(linear)={expect3} authored²={squared} authored(sRGB)={srgb}. " +
                     $"Landing on authored² means both carriers hold it (site 2 shipped without the " +
                     $"site-1 gate). Landing on the sRGB triple means a .linear conversion was added at " +
-                    $"the _BaseColor bind site — the UMR-135 defect.");
+                    $"the _BaseColor bind site — the Color-typed bind defect.");
         }
 
-        // ── style-transitions epic, Stage 2: tooth 21 — the eased colour renders in sRGB ─────────
+        // ── the eased colour renders in sRGB ─────────────────────────────────────────────────────
 
         /// <summary>As <see cref="RenderFillLayer"/>, but settles at <paramref name="oldColorToken"/> first,
         /// then retargets to <paramref name="newColorToken"/> and samples mid-ease at <paramref name="atSeconds"/>
@@ -408,7 +408,7 @@ namespace MapRenderer.Tests.Visual
                     $"channel {c}: the eased colour must reach the fragment as the LINEAR conversion of " +
                     $"the sRGB mix. measured={measured} authored(linear)={expect3} authored(sRGB)={srgb}. " +
                     $"Landing on the sRGB triple would mean the mix was pre-converted to linear before " +
-                    $"SetColor — the UMR-135 defect shape, applied to the transition path.");
+                    $"SetColor — the Color-typed bind defect shape, applied to the transition path.");
         }
     }
 }

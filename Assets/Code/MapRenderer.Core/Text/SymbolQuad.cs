@@ -1,6 +1,6 @@
 // Engine-free: no UnityEngine dependency.
 // Construction convention: object initializer with named members.
-// BLITTABLE (T8b): this struct crosses into the S20 Jobs boundary as a NativeArray<SymbolQuad> element
+// BLITTABLE: this struct crosses into the Jobs boundary as a NativeArray<SymbolQuad> element
 // (the same Core-defines-the-struct/Jobs-creates-the-NativeArray pattern LineRibbonVertex/
 // GlyphAtlasEntry/PositionedGlyph already use) — keep it to blittable fields only.
 
@@ -11,10 +11,10 @@ namespace MapRenderer.Core.Text
     /// <summary>
     /// One symbol-local glyph (or, later, sprite icon) quad: an axis-aligned, anchor-relative rectangle
     /// in baked-pixel space (<see cref="TextQuadLayout.OneEm"/> = 24px) plus its normalized atlas UV
-    /// rect. Deliberately glyph/sprite-AGNOSTIC — nothing text-specific (no codepoint/cluster field) —
-    /// so a later icon-layout stage reuses this exact struct with sprite UVs instead of glyph UVs (the
-    /// icon seam; see S19 stage doc §1). S20 scales these by <c>text-size/24</c>, places the anchor on
-    /// screen, and turns them into camera-facing billboard vertices — S19 builds no <c>Mesh</c>.
+    /// rect. Glyph/sprite-AGNOSTIC — nothing text-specific (no codepoint/cluster field) — so icon layout
+    /// reuses this exact struct with sprite UVs instead of glyph UVs. Placement scales these by
+    /// <c>text-size/24</c>, places the anchor on screen, and turns them into camera-facing billboard
+    /// vertices; layout itself builds no <c>Mesh</c>.
     /// </summary>
     public readonly struct SymbolQuad
     {
@@ -34,7 +34,7 @@ namespace MapRenderer.Core.Text
         public int LineIndex { get; init; }
 
         /// <summary>
-        /// Stage M: the glyph atlas page (Texture2DArray layer) <see cref="UvTopLeft"/>/<see cref="UvBottomRight"/>
+        /// The glyph atlas page (Texture2DArray layer) <see cref="UvTopLeft"/>/<see cref="UvBottomRight"/>
         /// sample from — copied from the source <see cref="GlyphAtlasEntry.Page"/> at layout time. 0 for
         /// every quad (including every icon/sprite quad — the sprite sheet stays single-page) until the
         /// glyph atlas overflows onto a second page.

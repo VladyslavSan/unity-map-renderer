@@ -12,19 +12,16 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// The ordered set of runtime render layers built once from a <see cref="StyleDocument"/> and kept
-    /// current per frame — the replacement for the retired <c>StyledLayerSet</c>.
+    /// current per frame.
     ///
-    /// <para>ARCHITECTURE §"Layer ordering": the style is an ordered list of layers composited in declared
+    /// <para>ARCHITECTURE "Layer ordering": the style is an ordered list of layers composited in declared
     /// order. This holds exactly that — ONE <see cref="List{IRenderLayer}"/> containing ALL painted layers
-    /// (fill, line, symbol, background — D7 global numbering, the render-layer model), where
-    /// <c>index == DrawIndex == SLOT == material index</c>; draw order rides <c>renderQueue</c>. The old
-    /// fill/line split (<c>_fills</c>/<c>_lines</c>, the fills-then-lines <c>materialIndex = FillCount + li</c>
-    /// flatten, and the "fills first" comments) is gone: every kind is just an <see cref="IRenderLayer"/>
-    /// implementation in one list, and a new layer type drops in via <see cref="RenderLayerFactory"/> with no
-    /// change here. Every painted kind is material-bearing when its base material is configured (symbol as
-    /// of E2/D11, background as of E3); a null <see cref="IRenderLayer.Material"/> means only that ONE
-    /// slot's own base material is unconfigured (<see cref="Materials.MapMaterialSet"/>), never a kind that
-    /// hasn't migrated into the model.</para>
+    /// (fill, line, symbol, background, under one global numbering), where
+    /// <c>index == DrawIndex == SLOT == material index</c>; draw order rides <c>renderQueue</c>. Every kind
+    /// is an <see cref="IRenderLayer"/> implementation in one list, and a new layer type drops in via
+    /// <see cref="RenderLayerFactory"/> with no change here. Every painted kind is material-bearing when
+    /// its base material is configured; a null <see cref="IRenderLayer.Material"/> means only that ONE
+    /// slot's own base material is unconfigured (<see cref="Materials.MapMaterialSet"/>).</para>
     ///
     /// <para>Records are built ONCE (not per tile); each tile-mesh layer produces a mesh per tile and draws
     /// it with the matching layer's material, whose <c>renderQueue</c> encodes the layer's place in the draw
@@ -35,7 +32,7 @@ namespace MapRenderer.Unity.Rendering.Style
     {
         private readonly List<IRenderLayer> _layers = new List<IRenderLayer>(16);
 
-        /// <summary>Style layers the last <see cref="Build"/> skipped, with why (UMR-116). Bounded to style
+        /// <summary>Style layers the last <see cref="Build"/> skipped, with why. Bounded to style
         /// load exactly like <see cref="_layers"/> — control-plane, not data-plane (rebuilt once per
         /// restyle, never touched per tile or per frame) — so a plain managed list is correct here; see
         /// docs/conventions-short.md, "New data-plane code is born native", for the discriminator.</summary>
@@ -73,7 +70,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>Snapshot copy for an async mesh-build task (so the list can't mutate mid-flight).</summary>
         public IRenderLayer[] SnapshotLayers() => _layers.ToArray();
 
-        /// <summary>The style-load compatibility summary (UMR-116): every layer the last <see cref="Build"/>
+        /// <summary>The style-load compatibility summary: every layer the last <see cref="Build"/>
         /// skipped, with its reason. Rebuilt from scratch on every <see cref="Build"/>, including a
         /// restyle — an old style's skips stop applying the moment a new style replaces it.</summary>
         public IReadOnlyList<SkippedLayer> SkippedLayers => _skippedLayers;
@@ -100,19 +97,19 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>
         /// Builds the render layers from <paramref name="style"/>. Draw order IS the style's declared layer
         /// order (MapLibre painter's algorithm): walk <c>style.Layers</c> ONCE and assign each a queue BAND
-        /// via <see cref="LayerDrawOrder"/> (D7) — one band per declared layer, monotonic across bands — so
+        /// via <see cref="LayerDrawOrder"/> — one band per declared layer, monotonic across bands — so
         /// an interleaved fill-over-symbol or line-over-fill composites exactly as declared (they share one
         /// transparent band, ZWrite off, so the renderQueue offset alone decides order). A layer's own
         /// <see cref="IRenderLayer.MaterialSubSlot"/> selects WHICH sub-slot of its band this write targets —
         /// <see cref="LayerSubSlot.Base"/> for fill/line/background, <see cref="LayerSubSlot.Above"/> for a
-        /// symbol layer's text, so it draws over that same layer's icon (G7/D7 — written separately by
+        /// symbol layer's text, so it draws over that same layer's icon (written separately by
         /// <see cref="SymbolRenderLayer.Create"/>, since the icon has no Build-time free ride).
         /// The list contains ALL painted layers — fill, line, symbol, background — with
         /// <c>index == DrawIndex == SLOT == material index</c>; every slot is material-bearing when
-        /// its base material is configured (symbol as of E2/D11, background as of E3). A layer that takes no
-        /// slot — an unsupported kind, an unconfigured material, or a by-design skip (a source-less symbol
-        /// layer) — is recorded in <see cref="SkippedLayers"/> with which, instead of silently dropped
-        /// (UMR-116; see <see cref="LayerSkipReason"/> for the three reasons). Disposes any previously-built
+        /// its base material is configured. A layer that takes no slot — an unsupported kind, an
+        /// unconfigured material, or a by-design skip (a source-less symbol layer) — is recorded in
+        /// <see cref="SkippedLayers"/> with which, instead of silently dropped
+        /// (see <see cref="LayerSkipReason"/> for the reasons). Disposes any previously-built
         /// layers AND clears the previous compatibility summary first (via <see cref="ClearLayers"/> — NOT
         /// <see cref="Dispose"/>: a restyle calls this repeatedly over the object's life, so the teardown
         /// must not be gated by the once-only disposed guard).
@@ -133,7 +130,7 @@ namespace MapRenderer.Unity.Rendering.Style
                 if (layer == null)
                 {
                     // Unsupported kind, unconfigured material, or genuinely unpainted by design — no slot;
-                    // recorded instead of silently dropped (UMR-116).
+                    // recorded instead of silently dropped.
                     _skippedLayers.Add(new SkippedLayer { Id = sl.Id, RawType = sl.RawType, Reason = skipReason });
                     continue;
                 }
@@ -141,7 +138,7 @@ namespace MapRenderer.Unity.Rendering.Style
                 layer.SetDrawOrder(drawIndex); // no-op when that slot's own base material is unconfigured
                 _layers.Add(layer);
                 // Seeded from the SAME predicate each TryCreate hands ZoomStyleApplier.SeedFade, so this
-                // ease and the material's multiplier agree on the first frame by construction.
+                // ease and the material's multiplier agree on the first frame.
                 float seed = sl.IsVisibleAtZoom(initialZoom) ? 1f : 0f;
                 _fades.Add(new LayerFade { Current = seed, Origin = seed, Target = seed });
                 drawIndex++;
@@ -151,19 +148,17 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>
         /// Pushes per-frame uniforms to every layer (fill/line zoom paint, zoom-step dasharrays, and the
         /// px→device conversion for the px-valued paint family), hence <paramref name="devicePixelRatio"/>
-        /// (S107). Alloc-free: a plain <c>for</c> over the list (struct enumerator-free), each layer's
+        /// Alloc-free: a plain <c>for</c> over the list (struct enumerator-free), each layer's
         /// <see cref="IRenderLayer.ApplyZoom"/> being alloc-free.
         ///
-        /// <para><b>The frame's px→world RULER is NOT pushed here</b> (S116). The line shader converts every
+        /// <para><b>The frame's px→world RULER is NOT pushed here.</b> The line shader converts every
         /// <c>px</c>-valued width property and its dash parameterisation with the
         /// <c>_MapFrameMetersPerDevicePixel</c> global, and that is a CAMERA quantity —
         /// <see cref="Map.MapCamera.SyncToCamera"/> owns the push, measuring it off the live camera
         /// (<see cref="Map.MapCamera.MetresPerDevicePixel"/>) instead of re-deriving it from a Web-Mercator
-        /// zoom formula here. The two agreed only while the altitude was the canonical function of zoom, and a
-        /// render path that never called this method read whatever an earlier one had left in that process
-        /// global.</para>
+        /// zoom formula here.</para>
         ///
-        /// <para><see cref="Build"/> deliberately takes no ratio: its per-layer seeds run at dpr 1, and the
+        /// <para><see cref="Build"/> takes no ratio: its per-layer seeds run at dpr 1, and the
         /// caller re-applies at the live ratio immediately afterwards (<c>MapView.SetStyle</c>) so no frame
         /// is ever drawn from a seeded value. Threading an initial ratio through
         /// <see cref="RenderLayerFactory"/>'s four Create/TryCreate overloads would churn 8 call sites for
@@ -239,8 +234,8 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
-        /// Style-transitions epic, Stage 3 (UMR-151): an ID-KEYED diff — the exits are named and explained
-        /// in `docs/tile-pipeline-design.md` §1.10. Returns <c>false</c> (unmodified) on ANY refusal — the
+        /// An ID-KEYED diff — the exits are named and explained in `docs/tile-pipeline-design.md`.
+        /// Returns <c>false</c> (unmodified) on ANY refusal — the
         /// two-pass shape below (classify fully, THEN mutate) is what makes that contract hold.
         /// </summary>
         /// <param name="oldStyle">The document these render layers were last built (or restyled) from.</param>
@@ -253,7 +248,7 @@ namespace MapRenderer.Unity.Rendering.Style
             if (!SurvivingLayerGate.RootMatches(oldStyle, newStyle)) return false;
 
             // Old side: id -> slot, over RENDERED layers only — _layers is shorter than oldStyle.Layers
-            // whenever Build skipped one (§1.10). A null id cannot be matched, so refuse closed.
+            // whenever Build skipped one. A null id cannot be matched, so refuse closed.
             var oldSlotById = new Dictionary<string, int>(_layers.Count);
             for (int i = 0; i < _layers.Count; i++)
             {
@@ -264,7 +259,7 @@ namespace MapRenderer.Unity.Rendering.Style
             }
 
             // Old side, DECLARED but never rendered (e.g. `raster`) — keyed the same way so an unchanged
-            // skipped layer is told apart from a genuine ADD below (§1.10, exit 1). No slot to track.
+            // skipped layer is told apart from a genuine ADD below. No slot to track.
             var oldDeclaredById = new Dictionary<string, StyleLayer>(oldStyle.Layers.Count);
             for (int i = 0; i < oldStyle.Layers.Count; i++)
             {
@@ -297,7 +292,7 @@ namespace MapRenderer.Unity.Rendering.Style
             }
 
             // Removal fence, by predicate (still read-only): refuse when a removed slot's layer is referenced
-            // by a list this arm never refreshes — MapView._symbolRenderLayers is the only one (§1.10, UMR-152).
+            // by a list this arm never refreshes — MapView._symbolRenderLayers is the only one.
             for (int i = 0; i < _layers.Count; i++)
                 if (_layers[i] is SymbolRenderLayer && !claimedSlots.Contains(i)) return false;
 
@@ -383,7 +378,7 @@ namespace MapRenderer.Unity.Rendering.Style
     }
 
     /// <summary>One entry of <see cref="RenderLayerSet.SkippedLayers"/> — a style layer that took no draw
-    /// slot, and why (UMR-116).</summary>
+    /// slot, and why.</summary>
     internal readonly struct SkippedLayer
     {
         /// <summary>The skipped layer's <see cref="StyleLayer.Id"/> (Style Spec <c>id</c>; may be null — see

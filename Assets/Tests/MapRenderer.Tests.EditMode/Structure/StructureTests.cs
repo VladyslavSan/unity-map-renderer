@@ -48,16 +48,13 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR C1 P3, teeth <b>A</b> and <b>F</b> — the neutral geometry path carries no format, and the detached
+    /// Teeth <b>A</b> and <b>F</b> — the neutral geometry path carries no format, and the detached
     /// sidecar cannot come back.
     ///
-    /// <para><b>What this replaces, and why the claim had to change.</b> IR B5's tooth asserted that
-    /// <c>ITileFeature</c> — an interface declaring zero members — declared zero members; C1 P1 deleted that
-    /// interface, and the rebased version asserted that <see cref="IFeature"/> exposed no integral array.
-    /// Both were satisfiable by the very shape they were meant to prevent: a <b>sidecar</b>. B5's own
-    /// <c>IMvtGeometryCarrier</c> satisfied "the neutral interface is empty" trivially, by living beside it.
-    /// P3 deleted the sidecar (geometry belongs to the layer now), so the tooth is restated as the claim that
-    /// makes the sidecar unavailable rather than merely absent:</para>
+    /// <para><b>Why the claim is shaped this way.</b> A tooth that asserts the neutral interface
+    /// declares zero members is satisfiable by the very shape it means to prevent: a <b>sidecar</b>
+    /// living beside it. So the tooth is the claim that makes a sidecar unavailable, not merely
+    /// absent:</para>
     ///
     /// <list type="number">
     /// <item><b>Fenced by LOCATION, not by an allow-list of names.</b> Every production type whose name
@@ -158,7 +155,7 @@ namespace MapRenderer.Tests.Structure
                 "every production type whose name announces a wire format must be declared under a decoder " +
                 "folder (MapRenderer.Jobs/Mvt, MapRenderer.Jobs/Tiles, MapRenderer.Core/GeoJson, or the two " +
                 "named producer files). Fenced by LOCATION, not by an allow-list of names: an allow-list is " +
-                "what rotted in IR B5, because a new format-named type was simply added to it. " +
+                "what rotted, because a new format-named type was simply added to it. " +
                 $"Offenders: {string.Join(", ", offenders)}");
         }
 
@@ -193,7 +190,7 @@ namespace MapRenderer.Tests.Structure
 
             Assert.IsEmpty(offenders,
                 "no production type outside the decoder folders may name a format type in a member " +
-                "signature. This is what B5 CLAIMED and did not deliver: its tooth asserted an interface was " +
+                "signature. This is what the earlier tooth CLAIMED and did not deliver: its tooth asserted an interface was " +
                 "empty, which a sidecar interface satisfies trivially. " +
                 $"Offenders: {string.Join(", ", offenders)}");
         }
@@ -211,7 +208,7 @@ namespace MapRenderer.Tests.Structure
                     $"'{surviving}' must be on IFeature — it is the kind gate and filter surface every " +
                     "consumer reads. Without it this fixture would be asserting over an empty type.");
             Assert.IsNotEmpty(typeof(ITileLayer).GetMember(nameof(ITileLayer.Geometry)),
-                "precondition: ITileLayer must expose Geometry — the whole point of P3 is that the LAYER " +
+                "precondition: ITileLayer must expose Geometry — the whole point is that the LAYER " +
                 "owns its coordinates, so a scan that could not see it is scanning the wrong type");
 
             var offenders = new List<string>();
@@ -237,7 +234,7 @@ namespace MapRenderer.Tests.Structure
                 $"command streams just to be a feature. Offenders: {string.Join(", ", offenders)}");
         }
 
-        /// <summary>IR C1 P1/P3: the zero-member <c>ITileFeature</c> and the sidecar
+        /// <summary>The zero-member <c>ITileFeature</c> and the sidecar
         /// <c>IMvtGeometryCarrier</c> are both deleted, and neither may come back. A tooth on the DELETION,
         /// not on emptiness — "this interface declares nothing" is a test that the interface should not
         /// exist, so the honest form is to assert it does not.</summary>
@@ -271,7 +268,7 @@ namespace MapRenderer.Tests.Structure
 
         // ── Tooth F ───────────────────────────────────────────────────────────────────────────────────
 
-        /// <summary>IR C1 P3, tooth F: the detached sidecar cannot come back by accretion. Deliberately
+        /// <summary>Tooth F: the detached sidecar cannot come back by accretion. Deliberately
         /// thin — its whole job is to make "just thread one more thing through the worker seam" cost a
         /// visible test edit, because that accretion is exactly how <c>TileGeometryStore</c>'s mispairing
         /// hazard got in.</summary>
@@ -287,8 +284,8 @@ namespace MapRenderer.Tests.Structure
 
             ParameterInfo[] parameters = process.GetParameters();
             Assert.AreEqual(2, parameters.Length,
-                "ProcessOnWorker takes exactly (IDecodedTile, in TileLayerProcessContext). B7's third " +
-                "parameter — a pass-scoped TileGeometryStore — was the detached sidecar this epic removed: " +
+                "ProcessOnWorker takes exactly (IDecodedTile, in TileLayerProcessContext). A third " +
+                "parameter — a pass-scoped TileGeometryStore — was the detached sidecar that was removed: " +
                 "geometry belongs to the LAYER now, so a processor has nothing extra to be handed. A third " +
                 "parameter of ANY type re-opens that shape. Found: " +
                 string.Join(", ", System.Array.ConvertAll(parameters, p => $"{p.ParameterType.Name} {p.Name}")));
@@ -370,15 +367,12 @@ namespace MapRenderer.Tests.Structure
     /// <summary>
     /// Source-text structural disposal-discipline pins for the tile-geometry producer seam.
     ///
-    /// <para><b>job-scheduling-design.md §8 stage 4 Group B (retired):</b> this file used to also pin
-    /// <c>FillMeshPipeline.Schedule</c>'s and its private <c>DeriveVisitedRings</c>' ring-stage disposal
-    /// discipline (IR stages B1/B2/B7) — both methods are deleted with the synchronous fill pipeline. The
-    /// graph's disposal discipline is a different mechanism entirely (dispose NODES scheduled onto the job
-    /// graph, not a `.Dispose()` call form in one function body) and is pinned elsewhere
-    /// (<c>FillGraphOutput.DebugBuffersAllocated</c>/<c>DebugBufferDisposeNodes</c> pairing, exercised by the
-    /// job-graph instrument tests) — not a like-for-like source-text re-pin here.</para>
+    /// <para>The graph's disposal discipline is a different mechanism (dispose NODES scheduled onto the
+    /// job graph, not a <c>.Dispose()</c> call form in one function body) and is pinned elsewhere —
+    /// <c>FillGraphOutput.DebugBuffersAllocated</c>/<c>DebugBufferDisposeNodes</c> pairing, exercised by
+    /// the job-graph instrument tests.</para>
     ///
-    /// <para>What remains: the MVT decode/materialize seam's ownership discipline, untouched by Group B —
+    /// <para>What this file pins: the MVT decode/materialize seam's ownership discipline —
     /// <c>MvtGeometryMaterializer.Materialize</c> mints the ring stage exactly once and frees it only on its
     /// own throw path (ownership transfers to the caller on success); <c>MvtDecoder.DecodeLayer</c> flattens
     /// and frees its own MVT command/tag buffers exactly once on every exit path, with the double-free guard
@@ -425,8 +419,8 @@ namespace MapRenderer.Tests.Structure
                 "buffer never escapes — on the success path it would hand the caller a freed buffer.");
         }
 
-        /// <summary>B2 T5a → 2a re-point: <c>commands</c>/<c>featOffsets</c>/<c>featLengths</c> flipped from
-        /// scratch <c>Materialize</c> minted and owned to a BORROWED constructor input — since 2a,
+        /// <summary>Re-point: <c>commands</c>/<c>featOffsets</c>/<c>featLengths</c> flipped from
+        /// scratch <c>Materialize</c> minted and owned to a BORROWED constructor input —
         /// <c>MvtDecoder.DecodeLayer</c> flattens them directly off the wire and owns disposal (see
         /// <see cref="DecodeLayerFreesTheMvtCommandBuffersItBuilds_ExactlyOnceOnEveryExitPath"/>, the other
         /// end of this move). A dispose reappearing here would fault the second of two <c>Materialize()</c>
@@ -582,7 +576,7 @@ namespace MapRenderer.Tests.Structure
                 "the geometry FlattenFeatureColumn call must sit BETWEEN try { and finally {, for the same " +
                 "reason as the tag call above.");
 
-            // Plan §8 R1's named regression: dropping the null-on-transfer would leave `tagWords` non-default
+            // The named regression: dropping the null-on-transfer would leave `tagWords` non-default
             // after the adopt, so the finally's `tagWords.Dispose()` would free the buffer the layer JUST
             // adopted — a use-after-free for every store/resolver in the layer. Pinned by shape, since the
             // count/finally assertions above cannot distinguish "nulled after adopt" from "adopted, not nulled".
@@ -721,29 +715,29 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR stage B4: the structural teeth on the symbol consumer of Waist 1, plus the assembly-boundary fence
+    /// The structural teeth on the symbol consumer of Waist 1, plus the assembly-boundary fence
     /// the stage exists to establish.
     ///
-    /// <para><b>Landmine #5 — the fused-<c>RingAssemblyJob</c> fence, symbol form.</b> Symbol has no polygon,
+    /// <para><b>The fused-<c>RingAssemblyJob</c> fence, symbol form.</b> Symbol has no polygon,
     /// hole, area or triangulation concept and rejects Polygon features outright, so every fill-assembly stage
     /// is off-limits to it. The behavioural half is impossible to write here (symbol never produces triangles),
     /// which is exactly why the fence is structural.</para>
     ///
-    /// <para><b>Ownership, INVERTED by IR C1 P2.</b> Waist 1 no longer <i>transfers</i> the buffer to
+    /// <para><b>Ownership is INVERTED.</b> Waist 1 no longer <i>transfers</i> the buffer to
     /// <c>Extract</c> — <c>Extract</c> <b>BORROWS</b> it from the worker pass's <c>TileGeometryStore</c>,
     /// which lends the same instance to every symbol layer naming that source-layer and frees it at the end
     /// of the pass. So <c>Extract</c> must mint <b>zero</b> buffers and dispose <b>zero</b>. Freeing a
     /// borrowed buffer is <b>loud</b> on this path: the store lends an array-backed buffer whose
-    /// <c>Dispose</c> frees three real <c>NativeArray</c>s, and P2's R6 sweep measured that double free as
+    /// <c>Dispose</c> frees three real <c>NativeArray</c>s, and a sweep measured that double free as
     /// <b>32 failures across 19 fixtures</b>, two of them with no line involvement at all — the
-    /// heap-corruption signature. (B1's "a mis-freed <c>AsArray()</c> view is a silent no-op" applies to the
+    /// heap-corruption signature. ("a mis-freed <c>AsArray()</c> view is a silent no-op" applies to the
     /// list-backed mode, which symbol never borrows.) The instrument is structural because it names the rule
     /// at the source and fails deterministically on the offending line, not because the behaviour goes
     /// unobserved.</para>
     ///
     /// <para>The one construction <c>Extract</c> may still make is its <b>private fallback store</b>, for the
     /// callers (tests, the demo path) that pass none. It is pinned at exactly one, outside every loop: a
-    /// store built per feature would be the per-(layer, feature) mint B7 retired, wearing a new name.</para>
+    /// store built per feature would be the retired per-(layer, feature) mint, wearing a new name.</para>
     ///
     /// <para>Assertions are comment-stripped greps over call forms, not a C# parser. That limitation is stated
     /// in each message rather than papered over.</para>
@@ -763,10 +757,9 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>Tokens that must be PRESENT. Without them a renamed, gutted or deleted file would satisfy
         /// every "count is zero" claim below trivially — the easiest kind of tooth to make vacuous.</summary>
-        // IR C1 P2 dropped "MvtGeometryMaterializer" (the mint it named) for the identifiers of the
-        // mechanism the file uses NOW. IR C1 P3 does the same again, one step further: the store is gone, so
-        // "GetOrMaterialize" is REPLACED (not removed — a required set with entries deleted is a disarmed
-        // test) by "tileLayer.Geometry", the expression the file reads the borrowed buffer through.
+        // "MvtGeometryMaterializer" and "GetOrMaterialize" are REPLACED here (not removed — a required set
+        // with entries deleted is a disarmed test) by "tileLayer.Geometry", the expression the file reads
+        // the borrowed buffer through.
         private static readonly string[] RequiredTokens =
         {
             "TileGeometryBuffers", "tileLayer.Geometry", "RingFeatureIdx", "RingOffsets",
@@ -791,17 +784,17 @@ namespace MapRenderer.Tests.Structure
                 "a body that never touched geometry would satisfy both zero-counts trivially");
 
             Assert.AreEqual(0, CountOccurrences(body, ".Materialize()"),
-                "IR C1 P2 INVERTED this from 1 to 0. Extract must mint NOTHING: the source-layer's buffer is " +
-                "materialized once inside the DECODE (IR C1 P3) and owned by the decoded layer, which lends " +
+                "This INVERTED from 1 to 0. Extract must mint NOTHING: the source-layer's buffer is " +
+                "materialized once inside the DECODE and owned by the decoded layer, which lends " +
                 "it to every consumer naming that source-layer — across both cadences of a kick.");
             Assert.AreEqual(0, CountOccurrences(body, "geometry.Dispose()"),
                 "…and must free NOTHING. Disposing a BORROWED buffer frees geometry sibling layers are still " +
-                "reading. That double free is LOUD here — the layer lends an array-backed buffer, and R6 " +
+                "reading. That double free is LOUD here — the layer lends an array-backed buffer, and a sweep " +
                 "measured it as 32 failures across 19 fixtures, two with no line involvement (heap " +
                 "corruption). This tooth is structural to fail on the offending LINE, not because the " +
                 "behavioural signal is missing.");
 
-            // IR C1 P3 — the three store clauses that used to sit here are RETIRED WITH THEIR SUBJECT, not
+            // The three store clauses that used to sit here are RETIRED WITH THEIR SUBJECT, not
             // dropped to make the file pass. They pinned (a) that Extract never disposes the caller's store,
             // (b) that it builds exactly one private fallback store, and (c) that the fallback is hoisted
             // above the try. There is no store: geometry belongs to the layer, so there is no borrowed
@@ -811,7 +804,7 @@ namespace MapRenderer.Tests.Structure
             // reintroduce a private mint is absent.
             Assert.AreEqual(0, CountOccurrences(body, "new MvtGeometryMaterializer("),
                 "Extract must construct NO producer of its own. This is the only remaining shape of the " +
-                "per-(layer, feature) mint the epic retired: with the store gone, a private materializer is " +
+                "retired per-(layer, feature) mint: with the store gone, a private materializer is " +
                 "how a consumer would silently stop sharing the layer's buffer — and it is OUTPUT-NEUTRAL, " +
                 "so no behavioural test in the suite would notice.");
             Assert.AreEqual(1, CountOccurrences(NormaliseWhitespace(body),
@@ -821,7 +814,7 @@ namespace MapRenderer.Tests.Structure
                 "sourced buffer in the same body is visible.)");
         }
 
-        // ── T7: landmine #5, plus the Q2 claim that no production code decodes MVT geometry any more ──
+        // ── T7: the fused-job fence, plus the claim that no production code decodes MVT geometry any more ──
 
         [Test]
         public void SymbolExtractorTouchesNoFillAssemblyStage_AndNoProductionCodeDecodesMvtGeometry()
@@ -844,7 +837,7 @@ namespace MapRenderer.Tests.Structure
                     "feature's 1-point path has no area at all, and a straight road has exactly zero.");
             }
 
-            // Clause 2 — Q2: MvtGeometry.Decode has no production call site left anywhere.
+            // Clause 2: MvtGeometry.Decode has no production call site left anywhere.
             const string decodeCallForm = "MvtGeometry.Decode(";
             var offenders = new List<string>();
             foreach (string assembly in new[] { "MapRenderer.Core", "MapRenderer.Jobs", "MapRenderer.Unity" })
@@ -864,11 +857,11 @@ namespace MapRenderer.Tests.Structure
                 testAssemblyHits += CountOccurrences(StripComments(File.ReadAllText(file)), decodeCallForm);
             Assert.Greater(testAssemblyHits, 10,
                 $"precondition (positive control): the SAME scan over the test assembly must find " +
-                $"'{decodeCallForm}' many times — it is the differential oracle B3 and B4 measure against. " +
+                $"'{decodeCallForm}' many times — it is the differential oracle the line and symbol teeth measure against. " +
                 $"Found {testAssemblyHits}; a low number means the matcher, not production, is what changed.");
 
             Assert.IsEmpty(offenders,
-                $"ZERO production files may call '{decodeCallForm}' — B4 retired the last one " +
+                $"ZERO production files may call '{decodeCallForm}' — the last one is retired " +
                 "(SymbolFeatureExtractor). The TYPE stays: it is the spec transcription, the parity oracle " +
                 $"MvtDecodeJob is measured against, and Tools/core-tests' ground truth. Offenders: " +
                 string.Join(", ", offenders));
@@ -991,9 +984,9 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR stage B3: the structural teeth on the line consumer of Waist 1.
+    /// The structural teeth on the line consumer of Waist 1.
     ///
-    /// <para><b>Landmine #5 — the fused-<c>RingAssemblyJob</c> fence.</b> <c>RingAssemblyJob</c> is a fused,
+    /// <para><b>The fused-<c>RingAssemblyJob</c> fence.</b> <c>RingAssemblyJob</c> is a fused,
     /// <b>fill-only</b> stage: one pass applies fill's <c>rLen &lt; 3</c> filter, a degenerate-<b>area</b>
     /// filter, and exterior/hole classification. None of the three is meaningful for a line — a straight
     /// polyline has exactly zero area and would be dropped, and lines have no outer/hole concept at all. The
@@ -1002,12 +995,12 @@ namespace MapRenderer.Tests.Structure
     /// the type would evade this file, and a shortcut that scheduled the job on a fixture whose geometry
     /// happens to survive would evade the behavioural one.</para>
     ///
-    /// <para><b>Ownership, INVERTED by IR C1 P2.</b> The buffer is no longer transferred to the line builder —
+    /// <para><b>Ownership is INVERTED.</b> The buffer is no longer transferred to the line builder —
     /// it is <b>BORROWED</b> from the pass-scoped <c>TileGeometryStore</c>, which lends the same instance to
     /// every style layer naming that source-layer. The builder must therefore mint <b>zero</b> buffers and
     /// dispose <b>zero</b>. A consumer that freed a borrowed buffer would free geometry its sibling layers are
     /// still reading, and on this path that second free is <b>loud</b>: the store hands back an array-backed
-    /// buffer whose <c>Dispose</c> frees three real <c>NativeArray</c>s, and P2's R6 sweep measured the double
+    /// buffer whose <c>Dispose</c> frees three real <c>NativeArray</c>s, and a sweep measured the double
     /// free as <b>32 failures across 19 fixtures</b> — two with no line involvement at all, the
     /// heap-corruption signature. (The "disposing it is a silent no-op" caveat belongs to the
     /// <c>AsArray()</c>-view, list-backed mode, which line never borrows.) This instrument is structural not
@@ -1027,11 +1020,11 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>Tokens that must be PRESENT. Without them a renamed, gutted or deleted file would satisfy
         /// every "count is zero" claim above trivially — the easiest kind of tooth to make vacuous.</summary>
-        // IR C1 P2: "MvtGeometryMaterializer" left this set with the mint it named. Its replacements are the
+        // "MvtGeometryMaterializer" left this set with the mint it named. Its replacements are the
         // identifiers of the mechanism the file uses NOW — the borrowed buffer type and the ordinal join —
         // so a gutted or re-pointed file still cannot satisfy the zero-counts trivially.
         //
-        // job-scheduling-design.md §8 stage 5 Group B: RingFeatureIdx/FeatureGeometryType/RibbonJob/
+        // RingFeatureIdx/FeatureGeometryType/RibbonJob/
         // RingOffsets retired from this SET (though the first three still appear in prose comments) — the
         // per-ring buffer read and the ribbon build both moved into the Burst job graph
         // (RingGatherJob/RibbonBatchJob, MapRenderer.Jobs/LineMeshGraph.cs), which this file no
@@ -1107,20 +1100,20 @@ namespace MapRenderer.Tests.Structure
                      { ".Materialize(", "TileGeometryBuffers.Allocate(", "TileGeometryBuffers.AdoptDerivedLists(" })
             {
                 Assert.AreEqual(0, CountOccurrences(body, mintToken),
-                    $"IR C1 P2 INVERTED this from 1 to 0. StyledLineTileBuilder must mint NOTHING — " +
+                    $"This INVERTED from 1 to 0. StyledLineTileBuilder must mint NOTHING — " +
                     $"'{mintToken}' found. The source-layer's buffer is materialized once per worker pass by " +
                     "TileGeometryStore and lent to every style layer naming that source-layer. A mint here is " +
-                    "the 61-decodes-per-pass regression B7 retired, re-introduced one layer down.");
+                    "the 61-decodes-per-pass regression that was retired, re-introduced one layer down.");
             }
             Assert.AreEqual(0, CountOccurrences(body, "geometry.Dispose()"),
                 "…and must free NOTHING. Disposing a BORROWED buffer frees geometry sibling layers are still " +
-                "reading. That double free is LOUD here — the store lends an array-backed buffer, and R6 " +
+                "reading. That double free is LOUD here — the store lends an array-backed buffer, and a sweep " +
                 "measured it as 32 failures across 19 fixtures, two with no line involvement (heap " +
                 "corruption). This tooth is structural to fail on the offending LINE, not because the " +
                 "behavioural signal is missing.");
         }
 
-        // job-scheduling-design.md §8 stage 5 Group B: WriteMeshData_StagesRibbonInNativeScratch_
+        // WriteMeshData_StagesRibbonInNativeScratch_
         // NotManagedLists is RETIRED here, not "made to pass". Its subject was the cross-ring staging
         // accumulators (NativeList<LinePositionNormal>/<LineWidthColor>/<Vector2>) that used to live INSIDE
         // WriteMeshData's own per-ring loop, block-copied into the Mesh.MeshData at the end. B.5 deleted
@@ -1163,7 +1156,7 @@ namespace MapRenderer.Tests.Structure
             return File.ReadAllText(path);
         }
 
-        /// <summary>The type's second partial file (job-scheduling-design.md §8 stage 5) — the write-step
+        /// <summary>The type's second partial file — the write-step
         /// job lives here. Ordinal 7's re-founded fence must scan both.</summary>
         private static string LineBuilderWriteJobSource()
         {
@@ -1198,25 +1191,24 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Epic A / A1 (falsifiable acceptance tooth #1): a
+    /// Falsifiable acceptance tooth: a
     /// RED-verifiable structural pair proving <c>TileManager.KickMeshBuild</c> no longer decodes/dispatches
     /// directly — the shared decode + fan-out now lives ONLY in
     /// <see cref="MapRenderer.Unity.Rendering.Tile.Processing.TileLayerProcessorRunner"/>.
     ///
-    /// Against the pre-A1 source this test FAILS on both forbidden call forms (a direct
-    /// <c>MvtDecoder.Decode(</c> and a direct mesh-write call inside <c>KickMeshBuild</c>) — recorded as
-    /// the RED observation before the production rewire. Adding an unused interface or merely renaming the
-    /// local cannot pass: the assertions are over the CALL forms actually present in the method body.
+    /// Against the pre-rewire source this test FAILS on both forbidden call forms (a direct
+    /// <c>MvtDecoder.Decode(</c> and a direct mesh-write inside <c>KickMeshBuild</c>). An unused
+    /// interface or a renamed local cannot pass: the assertions are over the CALL forms in the body.
     /// </summary>
     [TestFixture]
     public class TileProcessingStructureTests
     {
         private const string DecodeCallForm = "MvtDecoder.Decode(";
-        // The runner's read of the caller-owned reference. `.Value` (R2: SharedDisposable<IDecodedTile>,
-        // successor to the R1-era lease's `.Tile`) rather than `.GetOrDecode(` since D1 — the wrapper holds
+        // The runner's read of the caller-owned reference. `.Value` (SharedDisposable<IDecodedTile>,
+        // successor to the earlier lease's `.Tile`) rather than `.GetOrDecode(` — the wrapper holds
         // an already-decoded tile, so reading it is a property access, not a call.
         private const string DecodeReadForm = "decode.Value";
-        // job-scheduling-design.md §8 stage 5 Group B: `.WriteInto(` retired with the seam arm — the token
+        // `.WriteInto(` retired with the seam arm — the token
         // no longer names anything a compiling program can contain, so the clause it fenced would be
         // unfalsifiable. Swapped, not deleted (first swap): `WriteMeshData(` became the direct-mesh-write
         // entry point a regression would now reach for, so fencing it continued to guard the SAME property
@@ -1259,26 +1251,25 @@ namespace MapRenderer.Tests.Structure
 
             Assert.AreEqual(0, decodeCalls,
                 $"TileManager.KickMeshBuild must contain ZERO direct '{DecodeCallForm}' call sites — the " +
-                "decode is the runner's job now (Epic A / A1: one MVT decode per mesh worker pass, owned by " +
+                "decode is the runner's job now (one MVT decode per mesh worker pass, owned by " +
                 "TileLayerProcessorRunner).");
             Assert.AreEqual(0, scheduleWriteCalls,
                 $"TileManager.KickMeshBuild must contain ZERO direct '{ScheduleWriteCallForm}' call sites — " +
-                "the mesh write happens inside TileBuildGraph's write step (job-scheduling-design.md §8 " +
-                "stage 5), reached only through TileMeshLayerProcessor.BuildGraphRequest + the runner, never " +
+                "the mesh write happens inside TileBuildGraph's write step (job-scheduling-design.md's " +
+                "write step), reached only through TileMeshLayerProcessor.BuildGraphRequest + the runner, never " +
                 "by KickMeshBuild calling a builder's ScheduleWrite directly.");
             Assert.AreEqual(1, runnerCalls,
                 $"TileManager.KickMeshBuild must call '{RunnerCallForm}' exactly once — the single " +
                 "decode-once fan-out point for this worker pass.");
         }
 
-        /// <summary>Epic A / A4 (design §B Q1-Q3, plan §E-3): re-scoped again — A4 moved the decode out of
-        /// the runner into the caller-owned handle, and D1 moved it further still, to the source's
+        /// <summary>The decode moved out of
+        /// the runner into the caller-owned handle, and further still, to the source's
         /// <c>GetTile</c>. <c>RunWorkerPass</c> therefore decodes nothing and reads the caller's reference
-        /// exactly once, via <c>decode.Value</c> (R2). The invariant this test has guarded since A1/A3 — the mesh
+        /// exactly once, via <c>decode.Value</c>. The invariant this test guards — the mesh
         /// cadence's OWN decode-once boundary — survives as "reads the lease exactly once, decodes nothing
-        /// directly". job-scheduling-design.md §8 stage 3 retired the source-less worker pass entirely (Group
-        /// 5.2/5.5) — a background tile schedules its measure graph directly, no runner entry of its own —
-        /// so this test no longer has a sourceless half to check.</summary>
+        /// directly". There is no source-less worker pass — a background tile schedules its measure graph
+        /// directly, with no runner entry of its own — so this test has no sourceless half to check.</summary>
         [Test]
         public void TileLayerProcessorRunner_MeshWorkerPass_ReadsTheSharedDecode_AndNeverDecodesItself()
         {
@@ -1301,8 +1292,8 @@ namespace MapRenderer.Tests.Structure
                 "can be observed, and the fan-out is supposed to happen through the single tile it returns.");
         }
 
-        /// <summary>Epic A / A3 (plan §F tooth 1 — primary structural delegation tooth, RED-verified
-        /// against the pre-A3 <c>SymbolSubsystem</c>): the subsystem no longer decodes, extracts, or
+        /// <summary>The primary structural delegation tooth (RED-verified
+        /// against the previous <c>SymbolSubsystem</c>): the subsystem no longer decodes, extracts, or
         /// shapes symbols itself — that machinery moved into the processor contract. Against the un-rewired
         /// source (decode at <c>BuildTileAsync</c>'s old <c>:324</c>, <c>ExtractLayers</c> at <c>:325</c>,
         /// <c>ShapeAsync</c> at <c>:333</c>, no runner call) this test FAILS on all four forms — adding the
@@ -1331,7 +1322,7 @@ namespace MapRenderer.Tests.Structure
 
             Assert.AreEqual(0, CountOccurrences(source, DecodeCallForm),
                 $"SymbolSubsystem.cs must contain ZERO direct '{DecodeCallForm}' call sites — the " +
-                "symbol decode now lives in TileLayerProcessorRunner.RunSymbolWorkerPass (Epic A / A3).");
+                "symbol decode now lives in TileLayerProcessorRunner.RunSymbolWorkerPass.");
             Assert.AreEqual(0, CountOccurrences(source, extractLayersCallForm),
                 $"SymbolSubsystem.cs must contain ZERO direct '{extractLayersCallForm}' call sites — " +
                 "per-layer extraction now happens inside TileSymbolLayerProcessor.ProcessOnWorker.");
@@ -1347,11 +1338,10 @@ namespace MapRenderer.Tests.Structure
                 "decode-once fan-out point for the symbol worker pass.");
         }
 
-        /// <summary>Epic A / A6 (plan §E-13 — re-scoped again from A4's form, GENUINELY RED against
-        /// pre-A6 source): A6 moved the sole production <c>MvtDecoder.Decode(</c> call OUT of
+        /// <summary>The sole production <c>MvtDecoder.Decode(</c> call lives OUT of
         /// <c>MapRenderer.Unity</c> entirely, into <c>MvtTileDecoder</c>. The assembly-wide count under
         /// <c>MapRenderer.Unity</c> (including <c>TileDecodeDispatch.cs</c>, the sole permitted file) is ZERO
-        /// — the decode left the assembly, it did not just move within it. <b>IR C1 moved the seam again</b>,
+        /// — the decode left the assembly, it did not just move within it. The seam later moved again,
         /// out of <c>MapRenderer.Core</c> and into <c>MapRenderer.Jobs</c>; see
         /// <see cref="MapRendererJobs_DecodesMvtOnlyInsideMvtTileDecoder"/> for the positive half (together
         /// the two prove the sole-production-decode-site invariant across BOTH assembly moves).</summary>
@@ -1372,26 +1362,26 @@ namespace MapRenderer.Tests.Structure
             }
 
             Assert.IsEmpty(offenders,
-                $"no file under MapRenderer.Unity may call '{DecodeCallForm}' — Epic A / A6 relocated the " +
-                $"sole production decode site to MvtTileDecoder in Core; found it in: {string.Join(", ", offenders)}");
+                $"no file under MapRenderer.Unity may call '{DecodeCallForm}' — the " +
+                $"sole production decode site is MvtTileDecoder in Core; found it in: {string.Join(", ", offenders)}");
 
             // TileDecodeDispatch.cs specifically: it reads through the injected ITileDecoder, not MvtDecoder
-            // directly (the A4→A6 handoff this test's name change records), and it is the ONE place a decode
-            // is dispatched at all — the D1 successor to SharedTileDecode.GetOrDecode's single call.
+            // directly, and it is the ONE place a decode
+            // is dispatched at all — the successor to SharedTileDecode.GetOrDecode's single call.
             string dispatchPath = Path.Combine(
                 root, "Rendering", "Tile", "Processing", "TileDecodeDispatch.cs");
             FileAssert.Exists(dispatchPath);
             string dispatchSource = StripLineComments(File.ReadAllText(dispatchPath));
             Assert.AreEqual(0, CountOccurrences(dispatchSource, DecodeCallForm),
-                $"TileDecodeDispatch.cs must contain ZERO '{DecodeCallForm}' call sites post-A6.");
+                $"TileDecodeDispatch.cs must contain ZERO '{DecodeCallForm}' call sites.");
             Assert.AreEqual(1, CountOccurrences(dispatchSource, "decoder.Decode("),
                 "TileDecodeDispatch.cs must call 'decoder.Decode(' exactly once — the injected ITileDecoder " +
-                "is the sole read (Epic A / A6), and the single dispatch is what makes 'exactly one decode " +
+                "is the sole read, and the single dispatch is what makes 'exactly one decode " +
                 "per fetched tile' a property of one method rather than of every source remembering it.");
         }
 
-        /// <summary>Epic A / A6 (plan §E-13 — the positive half of the sole-decode-site proof), <b>rebased
-        /// to MapRenderer.Jobs by IR C1</b>: the ONE production <c>MvtDecoder.Decode(</c> call site lives in
+        /// <summary>The positive half of the sole-decode-site proof: the ONE production
+        /// <c>MvtDecoder.Decode(</c> call site lives in
         /// <c>Tiles/ITileDecoder.cs</c> (<c>MvtTileDecoder.Decode</c>) and nowhere else — and
         /// <c>MapRenderer.Core</c>, which used to host it, now decodes <b>nowhere</b>. The positive count
         /// (not just a zero-elsewhere scan) proves the decode actually landed there, not merely that the
@@ -1399,7 +1389,7 @@ namespace MapRenderer.Tests.Structure
         /// assembly too, where <c>DecodeTests</c>/<c>MvtPropertyDecodeTests</c> legitimately call
         /// <c>MvtDecoder.Decode(</c> for fixture setup — so the per-assembly assertions (this one +
         /// <see cref="MapRendererUnity_DecodesMvtNowhere"/>) are deliberately narrower than one combined
-        /// scan. RED pre-C1 on both clauses: the file lived under Core, so the Jobs count was 0 and the Core
+        /// scan. RED on both clauses before the move: the file lived under Core, so the Jobs count was 0 and the Core
         /// scan found it.</summary>
         [Test]
         public void MapRendererJobs_DecodesMvtOnlyInsideMvtTileDecoder()
@@ -1428,9 +1418,9 @@ namespace MapRenderer.Tests.Structure
                 $"found it in: {string.Join(", ", offenders)}");
             Assert.AreEqual(1, tileDecoderCount,
                 $"Tiles/ITileDecoder.cs must call '{DecodeCallForm}' exactly once — MvtTileDecoder.Decode, " +
-                "the sole production decode call site (Epic A / A6; rehomed to Jobs by IR C1).");
+                "the sole production decode call site, rehomed to Jobs.");
 
-            // IR C1's own half: the assembly the seam LEFT must be silent. Without this clause a
+            // The seam's own half: the assembly the seam LEFT must be silent. Without this clause a
             // half-finished move — the decoder copied into Jobs while Core keeps a caller — would pass.
             string coreRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Core");
             DirectoryAssert.Exists(coreRoot);
@@ -1445,28 +1435,28 @@ namespace MapRenderer.Tests.Structure
                     coreOffenders.Add(file);
 
             Assert.IsEmpty(coreOffenders,
-                $"no file under MapRenderer.Core may call '{DecodeCallForm}' — IR C1 moved the whole tile-" +
-                "decode seam out of Core (ARCHITECTURE.md §2: the product is Unity + Jobs; Core is legacy, " +
+                $"no file under MapRenderer.Core may call '{DecodeCallForm}' — the whole tile-" +
+                "decode seam moved out of Core (ARCHITECTURE.md §2: the product is Unity + Jobs; Core is legacy, " +
                 $"not a destination for new code). Found it in: {string.Join(", ", coreOffenders)}");
         }
 
-        /// <summary>Epic A / A6 (plan §E-13, F-1 — WriteInto-path neutralization, structural). The
+        /// <summary>WriteInto-path neutralization, structural. The
         /// fill/line/symbol fan-out — from feature selection through mesh/symbol build — references NO MVT
         /// carrier type (<c>MvtTile</c>/<c>MvtFeature</c>/<c>MvtLayer</c>/<c>MvtDecoder</c>) by name; only the
-        /// neutral <c>IDecodedTile</c>/<c>ITileLayer</c>/<c>IFeature</c>/<c>ITileDecoder</c> surface (§B-1,
-        /// §B-3). Genuinely RED pre-A6: every one of these 15 files named an MVT carrier type. The set is
-        /// still 15 files, re-derived not re-asserted — IR B4 MOVED the symbol extractor from
-        /// <c>MapRenderer.Core/Style/Symbol/</c> to <c>MapRenderer.Unity/Text/</c>, and IR C1 moved
+        /// neutral <c>IDecodedTile</c>/<c>ITileLayer</c>/<c>IFeature</c>/<c>ITileDecoder</c> surface.
+        /// Every one of these 15 files used to name an MVT carrier type. The set is
+        /// still 15 files, re-derived not re-asserted — the symbol extractor moved from
+        /// <c>MapRenderer.Core/Style/Symbol/</c> to <c>MapRenderer.Unity/Text/</c>, and
         /// <c>FeatureSelector</c> and <c>SourceLayerResolver</c> from <c>MapRenderer.Core</c> to
         /// <c>MapRenderer.Jobs/Tiles/</c>; none was added or removed by either.
         ///
-        /// <para><b>Anti-vacuity, REPLACED in IR B4.</b> The clause used to require the bare substring
-        /// <c>MvtGeometry</c> in each codec file's RAW text. Both halves broke: B2's rename made
+        /// <para><b>Anti-vacuity, REPLACED.</b> The clause used to require the bare substring
+        /// <c>MvtGeometry</c> in each codec file's RAW text. Both halves broke: a rename made
         /// <c>new MvtGeometryMaterializer(</c> satisfy it by substring on the line file, and the count included
-        /// comments, so B4's removal of the last real <c>MvtGeometry.Decode</c> call left the symbol file
+        /// comments, so removing the last real <c>MvtGeometry.Decode</c> call left the symbol file
         /// satisfied by an XML <c>see cref</c>. It could no longer detect a gutted file — and it could not
         /// merely be tightened, because its premise (<i>these files still decode geometry</i>) is expiring by
-        /// design as this epic moves every consumer onto the shared buffer: a word-boundary
+        /// design as consumers move onto the shared buffer: a word-boundary
         /// <c>\bMvtGeometry\b</c> would go RED on the line file for a legitimate reason.
         /// It is therefore RE-POINTED at what is still true — a per-file REQUIRED-IDENTIFIER SET naming the
         /// geometry mechanism each file actually uses (matched comment-stripped, with word boundaries, so
@@ -1477,7 +1467,7 @@ namespace MapRenderer.Tests.Structure
         public void WriteIntoPath_ReferencesNoMvtCarrierTypes()
         {
             string unityRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Unity");
-            // IR C1: FeatureSelector and SourceLayerResolver left MapRenderer.Core for MapRenderer.Jobs
+            // FeatureSelector and SourceLayerResolver left MapRenderer.Core for MapRenderer.Jobs
             // along with the rest of the decode seam. Same two files, same claim, new root.
             string jobsRoot  = Path.Combine(Application.dataPath, "Code", "MapRenderer.Jobs");
 
@@ -1517,24 +1507,24 @@ namespace MapRenderer.Tests.Structure
             Assert.IsEmpty(offenders,
                 "the WriteInto-path fan-out must reference ZERO MVT carrier types (MvtTile/MvtFeature/" +
                 "MvtLayer/MvtDecoder) — only the neutral IDecodedTile/ITileLayer/IFeature/ITileDecoder " +
-                $"surface (Epic A / A6). Offenders: {string.Join(", ", offenders)}");
+                $"surface. Offenders: {string.Join(", ", offenders)}");
 
-            // Anti-vacuity — REPLACED in tile-geometry IR B4; see the XML doc above for why the previous
+            // Anti-vacuity — REPLACED; see the XML doc above for why the previous
             // clause could no longer detect a gutted file. Each geometry-obtaining file must name every
             // identifier of the mechanism it actually uses today, matched on comment-stripped text with word
             // boundaries.
             (string relativePath, string[] required)[] mechanisms =
             {
-                // IR C1 P2: both files stopped minting and now BORROW the source-layer buffer, so
+                // Both files stopped minting and now BORROW the source-layer buffer, so
                 // "MvtGeometryMaterializer" is no longer an identifier either of them uses — it was REPLACED
                 // (not dropped: a required-set with entries removed is a disarmed test) by the identifiers of
-                // the mechanism they use instead. IR C1 P3 does the same one step further: the store is gone,
+                // the mechanism they use instead. The store is gone too,
                 // so symbol's `GetOrMaterialize` is replaced by `tileLayer` — the object it now reads the
                 // buffer off. `Geometry` alone would be a poor token (it is a substring of
                 // TileGeometryBuffers and matched with word boundaries would still be weak); `tileLayer` is
                 // the identifier that only exists because the LAYER owns the geometry.
                 //
-                // job-scheduling-design.md §8 stage 5 Group B: RingFeatureIdx/RingOffsets/RibbonJob
+                // RingFeatureIdx/RingOffsets/RibbonJob
                 // retired from the LINE row (they survive only in prose comments now, stripped here) — the
                 // per-ring buffer read and the ribbon build moved into the Burst job graph
                 // (MapRenderer.Jobs/LineMeshGraph.cs), which StyledLineTileBuilder.cs no longer names; it
@@ -1559,11 +1549,11 @@ namespace MapRenderer.Tests.Structure
                         $"{relativePath} must name '{identifier}' — this file still obtains geometry, now by " +
                         $"BORROWING the shared buffer, and gutting it would drop all {required.Length} of " +
                         "this file's required identifiers. WHY THIS CLAUSE CHANGED " +
-                        "(IR B4): the previous one counted the bare substring 'MvtGeometry' in RAW text. B2's " +
+                        ": the previous one counted the bare substring 'MvtGeometry' in RAW text. A " +
                         "rename satisfied it through 'MvtGeometryMaterializer' (a longer identifier " +
-                        "containing the token) and B4's removal of the last MvtGeometry.Decode call left it " +
+                        "containing the token) and removing the last MvtGeometry.Decode call left it " +
                         "satisfied by an XML doc comment — its premise ('these files still decode geometry') " +
-                        "expired by design as this epic moved the consumers onto the shared buffer. Cost, " +
+                        "expired as the consumers moved onto the shared buffer. Cost, " +
                         "accepted deliberately: a rename of the mechanism makes this go RED loudly, whereas " +
                         "the old clause's rename made it go green silently.");
                 }
@@ -1572,15 +1562,15 @@ namespace MapRenderer.Tests.Structure
                 // both files — precisely what the old clause could no longer tell you.
                 Assert.IsFalse(ContainsIdentifier(code, "MvtGeometry"),
                     $"{relativePath} must NOT name the bare identifier 'MvtGeometry' — the managed reference " +
-                    "decoder has zero production callers as of IR B4. Word-boundary matched, so a longer " +
+                    "decoder has zero production callers. Word-boundary matched, so a longer " +
                     "identifier merely CONTAINING the token would not be a hit (e.g. " +
-                    "'MvtGeometryMaterializer', which both files named until IR C1 P2 moved them off minting " +
+                    "'MvtGeometryMaterializer', which both files named until they moved off minting " +
                     "and onto the borrowed buffer); comment-stripped, so a doc comment cannot satisfy or " +
                     "violate it.");
             }
         }
 
-        /// <summary>Epic A / A4 (plan §F-2, symbol-body count): the symbol cadence no longer decodes for
+        /// <summary>The symbol cadence does not decode for
         /// itself — it reads the shared entry exactly once, same as the mesh cadence.</summary>
         [Test]
         public void RunSymbolWorkerPass_DoesNotDecodeItself_ReadsTheSharedEntry()
@@ -1602,23 +1592,22 @@ namespace MapRenderer.Tests.Structure
                 "own read of the caller's lease.");
         }
 
-        /// <summary>Epic A / A7 (tooth 1 — the primary
+        /// <summary>Tooth 1 — the primary
         /// structural tooth): <c>TileManager</c> must be byte-agnostic — it names none of the five
         /// byte-centric tokens the pre-raise coordinator used (<c>TileResponse</c>/<c>IDataSource</c>/
         /// <c>TileScheduler</c>/any concrete lease type/standalone <c>TileCache</c>), and DOES name the raised
-        /// seam (<c>ITileFeatureSource</c>/<c>SharedDisposable</c>). Genuinely RED pre-A7: the file named
-        /// all five tokens throughout (7/4/3/5/4 occurrences respectively, verified against the pre-A7
-        /// commit).
+        /// seam (<c>ITileFeatureSource</c>/<c>SharedDisposable</c>). Genuinely RED before the raise: the
+        /// file named all five tokens throughout.
         ///
         /// <c>TileCache</c> uses a WORD-BOUNDARY match, not the plain substring <see cref="CountOccurrences"/>
-        /// every other A6 tooth in this file uses — <c>TileManager.cs</c> keeps 19 <c>PreparedTileCache</c>
-        /// references (the S82 <c>_prepared</c> mesh/layer cache, plan §D explicitly leaves it UNTOUCHED), and
+        /// every other tooth in this file uses — <c>TileManager.cs</c> keeps 19 <c>PreparedTileCache</c>
+        /// references (the <c>_prepared</c> mesh/layer cache, left UNTOUCHED), and
         /// the substring <c>"TileCache"</c> embeds inside <c>"PreparedTileCache"</c> (…d|T… — both word
         /// characters, no boundary) — so a plain substring count would find those 19 kept references and could
-        /// NEVER go green even after a flawless A7. <c>\bTileCache\b</c> excludes <c>PreparedTileCache</c>
+        /// NEVER go green even after a flawless raise. <c>\bTileCache\b</c> excludes <c>PreparedTileCache</c>
         /// while still catching every standalone <c>TileCache</c> mention. The other four tokens have no
         /// such embedding collision, so they use the plain substring matcher.
-        /// <para><b>UMR-112.</b> The pipeline registry (<see cref="SourceRegistry"/>) is exactly the code
+        /// <para>The pipeline registry (<see cref="SourceRegistry"/>) is exactly the code
         /// that would plausibly reach for a byte fetcher, so the five forbidden-token checks now cover it
         /// too. The required-token check for <c>ITileFeatureSource</c> is scoped to <c>SourceRegistry.cs</c>
         /// alone — it holds all four remaining references; <c>TileManager.cs</c>'s own two are on a
@@ -1639,7 +1628,7 @@ namespace MapRenderer.Tests.Structure
             {
                 Assert.AreEqual(0, CountOccurrences(source, "TileResponse"),
                     $"{name} must contain ZERO 'TileResponse' occurrences — the byte-response type is now " +
-                    "an MvtTileFeatureSource-internal detail (Epic A / A7).");
+                    "an MvtTileFeatureSource-internal detail.");
                 Assert.AreEqual(0, CountOccurrences(source, "IDataSource"),
                     $"{name} must contain ZERO 'IDataSource' occurrences — the byte fetcher is wrapped " +
                     "BELOW the raised ITileFeatureSource seam, never named at the coordinator.");
@@ -1652,7 +1641,7 @@ namespace MapRenderer.Tests.Structure
                 Assert.AreEqual(0, CountOccurrences(source, "DecodedTileLease"),
                     $"{name} must contain ZERO 'DecodedTileLease' occurrences either — the coordinator " +
                     "holds only the polymorphic SharedDisposable<IDecodedTile>, never a concrete lease " +
-                    "implementation (R2 deleted DecodedTileLease outright). Widened from the SharedTileDecode " +
+                    "implementation (DecodedTileLease was deleted outright). Widened from the SharedTileDecode " +
                     "clause rather than replacing it: naming a concrete lease type would re-create exactly the " +
                     "coupling the old clause forbade.");
 
@@ -1667,17 +1656,17 @@ namespace MapRenderer.Tests.Structure
                 "SourceRegistry.cs must reference ITileFeatureSource — the raised seam it now holds instead " +
                 "of IDataSource/TileScheduler.");
             Assert.Greater(CountOccurrences(tileManagerSource, "SharedDisposable"), 0,
-                "TileManager.cs must reference SharedDisposable — R2's decode-provisioning reference count " +
+                "TileManager.cs must reference SharedDisposable — the decode-provisioning reference count " +
                 "(SharedDisposable<IDecodedTile>) it threads through the mesh/symbol kick, and whose " +
-                "reference it owns and releases. Successor to the R1-era IDecodedTileHandle clause.");
+                "reference it owns and releases. Successor to the IDecodedTileHandle clause.");
         }
 
-        /// <summary>UMR-112 §6.1 T8: <c>SourceRegistry</c>'s public surface is EXACTLY the ten members the
+        /// <summary><c>SourceRegistry</c>'s public surface is EXACTLY the ten members the
         /// plan enumerates — no getter-per-field creep, no <c>SourcePipeline</c> escaping. Reflection-based,
         /// not text-scraped: a grep on indentation over/undercounts (the private nested <c>SourcePipeline</c>
         /// class's own fields sit at the same indent and inflate a naive count to 18).
         /// <para><b>The bound has zero headroom by design.</b> An eleventh member is a finding that the seam
-        /// failed, not a number to bump — see §6.1's own note.</para></summary>
+        /// failed, not a number to bump.</para></summary>
         [Test]
         public void SourceRegistry_SurfaceIsExactlyTenMembers()
         {
@@ -1713,14 +1702,14 @@ namespace MapRenderer.Tests.Structure
             }
         }
 
-        /// <summary>Epic A / A7 (plan §F tooth 6, §G-1): pins the off-PlayerLoop invariant
+        /// <summary>Pins the off-PlayerLoop invariant
         /// <c>DrainMeshBuilds</c>'s spin-on-<c>IsCompleted</c> depends on — <c>MvtTileFeatureSource.GetTile</c>
         /// must introduce NO main-thread hop (completion stays off the PlayerLoop, supplied by the decode hop
         /// on the <c>HasData</c> path and by synchronous/inline completion otherwise — not by the fetch
         /// scheduler, which introduces no thread-pool hop of its own), or the drain-spin would never observe
-        /// completion without pumping the PlayerLoop (the exact A5b <c>KickMeshBuild</c> hazard this mirrors).
+        /// completion without pumping the PlayerLoop (the exact <c>KickMeshBuild</c> hazard this mirrors).
         /// Lightweight/structural — the behavioural net is the <c>DrainMeshBuilds</c> snapshot/leak exercise
-        /// elsewhere in the suite (plan §F-5).</summary>
+        /// elsewhere in the suite.</summary>
         [Test]
         public void MvtTileFeatureSource_GetTile_NeverHopsToMainThread()
         {
@@ -1735,10 +1724,10 @@ namespace MapRenderer.Tests.Structure
                 "continuation must stay off the PlayerLoop (supplied by TileDecodeDispatch.DecodeAsync on " +
                 "the HasData path, and by synchronous/inline completion otherwise — not by the fetch " +
                 "scheduler, which introduces no thread-pool hop of its own), preserving the off-PlayerLoop " +
-                "invariant DrainMeshBuilds' spin depends on (Epic A / A7 §G-1).");
+                "invariant DrainMeshBuilds' spin depends on.");
         }
 
-        /// <summary>Epic A / A6.1 (plan §F-1 — rename-complete structural tooth): asserts zero occurrences,
+        /// <summary>Rename-complete structural tooth: asserts zero occurrences,
         /// anywhere under <c>Assets/Code</c> or <c>Assets/Tests</c>, of the retired geometry-type enum's old
         /// name (the concatenated form built from "Mvt" + "GeometryType" — the renamed geometry-type enum
         /// now lives as <c>Core.Tiles.TileGeometryType</c>). Genuinely RED pre-rename: the old name was
@@ -1771,16 +1760,16 @@ namespace MapRenderer.Tests.Structure
 
             Assert.IsEmpty(offenders,
                 $"no file under {codeRoot} or {testsRoot} may reference the retired geometry-type enum name " +
-                $"— Epic A / A6.1 renamed it to Core.Tiles.TileGeometryType; found the old name in: " +
+                $"— it was renamed to Core.Tiles.TileGeometryType; found the old name in: " +
                 $"{string.Join(", ", offenders)}");
 
             string newTypePath = Path.Combine(codeRoot, "MapRenderer.Core", "Tiles", "TileGeometryType.cs");
             FileAssert.Exists(newTypePath);
         }
 
-        // ── D0: the decode-abandonment funnels ───────────────────────────────────────────────
+        // ── The decode-abandonment funnels ───────────────────────────────────────────────────
         //
-        // Three clauses, one per funnel D0 created or adopted. Each pins a CHOKEPOINT rather than a call
+        // Three clauses, one per funnel. Each pins a CHOKEPOINT rather than a call
         // form: the next stage hangs a per-record / per-entry release obligation on these methods, and an
         // obligation is only as strong as the guarantee that nothing bypasses the method carrying it. A
         // funnel with no structural pin is a convention.
@@ -1795,19 +1784,19 @@ namespace MapRenderer.Tests.Structure
         // over _loaded.
         private const string LoadedForeachPattern = @"foreach\s*\(\s*var\s+\w+\s+in\s+_loaded\s*\)";
 
-        /// <summary>D0 (funnel 1 — the record): <c>TileManager.DoDispose</c> must tear records down through
+        /// <summary>Funnel 1 (the record): <c>TileManager.DoDispose</c> must tear records down through
         /// <c>RenderTeardownRecord</c>, the one funnel cover-change, eviction and restyle already use — not
-        /// through hand-rolled loops of its own. Genuinely RED against the pre-D0 source, where
+        /// through hand-rolled loops of its own. Genuinely RED against the previous source, where
         /// <c>DoDispose</c> walked <c>_loaded</c> THREE times (spin+dispose mesh builds, cancel+observe
         /// fetches, destroy meshes), called <c>DestroyTrackedMeshes</c> directly and never called
         /// <c>RenderTeardownRecord</c> at all. Comment-stripped, so the prose above the loop cannot satisfy
         /// any clause.
         ///
-        /// <para><b>Strengthened in the D0 fix pass (arm 2 REQUIRED / arm 1 followUp 1).</b> The first form
+        /// <para><b>Strengthened.</b> The first form
         /// of this test counted call TEXT, so three real bypasses passed it: guarding the funnel call with
         /// <c>if (lt.Built)</c>, skipping records with a <c>continue</c>, and moving the sole
         /// <c>_loaded.Clear()</c> BEFORE the pass. Each left every count unchanged while dropping records
-        /// whose in-flight fetch / mesh build was never stashed in the S48/S84 pens. The counts are now
+        /// whose in-flight fetch / mesh build was never stashed in the pens. The counts are now
         /// backed by <see cref="AssertUnconditionallyReachedOnce"/> (brace depth + statement start + no
         /// earlier jump) and by an ORDERING comparison on character offsets. All three bypasses are
         /// RED-verified against this form.</para></summary>
@@ -1824,14 +1813,14 @@ namespace MapRenderer.Tests.Structure
             // ONE pass over _loaded — and the pass itself is reached on every path through DoDispose.
             Assert.AreEqual(1, Regex.Matches(body, LoadedForeachPattern).Count,
                 "TileManager.DoDispose must walk _loaded EXACTLY once — one pass, one funnel call per " +
-                "record. Three passes (the pre-D0 shape) is three places a later obligation can be missed.");
+                "record. Three passes (the older shape) is three places a later obligation can be missed.");
             AssertUnconditionallyReachedOnce(body, LoadedForeachPattern,
                 "the single _loaded teardown pass in TileManager.DoDispose",
                 "a pass reached only under a condition (or behind an early return) is a teardown that can " +
                 "skip every record at once.");
 
             // Nothing reaches AROUND the funnel: a record whose meshes are destroyed here never had its
-            // in-flight fetch / mesh build stashed in the S48/S84 pens.
+            // in-flight fetch / mesh build stashed in the pens.
             Assert.AreEqual(0, CountOccurrences(body, DestroyTrackedMeshesForm),
                 $"TileManager.DoDispose must contain ZERO direct '{DestroyTrackedMeshesForm}' calls — " +
                 "destroying a record's meshes is only PART of what the funnel does; a hand-rolled destroy " +
@@ -1867,12 +1856,12 @@ namespace MapRenderer.Tests.Structure
                 "build and fetch is dropped without ever reaching the funnel.");
         }
 
-        /// <summary>UMR-112 §6.1/§6.7: <c>SetSources</c> must clear every slot-keyed collection
+        /// <summary><c>SetSources</c> must clear every slot-keyed collection
         /// (<c>_loaded</c>, <c>_releaseQueue</c>, <c>_releaseQueued</c>, <c>_desired</c>, <c>_desiredSet</c>)
         /// unconditionally, and <c>_sources.Rebuild</c> must follow that clear block.
         /// <para><b>The clear-is-unconditional clause is the one that matters.</b> RED-verified (a
         /// ordering-inversion injection compiles and runs green against the BEHAVIOURAL test
-        /// <c>RemovedSource_TilesDoNotSurviveARestyle</c>): the hazard §6.1 names — a stale slot-keyed
+        /// <c>RemovedSource_TilesDoNotSurviveARestyle</c>): the hazard — a stale slot-keyed
         /// entry outliving a re-slot — is prevented by these five clears being unconditional, not by
         /// their order relative to <c>Rebuild</c>. The ordering IS observable at runtime: <c>Rebuild</c>
         /// calls caller-supplied code twice while mid-rebuild (<c>SourceSpec.CreateSource</c> for a new
@@ -1934,25 +1923,25 @@ namespace MapRenderer.Tests.Structure
                 "dropped.");
         }
 
-        /// <summary>D0 (funnel 2 — the abandoned fetch): the discard arm must be structurally incapable of
+        /// <summary>Funnel 2 (the abandoned fetch): the discard arm must be structurally incapable of
         /// handing a decode handle back to its CALLER. <c>DiscardFetchOutcome</c> returns
         /// <see langword="void"/>, so no discard SITE can bind, retain or re-consume what the fetch produced
         /// — caller-side ownership is compiler-enforced, not conventional. The two discard sites must call
         /// it and must NOT call the owning arm (<c>TileManager.TakeDecodeFromFetch</c>, a different file —
-        /// see below). Genuinely RED against the pre-D0 source, which had ONE method,
+        /// see below). Genuinely RED against the previous source, which had ONE method,
         /// <c>ObserveFetchOutcome(req, logErrors:)</c>, returning the handle to all four callers — two of
         /// which threw it away.
         ///
-        /// <para><b>Relocated (UMR-112).</b> The fetch pen and its discard funnel moved from
+        /// <para><b>Relocated.</b> The fetch pen and its discard funnel moved from
         /// <c>TileManager</c> into <see cref="PendingDisposalQueue"/> — same method, same invariant, new
         /// home. <c>TakeDecodeFromFetch</c> stayed behind on <c>TileManager</c>, so the "must not call the
         /// owning arm" clause is checked by absence rather than by reading a sibling file.</para>
         ///
-        /// <para><b>Scope, narrowed in the D0 fix pass (arm 2 NIT 1).</b> <see langword="void"/> constrains
+        /// <para><b>Scope, narrowed.</b> <see langword="void"/> constrains
         /// the CALLER and nothing else: it does not stop <c>DiscardFetchOutcome</c>'s own body from
         /// retaining, re-publishing or simply forgetting what it observed. The body half is pinned
         /// separately below — the funnel must actually observe the outcome, so an EMPTY body fails (arm 2
-        /// REQUIRED) — and the runtime release obligation that D1 will hang here is D1's leak teeth
+        /// REQUIRED) — and the runtime release obligation hung here belongs to the leak teeth
         /// (T-D1…T-D6), not a claim this text oracle makes.</para></summary>
         [Test]
         public void TheFetchDiscardFunnel_CannotHandBackADecodeHandle()
@@ -1977,7 +1966,7 @@ namespace MapRenderer.Tests.Structure
 
             // The funnel's OWN body, not just its call sites (arm 2 REQUIRED): the whole point of routing
             // every abandonment through one method is that the method DOES something, and an empty body
-            // passes every call-site clause above while re-opening the S84 console flood. The observation
+            // passes every call-site clause above while re-opening the console flood. The observation
             // must be the try's unconditional statement — a guarded GetResult observes only some outcomes.
             string funnelBody = StripComments(
                 ExtractMethodBody(source, "private void DiscardFetchOutcome(", path));
@@ -1990,10 +1979,10 @@ namespace MapRenderer.Tests.Structure
             AssertUnconditionallyReachedOnce(tryBody, @"\w+\s*\.\s*GetAwaiter\(\)\s*\.\s*GetResult\(\)",
                 "the fetch-outcome observation (`…GetAwaiter().GetResult()`) inside DiscardFetchOutcome",
                 "an EMPTY (or conditionally-observing) funnel body satisfies every call-site clause above " +
-                "while leaving the abandoned task's fault unobserved — the S84 UnityWebRequestException " +
+                "while leaving the abandoned task's fault unobserved — the UnityWebRequestException " +
                 "console flood, back through the method that exists to prevent it.");
 
-            // File-scoped, not per discard-site: TakeDecodeFromFetch stayed on TileManager (UMR-112), so a
+            // File-scoped, not per discard-site: TakeDecodeFromFetch stayed on TileManager, so a
             // CALL from here is impossible, but a COPY of its body pasted into this file is not — this
             // absence check is what actually rules that out.
             Assert.AreEqual(0, CountOccurrences(stripped, "TakeDecodeFromFetch("),
@@ -2006,25 +1995,25 @@ namespace MapRenderer.Tests.Structure
                 string body = StripComments(ExtractMethodBody(source, discardSiteAnchor, path));
                 Assert.Greater(CountOccurrences(body, "DiscardFetchOutcome("), 0,
                     $"the fetch-abandonment site anchored at '{discardSiteAnchor}' must observe its fetch " +
-                    "outcomes through DiscardFetchOutcome — an unobserved fetch task is the S84 " +
+                    "outcomes through DiscardFetchOutcome — an unobserved fetch task is the " +
                     "UnityWebRequestException console flood. STRUCTURAL HINT, stated as one: this is a " +
                     "PRESENCE count, not a reachability proof, and unlike the other two funnels it cannot " +
                     "be strengthened into one — both sites call the funnel from inside a pen-drain loop " +
                     "that legitimately `continue`s past a task that has not completed yet, so 'reached on " +
                     "every iteration' is not a property this site HAS. What every pen entry is eventually " +
-                    "observed is D1's runtime leak teeth to prove, not this clause's.");
+                    "observed is the runtime leak teeth to prove, not this clause's.");
             }
         }
 
-        /// <summary>D0 (funnel 4 — the parked symbol entry): every site that DISCARDS parked builds must go
+        /// <summary>Funnel 4 (the parked symbol entry): every site that DISCARDS parked builds must go
         /// through <c>SymbolSubsystem.DrainAndDiscardParkedBuilds</c>. Exactly two
         /// <c>_pendingSpriteQueue.TryDequeue(</c> sites may exist in the file — the funnel, and
         /// <c>PumpBuilds</c>' live drain, which CONSUMES entries rather than discarding them and is a
-        /// different job. Genuinely RED against the pre-D0 source, which had three: the live drain plus two
+        /// different job. Genuinely RED against the previous source, which had three: the live drain plus two
         /// bare <c>while (TryDequeue(out _)) { }</c> loops in <c>SetStyle</c> and <c>DoDispose</c>, i.e. two
         /// future drop paths where there should be one.
         ///
-        /// <para><b>Strengthened in the D0 fix pass (arm 2 REQUIRED).</b> The per-site call clause counted
+        /// <para><b>Strengthened.</b> The per-site call clause counted
         /// text, so <c>if (cond) DrainAndDiscardParkedBuilds();</c> passed it. It now goes through
         /// <see cref="AssertUnconditionallyReachedOnce"/>.</para></summary>
         [Test]
@@ -2066,7 +2055,7 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>
-        /// D1 fix (funnel 4), updated for the WorkScheduler migration: the parked drain must dispatch through
+        /// Funnel 4, updated for the WorkScheduler migration: the parked drain must dispatch through
         /// <c>WorkScheduler.Schedule</c>, and both of its ownership-guard releases must sit in a <c>finally</c>
         /// rather than a trailing statement.
         ///
@@ -2078,7 +2067,7 @@ namespace MapRenderer.Tests.Structure
         /// <c>SymbolParkedRedecodeTests.AParkedEntryCancelledWithoutADrain_…</c> now drives. The
         /// pre-handoff guard has a runtime tooth too
         /// (<c>AParkedEntryWhoseWorkerCannotBeBuilt_StillReleasesItsReference</c>), and the post-drain
-        /// enqueue race — R1: now made STRUCTURALLY impossible by the atomic park, so its runtime tooth is
+        /// enqueue race — now made STRUCTURALLY impossible by the atomic park, so its runtime tooth is
         /// <c>AParkBlockedByTheAbandonDrainGate_AcquiresNothingUntilItHoldsTheGate</c>, the successor to the
         /// retired <c>AParkEnqueuedAfterItsCancellersDrain_…</c>. What is left here is the residue no
         /// runtime test can see.</para>
@@ -2163,7 +2152,7 @@ namespace MapRenderer.Tests.Structure
                 "in SymbolParkedRedecodeTests; the clause is here so the mouths are pinned together).");
 
             // ── The park side: the acquire→enqueue window has a release that does not need a consumer ──
-            // R1: this logic moved OFF RunWorkerAndHandoff and into TryParkBuild — the one gated site (see
+            // This logic moved OFF RunWorkerAndHandoff and into TryParkBuild — the one gated site (see
             // TryParkBuildAndTheAbandonDrain_LockTheSameParkGate for the gate itself); this clause keeps its
             // original narrow claim, just re-anchored to where the acquire+enqueue now lives.
             string parkBuild = StripComments(
@@ -2178,7 +2167,7 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>
-        /// R1 (decode-refcount plan §6, F1's structural companion): both mouths that touch the parked
+        /// Both mouths that touch the parked
         /// queue's ownership — <c>TryParkBuild</c>'s ct-check+acquire+enqueue and
         /// <c>DrainAndDiscardParkedBuilds</c>'s dequeue+dispose — must lock the SAME <c>_parkGate</c>,
         /// unconditionally, or the exclusion the runtime rendezvous tooth
@@ -2186,7 +2175,7 @@ namespace MapRenderer.Tests.Structure
         /// tooth only observes the PARK side of the exclusion (it asserts the park has not acquired while the
         /// gate is held) — a drain that silently stopped taking the gate would still leave it green, because
         /// nothing in that tooth exercises the drain's own critical section concurrently with a park. This
-        /// pin is what covers the residual gap the plan (§6/F1) accepted rather than adding a second runtime
+        /// pin is what covers the residual gap accepted rather than adding a second runtime
         /// tooth: forcing the two to race deterministically needs the same <c>internal</c> seam the
         /// maintainer declined (Option 2). A presence count would pass for <c>if (cond) lock (_parkGate)</c>,
         /// so this reuses <see cref="AssertUnconditionallyReachedOnce"/> exactly as every other funnel in
@@ -2221,21 +2210,21 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>
-        /// R1 fix (decode-refcount plan §3 R1): <c>KickMeshBuild</c> ACQUIRES its OWN reference in its
+        /// <c>KickMeshBuild</c> ACQUIRES its OWN reference in its
         /// main-thread prologue — it no longer borrows the caller's and transfers it into the pool lambda —
         /// so it must release exactly the token it acquired, from that lambda's <c>finally</c>, and NEITHER
         /// caller may null the record's field around the call any more.
         ///
-        /// <para><b>This tooth inverted again, and the inversion is R1's whole point.</b> The D1 form of this
+        /// <para><b>This tooth inverted again, and the inversion is the point.</b> The earlier form of this
         /// tooth demanded the caller null <c>lt.Decode</c> AFTER the call — the transfer-completes-on-return
-        /// contract. R1 retires the transfer altogether: the record keeps its own reference for its WHOLE
+        /// contract. The transfer is retired altogether: the record keeps its own reference for its WHOLE
         /// in-cover lifetime now (see the <c>LoadedTile.Decode</c> field doc), and
         /// <c>RenderTeardownRecord</c> (funnel 1) is its only release, kicked or not. A surviving
         /// <c>lt.Decode = null;</c> at either kick call site is the retired transfer shape leaking back in —
         /// it would desync <c>FetchCompleted &amp;&amp; Step != BuildStep.Prologue &amp;&amp; Decode == null</c> from the
         /// kicked state and re-observe the record's PRESERVED fetch task on the next tick.</para>
         ///
-        /// <para><b>Re-shaped for job-scheduling-design.md §8 stage 3.</b> The body's `finally { decode.Release(); }`
+        /// <para>The body's `finally { decode.Release(); }`
         /// is gone — on SUCCESS the reference now TRANSFERS to the returned <c>TilePrologueOutput</c> (freed
         /// once handed to <c>TileBuildGraph.ScheduleMeasure</c>, or by a pen's <c>TilePrologueOutput.Dispose()</c>
         /// if it never gets that far); on a FAULT it is released by a guard `catch`. Both schedulers always
@@ -2262,7 +2251,7 @@ namespace MapRenderer.Tests.Structure
 
             Assert.AreEqual(1, CountOccurrences(body, "decode.Acquire()"),
                 "KickMeshBuild must call 'decode.Acquire()' exactly once — its OWN reference, taken in the " +
-                "main-thread prologue before the scheduler call exists. R1 retires the transfer: the record no " +
+                "main-thread prologue before the scheduler call exists. The transfer is retired: the record no " +
                 "longer hands this reference over, so the kick must take a separate one of its own.");
             Assert.AreEqual(2, CountOccurrences(body, "decode.Release()"),
                 "KickMeshBuild must contain EXACTLY TWO 'decode.Release()' — one guard `catch` around the " +
@@ -2271,7 +2260,7 @@ namespace MapRenderer.Tests.Structure
                 "— before the body runs). They are mutually exclusive by control flow, so each reference is " +
                 "released exactly once; a THIRD would be a real double-free.");
             Assert.AreEqual(0, CountOccurrences(body, "finally"),
-                "…job-scheduling-design.md §8 stage 3: there is no `finally` any more — on success the " +
+                "…job-scheduling-design.md: there is no `finally` any more — on success the " +
                 "reference TRANSFERS to the returned TilePrologueOutput instead of being released here.");
             Assert.AreEqual(2, Regex.Matches(body, @"catch\s*\{\s*decode\.Release\(\);\s*throw;\s*\}").Count,
                 "…and BOTH releases are guard `catch { decode.Release(); throw; }` blocks (mirrors " +
@@ -2290,7 +2279,7 @@ namespace MapRenderer.Tests.Structure
                 "…and BOTH call sites must feed the RECORD's field, never a bare local. A bare local is the " +
                 "one owner no funnel can see: if the prologue throws, the local unwinds carrying the kick's " +
                 "own reference before it was even acquired — this pins that the kick reads FROM the record's " +
-                "field, R1's ownership question notwithstanding.");
+                "field, the ownership question notwithstanding.");
 
             foreach (string callerAnchor in new[]
                      { "void DrainMeshBuilds(CameraProperties", "private int PumpPending(" })
@@ -2300,7 +2289,7 @@ namespace MapRenderer.Tests.Structure
                 Assert.GreaterOrEqual(call, 0,
                     $"the caller anchored at '{callerAnchor}' must kick through lt.Decode");
                 Assert.AreEqual(0, CountOccurrences(callerBody, "lt.Decode = null"),
-                    $"'{callerAnchor}' must NOT null lt.Decode anywhere around its KickMeshBuild call — R1 " +
+                    $"'{callerAnchor}' must NOT null lt.Decode anywhere around its KickMeshBuild call — the change " +
                     "retired the transfer: the record keeps its own reference for its whole in-cover " +
                     "lifetime, and RenderTeardownRecord (funnel 1) is the only release. A null-out here is " +
                     "the retired transfer shape leaking back in.");
@@ -2338,7 +2327,7 @@ namespace MapRenderer.Tests.Structure
                 "TileManager.cs must contain ZERO 'UniTask.RunOnThreadPool' call sites — the mesh-build kick " +
                 "still on the seam (KickMeshBuild) dispatches through IWorkScheduler, the only policy that " +
                 "runs on a WebGL player.");
-            // job-scheduling-design.md §8 stage 2 / E1 (resolved by reordering, option C): the source-less
+            // The source-less
             // background kick left the seam entirely — it schedules FillMeshGraph directly and reaches no
             // IWorkScheduler.Schedule<T> call (tooth (e), MeshBuildWorkSchedulerTests). Only KickMeshBuild
             // (source tiles) still dispatches through the seam.
@@ -2360,16 +2349,16 @@ namespace MapRenderer.Tests.Structure
                 "terminal with no recycling hazard (the backing completion source never recycles), so the " +
                 "wrapper this stage retires from KickMeshBuild is genuinely unnecessary, not just deleted.");
 
-            // Tooth (h) — job-scheduling-design.md §8 stage 3: BuildStep.Seam is renamed to BuildStep.Prologue
+            // Tooth (h): BuildStep.Seam is renamed to BuildStep.Prologue
             // throughout; a survivor is either a stale rename or a live reference to the retired member name.
             Assert.AreEqual(0, CountOccurrences(stripped, "BuildStep.Seam"),
                 "TileManager.cs must contain ZERO 'BuildStep.Seam' occurrences — the member was renamed to " +
-                "BuildStep.Prologue (job-scheduling-design.md §8 stage 3); a survivor names a member that no " +
+                "BuildStep.Prologue (job-scheduling-design.md); a survivor names a member that no " +
                 "longer exists.");
         }
 
         /// <summary>
-        /// D1 fix: <c>RenderTeardownRecord</c> DISARMS before it fires — <c>lt.Decode</c> is nulled before
+        /// <c>RenderTeardownRecord</c> DISARMS before it fires — <c>lt.Decode</c> is nulled before
         /// <c>Release()</c> is called, not after.
         ///
         /// <para><b>Structural, and this one really is.</b> <c>Release()</c> throws on an unbalanced release
@@ -2380,7 +2369,7 @@ namespace MapRenderer.Tests.Structure
         /// throws, so reflecting into the method directly cannot read the difference either (measured, not
         /// assumed). What is pinned here is the funnel's own discipline.</para>
         ///
-        /// <para><b>Caller-side residue (UMR-151).</b> The two direct callers are
+        /// <para><b>Caller-side residue.</b> The two direct callers are
         /// <c>TileManager.RemoveAndTeardownRecord</c>, which drops the record from <c>_loaded</c> before
         /// calling this, and <c>DoDispose</c>, which does not. A throw mid-loop still abandons the records
         /// the loop never reached — that half stays open, in
@@ -2403,7 +2392,7 @@ namespace MapRenderer.Tests.Structure
             Assert.IsTrue(disarm.Success,  "RenderTeardownRecord must null the record's decode handle");
             Assert.IsTrue(release.Success, "RenderTeardownRecord must release the record's decode handle");
             Assert.Less(disarm.Index, release.Index,
-                "RenderTeardownRecord must NULL lt.Decode BEFORE releasing. R2: SharedDisposable's Release() " +
+                "RenderTeardownRecord must NULL lt.Decode BEFORE releasing. SharedDisposable's Release() " +
                 "is undefended (a DEBUG assertion only, not a throw), but the tile's Dispose() can still " +
                 "throw; with the null-out afterwards a throw there leaves the field armed with a reference " +
                 "that is already released, so a retry releases it a second time — a silent double-release " +
@@ -2428,7 +2417,7 @@ namespace MapRenderer.Tests.Structure
         /// <c>try</c> block can be extracted exactly the way a method body is: the brace-balanced block
         /// (inclusive of its outer braces) beginning at the first '{' at or after
         /// <paramref name="searchFrom"/>. <paramref name="blockEndIndex"/> is the index of the block's
-        /// closing brace in <paramref name="source"/> — the D0 ordering clause compares against it, since
+        /// closing brace in <paramref name="source"/> — the ordering clause compares against it, since
         /// "before or after the loop" is an offset question, not a counting one.</summary>
         private static string ExtractBlockAfter(string source, int searchFrom, string path, out int blockEndIndex)
         {
@@ -2481,7 +2470,7 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>Asserts that <paramref name="pattern"/> occurs in <paramref name="block"/> exactly once
         /// as an <b>unconditionally reached</b> statement — the property a funnel needs and that a bare
-        /// occurrence count does not give (the D0 fix pass exists because four real bypasses passed the
+        /// occurrence count does not give (four real bypasses passed the
         /// counts). Three conditions, all required:
         /// <list type="bullet">
         /// <item>brace depth 1 relative to <paramref name="block"/>'s own outer braces — so it is not nested
@@ -2490,7 +2479,7 @@ namespace MapRenderer.Tests.Structure
         /// <c>}</c>) — which is what catches a BRACELESS guard, <c>if (c) Funnel();</c>, whose depth is
         /// still 1 and which the depth check alone therefore cannot see;</item>
         /// <item>no earlier <c>return</c>/<c>continue</c>/<c>break</c>/<c>goto</c> anywhere in the block can
-        /// jump past it — arm 1's followUp 1, a <c>continue</c> that skips a record while keeping the call
+        /// jump past it — arm 1's recorded gap, a <c>continue</c> that skips a record while keeping the call
         /// textually present.</item>
         /// </list>
         /// <paramref name="pattern"/> must match from the FIRST character of the statement, or the
@@ -2502,7 +2491,7 @@ namespace MapRenderer.Tests.Structure
         /// nested block, a brace inside a string literal, and a funnel body that does nothing at all are all
         /// invisible to it — the last of those is why the discard funnel gets a separate body clause. It
         /// pins that the call SITE cannot be bypassed by the three edits above; it says nothing about
-        /// whether the per-record obligation inside the funnel is honoured, which is D1's runtime leak teeth
+        /// whether the per-record obligation inside the funnel is honoured, which is the runtime leak teeth
         /// to establish.</para></summary>
         private static void AssertUnconditionallyReachedOnce(string block, string pattern, string what, string why)
         {
@@ -2544,7 +2533,7 @@ namespace MapRenderer.Tests.Structure
             => Regex.Matches(text, Regex.Escape(callForm)).Count;
 
         /// <summary><see cref="StripLineComments"/> plus block comments — the anti-vacuity clause in
-        /// <see cref="WriteIntoPath_ReferencesNoMvtCarrierTypes"/> must not be satisfiable by prose (B3's
+        /// <see cref="WriteIntoPath_ReferencesNoMvtCarrierTypes"/> must not be satisfiable by prose (the
         /// finding: the old clause passed on an XML <c>see cref</c> after the real call was gone). Additive,
         /// deliberately: <see cref="StripLineComments"/> is shared by five other assertions and is not
         /// modified. Measured at the time of writing: neither target file contains a block comment, so the
@@ -2585,7 +2574,7 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// job-scheduling-design.md §8 stage 1: the structural complement to
+    /// The structural complement to
     /// <c>FillMeshGraphSchedulingTests</c>'s not-completed-at-return tooth. That behavioural tooth cannot
     /// false-red on a tiny fixture (an unflushed job cannot have started), but for the same reason it proves
     /// only that nothing completed synchronously THIS RUN — it cannot see a <c>Complete()</c> call that
@@ -2632,10 +2621,10 @@ namespace MapRenderer.Tests.Structure
         {
             "SizingJob", "FillGatherJob", "EarcutBatchJob", "AggregateJob",
             "RingAssemblyJob", "JobHandle",
-            // job-scheduling-design.md §8 stage 4: the curved-arm sub-chain — its two nodes, and the
+            // The curved-arm sub-chain — its two nodes, and the
             // predicate (exactly WriteGeometry's) that decides which arm a layer takes.
             "GlobeFillSubdivideDispatch", "GlobeFillScatterJob", "MaxRefineAngleRad",
-            // job-scheduling-design.md §7 rule 2: EarcutBatchJob has no loop of its own to bound, so neither
+            // job-scheduling-design.md's rule 2: EarcutBatchJob has no loop of its own to bound, so neither
             // FillSizingJobTests nor any other RED tooth reds if its deferred-count SOURCE regresses from
             // buffers.PerPolyOuterCount (a sizing-owned column) to a borrowed count. This literal pins that
             // source structurally — the only thing that reds on that regression.
@@ -2669,12 +2658,12 @@ namespace MapRenderer.Tests.Structure
                 "its own handle.");
         }
 
-        // ── The attribute fence — job-scheduling-design.md §7 rule 2: "no [NativeDisableContainerSafetyRestriction]
-        // in a graph builder EVER, and no [NativeDisableParallelForRestriction] before stage 6." Scoped to the
-        // two directories §3.2 names as where graph builders and stream-write jobs live — not one hand-listed
-        // file, so adding a job anywhere under either directory is covered by construction. Stage 6 sanctions
-        // EXACTLY ONE occurrence of NativeDisableParallelForRestriction in EACH of two files (job-scheduling-
-        // design.md §8 stage 6, A0.3/C.5/A.2/E.4): EarcutBatchJob.cs and RibbonBatchJob.cs, each a
+        // ── The attribute fence — job-scheduling-design.md's rule 2: "no [NativeDisableContainerSafetyRestriction]
+        // in a graph builder EVER." Scoped to the
+        // two directories the design names as where graph builders and stream-write jobs live — not one
+        // hand-listed file, so adding a job anywhere under either directory is covered. The design
+        // sanctions EXACTLY ONE occurrence of NativeDisableParallelForRestriction in EACH of two files:
+        // EarcutBatchJob.cs and RibbonBatchJob.cs, each a
         // field-level attribute on its single Buffers field. No other file, and no other count.
         // NativeDisableContainerSafetyRestriction stays forbidden with NO exceptions, anywhere, always.
         //
@@ -2765,8 +2754,8 @@ namespace MapRenderer.Tests.Structure
             }
         }
 
-        // ── The JobsDebugger precondition — job-scheduling-design.md §7's own qualification: the schedule-time
-        // write-write detection every dependency-edge tooth in this epic relies on is CONTINGENT on this
+        // ── The JobsDebugger precondition — job-scheduling-design.md's own qualification: the schedule-time
+        // write-write detection every dependency-edge tooth here relies on is CONTINGENT on this
         // toggle, not on being in the Editor. Nothing else observed it before this. ─────────────────────────
 
         [Test]
@@ -2774,7 +2763,7 @@ namespace MapRenderer.Tests.Structure
         {
             Assert.IsTrue(JobsUtility.JobDebuggerEnabled,
                 "the Editor's job debugger is OFF. Every dependency-edge tooth recorded against a dropped " +
-                "`deps` edge in this epic (job-scheduling-design.md §7 rule 1 — the missing-edge " +
+                "`deps` edge (job-scheduling-design.md — the missing-edge " +
                 "InvalidOperationException at Schedule) proves nothing while this reads false: the " +
                 "schedule-time write-write detection is contingent on this toggle, not on merely running in " +
                 "the Editor.");
@@ -2798,7 +2787,7 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>Verified today: exactly these seven declare a sizing-owned buffers struct as a field.
         /// Red on an EIGHTH means a new node joined this family — check what column it bounds its own loop by
-        /// against job-scheduling-design.md §7 rule 2 before adding it here.</summary>
+        /// against job-scheduling-design.md's rule 2 before adding it here.</summary>
         private static readonly string[] KnownSizingOwnedBuffersConsumers =
         {
             "SizingJob.cs", "FillGatherJob.cs", "EarcutBatchJob.cs", "AggregateJob.cs",
@@ -2870,24 +2859,24 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// job-scheduling-design.md §8 stage 4 Group B, B.9 — the stop-rule fence: once fill AND the extrusion
-    /// roof are both graph-arm, nothing in production may still reference a symbol Group B retired. The
+    /// The stop-rule fence: once fill AND the extrusion
+    /// roof are both graph-arm, nothing in production may still reference a retired symbol. The
     /// PREDICATE — every symbol whose only production caller was the synchronous fill pipeline
     /// (<c>FillMeshPipeline.Schedule</c>, its two synchronous mesh writers, or their globe/count-rule
     /// scaffolding), which lost that caller when the graph became the only mesher — not a hand-picked list:
-    /// <see cref="ForbiddenPatterns"/> below must derive from re-reading the plan's B.1–B.5 deletion rows
+    /// <see cref="ForbiddenPatterns"/> below must derive from re-reading the deletion rows
     /// each time a member is added there, not from what a prior pass happened to name.
     ///
     /// Identifier-anchored (lessons-learned "a source-text fence must match the IDENTIFIER") — scans every
     /// <c>.cs</c> file under <c>MapRenderer.Jobs/</c> and <c>MapRenderer.Unity/Rendering/</c>, comments
-    /// stripped first so a HISTORICAL prose mention of a retired name (this epic's docs are full of them,
+    /// stripped first so a HISTORICAL prose mention of a retired name (historical docs are full of them,
     /// deliberately — "the synchronous entry point Run/RunTyped is retired with its callers X, Y") does not
     /// fail the fence; only a real reference in CODE does.
     ///
     /// <para><c>GlobeFillSubdivideDispatch.Run</c>/<c>RunTyped</c> stay banned throughout even though the
     /// class is not deleted — it is live at <c>GlobeFillSubdivider.cs:202</c> with a production caller,
     /// <c>FillMeshGraph.cs:287</c>, through its surviving <c>Schedule</c> entry point and its <c>Default*</c>
-    /// constants — because only its synchronous <c>Run</c>/<c>RunTyped</c> members were retired with Group B,
+    /// constants — because only its synchronous <c>Run</c>/<c>RunTyped</c> members were retired,
     /// and nothing has ever given THIS pair a new caller.</para>
     ///
     /// <para><b>Tooth (b)'s hole:</b> <c>ProjectPointsJob&lt;TProj&gt;.Run(n)</c> itself stays <c>public</c>,
@@ -2917,7 +2906,7 @@ namespace MapRenderer.Tests.Structure
     [TestFixture]
     public class FillMeshPipelineRetirementFenceTests
     {
-        /// <summary>Every symbol retired (job-scheduling-design.md §8 stage 4 B.1–B.5, plus
+        /// <summary>Every retired symbol (plus
         /// <c>ProjectionDispatch.Run</c>/<c>RunTyped</c>'s own re-retirement in the wall-job-graph stage —
         /// see the class doc) that STILL has no production caller, one pattern each — a call form where a
         /// bare identifier would false-positive on an unrelated member of the same name, a word-boundary bare
@@ -2970,7 +2959,7 @@ namespace MapRenderer.Tests.Structure
 
             Assert.IsEmpty(violations,
                 "production source under MapRenderer.Jobs/ or MapRenderer.Unity/Rendering/ still references a " +
-                "symbol Group B retired — the graph is the only mesher now:\n" +
+                "a retired symbol mesher — the graph is the only mesher now:\n" +
                 string.Join("\n", violations));
         }
 
@@ -3031,13 +3020,13 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// job-scheduling-design.md §8 stage 5 (the wall-job-graph stage), tooth (d) — a caller fence for a claim
+    /// Tooth (d) — a caller fence for a claim
     /// no runtime test can make: Unity has no manual/event <c>JobHandle</c>, so a test cannot hold the wall
     /// graph unsatisfied to observe "still running", and the job safety system tracks the HANDLE rather than
     /// execution state, so reading a wall column early throws whether or not the job ran. Both readings this
     /// fence would otherwise want are unavailable — see <see cref="FillMeshPipelineRetirementFenceTests"/>'s
     /// own mould, which this one copies: identifier-anchored, comments stripped first (a HISTORICAL prose
-    /// mention — this epic's docs are full of them — must not fail the fence; only a real reference in CODE
+    /// mention — historical docs are full of them — must not fail the fence; only a real reference in CODE
     /// does), scanning every <c>.cs</c> file under <c>MapRenderer.Jobs/</c> and
     /// <c>MapRenderer.Unity/Rendering/</c>, both <c>AllDirectories</c>, with the same <c>&gt;= 50</c>
     /// non-vacuity guard.
@@ -3054,8 +3043,8 @@ namespace MapRenderer.Tests.Structure
     /// (its sole scheduler) — a named count, not "at least one" or "not in file X": <c>WallQuadJob</c> stays
     /// nested in a partial file of <c>StyledFillExtrusionTileBuilder</c>, so a fence naming only the prologue
     /// file would be evaded by re-inlining the job's construction into a THIRD partial of the same type
-    /// (R4, job-scheduling-design.md §5(d)'s own note on the plan's earlier, self-contradicting three-bullet
-    /// version).</item>
+    /// (the earlier three-bullet
+    /// version was self-contradicting).</item>
     /// </list>
     /// </summary>
     [TestFixture]
@@ -3163,7 +3152,7 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// job-scheduling-design.md §8 stage 5 (the wall-job-graph stage), tooth (b)'s hole — review R3.
+    /// Tooth (b)'s hole.
     /// <c>ProjectPointsJob&lt;TProj&gt;.Run(n)</c> stays <c>public</c> and cannot itself be source-text
     /// fenced (an instance method called after a multi-line object-initializer block has no fixed textual
     /// shape a regex can anchor — see <see cref="FillMeshPipelineRetirementFenceTests"/>'s own class doc).
@@ -3276,7 +3265,7 @@ namespace MapRenderer.Tests.Structure
             "FillGraphOutput", "LineGraphOutput", "FillExtrusionGraphOutput",
             "StyledFillTileBuilder", "StyledLineTileBuilder", "StyledFillExtrusionTileBuilder",
             "WallColumns", "LayerInput",
-            // R2: the three this stage creates — without these the fence is blind to the reflex re-growth.
+            // The three created here — without these the fence is blind to the reflex re-growth.
             "FillLayerBuild", "FillExtrusionLayerBuild", "LineLayerBuild",
         };
 
@@ -3375,7 +3364,7 @@ namespace MapRenderer.Tests.Structure
 // Disambiguate from UnityEngine.RenderMode (Canvas) — the map's render mode is the material-set one.
 
     /// <summary>
-    /// The unlit epic's HARD CONSTRAINT, made falsifiable: <b>mesh preparation never branches on render
+    /// Unlit mode's HARD CONSTRAINT, made falsifiable: <b>mesh preparation never branches on render
     /// mode.</b> One builder produces one per-layer vertex/mesh layout; the Lit and Unlit shader twins both
     /// consume it. That is what makes unlit a material-set setting rather than a parallel pipeline — and it
     /// holds today only <i>by construction</i>, since nothing in the meshing path names
@@ -3490,7 +3479,7 @@ namespace MapRenderer.Tests.Structure
                 $"controlHits={controlHits.Count} ({string.Join(", ", controlHits)})");
 
             Assert.IsEmpty(offenders,
-                $"no mesh-preparation source may name '{token}'. The unlit epic's hard constraint is that " +
+                $"no mesh-preparation source may name '{token}'. Unlit mode's hard constraint is that " +
                 "the per-layer vertex/mesh layout is byte-identical between the Lit and Unlit twins, so " +
                 "mesh preparation NEVER branches on render mode — each builder produces one layout and both " +
                 "shaders consume it. A meshing/geometry/tile-pipeline file that can see the mode is one " +

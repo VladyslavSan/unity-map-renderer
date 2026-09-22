@@ -33,7 +33,7 @@ namespace MapRenderer.Core.Geo
     /// <c>new GeoCoordinate3D { Latitude = 52.52, Longitude = 13.40, Altitude = 0.0 }</c>.</para>
     /// <para>Blittable: only <c>double</c> backing fields; usable as <c>NativeArray&lt;GeoCoordinate3D&gt;</c>
     /// element type and as a Burst job struct field.</para>
-    /// <para><c>Altitude</c> is metres above the WGS-84 ellipsoid datum (reserved for terrain; pass 0 until S25).</para>
+    /// <para><c>Altitude</c> is metres above the WGS-84 ellipsoid datum (reserved for terrain; pass 0).</para>
     /// </summary>
     [Serializable]
     public readonly struct GeoCoordinate3D
@@ -44,7 +44,7 @@ namespace MapRenderer.Core.Geo
         /// <summary>Longitude, degrees [-180, 180]. WGS-84 geodetic.</summary>
         public double Longitude { get; init; }
 
-        /// <summary>Altitude in metres above the WGS-84 ellipsoid datum. Pass 0 until S25 (terrain).</summary>
+        /// <summary>Altitude in metres above the WGS-84 ellipsoid datum. Reserved for terrain; pass 0.</summary>
         public double Altitude { get; init; }
 
         /// <summary>Projects to the surface (drops altitude).</summary>

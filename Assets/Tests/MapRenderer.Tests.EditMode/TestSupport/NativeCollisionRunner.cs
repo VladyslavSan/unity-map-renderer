@@ -181,7 +181,7 @@ namespace MapRenderer.Tests.TestSupport
             return false;
         }
 
-        // 1-box candidates (point-like) — fully exercises the grid, which is the B-4a risk. Box size range is
+        // 1-box candidates (point-like) — fully exercises the grid, which is the risk. Box size range is
         // a parameter so a case can force wide boxes (many cells) or a giant span (cell enlargement). Shared
         // by CollisionGridContractTests and CollisionJobPlacementTests — the one definition both call.
         internal static (SymbolCandidate[], SymbolBox[]) RandomScene(int count, int seed, float worldW, float worldH,

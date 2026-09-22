@@ -5,9 +5,8 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Epic A / A5b: the symbol-agnostic seam through which <see cref="Tile.TileManager"/> drives the
-    /// symbol worker pass from its per-tile kick — the retired parallel push feed
-    /// (<c>SymbolTileBytesReady</c>/<c>OnTileBytesReady</c>) is replaced by this factory. TileManager holds
+    /// The symbol-agnostic seam through which <see cref="Tile.TileManager"/> drives the
+    /// symbol worker pass from its per-tile kick. TileManager holds
     /// only this interface pair (<c>string</c>/<see cref="TileId"/>/<see cref="SharedDisposable{T}"/> types) —
     /// it never references a symbol/store/glyph type; the real implementor
     /// (<c>MapRenderer.Unity.Text.SymbolSubsystem</c>) lives on the other side of the seam.

@@ -26,7 +26,7 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.GeoJsons
 {
     /// <summary>
-    /// GeoJSON S2 — the source, end to end: <b>T1</b> (an inline geojson source actually renders through
+    /// The GeoJSON source, end to end: <b>T1</b> (an inline geojson source actually renders through
     /// <c>MapView.SetStyle</c>), <b>T3</b> (<c>SourceKey</c> carries the inline-data identity, both
     /// directions) and <b>T5</b> (the slice happens inside <c>GetTile</c>, OFF the main thread, and its
     /// native buffers are freed by the lease's last release).
@@ -469,7 +469,7 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.IsNull(first.Tiles, "precondition: an inline source has no tiles[]");
 
             Assert.AreNotEqual(TileManager.SourceKey.From(first), TileManager.SourceKey.From(second),
-                "two different inline datasets must not be the same source. They were, before S2 — so a " +
+                "two different inline datasets must not be the same source. They used to be — so a " +
                 "restyle between them kept the first one's pipeline and rendered the wrong geometry.");
         }
 

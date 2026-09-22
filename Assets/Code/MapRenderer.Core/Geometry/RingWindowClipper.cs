@@ -23,7 +23,7 @@ namespace MapRenderer.Core.Geometry
     /// the only thing either one actually guarantees: winding is preserved.</para>
     ///
     /// <para>The Unity-front reversal for stock Cull Back stays where it is, at the mesh-write boundary in
-    /// <c>StyledFillTileBuilder</c> (<c>docs/coordinates-and-projections.md</c> §7.1).</para>
+    /// <c>StyledFillTileBuilder</c> (<c>docs/coordinates-and-projections.md</c>).</para>
     ///
     /// <para><b>Why it is exact at the corners.</b> S–H is exact for a CONVEX clip region against an
     /// arbitrary (possibly concave) subject; the window is an axis-aligned rectangle, hence convex, so the
@@ -42,7 +42,7 @@ namespace MapRenderer.Core.Geometry
     /// <c>Intersect</c>, same zero-length-edge dedup, same trailing first==last collapse, same bbox fast
     /// path. <c>RingWindowClipperParityTests</c> pins the two BIT-IDENTICAL over a randomised corpus, which
     /// is what converts the copy from an unverified smell into a checked equivalence — and leaves a clean
-    /// retirement path (<c>RingClipJob</c> can delegate once the geometry-IR epic lands).</para>
+    /// retirement path: <c>RingClipJob</c> can delegate to it.</para>
     /// </summary>
     public static class RingWindowClipper
     {

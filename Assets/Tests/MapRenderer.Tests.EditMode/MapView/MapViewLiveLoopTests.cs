@@ -25,13 +25,11 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.MapViews
 {
     /// <summary>
-    /// S40 live loop tests for <see cref="MapView"/> with per-layer styled fill rendering.
+    /// Live loop tests for <see cref="MapView"/> with per-layer styled fill rendering.
     /// Covers:
     ///   (1) view-state drives tile selection + eviction releases (container destroyed).
     ///   (2) wiring parity: MapView with a 1-fill-layer style produces the same mesh vertex count
     ///       as StyledFillTileBuilder called directly — proves the live-loop wiring is correct.
-    ///       (Replaces the retired S06 bit-identical Burst-vs-managed assertion; that test pinned
-    ///        the Burst pipeline which is now replaced by the managed per-layer path.)
     ///   (3) NO per-frame GC in steady state (the acceptance teeth — the ApplyZoom loop and all
     ///       reused buffers must not allocate in the pan / static-frame / bearing-only cases).
     /// </summary>
@@ -132,10 +130,10 @@ namespace MapRenderer.Tests.MapViews
                     "A static frame (cover clean, nothing pending) must early-out with zero allocation.");
 
                 // ── (c) a heading/tilt change still ticks alloc-free. ──
-                // S71: heading now DIRTIES the cover (it rotates the viewport quad → a different tile bbox),
-                // so this Tick runs the full recompute — but at the whole-world z2 cover the re-selected set
-                // is identical, so request/release find nothing and the recompute stays zero-alloc. (Tilt is
-                // not in the cover key — the selector has no tilt branch, D3.)
+                // Heading DIRTIES the cover (it rotates the viewport quad → a different tile bbox), so this Tick
+                // runs the full recompute — but at the whole-world z2 cover the re-selected set is identical, so
+                // request/release find nothing and the recompute stays zero-alloc. Tilt is not in the cover key:
+                // the selector has no tilt branch.
                 view.Camera.Apply(new CameraPropertiesUpdate { Heading = 45.0, Tilt = 30.0 });
                 Assert.That(() => view.LateUpdate(), Is.Not.AllocatingGCMemory(),
                     "A heading/tilt change must tick alloc-free (cover recompute over an unchanged whole-world set).");

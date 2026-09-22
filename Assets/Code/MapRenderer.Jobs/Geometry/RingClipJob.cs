@@ -15,7 +15,7 @@ namespace MapRenderer.Jobs.Geometry
     /// <para><b>Coordinate space and winding (producer declaration).</b> Input and output are both raw
     /// <b>tile space</b> — no projection, no rescaling. Sutherland–Hodgman is orientation-preserving, so a
     /// ring's output winding EQUALS its input winding (the canonical CCW-in-tile-space convention,
-    /// <c>docs/coordinates-and-projections.md</c> §7.1). The Unity-front reversal for stock Cull Back stays
+    /// <c>docs/coordinates-and-projections.md</c>). The Unity-front reversal for stock Cull Back stays
     /// where it is, at the mesh-write boundary in <c>StyledFillTileBuilder</c>.</para>
     ///
     /// <para><b>Boundary is inclusive</b> (<c>&gt;= min</c>, <c>&lt;= max</c>): a vertex exactly on the
@@ -57,10 +57,10 @@ namespace MapRenderer.Jobs.Geometry
         [ReadOnly] public NativeArray<int>     RingOffsets;    // length = RingCount + 1 (sentinel)
         [ReadOnly] public NativeArray<int>     RingFeatureIdx; // which feature each ring belongs to
 
-        /// <summary>IR B7: ring indices into <see cref="RingOffsets"/>, in the order the consumer wants them
-        /// visited — <b>not</b> <c>0..ringCount</c>. The buffer is shared across consumers now, so which rings
-        /// this clip pass reads, and in what order, is the caller's decision rather than the buffer's extent.
-        /// Its length is the number of rings considered (survivors may be fewer).</summary>
+        /// <summary>Ring indices into <see cref="RingOffsets"/>, in the order the consumer wants them
+        /// visited — <b>not</b> <c>0..ringCount</c>. The buffer is shared across consumers, so which rings
+        /// this clip pass reads, and in what order, is the caller's decision. Its length is the number of
+        /// rings considered; survivors may be fewer.</summary>
         [ReadOnly] public NativeArray<int> RingVisitOrder;
 
         /// <summary>Inclusive window corners in tile units — <c>TileBufferClip.TryWindow</c>'s output.</summary>

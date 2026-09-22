@@ -5,21 +5,14 @@ using MapRenderer.Core.Geometry;
 namespace MapRenderer.Jobs.Lines
 {
     /// <summary>
-    /// The line graph's ribbon buffers, from sizing through aggregation (job-scheduling-design.md §8 stage
-    /// 6, E.2) — the ribbon twin of <see cref="TriangulationBuffers"/>: 2 prefix-sum offset tables + 2
-    /// flat oversized-per-ring output columns + 2 per-ring real-count columns, shared by
-    /// <see cref="RibbonSizingJob"/>, <see cref="RibbonBatchJob"/> and
-    /// <see cref="RibbonAggregateJob"/>, instead of each declaring its own field list.
+    /// The line graph's ribbon buffers, from sizing through aggregation — the ribbon twin of
+    /// <see cref="TriangulationBuffers"/>: 2 prefix-sum offset tables, 2 flat oversized-per-ring output
+    /// columns, and 2 per-ring real-count columns, shared by <see cref="RibbonSizingJob"/>,
+    /// <see cref="RibbonBatchJob"/> and <see cref="RibbonAggregateJob"/>.
     ///
-    /// <para><b>Every field is plain, not <c>[ReadOnly]</c></b> — same reasoning as
-    /// <see cref="TriangulationBuffers"/>'s own doc: which of the six columns a given job reads versus
-    /// writes differs per job, and the three nodes here are already a strictly linear chain (sizing → ribbon
-    /// → aggregate), so the dependency a conservative writer needs is the same edge the chain already
-    /// has.</para>
-    ///
-    /// <para><b>Every field must be a CREATED container</b> — same hazard as
-    /// <see cref="TriangulationBuffers"/>'s own doc: the safety system validates the whole struct at
-    /// schedule time, not just the fields a job body touches. Always build a value via <see cref="Allocate"/>.</para>
+    /// <para><b>Every field is plain, not <c>[ReadOnly]</c></b>, and <b>every field must be a CREATED
+    /// container</b> — both for the reasons <see cref="TriangulationBuffers"/>'s own doc gives. Always build
+    /// a value through <see cref="Allocate"/>.</para>
     /// </summary>
     internal struct RibbonBuffers
     {

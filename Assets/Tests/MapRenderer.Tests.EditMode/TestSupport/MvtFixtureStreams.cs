@@ -10,10 +10,10 @@ namespace MapRenderer.Tests.TestSupport
     /// Reads a committed <c>.pbf</c> fixture's <b>per-feature MVT geometry command streams</b> straight out of
     /// the bytes, independently of production's decoder.
     ///
-    /// <para><b>Why this exists (IR C1 P3).</b> Until P3 the differential oracles
+    /// <para><b>Why this exists.</b> The differential oracles
     /// (<c>StyledLineBufferParityTests</c>, <c>SymbolBufferParityTests</c>, <c>JobifiedPipelineTests</c>'
     /// decode parity, <c>LineRibbonJobTests</c>' fixture sweep) reached the command words through
-    /// <c>MvtFeature.Geometry</c> and ran <see cref="MvtGeometry.Decode"/> over them. P3 deleted that field —
+    /// <c>MvtFeature.Geometry</c> and ran <see cref="MvtGeometry.Decode"/> over them. That field is gone —
     /// geometry belongs to the layer now, and the words are consumed and dropped inside
     /// <c>MvtDecoder.Decode</c>. Reading the buffer those same oracles are checking would <b>disarm</b> them
     /// (arm A and arm B would become the same measurement), so arm A gets its own reader.</para>

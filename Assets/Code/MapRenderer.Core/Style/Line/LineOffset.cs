@@ -3,9 +3,9 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.Line
 {
     /// <summary>
-    /// S44: line-offset — engine-free CPU helpers for the perpendicular ribbon shift.
+    /// <c>line-offset</c> — engine-free CPU helpers for the perpendicular ribbon shift.
     ///
-    /// Design decision D1 (shader-space offset): the vertex shader already extrudes each ribbon
+    /// The offset is applied in shader space: the vertex shader already extrudes each ribbon
     /// vertex along the per-vertex extrusion normal by ±½·widthM. To shift the band center by
     /// <c>offsetM</c> without changing its thickness, we add <c>offsetM</c> in the SAME normal
     /// direction — but multiplied by the vertex's <em>side</em> value (∈{+1,−1}) so that BOTH
@@ -17,7 +17,7 @@ namespace MapRenderer.Core.Style.Line
     /// Multiplying by side aligns the displacement so both sides move in the same direction —
     /// shifting the band center to offsetM while leaving the half-width unchanged.
     ///
-    /// HLSL mirror: MapLineForwardPass.hlsl, "S44 line-offset" block.
+    /// HLSL mirror: MapLineForwardPass.hlsl.
     ///   offsetWS += unitDir_WS * input.sideAndDist.x * (miter * offsetM);
     /// Keep both in sync on any arithmetic change.
     ///
@@ -77,15 +77,15 @@ namespace MapRenderer.Core.Style.Line
         // Mirror of the width px→m conversion in Shaders/Map/Line/Line_VertexExtrude.hlsl:
         //   widthWorld = _Width * ((_WidthIsPixels > 0.5) ? pxToWorld : 1)
         //
-        // NOTE the asymmetry: on the GPU `pxToWorld` is MEASURED per-vertex through the projection matrix
-        // (S104 deleted the _MetersPerPixel uniform this comment used to name), so it varies with depth and
-        // direction under tilt. This CPU mirror takes a single zoom-derived scalar, which agrees with the
+        // NOTE the asymmetry: on the GPU `pxToWorld` is MEASURED per-vertex through the projection
+        // matrix, so it varies with depth and direction under tilt. This CPU mirror takes a single
+        // zoom-derived scalar, which agrees with the
         // GPU at the view centre and drifts from it toward the edges of a tilted frame. That is fine for
-        // what it is used for — the RATIO between two zooms, which is what tooth 3 pins.
+        // what it is used for — the RATIO between two zooms.
         //
-        // Tooth 3 requires that offset and width share the same conversion path. Using the same
-        // branch here guarantees that offsetM(z1)/offsetM(z2) == widthM(z1)/widthM(z2) at two
-        // zooms (both linear in metersPerPixel when widthIsPixels=true, constant otherwise).
+        // Offset and width must share the same conversion path, so that offsetM(z1)/offsetM(z2) ==
+        // widthM(z1)/widthM(z2) at two zooms (both linear in metersPerPixel when widthIsPixels=true,
+        // constant otherwise).
 
         /// <summary>
         /// Converts an offset from its source unit to world meters, mirroring the

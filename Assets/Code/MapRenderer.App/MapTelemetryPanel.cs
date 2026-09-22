@@ -6,18 +6,18 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// S85: a dev/debug readout surface for the map's telemetry — mirrors <see cref="CameraControlPanel"/>'s
-    /// shape (serialized read-only display fields, overwritten every frame). Reports only; never a control
-    /// knob (decision 8) — no field here is ever read back into the map.
+    /// A dev/debug readout surface for the map's telemetry — mirrors <see cref="CameraControlPanel"/>'s
+    /// shape (serialized read-only display fields, overwritten every frame). Reports only, never a control
+    /// knob: no field here is ever read back into the map.
     ///
     /// <para><b>A telemetry CONSUMER, and off by default</b> (<c>docs/telemetry-design.md</c>): it PULLS each
     /// provider's levels while enabled and does not <c>Update</c> at all while disabled, so a disabled panel
     /// costs the frame nothing. That matters because writing these live public fields forces an Editor repaint
-    /// every frame, which is exactly the cost that confounded a real measurement (§1.3). Enable it when you want
-    /// the readout; leave it off while profiling.</para>
+    /// every frame, and that cost confounds a real measurement. Enable it when you want the readout; leave
+    /// it off while profiling.</para>
     ///
     /// <para><b>Play-mode only:</b> <see cref="MapView"/> is constructed only on the runtime
-    /// runtime wiring/startup path, so in edit mode there is nothing to read yet.
+    /// wiring/startup path, so in edit mode there is nothing to read yet.
     /// <see cref="Pull"/> runs per frame and no-ops cleanly until the view exists — the same guard
     /// <see cref="CameraControlPanel"/> uses. Nothing has to notice that <c>SetCamera</c> replaced the view,
     /// because a pull reads whatever <c>Map.View</c> is at that moment.</para>
@@ -82,7 +82,7 @@ namespace MapRenderer.App
         [Tooltip("Lifetime count of genuine (non-cancellation) fetch errors.")]
         public int FetchErrorCount;
 
-        [Header("S82: Prepared-tile cache utilization (live — overwritten each frame)")]
+        [Header("Prepared-tile cache utilization (live — overwritten each frame)")]
         [Tooltip("Master toggle for the PreparedTileCache (PreparedTileCacheConfig.Enabled). False means " +
                  "every revisit re-fetches/re-builds/re-uploads — hits are always 0 in that state.")]
         public bool PreparedCacheEnabled;
@@ -114,7 +114,7 @@ namespace MapRenderer.App
         [Tooltip("Cumulative LRU evictions (an entry destroyed because the byte budget or count cap was exceeded).")]
         public int PreparedCacheEvictions;
 
-        [Header("S105: Symbol labels — STORE (published by SymbolSubsystem)")]
+        [Header("Symbol labels — STORE (published by SymbolSubsystem)")]
         [Tooltip("Active (in-cover) label-tile count — tiles whose labels feed this frame's placement pass.")]
         public int SymbolActiveTiles;
 
@@ -126,7 +126,7 @@ namespace MapRenderer.App
                  "coverage threshold; D1 keeps them resident but masked out of placement). Tune SymbolTileCoverageCull.")]
         public int SymbolCoverageDropped;
 
-        [Header("S105: Symbol labels — PLACEMENT (published by SymbolPlacementSystem)")]
+        [Header("Symbol labels — PLACEMENT (published by SymbolPlacementSystem)")]
         [Tooltip("Symbols fed into the last placement Tick (before projection cull) — sum over active tiles.")]
         public int SymbolInputCount;
 

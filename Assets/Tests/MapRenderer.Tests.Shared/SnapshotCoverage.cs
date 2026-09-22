@@ -44,7 +44,7 @@ namespace MapRenderer.Tests
         ///   - not uniform (not a single flat colour)
         ///   - fill fraction in the expected band [minFill, maxFill]
         ///   - spatial spread: at least minBuckets grid cells contain fill pixels.
-        /// Thresholds are deliberately wide (10–85%, 8 of 64 buckets) to be GPU/driver/Unity-tolerant.
+        /// Thresholds are wide (10–85%, 8 of 64 buckets) to stay GPU/driver/Unity-tolerant.
         /// </summary>
         public bool Passes(
             float minFill    = 0.10f,
@@ -235,7 +235,7 @@ namespace MapRenderer.Tests
         }
 
         // ─────────────────────────────────────────────────────────────────────────────
-        // S07 — region samplers for the multi-layer draw-order snapshot test.
+        // Region samplers for the multi-layer draw-order snapshot test.
         //
         // The painter's-algorithm reorder test samples a fixed screen rectangle where two
         // layers overlap, then asserts (a) the top layer's colour dominates the region mean
@@ -292,7 +292,7 @@ namespace MapRenderer.Tests
         /// (each normalised to [0,1] before squaring). A flat, single-colour region → ~0; a speckled /
         /// z-fighting region → noticeably positive. Empty region returns 0.
         ///
-        /// Used by the S07 reorder snapshot to assert a CLEAN composite (no coplanar z-fight): a coplanar
+        /// Used by the reorder snapshot to assert a CLEAN composite (no coplanar z-fight): a coplanar
         /// ZWrite-On stack would alternate between two layers' colours per pixel and inflate this value;
         /// the ZWrite-Off painter's stack composites flat → near-zero.
         /// </summary>

@@ -1,7 +1,7 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
 // Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
 //
-// Stays its own file (UMR-176): its `using MapRenderer.Core.Style.Line;` (a namespace import, for
+// Stays its own file: its `using MapRenderer.Core.Style.Line;` (a namespace import, for
 // LineOffset) brings `MapRenderer.Core.Style.Line.StyleLayer` into scope, colliding with the bare
 // `StyleLayer` (MapRenderer.Core.Style.StyleLayer) used elsewhere in StyleTests.cs (CS0104) — see
 // docs/conventions-short.md's "Plain-import collisions" note.
@@ -18,7 +18,7 @@ using MapRenderer.Core.Style.Line;
 namespace MapRenderer.Tests.Style
 {
     /// <summary>
-    /// S44 — <see cref="LineOffset"/>: perpendicular band-center shift, sign/symmetry,
+    /// <see cref="LineOffset"/>: perpendicular band-center shift, sign/symmetry,
     /// zoom coupling, width independence, join cleanliness, and shader structure guard.
     ///
     /// All decisive teeth are CPU-side via <see cref="LineOffset.Displace"/> over
@@ -358,19 +358,18 @@ namespace MapRenderer.Tests.Style
             // into outerM (the magnitude), both sides widen symmetrically and ALL of teeth 1/2/4
             // would pass on the CPU but fail on the GPU. The greppable HLSL assertion catches it.
             //
-            // S67: The offset term moved from Line_LitForwardPass.hlsl (inline) into
-            // Line_VertexExtrude.hlsl (shared helper). We assert it is there — still one site,
-            // consumed by all five line passes. Same assertion strength, correct file.
+            // The offset term lives in Line_VertexExtrude.hlsl (a shared helper) — one site, consumed by all
+            // five line passes.
 
-            // S67: extrusion logic (including the S44 offset term) lives in Line_VertexExtrude.hlsl (shared,
+            // Extrusion logic (including the offset term) lives in Line_VertexExtrude.hlsl (shared,
             // resolved by name — move-proof).
             string hlsl = File.ReadAllText(EngineFreeShaderPaths.ResolveMapShaderPath("Line_VertexExtrude.hlsl"));
 
-            // The S44 offset term must reference sideAndDist.x (the per-vertex side value).
+            // The offset term must reference sideAndDist.x (the per-vertex side value).
             // This is the structural guarantee that the offset shifts the band CENTER,
             // not the half-width (which would be a symmetric widening, failing teeth 1/2/4).
             Assert.That(hlsl, Does.Contain("sideAndDist.x * (miter * _LineOffset * pxToWorld)"),
-                "Line_VertexExtrude.hlsl S44 offset term must multiply by sideAndDist.x " +
+                "Line_VertexExtrude.hlsl offset term must multiply by sideAndDist.x " +
                 "to achieve a side-consistent shift (band center shift, not symmetric widening). " +
                 "Grep: 'sideAndDist.x * (miter * _LineOffset * pxToWorld)'");
 

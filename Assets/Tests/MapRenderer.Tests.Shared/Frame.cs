@@ -3,14 +3,12 @@ using UnityEngine;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// A decoded RGBA32 pixel buffer that knows its own shape — replaces the <c>byte[] pixels, int width,
-    /// int height</c> triple threaded through every pixel-reading test helper.
+    /// A decoded RGBA32 pixel buffer that knows its own shape.
     ///
     /// <para>Row-major, <b>BOTTOM-left origin</b>: row 0 is the BOTTOM scanline, row index grows UPWARD on
     /// screen. This is Unity's native <c>Texture2D.GetPixels32()</c>/<c>ReadPixels</c> convention (see
-    /// <see cref="SnapshotRenderer.Pixels"/>); the doc here said "top-left" until P5, which is backwards
-    /// and cost a debugging round on <c>FillTranslateSnapshotTests</c> — a vertical-direction assertion
-    /// must read this as bottom-up.</para>
+    /// <see cref="SnapshotRenderer.Pixels"/>). A vertical-direction assertion must read this as
+    /// bottom-up.</para>
     /// </summary>
     public readonly struct Frame
     {

@@ -15,8 +15,8 @@ namespace MapRenderer.Core.Text
     {
         /// <summary>
         /// Looks up the horizontal advance (glyph-PBF pixel units) and the resolved atlas font id for
-        /// <paramref name="codepoint"/>. Returns false for a codepoint found nowhere in the stack (S18
-        /// Slice 3 policy: the shaper then uses 0 rather than throwing — see <see cref="CodepointTextShaper"/>).
+        /// <paramref name="codepoint"/>. Returns false for a codepoint found nowhere in the stack; the
+        /// shaper then uses 0 rather than throwing — see <see cref="CodepointTextShaper"/>.
         /// </summary>
         bool TryResolveGlyph(uint codepoint, out float advance, out int fontId);
     }

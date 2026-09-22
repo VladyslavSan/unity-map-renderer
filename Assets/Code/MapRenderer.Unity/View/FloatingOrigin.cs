@@ -7,8 +7,8 @@ namespace MapRenderer.Unity.View
     /// <summary>
     /// Two-level Relative-To-Center (RTC) / floating-origin math (pure, engine-free). This is the
     /// machinery that keeps world-scale Web-Mercator coordinates (±20,037,508 m) inside float32's usable
-    /// precision so a panned/zoomed/tilted scene does not jitter (ARCHITECTURE §"floating origin", docs
-    /// coordinates §5).
+    /// precision so a panned/zoomed/tilted scene does not jitter (ARCHITECTURE "floating origin",
+    /// <c>docs/coordinates-and-projections.md</c>).
     ///
     /// <para><b>The two levels — and where each is applied:</b></para>
     /// <list type="number">
@@ -35,14 +35,13 @@ namespace MapRenderer.Unity.View
     /// rendered magnitude stays within the float32 ULP budget (≈ 8.4 km ⇒ sub-mm) by a wide margin.</para>
     ///
     /// <para>All inputs/outputs are Web-Mercator meters except <see cref="TileLocalToScene"/>, which
-    /// returns the small float32 render-space offset (east=+X, height=+Y, north=+Z per docs §7).</para>
+    /// returns the small float32 render-space offset (east=+X, height=+Y, north=+Z).</para>
     /// </summary>
     public static class FloatingOrigin
     {
         /// <summary>
         /// The Mercator min-corner of a tile — the origin that <c>ProjectPointsJob</c> bakes mesh
-        /// vertices relative to. (Matches <c>MapFillBootstrap</c>/<c>JobifiedPipelineTests</c> which pass
-        /// <c>TileId.MercatorBounds().min</c> as the projection origin.)
+        /// vertices relative to.
         /// </summary>
         public static double2 TileLocalOriginMercator(TileId tile)
         {
@@ -52,7 +51,7 @@ namespace MapRenderer.Unity.View
 
         /// <summary>
         /// The tile GameObject's local position in render space: <c>(tileOrigin − sceneOrigin)</c> cast to
-        /// float32. Small and near the camera once the scene origin is rebased. Mapping per docs §7:
+        /// float32. Small and near the camera once the scene origin is rebased. Mapping:
         /// Mercator east → +X, north → +Z, height → +Y (fills are flat on XZ).
         /// </summary>
         public static float3 TileLocalToScene(double2 tileOriginMerc, double2 sceneOriginMerc)
@@ -63,7 +62,7 @@ namespace MapRenderer.Unity.View
         }
 
         /// <summary>
-        /// Projection-agnostic generalization of <see cref="TileLocalToScene"/> (S91-C): the tile
+        /// Projection-agnostic generalization of <see cref="TileLocalToScene"/>: the tile
         /// GameObject's local <b>position</b> in render space when the scene is rebased into the look-at's
         /// local ENU frame — the placement that makes ONE camera-orbit pose
         /// (<c>CameraPoseMath.ComputeRelativePose</c>, look-at at the render origin, up=+Y) work for BOTH the plane

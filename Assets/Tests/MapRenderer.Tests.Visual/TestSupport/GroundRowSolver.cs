@@ -20,14 +20,14 @@ namespace MapRenderer.Tests
         /// returns — NOT a pixel index. Both spaces have a bottom-left origin and grow upward, so there is no flip;
         /// they differ by exactly half a pixel, because pixel index j's CENTRE is at screen-y j + 0.5. Callers
         /// measuring on SnapshotRenderer.Pixels (row 0 = bottom scanline) must add that 0.5 themselves.
-        /// Half a pixel is not a rounding detail here: at the T-S1 pose the two band edges sit at local scales of
-        /// 763 and 347 metres per screen pixel, so a uniform half-row error fabricates a 1.7 % asymmetry — the same
-        /// size as the effect S111 removes, and in the same direction.</para>
+        /// Half a pixel is not a rounding detail here: at the tilted pose the two band edges sit at local scales
+        /// of 763 and 347 metres per screen pixel, so a uniform half-row error fabricates a 1.7 % asymmetry —
+        /// the same size and direction as the foreshortening defect these fixtures measure.</para>
         ///
-        /// <para>The bracket is a PAIR, not a symmetric ±: a target far from the look-at needs a wide bracket on one
-        /// side while the other must stay in front of the camera. At the S111 pose the camera plane crosses the
-        /// ground at z ≈ −165 501 m, and WorldToScreenPoint returns a mirrored, non-monotone y beyond it, which
-        /// would void the bisection silently.</para></summary>
+        /// <para>The bracket is a PAIR, not a symmetric ±: a target far from the look-at needs a wide bracket on
+        /// one side while the other must stay in front of the camera. At the tilted pose the camera plane
+        /// crosses the ground at z ≈ −165 501 m, and WorldToScreenPoint returns a mirrored, non-monotone y
+        /// beyond it, which would void the bisection silently.</para></summary>
         internal static double SolveWorldZForRow(
             Camera camera, double targetScreenY, double loMetres, double hiMetres)
         {

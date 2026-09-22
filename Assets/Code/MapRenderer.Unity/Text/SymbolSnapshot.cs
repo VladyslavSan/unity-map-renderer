@@ -1,7 +1,6 @@
-// Unity-side (holds SymbolTileBlock refs — Core stays engine-free). No longer engine-free itself: the
-// reader cutover (symbols-async-reconcile stage 4.2) retypes TileSlice.Block/OrderedBlocks from
-// System.IDisposable to the concrete Unity.Collections-backed SymbolTileBlock, so this file left the
-// core-tests.csproj fast loop (still compiled + run by the Unity EditMode runner).
+// Unity-side (holds SymbolTileBlock refs — Core stays engine-free). Not engine-free itself:
+// TileSlice.Block/OrderedBlocks are the concrete Unity.Collections-backed SymbolTileBlock, so this file is
+// outside the core-tests.csproj fast loop (still compiled + run by the Unity EditMode runner).
 
 using System;
 using System.Collections.Generic;
@@ -11,18 +10,19 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// Stage 4b (symbols-async-reconcile): the IMMUTABLE main-thread snapshot the off-main
+    /// The IMMUTABLE main-thread snapshot the off-main
     /// <see cref="SymbolReconciler"/> reads. Captured on a SCHEDULE frame by
     /// <see cref="SymbolTileStore.CaptureSnapshot"/> (main thread), it holds each collected tile's baked
     /// native block + whether the tile is departing. The worker reads these <b>off-thread</b>; each slice's
     /// own <see cref="SharedDisposable{T}"/> reference (see <see cref="SymbolSnapshot.Add"/>) keeps every
     /// referenced <see cref="TileSlice.Block"/> alive until the snapshot leaves service, so the off-thread reads
-    /// are never a use-after-free (design §3.2).
+    /// are never a use-after-free (`docs/labels-async-reconcile-design.md`, the input-snapshot and
+    /// native-block lifetime contract).
     ///
     /// <para><b>Reused, alloc-light.</b> <see cref="Slices"/> is reused across captures — <see cref="Clear"/>
     /// releases and resets the count (so a disposed block is never held past a capture), <see cref="Add"/> fills
     /// a pooled <see cref="TileSlice"/> in place. Off the per-frame path (capture happens only on a tile-event
-    /// frame), but kept low-alloc anyway per the design's GC caveat (§4).</para>
+    /// frame), but kept low-alloc anyway.</para>
     /// </summary>
     internal sealed class SymbolSnapshot
     {
@@ -84,16 +84,15 @@ namespace MapRenderer.Unity.Text
     }
 
     /// <summary>
-    /// Stage 4b (symbols-async-reconcile): the off-main reconcile OUTPUT — the deduped winner set the main
+    /// The off-main reconcile OUTPUT — the deduped winner set the main
     /// thread consumes (coverage-classify → <c>SymbolGatherPlan.Build</c>) once picked up. All lists are
     /// reused; the double-buffer swaps this whole object front/back so a completed worker fills the BACK
-    /// result while the main thread reads the stable FRONT (design §2). Byte-identical (order + membership +
-    /// the plan arrays) to the store's inline <c>CollectInto</c>.
+    /// result while the main thread reads the stable FRONT (`docs/labels-async-reconcile-design.md`). Byte-identical (order + membership + the plan
+    /// arrays) to the store's inline <c>CollectInto</c>.
     ///
-    /// <para><b>Reader cutover (4.2):</b> winner identity is now purely <c>(BlockId[i], LocalIndex[i])</c> —
-    /// there is no managed symbol list to hand back (<see cref="SymbolGatherPlan.Build"/> reads only the
-    /// count). <c>Output</c> is gone: <see cref="MapRenderer.Unity.Text.Placement.SymbolGatherPlan.Build"/>
-    /// is the sole production reader and it only ever needed <c>BlockId.Count</c>.</para>
+    /// <para>Winner identity is purely <c>(BlockId[i], LocalIndex[i])</c> — there is no managed symbol list
+    /// to hand back. <see cref="MapRenderer.Unity.Text.Placement.SymbolGatherPlan.Build"/> is the sole
+    /// production reader and only needs <c>BlockId.Count</c>.</para>
     /// </summary>
     internal sealed class SymbolReconcileResult
     {

@@ -1,6 +1,6 @@
 // Engine-free: no UnityEngine dependency.
 // Construction convention: object initializer with named members.
-// BLITTABLE: this struct crosses into the S19/S20 Burst jobs as a NativeArray<PositionedGlyph> element
+// BLITTABLE: this struct crosses into the Burst jobs as a NativeArray<PositionedGlyph> element
 // at the MapRenderer.Jobs boundary (the same Core-defines-the-struct/Jobs-creates-the-NativeArray
 // pattern LineRibbonVertex/GeoCoordinate/GlyphAtlasEntry already use) — keep it to blittable scalar
 // fields only: no byte[], no string, no reference types.
@@ -32,13 +32,13 @@ namespace MapRenderer.Core.Text
         /// <summary>Horizontal pen advance to the next glyph, in the glyph-PBF's pixel units.</summary>
         public float XAdvance { get; init; }
 
-        /// <summary>Vertical pen advance (0 for horizontal-only shaping — S18 Slice 3 does not shape vertical text).</summary>
+        /// <summary>Vertical pen advance (0 — the shaper does not shape vertical text).</summary>
         public float YAdvance { get; init; }
 
-        /// <summary>Per-glyph horizontal offset from the pen position (0 — Option Y has no GPOS-style kerning).</summary>
+        /// <summary>Per-glyph horizontal offset from the pen position (0 — no GPOS-style kerning).</summary>
         public float XOffset { get; init; }
 
-        /// <summary>Per-glyph vertical offset from the pen position (0 — Option Y has no GPOS-style kerning).</summary>
+        /// <summary>Per-glyph vertical offset from the pen position (0 — no GPOS-style kerning).</summary>
         public float YOffset { get; init; }
 
         /// <summary>

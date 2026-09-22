@@ -6,7 +6,7 @@ using NUnit.Framework;
 
 namespace MapRenderer.Tests.Expressions
 {
-    /// <summary>S09 — math category (Style Spec "Math").</summary>
+    /// <summary>Math category (Style Spec "Math").</summary>
     [TestFixture]
     public class MathOpTests
     {

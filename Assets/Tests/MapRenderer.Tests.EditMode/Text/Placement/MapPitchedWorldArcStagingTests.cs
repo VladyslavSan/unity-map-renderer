@@ -5,12 +5,12 @@
 // Contents:
 //   CollisionGridContractTests      — Unit-level contract teeth for the collision grid, kept independently of the placement tests that also exercise it (see the note at SymbolPlacementSystem.cs:732).
 //   CollisionJobPlacementTests      — CollisionJob's placement teeth: named/permutation-invariant/sort-key-driven survivor sets over hand-built scenes, plus AssertGreedyContract exercised over adversarial random scenes (wide boxes, the MaxGridDim cell-enlargement path, dense clusters, and…
-//   CrossTileIdentityStoreTests     — A-3: cross-tile point-symbol identity — SymbolTileStore's dedup (the store-level half of CrossTileIdentityTests, moved here at the reader cutover, 4.2 — see that file's header).
-//   HorizonCullGatherTests          — S3: the globe far-side horizon cull as a GatherSymbolPoints fade trigger (peer of the tile/ distance/departing culls) — a two-sided EditMode proof over a REAL SphericalProjection MapCamera.
+//   CrossTileIdentityStoreTests     — cross-tile point-symbol identity — SymbolTileStore's dedup (the store-level half of CrossTileIdentityTests — see that file's header).
+//   HorizonCullGatherTests          — the globe far-side horizon cull as a GatherSymbolPoints fade trigger (peer of the tile/ distance/departing culls) — a two-sided EditMode proof over a REAL SphericalProjection MapCamera.
 //   IconSkirtCarrierChainTests      — The icon skirt's CARRIER CHAIN, driven end to end from a genuinely padded SpriteAtlasView: SymbolFeatureExtractor (computes IconQuadLayout.SkirtPx) → SymbolFeature.IconSkirtPx → StyledSymbolTileBuilder → the point symbol's Layout.Bounds* and the along-line…
-//   MapPitchedWorldArcStagingTests  — W3 / Stage AC / GLOBE-A: curved (along-line) symbol staging under a genuinely pitched camera and, for GLOBE-A, a non-zero-axial on-sphere arc — catches a metres-vs-pixels sign confusion a straight path is blind to.
-//   ShapedSymbolBlittabilityTests   — UMR-87: ShapedSymbol must live in a NativeArray{T} — the whole point of interning its Text/IconImage strings into TextId/IconImageId ints.
-//   StyledSymbolTileBuilderTests    — S105 Slice 3 (A4) — THE decisive test: a parsed symbol layer + the real fixture tile, run through StyledSymbolTileBuilder produces the expected set of shaped ShapedSymbols.
+//   MapPitchedWorldArcStagingTests  — curved (along-line) symbol staging under a genuinely pitched camera and, for GLOBE-A, a non-zero-axial on-sphere arc — catches a metres-vs-pixels sign confusion a straight path is blind to.
+//   ShapedSymbolBlittabilityTests   — ShapedSymbol must live in a NativeArray{T} — the whole point of interning its Text/IconImage strings into TextId/IconImageId ints.
+//   StyledSymbolTileBuilderTests    — THE decisive test: a parsed symbol layer + the real fixture tile, run through StyledSymbolTileBuilder produces the expected set of shaped ShapedSymbols.
 
 using NUnit.Framework;
 using Unity.Collections;
@@ -198,7 +198,7 @@ namespace MapRenderer.Tests.Text.Placement
             finally { boxes.Dispose(); cands.Dispose(); ns.Dispose(); outCount.Dispose(); }
         }
 
-        // The hazard the differential used to hold implicitly (§3.1.1): the caller pre-sizes the grid node
+        // The hazard the differential used to hold implicitly: the caller pre-sizes the grid node
         // storage and a Burst job cannot grow it, so an under-count silently drops blocker inserts — a
         // candidate isn't blocked, and wrong survivors follow with no crash to notice. Directly observable
         // with no mirroring of the job's cell mapping: CellHead/NodeBox/NodeNext are plain public
@@ -309,7 +309,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// <see cref="CollisionJob"/>'s placement teeth: named/permutation-invariant/sort-key-driven survivor
     /// sets over hand-built scenes, plus <see cref="NativeCollisionRunner.AssertGreedyContract"/> exercised
     /// over adversarial random scenes (wide boxes, the <c>MaxGridDim</c> cell-enlargement path, dense
-    /// clusters, and Stage C's per-box optional mask). Every named-set assertion is OUTCOME-based (WHICH
+    /// clusters, and the per-box optional mask). Every named-set assertion is OUTCOME-based (WHICH
     /// symbols survive, by <see cref="SymbolCandidate.SymbolIndex"/> — not a count).
     /// </summary>
     [TestFixture]
@@ -566,7 +566,7 @@ namespace MapRenderer.Tests.Text.Placement
                 "the two curved symbols place (disjoint regions); the two points overlapping their glyphs are dropped; the far point always places");
         }
 
-        // ── C6 (stage C) ──────────────────────────────────────────────────────────────────────────────────
+        // ── C6 ────────────────────────────────────────────────────────────────────────────────────────────
         // Two-box PAIR candidates whose halves OVERLAP BY CONSTRUCTION (what a centred icon+text pair is),
         // each carrying a random OptionalBoxMask, interleaved with ordinary single-box candidates in a
         // congested region so most halves actually contend. AssertGreedyContract's exact DroppedBoxMask
@@ -703,16 +703,16 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// A-3: cross-tile point-symbol identity — <see cref="SymbolTileStore"/>'s dedup (the store-level half of
-    /// <c>CrossTileIdentityTests</c>, moved here at the reader cutover, 4.2 — see that file's header).
+    /// Cross-tile point-symbol identity — <see cref="SymbolTileStore"/>'s dedup (the store-level half of
+    /// <c>CrossTileIdentityTests</c>, moved here at the reader cutover — see that file's header).
     ///
-    /// <para><b>Stage 3:</b> the store dedup no longer takes a caller grid — it keys on the fixed
+    /// <para>The store dedup does not take a caller grid — it keys on the fixed
     /// <see cref="CrossTileSymbolKey.CanonicalGridMeters"/> (4 m), so the cases below pass a gate <c>q</c> whose
     /// MAGNITUDE the store ignores; their anchors are spaced to merge/split under the fixed 4 m grid: (3) a
     /// symbol present in both a parent and child tile dedups to ONE, finest-zoom wins; (4) different text in the
     /// same cell does NOT merge; (5) line symbols are not deduped.</para>
     ///
-    /// <para><b>Retired (4.2), not converted:</b> the pre-cutover file also had a <c>Store_QuantizeDisabled_EmitsEverything</c>
+    /// <para><b>Retired at the cutover, not converted:</b> the pre-cutover file also had a <c>Store_QuantizeDisabled_EmitsEverything</c>
     /// case pinning "<c>quantizeMeters</c> ≤ 0 disables dedup, both copies emitted". The reader cutover's
     /// <see cref="SymbolTileStore.CollectInto(List{int},List{int},List{byte},double,out int)"/> is the ONLY
     /// surviving overload and it has no no-dedup branch left (the plan-aware shim already always ran the
@@ -767,7 +767,7 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void Store_ParentAndChildSameSymbol_DedupToFinest()
         {
-            const double q = 50.0; // Stage 3: the store IGNORES this magnitude — it grids on the fixed 4 m; q only gates dedup ON.
+            const double q = 50.0; // The store IGNORES this magnitude — it grids on the fixed 4 m; q only gates dedup ON.
             double3 anchor = new double3(5000.0, 0, 5000.0); // a CanonicalGridMeters=4 cell centre (5000 = 4·1250)
             var parent = new TileId { Z = 10, X = 500, Y = 400 };
             var child = new TileId { Z = 11, X = 1000, Y = 800 };
@@ -830,9 +830,9 @@ namespace MapRenderer.Tests.Text.Placement
             store.Clear();
         }
 
-        // ── UMR-87: CrossTileSymbolKey.cs's own claim, observed directly (not just via the reconciler's
+        // ── CrossTileSymbolKey.cs's own claim, observed directly (not just via the reconciler's
         //    winner-selection parity above, which proves it only indirectly). CrossTileSymbolKey.For (string-
-        //    keyed) and DedupKey.For (int-keyed, UMR-87's PointFadeId/reconciler identity) MUST grid to the
+        //    keyed) and DedupKey.For (int-keyed, the PointFadeId/reconciler identity) MUST grid to the
         //    IDENTICAL (GridX, GridZ, GridY) for the same anchor — both call the ONE shared
         //    CrossTileSymbolKey.QuantizeAnchor. This is a STRUCTURAL guarantee today (one code path), but a
         //    future edit could silently fork the two `For` implementations; this pins the field values so that
@@ -858,7 +858,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S3: the globe far-side horizon cull as a <c>GatherSymbolPoints</c> fade trigger (peer of the tile/
+    /// The globe far-side horizon cull as a <c>GatherSymbolPoints</c> fade trigger (peer of the tile/
     /// distance/departing culls) — a two-sided EditMode proof over a REAL <see cref="SphericalProjection"/>
     /// <see cref="MapCamera"/>. Teeth:
     /// <list type="bullet">
@@ -911,7 +911,7 @@ namespace MapRenderer.Tests.Text.Placement
                 paint: SymbolPaint.Default, textSizePx: 24f, paddingPx: 2f, sortKey: 0f, text: text,
                 featureIndex: feature, tileKey: 0L);
 
-        // Epic A / A1: point symbols draw through the WORLD path now — see SymbolFadeTests.MaxAlpha's identical
+        // Point symbols draw through the WORLD path — see SymbolFadeTests.MaxAlpha's identical
         // header for the full rationale (fade opacity rides the world slot's stream-1 Opacity, not
         // system.Mesh's vertex-colour alpha).
         private static float MaxAlpha(SymbolPlacementSystem system, long tileKey = 0L)
@@ -952,7 +952,7 @@ namespace MapRenderer.Tests.Text.Placement
                 View = component.View;
 
                 Atlas = BuildTinyAtlasTexture();
-                // Epic A / A1: point symbols now draw through the world path — the demo tick needs its own
+                // Point symbols draw through the world path — the demo tick needs its own
                 // world base material for a live opacity read (see MaxAlpha's header).
                 System = new SymbolPlacementSystem(Camera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             }
@@ -1002,7 +1002,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.AreEqual(0, h.System.LastQuadCount, "a fresh far-side anchor produces no geometry (hard-skip)");
             Assert.AreEqual(0, h.System.LastCandidateCount, "…and never enters the collision pass");
-            Assert.AreEqual(1, h.System.LastHorizonCulledCount, "…attributed to the S3 horizon cull");
+            Assert.AreEqual(1, h.System.LastHorizonCulledCount, "…attributed to the horizon cull");
             Assert.AreEqual(0, h.System.LastDistanceCulledCount, "the B-3 radius must not preempt the horizon trigger here");
         }
 
@@ -1080,7 +1080,7 @@ namespace MapRenderer.Tests.Text.Placement
             AddPoint(buffer, anchor, "A", 0);
 
             // 1) The camera looks straight at the anchor — visible, snaps to full opacity (default deltaTime).
-            // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+            // Duplicate — the collision verdict is harvested one Tick late.
             SceneFrame frame1 = h.Frame();
             h.System.TickSymbols(in frame1, buffer, h.Atlas, h.Camera.Projection);
             h.System.TickSymbols(in frame1, buffer, h.Atlas, h.Camera.Projection);
@@ -1133,9 +1133,9 @@ namespace MapRenderer.Tests.Text.Placement
     public class IconSkirtCarrierChainTests
     {
 
-        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// <summary>A synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
         /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
-        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        /// leak would be invisible, which is the failure class this fixture exists to catch.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private const int Padding = 1;
@@ -1354,11 +1354,11 @@ namespace MapRenderer.Tests.Text.Placement
         };
 
         /// <summary>
-        /// Stages one symbol. <paramref name="view"/> defaults to <c>default(SymbolViewTransform)</c> — W3's
-        /// "no camera was supplied" state, which keeps the pre-W3 SCREEN collision box byte-identical — so
-        /// every W1/W2 caller above is untouched by W3 and its expectations still describe the same code.
+        /// Stages one symbol. <paramref name="view"/> defaults to <c>default(SymbolViewTransform)</c> — the
+        /// "no camera was supplied" state, which keeps the SCREEN collision box byte-identical, so every
+        /// caller above still describes the same code.
         /// <paramref name="worldUpPathOverride"/> likewise defaults to the all-zero up path these fixtures
-        /// have always passed (a degenerate ground frame, W3-T6's subject).
+        /// have always passed (a degenerate ground frame, Projected-T6's subject).
         /// </summary>
         private static int Stage(in CurvedStageInput s, float2[] screenPath, double3[] worldPath,
             CurvedGlyph[] glyphs, LineAnchor[] anchors, ref Pools p, float[] depthPathOverride = null,
@@ -1379,11 +1379,11 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W1-T6 — R5a's observing tooth: the screen point of a WORLD parameter is the AFFINE lerp.
+        // Arc-T6 — R5a's observing tooth: the screen point of a WORLD parameter is the AFFINE lerp.
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W1-T6 — the observer for the recorded R5a limitation.</b> Proves: under the world arc walk,
+        /// <b>Arc-T6 — the observer for the recorded R5a limitation.</b> Proves: under the world arc walk,
         /// <c>AtWithSegment</c> maps a resolved <c>(seg, t)</c> to the screen with a plain AFFINE
         /// <c>lerp(path[seg], path[seg+1], t)</c>, and NOT with the perspective-correct screen parameter
         /// <c>t' = t·w₁ / ((1−t)·w₀ + t·w₁)</c> — the WORLD→SCREEN map, whose inverse (the familiar
@@ -1409,8 +1409,8 @@ namespace MapRenderer.Tests.Text.Placement
         /// tooth cannot pass by coincidence on a degenerate geometry.</para>
         ///
         /// <para>Single-segment on purpose: a lone segment resolves <c>t = 0.5</c> under BOTH walks, so this
-        /// tooth pins the <c>(seg,t) → screen</c> MAPPING alone and is deliberately unaffected by injection I1
-        /// (kill the world branch). Anyone who implements <c>t'</c> turns it RED and must delete the recorded
+        /// tooth pins the <c>(seg,t) → screen</c> MAPPING alone and is unaffected by an injection that kills
+        /// the world branch. Anyone who implements <c>t'</c> turns it RED and must delete the recorded
         /// limitation from <c>StageCurved</c>'s doc.</para>
         /// </summary>
         [Test]
@@ -1434,7 +1434,7 @@ namespace MapRenderer.Tests.Text.Placement
             var depthPathCarryingW = new[] { (float)w0, (float)w1 };
 
             int staged = Stage(in s, screenPath, worldPath, glyphs, anchors, ref p, depthPathCarryingW);
-            Assert.That(staged, Is.EqualTo(1), "W1-T6 precondition: the single-glyph label must stage.");
+            Assert.That(staged, Is.EqualTo(1), "Arc-T6 precondition: the single-glyph label must stage.");
 
             // The two candidate answers, both computed HERE from the fixture's own constants.
             double2 a0 = new double2(screenPath[0].x, screenPath[0].y);
@@ -1451,41 +1451,41 @@ namespace MapRenderer.Tests.Text.Placement
             // ½, so it alone cannot tell w₁/(w₀+w₁) from w₀/(w₀+w₁). On a receding segment (w₁ > w₀) the
             // world midpoint must project PAST the screen midpoint, toward the far endpoint.
             Assert.That(tPrime, Is.GreaterThan(0.5),
-                $"W1-T6 precondition: on a receding segment (w₀={w0:F0} < w₁={w1:F0}) the perspective-correct " +
+                $"Arc-T6 precondition: on a receding segment (w₀={w0:F0} < w₁={w1:F0}) the perspective-correct " +
                 $"parameter must exceed the affine ½ — reads {tPrime:F6}. A value below ½ means the formula " +
                 "has been transposed into the inverse screen→attribute map.");
 
             double2 staged0 = new double2(p.Quads[0].AnchorScreenPx.x, p.Quads[0].AnchorScreenPx.y);
             Assert.That(math.length(staged0 - affine), Is.LessThan(1e-3),
-                $"W1-T6: the staged screen anchor must be the AFFINE lerp at the world parameter — staged " +
+                $"Arc-T6: the staged screen anchor must be the AFFINE lerp at the world parameter — staged " +
                 $"({staged0.x:F4}, {staged0.y:F4}) vs affine ({affine.x:F4}, {affine.y:F4}). This is the " +
                 "RECORDED R5a limitation; if you implemented the perspective-correct t', delete the " +
                 "limitation from StageCurved's doc rather than widening this bound.");
             Assert.That(separationPx, Is.EqualTo(50.0).Within(1e-6),
-                $"W1-T6 precondition: the perspective-correct answer must be a STATED distance away, or this " +
+                $"Arc-T6 precondition: the perspective-correct answer must be a STATED distance away, or this " +
                 $"tooth discriminates nothing — t'={tPrime:F6} against 0.5 on a 300 px segment is " +
                 $"{separationPx:F6} px (expected 50).");
             Assert.That(math.length(staged0 - perspectiveCorrect), Is.EqualTo(50.0).Within(1e-3),
-                $"W1-T6: the staged anchor must differ from the perspective-correct answer " +
+                $"Arc-T6: the staged anchor must differ from the perspective-correct answer " +
                 $"({perspectiveCorrect.x:F4}, {perspectiveCorrect.y:F4}) by the full 50 px — measured " +
                 $"{math.length(staged0 - perspectiveCorrect):F4} px.");
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W1-T7 — R5b's observing tooth: the max-angle gate stays on the SCREEN tangent.
+        // Arc-T7 — R5b's observing tooth: the max-angle gate stays on the SCREEN tangent.
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W1-T7 — the observer for the recorded R5b limitation.</b> Proves: a map-pitched symbol whose
+        /// <b>Arc-T7 — the observer for the recorded R5b limitation.</b> Proves: a map-pitched symbol whose
         /// SCREEN path is kinked past <c>text-max-angle</c> is DROPPED, even though its WORLD path is very
-        /// nearly straight. The gate answers "is the projected path too kinky to place a symbol on", and W1
-        /// deliberately leaves it there.
+        /// nearly straight. The gate answers "is the projected path too kinky to place a symbol on", and the world walk
+        /// leaves it there.
         ///
         /// <para>The control clause is what makes it non-vacuous: the SAME world path with a STRAIGHT screen
         /// path stages. So the drop is attributable to the screen kink and not to any other precondition of
         /// this geometry.</para>
         ///
-        /// <para>RED-verify: move the gate to the world tangent (injection I6) — the world bend is 2°, well
+        /// <para>RED-verify: move the gate to the world tangent — the world bend is 2°, well
         /// inside the 30° limit, so the kinked case would stage and this goes RED.</para>
         /// </summary>
         [Test]
@@ -1521,41 +1521,39 @@ namespace MapRenderer.Tests.Text.Placement
             int stagedStraight = Stage(in s, straightScreen, worldPath, glyphs, anchors, ref straightPools);
 
             Assert.That(stagedKinked == 0 && stagedStraight == 1, Is.True,
-                $"W1-T7: the max-angle gate must read the SCREEN tangent — the 90°-kinked screen path staged " +
+                $"Arc-T7: the max-angle gate must read the SCREEN tangent — the 90°-kinked screen path staged " +
                 $"{stagedKinked} candidates (expected 0, dropped) and the straight screen path over the SAME " +
                 $"world polyline staged {stagedStraight} (expected 1). The world path bends only 2°, so a " +
                 "gate moved onto world curvature would keep BOTH. If that move was deliberate, delete R5b " +
                 "from StageCurved's doc rather than relaxing this.");
             Assert.That(kinkedPools.QuadCount, Is.EqualTo(0),
-                $"W1-T7: a dropped anchor must roll its partial appends back — {kinkedPools.QuadCount} quads " +
+                $"Arc-T7: a dropped anchor must roll its partial appends back — {kinkedPools.QuadCount} quads " +
                 "were left behind.");
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W1-T8 / W1-T9 — the stage invariant and the degradation guard, as code properties.
+        // Arc-T8 / Arc-T9 — the stage invariant and the degradation guard, as code properties.
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W1-T8 — THE STAGE INVARIANT, AS A TEST.</b> Proves: a symbol whose resolved pitch alignment is
+        /// <b>Arc-T8 — THE STAGE INVARIANT, AS A TEST.</b> Proves: a symbol whose resolved pitch alignment is
         /// not <see cref="AlignmentMode.Map"/> cannot observe the new per-frame ruler AT ALL — its staged
         /// boxes and quads are BIT-identical with <c>MetresPerLogicalPixel</c> at 0, 1 and 10⁶, four orders of
         /// magnitude apart. Run for <see cref="AlignmentMode.Viewport"/> and for
-        /// <see cref="AlignmentMode.Auto"/> (the enum's zero value, which is what every hand-built pre-W1
+        /// <see cref="AlignmentMode.Auto"/> (the enum's zero value, which is what every hand-built
         /// fixture carries — the hinge the whole 2099-test invariant hangs on).
         ///
-        /// <para>This is what turns §1's invariant from a claim about the current test suite into a property
+        /// <para>This is what turns the invariant from a claim about the current test suite into a property
         /// of the code: a future symbol that resolves to viewport pitch cannot start moving because someone
         /// changed the ruler.</para>
         ///
-        /// <para>RED-verify: injection I7 (drop the <c>== AlignmentMode.Map</c> conjunct, so every symbol takes
+        /// <para>RED-verify: an injection that drops the <c>== AlignmentMode.Map</c> conjunct, so every symbol takes
         /// the world walk).</para>
         ///
-        /// <para><b>W2 discharged W1's followUp 1 — this tooth is no longer alone.</b> It used to be the SOLE
-        /// observer of the <c>PitchAlignment == Map</c> conjunct in the whole suite, so weakening it would
-        /// have left the predicate unobserved. W2 added a SECOND, independent consumer of the same
-        /// <c>worldArc</c> bool (<c>CandidateEmit.CornerMetresPerLogicalPixel</c>), watched by W2-T6's three
-        /// cases below and by W2-T7. They read the same predicate through a different output, so I7 now reds
-        /// several teeth rather than one.</para>
+        /// <para><b>Not the sole observer.</b> A SECOND, independent consumer of the same <c>worldArc</c>
+        /// bool (<c>CandidateEmit.CornerMetresPerLogicalPixel</c>) is watched by Ruler-T6's three cases below
+        /// and by Ruler-T7, so dropping the <c>PitchAlignment == Map</c> conjunct reds several teeth, not
+        /// just this one.</para>
         /// </summary>
         [Test]
         public void NonMapPitchedSymbol_CannotObserveTheRuler_AtAnyMagnitude()
@@ -1570,7 +1568,7 @@ namespace MapRenderer.Tests.Text.Placement
                     var p = Pools.New();
                     int staged = StageReferenceSymbol(mode, rulers[r], ref p);
                     Assert.That(staged, Is.EqualTo(1),
-                        $"W1-T8 precondition ({mode}, ruler {rulers[r]}): the reference label must stage.");
+                        $"Arc-T8 precondition ({mode}, ruler {rulers[r]}): the reference label must stage.");
                     quadBits[r] = Bits(p.Quads, p.QuadCount);
                     boxBits[r]  = Bits(p.Boxes, p.BoxCount);
                 }
@@ -1578,19 +1576,19 @@ namespace MapRenderer.Tests.Text.Placement
                 for (int r = 1; r < rulers.Length; r++)
                 {
                     AssertBitIdentical(quadBits[0], quadBits[r],
-                        $"W1-T8 ({mode}): PlacedQuads at MetresPerLogicalPixel={rulers[r]} differ from those " +
+                        $"Arc-T8 ({mode}): PlacedQuads at MetresPerLogicalPixel={rulers[r]} differ from those " +
                         $"at {rulers[0]}");
                     AssertBitIdentical(boxBits[0], boxBits[r],
-                        $"W1-T8 ({mode}): SymbolBoxes at MetresPerLogicalPixel={rulers[r]} differ from those " +
+                        $"Arc-T8 ({mode}): SymbolBoxes at MetresPerLogicalPixel={rulers[r]} differ from those " +
                         $"at {rulers[0]}");
                 }
             }
         }
 
         /// <summary>
-        /// <b>W1-T9 — the degradation guard.</b> Proves: a <see cref="AlignmentMode.Map"/> symbol whose
+        /// <b>Arc-T9 — the degradation guard.</b> Proves: a <see cref="AlignmentMode.Map"/> symbol whose
         /// per-frame ruler was never patched (<c>MetresPerLogicalPixel == 0</c>) stages BIT-identically to the
-        /// same symbol under <see cref="AlignmentMode.Viewport"/> — i.e. it falls back to the pre-W1 screen
+        /// same symbol under <see cref="AlignmentMode.Viewport"/> — i.e. it falls back to the screen
         /// walk rather than collapsing every glyph onto the anchor.
         ///
         /// <para>Without the <c>&gt; 0</c> conjunct, <c>arcScale</c> would be 0, every glyph's <c>arc</c>
@@ -1610,24 +1608,24 @@ namespace MapRenderer.Tests.Text.Placement
             int stagedViewport = StageReferenceSymbol(AlignmentMode.Viewport, 0f, ref viewportPools);
 
             Assert.That(stagedMap == 1 && stagedViewport == 1, Is.True,
-                $"W1-T9 precondition: both references must stage — map {stagedMap}, viewport {stagedViewport}.");
+                $"Arc-T9 precondition: both references must stage — map {stagedMap}, viewport {stagedViewport}.");
             // The glyphs must not have collapsed onto one point: that is the failure this guard prevents, and
             // asserting it separately means a bit-comparison that somehow matched a degenerate symbol still
             // fails here.
             float spreadPx = math.length(
                 mapPools.Quads[mapPools.QuadCount - 1].AnchorScreenPx - mapPools.Quads[0].AnchorScreenPx);
             Assert.That(spreadPx, Is.GreaterThan(1f),
-                $"W1-T9: an unpatched map-pitched label must still spread its glyphs along the path — first " +
+                $"Arc-T9: an unpatched map-pitched label must still spread its glyphs along the path — first " +
                 $"and last anchors are {spreadPx:F6} px apart, i.e. the label collapsed to a point.");
             AssertBitIdentical(Bits(mapPools.Quads, mapPools.QuadCount),
                 Bits(viewportPools.Quads, viewportPools.QuadCount),
-                "W1-T9: a map-pitched label with MetresPerLogicalPixel=0 must stage exactly as a viewport one");
+                "Arc-T9: a map-pitched label with MetresPerLogicalPixel=0 must stage exactly as a viewport one");
             AssertBitIdentical(Bits(mapPools.Boxes, mapPools.BoxCount),
                 Bits(viewportPools.Boxes, viewportPools.BoxCount),
-                "W1-T9: same, for the collision boxes");
+                "Arc-T9: same, for the collision boxes");
         }
 
-        /// <summary>The symbol T8/T9 compare across rulers: three glyphs on a plain two-vertex path, with the
+        /// <summary>The symbol Arc-T8/Arc-T9 compare across rulers: three glyphs on a plain two-vertex path, with the
         /// world span deliberately UNRELATED to the screen span (100 m vs 400 px) so that if the world walk
         /// ever did run here the difference would be enormous, not marginal.</summary>
         private static int StageReferenceSymbol(AlignmentMode pitch, float metresPerLogicalPixel, ref Pools p,
@@ -1648,11 +1646,11 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W1-T10 — R3's named trap: the chord probe's half-width is an ARC quantity.
+        // Arc-T10 — the named trap: the chord probe's half-width is an ARC quantity.
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W1-T10 — REQUIRED, and the only observer of R3's named trap.</b> Proves: on a map-pitched BENT
+        /// <b>Arc-T10 — REQUIRED, and the only observer of the named trap.</b> Proves: on a map-pitched BENT
         /// path, a glyph whose footprint straddles the interior vertex is rotated to the CHORD across that
         /// footprint — not to either raw segment angle.
         ///
@@ -1682,9 +1680,9 @@ namespace MapRenderer.Tests.Text.Placement
         /// (segment 0, <c>t = 0.7</c>) and 1700 m (segment 1, <c>t = (1700−1000)/2000 = 0.35</c>), and the
         /// chord across <c>lerp(P₀,P₁,0.7) → lerp(P₁,P₂,0.35)</c> is the answer.</para>
         ///
-        /// <para>RED-verify: injection I3 (leave <c>halfWidthArc</c> on the px scale) — confirm the injected
+        /// <para>RED-verify: an injection that leaves <c>halfWidthArc</c> on the px scale — confirm the injected
         /// build returns segment 1's raw angle, i.e. that the chord genuinely COLLAPSED rather than merely
-        /// shifting. Also RED under I1 (kill the world branch), per the geometry note above.</para>
+        /// shifting. Also RED when the world branch is killed, per the geometry note above.</para>
         /// </summary>
         [Test]
         public void MapPitched_GlyphStraddlingAVertex_RotatesToTheChord_NotARawSegmentAngle()
@@ -1714,7 +1712,7 @@ namespace MapRenderer.Tests.Text.Placement
             var p = Pools.New();
 
             int staged = Stage(in s, screenPath, worldPath, glyphs, anchors, ref p);
-            Assert.That(staged, Is.EqualTo(1), "W1-T10 precondition: the straddling glyph must stage.");
+            Assert.That(staged, Is.EqualTo(1), "Arc-T10 precondition: the straddling glyph must stage.");
 
             // The expected chord, derived here from the design constants (see this tooth's doc) — plain
             // lerps at the hand-derived parameters 0.7 and 0.35, no call into the arc math under test.
@@ -1727,22 +1725,22 @@ namespace MapRenderer.Tests.Text.Placement
             double stagedRad = p.Quads[0].RotationRadians;
 
             Assert.That(math.abs(expectedRad - segment0Rad), Is.GreaterThan(math.radians(15.0)),
-                $"W1-T10 precondition: the chord answer ({math.degrees(expectedRad):F3}°) must be well clear " +
+                $"Arc-T10 precondition: the chord answer ({math.degrees(expectedRad):F3}°) must be well clear " +
                 "of segment 0's raw angle, or the tooth cannot discriminate.");
             Assert.That(math.abs(expectedRad - segment1Rad), Is.GreaterThan(math.radians(15.0)),
-                $"W1-T10 precondition: the chord answer ({math.degrees(expectedRad):F3}°) must be well clear " +
+                $"Arc-T10 precondition: the chord answer ({math.degrees(expectedRad):F3}°) must be well clear " +
                 "of segment 1's raw angle, or the tooth cannot discriminate.");
             Assert.That(stagedRad, Is.EqualTo(expectedRad).Within(math.radians(0.05)),
-                $"W1-T10: the straddling glyph must rotate to the CHORD across its own world footprint — " +
+                $"Arc-T10: the straddling glyph must rotate to the CHORD across its own world footprint — " +
                 $"staged {math.degrees(stagedRad):F4}°, chord {math.degrees(expectedRad):F4}°, segment " +
                 $"angles {math.degrees(segment0Rad):F1}° / {math.degrees(segment1Rad):F1}°. A staged value " +
                 $"of exactly {math.degrees(segment1Rad):F1}° means the chord probe COLLAPSED — halfWidthArc " +
-                "is on the px scale while the walk runs in metres (R3's named trap).");
+                "is on the px scale while the walk runs in metres (the named trap).");
         }
 
         // ── bit-identity comparison ─────────────────────────────────────────────────────────────────────
         //
-        // Field-by-field EQUALITY is not what T8/T9 claim; they claim BIT-identity, and NaN/−0.0 make those
+        // Field-by-field EQUALITY is not what Arc-T8/Arc-T9 claim; they claim BIT-identity, and NaN/−0.0 make those
         // different statements. So each struct is flattened to its raw bit patterns by walking its value-type
         // fields reflectively — which also means a field added to PlacedQuad/SymbolBox later is compared
         // automatically instead of silently escaping the check.
@@ -1809,25 +1807,24 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W2-T6 — the CORNER UNIT's producer: set exactly when the world walk is (R3 + R4.1)
+        // Ruler-T6 — the CORNER UNIT's producer: set exactly when the world walk runs ═════════
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W2-T6, case 1.</b> Proves: a <see cref="AlignmentMode.Map"/> symbol with a live ruler emits
+        /// <b>Ruler-T6, case 1.</b> Proves: a <see cref="AlignmentMode.Map"/> symbol with a live ruler emits
         /// <c>CandidateEmit.CornerMetresPerLogicalPixel</c> equal to EXACTLY that ruler — the same value the
         /// arc walk is spacing its anchors with, so the drawn size and the spacing cannot come from different
         /// constants.
         ///
-        /// <para><b>This also discharges W1's followUp 1.</b> Before W2, <c>W1-T8</c> was the SOLE observer of
-        /// the <c>PitchAlignment == Map</c> conjunct in a 2109-test suite — injection I7 (drop the conjunct)
-        /// reddened T8 and nothing else. After W2 the same <c>worldArc</c> bool is observed through a SECOND,
-        /// independent output by these three cases and by W2-T7, so weakening W1-T8 no longer leaves the
-        /// predicate unobserved. W1-T8's doc carries the reciprocal cross-reference.</para>
+        /// <para><b>This also observes the <c>PitchAlignment == Map</c> conjunct.</b> <c>Arc-T8</c> used to
+        /// be its sole observer, so weakening Arc-T8 would have left the predicate unobserved. These three
+        /// cases and Ruler-T7 read the same <c>worldArc</c> bool through a different output. Arc-T8's doc
+        /// carries the reciprocal cross-reference.</para>
         ///
         /// <para><b>Ruler magnitudes are bounded by the reference symbol's own road, deliberately.</b> Under the
         /// world walk the reference symbol's arc span is <c>60 · ruler</c> metres against a 100 m world path, so
         /// a ruler above ≈ 1.6 makes <c>StageCurved</c> return 0 at its <c>symbolSpanArc &gt; total</c> spill
-        /// gate and there is no emit to read. W1-T8 and W1-T9 never hit that because they run this symbol
+        /// gate and there is no emit to read. Arc-T8 and Arc-T9 never hit that because they run this symbol
         /// either non-map-pitched or with a zero ruler. The values below straddle 1 so the assertion is that
         /// the emit carries the ruler EXACTLY, not merely that it is non-zero.</para>
         /// </summary>
@@ -1839,10 +1836,10 @@ namespace MapRenderer.Tests.Text.Placement
                 var p = Pools.New();
                 int staged = StageReferenceSymbol(AlignmentMode.Map, ruler, ref p);
                 Assert.That(staged, Is.EqualTo(1),
-                    $"W2-T6 precondition (ruler {ruler}): the reference label must stage — a 0 means its " +
+                    $"Ruler-T6 precondition (ruler {ruler}): the reference label must stage — a 0 means its " +
                     $"world arc span ({60f * ruler:F1} m) outgrew its 100 m road at the spill gate.");
                 Assert.That(p.Emit[0].CornerMetresPerLogicalPixel, Is.EqualTo(ruler),
-                    $"W2-T6: a map-pitched label with MetresPerLogicalPixel = {ruler} must carry exactly " +
+                    $"Ruler-T6: a map-pitched label with MetresPerLogicalPixel = {ruler} must carry exactly " +
                     $"{ruler} as its corner unit, got {p.Emit[0].CornerMetresPerLogicalPixel}. Any other " +
                     "value means the corner scale and the arc scale were derived separately — the state this " +
                     "stage exists to make inexpressible.");
@@ -1850,8 +1847,8 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         /// <summary>
-        /// <b>W2-T6, case 2.</b> Proves: a NON-map-pitched symbol emits <c>0f</c> as its corner unit whatever
-        /// the ruler reads — so its <c>Offset</c> stays LOGICAL PIXELS and every pre-W2 path is untouched.
+        /// <b>Ruler-T6, case 2.</b> Proves: a NON-map-pitched symbol emits <c>0f</c> as its corner unit whatever
+        /// the ruler reads — so its <c>Offset</c> stays LOGICAL PIXELS and every existing path is untouched.
         /// The zero value is the struct's default, which is why no point emit and no hand-built fixture emit
         /// had to be edited by this stage.
         /// </summary>
@@ -1864,58 +1861,58 @@ namespace MapRenderer.Tests.Text.Placement
                     var p = Pools.New();
                     int staged = StageReferenceSymbol(mode, ruler, ref p);
                     Assert.That(staged, Is.EqualTo(1),
-                        $"W2-T6 precondition ({mode}, ruler {ruler}): the reference label must stage.");
+                        $"Ruler-T6 precondition ({mode}, ruler {ruler}): the reference label must stage.");
                     Assert.That(p.Emit[0].CornerMetresPerLogicalPixel, Is.EqualTo(0f),
-                        $"W2-T6 ({mode}, ruler {ruler}): a non-map-pitched label must carry 0 as its corner " +
-                        $"unit — i.e. logical pixels, the pre-W2 behaviour — got " +
+                        $"Ruler-T6 ({mode}, ruler {ruler}): a non-map-pitched label must carry 0 as its corner " +
+                        $"unit — i.e. logical pixels, the screen behaviour — got " +
                         $"{p.Emit[0].CornerMetresPerLogicalPixel}. A non-zero here would make every viewport " +
-                        "label's corners metres and reinterpret the whole pre-W2 render.");
+                        "label's corners metres and reinterpret the whole screen render.");
                 }
         }
 
         /// <summary>
-        /// <b>W2-T6, case 3 — the two halves must degrade TOGETHER.</b> Proves: a
+        /// <b>Ruler-T6, case 3 — the two halves must degrade TOGETHER.</b> Proves: a
         /// <see cref="AlignmentMode.Map"/> symbol whose per-frame ruler was never patched
         /// (<c>MetresPerLogicalPixel == 0</c>) emits <c>0f</c> as its corner unit too.
         ///
-        /// <para>W1-T9 pins that such a symbol falls back to the pre-W1 SCREEN arc walk rather than collapsing
+        /// <para>Arc-T9 pins that such a symbol falls back to the SCREEN arc walk rather than collapsing
         /// to a point. This is the corner-side half of the same guard: the arc ruler and the corner unit come
-        /// from ONE predicate, so an unpatched symbol degrades wholly to the pre-W2 behaviour rather than into
+        /// from ONE predicate, so an unpatched symbol degrades wholly to the screen behaviour rather than into
         /// a half-converted state where the spacing is screen px and the corners are metres. A test that shows
         /// them degrading together is the point — the failure this prevents is not a crash, it is a silently
-        /// mixed pair of rulers, which is the exact shape of the bug this epic kept re-landing.</para>
+        /// mixed pair of rulers, which is the exact shape of the bug that kept re-landing.</para>
         /// </summary>
         [Test]
         public void CornerMetresPerLogicalPixel_IsZero_WhenMapPitchedButTheRulerIsMissing()
         {
             var p = Pools.New();
             int staged = StageReferenceSymbol(AlignmentMode.Map, 0f, ref p);
-            Assert.That(staged, Is.EqualTo(1), "W2-T6 precondition: the reference label must stage.");
+            Assert.That(staged, Is.EqualTo(1), "Ruler-T6 precondition: the reference label must stage.");
             Assert.That(p.Emit[0].CornerMetresPerLogicalPixel, Is.EqualTo(0f),
-                "W2-T6: a map-pitched label with no ruler must degrade its CORNER unit to logical px exactly " +
-                "as W1-T9 shows it degrades its ARC ruler to the screen walk — got " +
+                "Ruler-T6: a map-pitched label with no ruler must degrade its CORNER unit to logical px exactly " +
+                "as Arc-T9 shows it degrades its ARC ruler to the screen walk — got " +
                 $"{p.Emit[0].CornerMetresPerLogicalPixel}. The two must degrade together; a half-converted " +
                 "label is worse than either whole behaviour.");
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W2-T3b — equation (5) past the fixture's cull ceiling, with NO camera
+        // Ruler-T3b — equation (5) past the fixture's cull ceiling, with NO camera
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W2-T3b — the CPU half of equation (6), carried to 50× and beyond.</b> Proves: for a map-pitched
+        /// <b>Ruler-T3b — the CPU half of equation (6), carried to 50× and beyond.</b> Proves: for a map-pitched
         /// curved symbol, <c>worldAdvance / cellWidth_world</c> equals the purely typographic
         /// <c>ΔArcCenter / cellWidthBaked</c> at every magnitude regime, computed through production
         /// <see cref="SymbolStagingMath.StageCurved"/> and production <see cref="BillboardMath.BuildWorldQuad"/>
         /// with the emit's OWN corner scale.
         ///
-        /// <para><b>Why it exists, and exactly what it does and does not add.</b> W2-T3 stops at 8× because
-        /// the renderer's B-3 pre-projection distance cull removes the far symbols — the horizon measurement
+        /// <para><b>Why it exists, and exactly what it does and does not add.</b> Ruler-T3 stops at 8× because
+        /// the renderer's pre-projection distance cull removes the far symbols — the horizon measurement
         /// proved that by observing that <c>PointFar</c>, which has no road and no arc walk at all, disappears
         /// at the same ratio. Equation (5) needs no camera, so this tooth carries the identity past that wall.
         /// <b>It pins the CPU half only and does NOT exercise the shader.</b> The three reaches, named so
-        /// nothing is over-read (followUp F-W2-5): rendered ink to ≈ 2.4× (W2-T1/T2), real-mesh world metres
-        /// to 8× (W2-T3, W2-T10), CPU identity to 50× (here). The gap above 8× in the RENDERED arms is a
+        /// nothing is over-read: rendered ink to ≈ 2.4× (Ruler-T1/T2), real-mesh world metres
+        /// to 8× (Ruler-T3, Ruler-T10), CPU identity to 50× (here). The gap above 8× in the RENDERED arms is a
         /// recorded limitation, not an implied claim.</para>
         ///
         /// <para><b>What "depth ratio" means with no camera.</b> Nothing — and that is the structural point.
@@ -1924,7 +1921,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// spacing CANNOT depend on distance from the camera; it can only fail NUMERICALLY. What the sweep
         /// below varies is therefore the MAGNITUDE regime — the symbol's distance from its tile origin, along
         /// the road axis, which is what a deep pose actually produces — which is the one thing that can
-        /// degrade. That is the horizon measurement's §5 method, reused. Displacing ACROSS the road axis would
+        /// degrade. That is the horizon measurement's method, reused. Displacing ACROSS the road axis would
         /// measure nothing: the large offset lands in a component identical for every glyph and cancels
         /// exactly in the gap.</para>
         /// </summary>
@@ -1960,12 +1957,12 @@ namespace MapRenderer.Tests.Text.Placement
             var p = Pools.New();
             int staged = Stage(in s, screenPath, worldPath, glyphs, anchors, ref p);
             Assert.That(staged, Is.EqualTo(1),
-                $"W2-T3b precondition (magnitude {magnitude}): the label must stage; a 0 means the road is " +
+                $"Ruler-T3b precondition (magnitude {magnitude}): the label must stage; a 0 means the road is " +
                 "too short for its world span at this magnitude, which would make the reading vacuous.");
 
             float cornerScale = p.Emit[0].CornerMetresPerLogicalPixel;
             Assert.That(cornerScale, Is.GreaterThan(0f),
-                "W2-T3b precondition: the emit must carry a metre corner unit, or there is no world cell " +
+                "Ruler-T3b precondition: the emit must carry a metre corner unit, or there is no world cell " +
                 "width to compare against.");
 
             // Production BuildWorldQuad, with the emit's OWN scale — exactly the composition
@@ -1990,12 +1987,12 @@ namespace MapRenderer.Tests.Text.Placement
                 double advanceWorld = math.length(p.Quads[g + 1].AnchorLocal - p.Quads[g].AnchorLocal);
                 double ratio = advanceWorld / cellWidthWorld;
                 TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                    "W2-T3b  magnitude={0:F0}  gap {1}  advanceWorld={2:F3} m  cellWidthWorld={3:F3} m  " +
+                    "Ruler-T3b  magnitude={0:F0}  gap {1}  advanceWorld={2:F3} m  cellWidthWorld={3:F3} m  " +
                     "ratio={4:F8}  expected={5:F8}",
                     magnitude, g, advanceWorld, cellWidthWorld, ratio, expected));
 
                 Assert.That(ratio, Is.EqualTo(expected).Within(0.01).Percent,
-                    $"W2-T3b (magnitude {magnitude}, gap {g}): worldAdvance / cellWidth_world must be the " +
+                    $"Ruler-T3b (magnitude {magnitude}, gap {g}): worldAdvance / cellWidth_world must be the " +
                     $"baked {advanceBaked}/{cellWidthBaked} = {expected:F8} at EVERY magnitude, measured " +
                     $"{ratio:F8}. Both sides are produced by the SAME arcScale, so it cancels identically; a " +
                     "drift here at large magnitude is a float-precision floor, not a model failure — the " +
@@ -2004,20 +2001,20 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3 — the projected-world-corner collision box. Shared apparatus first, then W3-T4…T9.
+        // The projected-world-corner collision box. Shared apparatus first, then Projected-T4…T9.
         //
         // NO CAMERA OBJECT: the view transform is HAND-BUILT here, so every expected pixel number below is
         // plain arithmetic over two constants (the viewport and the field of view) rather than a reading
         // taken off a live scene.
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
-        /// <summary>The W3 teeth's viewport, logical px. Square, so the projection's aspect ratio is 1.</summary>
+        /// <summary>The projected-box teeth's viewport, logical px. Square, so the projection's aspect ratio is 1.</summary>
         private const double ViewportPx = 512.0;
 
         /// <summary>Vertical field of view, radians (60°).</summary>
         private const float FovRadians = 1.0471975511965976f;
 
-        /// <summary>The camera-facing surface normal used by most W3 teeth: with a road along <c>+X̂</c> this
+        /// <summary>The camera-facing surface normal used by most projected-box teeth: with a road along <c>+X̂</c> this
         /// makes <c>x̂ = +X̂</c> and <c>ŷ = cross(x̂, up) = +Ŷ</c>, i.e. the glyph quad lies in the plane
         /// PERPENDICULAR to the view axis, so a corner's projection is a plain uniform scale in BOTH screen
         /// axes and every expectation below is arithmetic instead of a solve.</summary>
@@ -2025,7 +2022,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>The ordinary GROUND normal: with a road along <c>+X̂</c> this makes
         /// <c>ŷ = cross(x̂, up) = +Ẑ</c>, i.e. the quad's own y axis runs ALONG the view axis, which is how
-        /// W3-T7 pushes a corner behind the camera without moving the anchor.</summary>
+        /// Projected-T7 pushes a corner behind the camera without moving the anchor.</summary>
         private static readonly float3 GroundUp = new float3(0f, 1f, 0f);
 
         /// <summary>Screen px per metre of world offset, per metre of view depth:
@@ -2042,9 +2039,9 @@ namespace MapRenderer.Tests.Text.Placement
         /// <para><b>Written out rather than composed as <c>inverse(float4x4.LookAt(eye, target, up))</c>.</b>
         /// <c>float4x4.LookAt</c> returns a camera→WORLD transform whose <c>+Z</c> IS the forward direction, so
         /// its inverse places the target at view <b>+Z</b> — the opposite sense. Composed that way every corner
-        /// comes back with <c>clip.w ≤ 0</c>, every projection fails, BOTH arms of W3-T4 silently take the
+        /// comes back with <c>clip.w ≤ 0</c>, every projection fails, BOTH arms of Projected-T4 silently take the
         /// screen-box fallback, and the tooth fails in a shape that reads like a logic bug rather than like a
-        /// convention mismatch. <b>W3-T4-pre is the tooth that proves this matrix actually projects</b> — a
+        /// convention mismatch. <b>Projected-T4-pre is the tooth that proves this matrix actually projects</b> — a
         /// ≈2 px projected half-height against a 15 px screen one is only reachable if it does.</para>
         /// </summary>
         private static float4x4 ViewMatrix(float3 eye, float3 target, float3 up)
@@ -2075,7 +2072,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>Where <see cref="OriginView"/> puts a render-space point, in logical screen px — the
         /// FIXTURE's own projection, calling no production code. It is what makes each synthetic screen
-        /// polyline below the TRUE projection of its world polyline, so the pre-W3 screen box these teeth
+        /// polyline below the TRUE projection of its world polyline, so the screen box these teeth
         /// compare against is the one the shipped code would really have built.</summary>
         private static float2 ProjectPx(double3 world)
             => new float2(
@@ -2083,10 +2080,10 @@ namespace MapRenderer.Tests.Text.Placement
                 (float)(0.5 * ViewportPx + PxPerMetreAtUnitDepth * world.y / world.z));
 
         /// <summary>
-        /// W3's staging fixture: ONE glyph, centred on a straight road that runs along <c>+X̂</c> at view depth
+        /// The staging fixture: ONE glyph, centred on a straight road that runs along <c>+X̂</c> at view depth
         /// <paramref name="depthM"/> and lateral offset <paramref name="lateralM"/>. The screen polyline is the
-        /// TRUE projection of the world polyline (<see cref="ProjectPx"/>), so both the pre-W3 screen box and
-        /// the W3 projected box are the boxes the shipped code builds for a real pose of this shape.
+        /// TRUE projection of the world polyline (<see cref="ProjectPx"/>), so both the screen box and
+        /// the projected box are the boxes the shipped code builds for a real pose of this shape.
         /// </summary>
         private static int StageW3Glyph(ref Pools p, in SymbolViewTransform view, in float3 surfaceUp,
             in SymbolQuad cell, float cellSkirt, float textSizePx, float mpp,
@@ -2110,20 +2107,20 @@ namespace MapRenderer.Tests.Text.Placement
                 view: view, worldUpPathOverride: ups, ordinal: ordinal);
         }
 
-        // ── the W3-T4 suppression pair's sizing, all derived, none typed ────────────────────────────────
+        // ── the Projected-T4 suppression pair's sizing, all derived, none typed ────────────────────────────────
 
         /// <summary>`text-size` for the suppression pair: 2.5 em, so the 6-baked-px cell half-height becomes a
-        /// 15 logical-px PRE-W3 box half-height.</summary>
+        /// 15 logical-px SCREEN box half-height.</summary>
         private const float SuppressionTextSizePx = 2.5f * TextQuadLayout.OneEm;
 
         private const float  SuppressionCellHalfHeightBaked = 6f;   // what Cell(...) bakes
         private const float  SuppressionCellHalfWidthBaked  = 10f;
         private const float  SuppressionMpp = 1f;                   // metres per logical px
-        private const double SuppressionTargetHalfHeightPx = 2.0;   // the W3 box's designed half-height
+        private const double SuppressionTargetHalfHeightPx = 2.0;   // the projected box's designed half-height
         private const double SuppressionTargetSeparationPx = 8.0;   // the roads' designed projected gap
 
-        /// <summary>The pre-W3 box's half-height, in logical px: the cell half-height scaled by
-        /// <c>TextSizePx / OneEm</c>, with no depth term at all — which is the defect W3 removes.</summary>
+        /// <summary>The screen box's half-height, in logical px: the cell half-height scaled by
+        /// <c>TextSizePx / OneEm</c>, with no depth term at all — which is the defect the projected box removes.</summary>
         private const double SuppressionScreenHalfHeightPx =
             SuppressionCellHalfHeightBaked * SuppressionTextSizePx / TextQuadLayout.OneEm;
 
@@ -2140,7 +2137,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static readonly double SuppressionLateralM =
             SuppressionTargetSeparationPx * SuppressionDepthM / PxPerMetreAtUnitDepth;
 
-        /// <summary>Stages the W3-T4 pair — two map-pitched one-glyph symbols on PARALLEL roads at the same
+        /// <summary>Stages the Projected-T4 pair — two map-pitched one-glyph symbols on PARALLEL roads at the same
         /// depth, both <c>AllowOverlap = false</c>, with distinct sort keys and feature indices (a total
         /// placement order) — into ONE shared box/candidate pool at ordinals 0 and 1.</summary>
         private static Pools StageSuppressionPair(SymbolViewTransform view)
@@ -2155,10 +2152,10 @@ namespace MapRenderer.Tests.Text.Placement
                 SuppressionDepthM, SuppressionLateralM, roadHalfM: 1000.0,
                 iconRotateRadians: 0f, sortKey: 1f, featureIndex: 41, ordinal: 1);
             Assert.That(a == 1 && b == 1, Is.True,
-                $"W3-T4 precondition: both labels of the pair must stage — staged {a} and {b}. A zero means " +
+                $"Projected-T4 precondition: both labels of the pair must stage — staged {a} and {b}. A zero means " +
                 "the road is too short for the label's world span or the anchor spilled.");
             Assert.That(p.BoxCount, Is.EqualTo(2),
-                $"W3-T4 precondition: the shared pool must hold exactly one box per label, got {p.BoxCount}.");
+                $"Projected-T4 precondition: the shared pool must hold exactly one box per label, got {p.BoxCount}.");
             return p;
         }
 
@@ -2167,24 +2164,24 @@ namespace MapRenderer.Tests.Text.Placement
         private static double CentreY(in SymbolBox b)      => 0.5 * (b.Max.y + b.Min.y);
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T4-pre — the suppression fixture's three sizing rows, asserted directly
+        // Projected-T4-pre — the suppression fixture's three sizing rows, asserted directly
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T4-pre — the preconditions of W3-T4, as their own test.</b> A re-tuned constant must red HERE,
+        /// <b>Projected-T4-pre — the preconditions of Projected-T4, as their own test.</b> A re-tuned constant must red HERE,
         /// with its numbers, rather than quietly making the headline tooth vacuous (a pair whose boxes no
         /// longer straddle the road separation would return the same survivor count on both arms and pass).
         ///
         /// <para>It also proves the <b>hand-built view transform actually projects</b>. If
         /// <c>ViewMatrix</c>/<c>PerspectiveFov</c> disagreed about which way the camera looks, every corner
         /// would come back <c>clip.w ≤ 0</c>, <c>TryBuildProjectedWorldGlyph</c> would return false, and the
-        /// "projected" arm would read the pre-W3 15 px rather than 2 px. See <see cref="ViewMatrix"/>.</para>
+        /// "projected" arm would read the screen arm's 15 px rather than 2 px. See <see cref="ViewMatrix"/>.</para>
         /// </summary>
         [Test]
         public void MapPitched_SuppressionFixture_IsSizedSoTheTwoBoxesStraddleTheRoadGap()
         {
-            Pools screen = StageSuppressionPair(default);            // D5 ⇒ the pre-W3 screen box
-            Pools projected = StageSuppressionPair(OriginView());     // the W3 box
+            Pools screen = StageSuppressionPair(default);            // no view transform ⇒ the screen box
+            Pools projected = StageSuppressionPair(OriginView());     // the projected box
 
             double screenHalfHeight = HalfHeightPx(screen.Boxes[0]);
             double projectedHalfHeight = HalfHeightPx(projected.Boxes[0]);
@@ -2192,71 +2189,71 @@ namespace MapRenderer.Tests.Text.Placement
             double projectedSeparation = CentreY(projected.Boxes[1]) - CentreY(projected.Boxes[0]);
 
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                "W3-T4-pre  depth={0:F2} m  lateral={1:F2} m  screen half-height={2:F4} px  " +
+                "Projected-T4-pre  depth={0:F2} m  lateral={1:F2} m  screen half-height={2:F4} px  " +
                 "projected half-height={3:F4} px  separation: screen={4:F4} px projected={5:F4} px",
                 SuppressionDepthM, SuppressionLateralM, screenHalfHeight, projectedHalfHeight,
                 screenSeparation, projectedSeparation));
 
             Assert.That(screenHalfHeight, Is.EqualTo(SuppressionScreenHalfHeightPx).Within(1e-3),
-                $"W3-T4-pre row 1: the PRE-W3 box's half-height must be the depth-free " +
+                $"Projected-T4-pre row 1: the SCREEN box's half-height must be the depth-free " +
                 $"cellHalfBaked·TextSizePx/OneEm = {SuppressionScreenHalfHeightPx:F4} px, read " +
                 $"{screenHalfHeight:F4}.");
             Assert.That(projectedHalfHeight, Is.EqualTo(SuppressionTargetHalfHeightPx).Within(0.05),
-                $"W3-T4-pre row 2: the W3 box's half-height must foreshorten to the designed " +
+                $"Projected-T4-pre row 2: the projected box's half-height must foreshorten to the designed " +
                 $"{SuppressionTargetHalfHeightPx:F2} px at {SuppressionDepthM:F1} m, read " +
                 $"{projectedHalfHeight:F4}. A reading of {SuppressionScreenHalfHeightPx:F1} px means every " +
                 "corner failed to project and the box fell back — check ViewMatrix's Z sense.");
             Assert.That(projectedSeparation, Is.EqualTo(SuppressionTargetSeparationPx).Within(0.05),
-                $"W3-T4-pre row 3: the roads' projected lateral separation must be the designed " +
+                $"Projected-T4-pre row 3: the roads' projected lateral separation must be the designed " +
                 $"{SuppressionTargetSeparationPx:F2} px, read {projectedSeparation:F4}.");
             Assert.That(screenSeparation, Is.EqualTo(SuppressionTargetSeparationPx).Within(0.05),
-                $"W3-T4-pre row 3 (screen arm): the pre-W3 boxes ride the SAME projected anchors, so their " +
+                $"Projected-T4-pre row 3 (screen arm): the screen boxes ride the SAME projected anchors, so their " +
                 $"separation must also be {SuppressionTargetSeparationPx:F2} px, read {screenSeparation:F4} " +
                 "— otherwise the two arms differ in more than the box construction.");
 
             // The discriminator, stated as arithmetic: the separation must sit STRICTLY BETWEEN the two box
             // heights, or the two arms cannot disagree about placement.
             Assert.That(projectedSeparation, Is.GreaterThan(2.0 * projectedHalfHeight),
-                $"W3-T4-pre: the projected boxes must CLEAR each other — separation {projectedSeparation:F4} " +
+                $"Projected-T4-pre: the projected boxes must CLEAR each other — separation {projectedSeparation:F4} " +
                 $"px against a full height of {2.0 * projectedHalfHeight:F4} px.");
             Assert.That(screenSeparation, Is.LessThan(2.0 * screenHalfHeight),
-                $"W3-T4-pre: the screen boxes must OVERLAP — separation {screenSeparation:F4} px against a " +
+                $"Projected-T4-pre: the screen boxes must OVERLAP — separation {screenSeparation:F4} px against a " +
                 $"full height of {2.0 * screenHalfHeight:F4} px.");
             Assert.That(HalfWidthPx(projected.Boxes[0]), Is.GreaterThan(0.5),
-                "W3-T4-pre: the projected box must have a real width too — a collapsed box would clear its " +
+                "Projected-T4-pre: the projected box must have a real width too — a collapsed box would clear its " +
                 "neighbour for the wrong reason.");
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T4 — R2: SUPPRESSION. The old box drops a symbol the new one places.
+        // Projected-T4 — SUPPRESSION. The old box drops a symbol the new one places.
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T4 — THE STAGE'S REASON TO EXIST.</b> Two map-pitched symbols on parallel roads, sized by
-        /// W3-T4-pre so their PROJECTED boxes clear each other by 8 px while their pre-W3 SCREEN boxes (15 px
+        /// <b>Projected-T4 — the reason the projected box exists.</b> Two map-pitched symbols on parallel roads, sized by
+        /// Projected-T4-pre so their PROJECTED boxes clear each other by 8 px while their SCREEN boxes (15 px
         /// half-height, no depth term) overlap. With a usable view transform the collision pass places BOTH;
-        /// with <c>default(SymbolViewTransform)</c> — which D5 makes a reachable state of the SHIPPED code, not
+        /// with <c>default(SymbolViewTransform)</c> — which is a reachable state of the SHIPPED code, not
         /// something only an edit can produce — it places ONE.
         ///
         /// <para><b>The tooth contains its own before/after, so it needs no injection.</b> Both arms run the
         /// same shipped binary over the same geometry; the only difference is whether a camera was supplied.
-        /// That is exactly the over-reservation W3 removes: the screen box reserved ~150× the ink's area at
+        /// That is exactly the over-reservation the projected box removes: the screen box reserved ~150× the ink's area at
         /// depth, and over-reservation can only ever SUPPRESS a symbol, never misplace one.</para>
         /// </summary>
         [Test]
         public void MapPitched_ProjectedBox_PlacesBothSymbols_WhereTheScreenBoxSuppressesOne()
         {
             int projectedSurvivors = Survivors(StageSuppressionPair(OriginView()), "projected");
-            int screenSurvivors    = Survivors(StageSuppressionPair(default),      "screen (pre-W3)");
+            int screenSurvivors    = Survivors(StageSuppressionPair(default),      "screen");
 
             Assert.That(projectedSurvivors, Is.EqualTo(2),
-                $"W3-T4: with the four world corners projected, the two labels' boxes clear each other and " +
-                $"BOTH must place — {projectedSurvivors} survived. This is the label the pre-W3 box was " +
+                $"Projected-T4: with the four world corners projected, the two labels' boxes clear each other and " +
+                $"BOTH must place — {projectedSurvivors} survived. This is the label the screen box was " +
                 "silently eating at tilt.");
             Assert.That(screenSurvivors, Is.EqualTo(1),
-                $"W3-T4 (control): the pre-W3 SCREEN box has no depth term, so at this depth it over-reserves " +
+                $"Projected-T4 (control): the SCREEN box has no depth term, so at this depth it over-reserves " +
                 $"and one of the two must be suppressed — {screenSurvivors} survived. If this reads 2 the " +
-                "fixture has stopped discriminating; W3-T4-pre says which row moved.");
+                "fixture has stopped discriminating; Projected-T4-pre says which row moved.");
         }
 
         /// <summary>Runs the shared collision pass over a staged pair and reports the survivor set, printing
@@ -2266,7 +2263,7 @@ namespace MapRenderer.Tests.Text.Placement
             var survivor = new bool[2];
             int n = NativeCollisionRunner.RunCollision(p.Candidates, 2, p.Boxes, p.BoxCount, survivor);
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                "W3-T4  {0,-16} boxA=[{1:F3}, {2:F3}]×[{3:F3}, {4:F3}]  boxB=[{5:F3}, {6:F3}]×[{7:F3}, " +
+                "Projected-T4  {0,-16} boxA=[{1:F3}, {2:F3}]×[{3:F3}, {4:F3}]  boxB=[{5:F3}, {6:F3}]×[{7:F3}, " +
                 "{8:F3}]  survivors={9} ({10}, {11})",
                 armName, p.Boxes[0].Min.x, p.Boxes[0].Max.x, p.Boxes[0].Min.y, p.Boxes[0].Max.y,
                 p.Boxes[1].Min.x, p.Boxes[1].Max.x, p.Boxes[1].Min.y, p.Boxes[1].Max.y,
@@ -2275,26 +2272,26 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T5 — R3: the non-map path cannot observe the view transform, at any magnitude
+        // Projected-T5 — the non-map path cannot observe the view transform, at any magnitude
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T5 — the stage invariant's structural half.</b> Proves: a symbol whose resolved pitch alignment
+        /// <b>Projected-T5 — the invariant's structural half.</b> Proves: a symbol whose resolved pitch alignment
         /// is not <see cref="AlignmentMode.Map"/> cannot observe the new per-frame view transform AT ALL — its
         /// staged <see cref="SymbolBox"/>es and <see cref="PlacedQuad"/>s are BIT-identical with no transform and
         /// with three genuinely different real ones (different eye, target, field of view, aspect, scene origin
         /// and viewport). Run for <see cref="AlignmentMode.Viewport"/> and for <see cref="AlignmentMode.Auto"/>,
-        /// the enum's zero value that every hand-built pre-W1 fixture carries.
+        /// the enum's zero value that every hand-built fixture carries.
         ///
         /// <para>The empirical half of the same claim is the full gate at CP-1 (2154/2154 unmoved); the
-        /// sensitivity half is injection I6, which drops the <c>cornerMetresPerLogicalPixel &gt; 0f</c>
+        /// sensitivity half is an injection that drops the <c>cornerMetresPerLogicalPixel &gt; 0f</c>
         /// conjunct.</para>
         ///
-        /// <para><b>The fixture is the W3 camera-facing glyph, NOT <c>StageReferenceSymbol</c>, and that choice
+        /// <para><b>The fixture is the camera-facing glyph, NOT <c>StageReferenceSymbol</c>, and that choice
         /// is load-bearing.</b> The reference symbol carries an all-zero surface normal and sits at the camera
         /// origin, so its projection would fail at the ground-frame guard and at <c>clip.w</c> — this tooth
         /// would then be bit-identical across transforms for a reason that has nothing to do with the pitch
-        /// predicate, and injection I6 would leave it GREEN. It did, on the first version of this tooth; the
+        /// predicate, and that injection would leave it GREEN. It did, on the first version of this tooth; the
         /// fixture below is what fixes that. Here the symbol has a real normal, a live ruler and a depth at
         /// which every corner projects, so the ONLY thing keeping it off the projected branch is its pitch
         /// alignment.</para>
@@ -2315,7 +2312,7 @@ namespace MapRenderer.Tests.Text.Placement
                         SuppressionMpp, SuppressionDepthM, lateralM: 0.0, roadHalfM: 1000.0,
                         iconRotateRadians: 0f, sortKey: 0f, featureIndex: 46, ordinal: 0, pitch: mode);
                     Assert.That(staged, Is.EqualTo(1),
-                        $"W3-T5 precondition ({mode}, view {v}): the reference label must stage.");
+                        $"Projected-T5 precondition ({mode}, view {v}): the reference label must stage.");
                     quadBits[v] = Bits(p.Quads, p.QuadCount);
                     boxBits[v]  = Bits(p.Boxes, p.BoxCount);
                 }
@@ -2323,9 +2320,9 @@ namespace MapRenderer.Tests.Text.Placement
                 for (int v = 1; v < views.Length; v++)
                 {
                     AssertBitIdentical(quadBits[0], quadBits[v],
-                        $"W3-T5 ({mode}): PlacedQuads under view transform {v} differ from those with none");
+                        $"Projected-T5 ({mode}): PlacedQuads under view transform {v} differ from those with none");
                     AssertBitIdentical(boxBits[0], boxBits[v],
-                        $"W3-T5 ({mode}): SymbolBoxes under view transform {v} differ from those with none");
+                        $"Projected-T5 ({mode}): SymbolBoxes under view transform {v} differ from those with none");
                 }
             }
         }
@@ -2350,21 +2347,21 @@ namespace MapRenderer.Tests.Text.Placement
         };
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T6 — D10 / F-W3-1: a degenerate ground frame falls back to the screen box, bit-identically
+        // Projected-T6 — a degenerate ground frame falls back to the screen box, bit-identically
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T6 — the observing tooth for followUp F-W3-1.</b> Proves: a map-pitched symbol whose
+        /// <b>Projected-T6 — the observing tooth for the degenerate-frame limitation.</b> Proves: a map-pitched symbol whose
         /// per-vertex <c>Up</c> is <see cref="float3.zero"/> — the exact state ~10 older fixtures and
         /// <c>SymbolTileBlockBaker</c> (null <c>PathUpRender</c>) still write, and which that site's own
         /// comment calls "a bug signal, not a supported state" — stages its box BIT-identically to the same
-        /// symbol with no view transform at all. It takes the pre-W3 SCREEN box.
+        /// symbol with no view transform at all. It takes the SCREEN box.
         ///
         /// <para><b>This is a KNOWING divergence from the shader, recorded, not fixed.</b>
         /// <c>SymbolWorldMapPitchClip</c>'s degenerate fallback is a camera-facing METRE frame, so the ink and
         /// the box disagree in this state. Reproducing that frame on the CPU needs the view basis in render
         /// space and a fresh handedness derivation, to serve a case unreachable in production. This tooth is
-        /// what stops the divergence becoming an unobserved branch — the same role W1-T9 plays for the ruler
+        /// what stops the divergence becoming an unobserved branch — the same role Arc-T9 plays for the ruler
         /// guard.</para>
         ///
         /// <para>The non-vacuity clause runs FIRST: with a real <c>Up</c> the very same fixture and the very
@@ -2386,19 +2383,19 @@ namespace MapRenderer.Tests.Text.Placement
             double projectedHalfHeight = HalfHeightPx(withUp.Boxes[0]);
             double screenHalfHeight    = HalfHeightPx(noView.Boxes[0]);
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                "W3-T6  projected half-height={0:F4} px  screen half-height={1:F4} px  degenerate-Up " +
+                "Projected-T6  projected half-height={0:F4} px  screen half-height={1:F4} px  degenerate-Up " +
                 "half-height={2:F4} px", projectedHalfHeight, screenHalfHeight, HalfHeightPx(zeroUp.Boxes[0])));
 
             Assert.That(math.abs(projectedHalfHeight - screenHalfHeight), Is.GreaterThan(1.0),
-                $"W3-T6 precondition (non-vacuity): with a REAL surface normal this transform must produce a " +
+                $"Projected-T6 precondition (non-vacuity): with a REAL surface normal this transform must produce a " +
                 $"genuinely different box — projected {projectedHalfHeight:F4} px against screen " +
                 $"{screenHalfHeight:F4} px. Without this the bit-identity below would only say the transform " +
                 "was never usable.");
             AssertBitIdentical(Bits(noView.Boxes, noView.BoxCount), Bits(zeroUp.Boxes, zeroUp.BoxCount),
-                "W3-T6: a map-pitched label with a ZERO surface normal must fall back to the pre-W3 screen box");
+                "Projected-T6: a map-pitched label with a ZERO surface normal must fall back to the screen box");
         }
 
-        /// <summary>W3-T6/T7's probe symbol: the camera-facing fixture at the suppression pair's own depth, so
+        /// <summary>Projected-T6/T7's probe symbol: the camera-facing fixture at the suppression pair's own depth, so
         /// its projected box is the well-understood ≈2 px one and the fallback is unmistakably different.</summary>
         private static void StageDegenerateProbe(ref Pools p, SymbolViewTransform view, float3 surfaceUp)
         {
@@ -2406,16 +2403,16 @@ namespace MapRenderer.Tests.Text.Placement
                 cellSkirt: 0f, SuppressionTextSizePx, SuppressionMpp,
                 SuppressionDepthM, lateralM: 0.0, roadHalfM: 1000.0,
                 iconRotateRadians: 0f, sortKey: 0f, featureIndex: 42, ordinal: 0);
-            Assert.That(staged, Is.EqualTo(1), "W3-T6/T7 precondition: the probe label must stage.");
+            Assert.That(staged, Is.EqualTo(1), "Projected-T6/T7 precondition: the probe label must stage.");
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T7 — a corner that fails to project falls back, and does not emit a half-built box
+        // Projected-T7 — a corner that fails to project falls back, and does not emit a half-built box
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T7 — the per-corner guard.</b> Proves: when ONE of the four world corners lands behind the
-        /// camera, the whole box falls back to the pre-W3 screen box BIT-identically — never a box built from
+        /// <b>Projected-T7 — the per-corner guard.</b> Proves: when ONE of the four world corners lands behind the
+        /// camera, the whole box falls back to the screen box BIT-identically — never a box built from
         /// the three corners that did project.
         ///
         /// <para><b>The geometry.</b> The surface normal here is the ordinary GROUND one, so
@@ -2424,11 +2421,11 @@ namespace MapRenderer.Tests.Text.Placement
         /// 6-baked-px half-height is 6000 m, so on a road 100 m from the camera the up-screen corner sits at
         /// <c>z = −5900 m</c> and <c>TryProjectPoint</c> rejects it on <c>clip.w ≤ 0</c>.</para>
         ///
-        /// <para><b>Reachability, reported not assumed (followUp F-W2-8).</b> The construction needs a ruler of
+        /// <para><b>Reachability, reported not assumed.</b> The construction needs a ruler of
         /// 1000 metres per logical pixel at a view depth of 100 metres — a glyph 120× taller than its distance
         /// to the camera. No pose this renderer produces is anywhere near it: the shipped fixture's ruler is
         /// ~306 m/px at a look-at depth of tens of kilometres. So this stays a guard for an unreachable state,
-        /// and F-W2-8 is NOT shown to be reachable by it. The deep arm below is the same fixture pushed to a
+        /// and that state is NOT shown to be reachable by it. The deep arm below is the same fixture pushed to a
         /// depth where all four corners DO project, which is what makes the fallback attributable to the corner
         /// rejection rather than to the extreme scale.</para>
         /// </summary>
@@ -2450,7 +2447,7 @@ namespace MapRenderer.Tests.Text.Placement
             StageCornerProbe(ref shallowScreen, default, hugeRulerMpp, shallowDepthM);
 
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                "W3-T7  deep: projected=[{0:F3}, {1:F3}] screen=[{2:F3}, {3:F3}]  shallow: projected=" +
+                "Projected-T7  deep: projected=[{0:F3}, {1:F3}] screen=[{2:F3}, {3:F3}]  shallow: projected=" +
                 "[{4:F3}, {5:F3}] screen=[{6:F3}, {7:F3}]",
                 deepProjected.Boxes[0].Min.x, deepProjected.Boxes[0].Max.x,
                 deepScreen.Boxes[0].Min.x, deepScreen.Boxes[0].Max.x,
@@ -2461,37 +2458,37 @@ namespace MapRenderer.Tests.Text.Placement
             // give a genuinely different box — so the fallback below is attributable to the rejected corner.
             Assert.That(BitsEqual(Bits(deepProjected.Boxes, deepProjected.BoxCount),
                                   Bits(deepScreen.Boxes, deepScreen.BoxCount)), Is.False,
-                "W3-T7 precondition (non-vacuity): with every corner in front of the camera the projected box " +
+                "Projected-T7 precondition (non-vacuity): with every corner in front of the camera the projected box " +
                 "must differ from the screen box, or the bit-identity below says nothing about the corner guard.");
 
             AssertBitIdentical(Bits(shallowScreen.Boxes, shallowScreen.BoxCount),
                 Bits(shallowProjected.Boxes, shallowProjected.BoxCount),
-                "W3-T7: with one corner behind the camera the box must be the pre-W3 screen box");
+                "Projected-T7: with one corner behind the camera the box must be the screen box");
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T11 — F-W3-8: a corner that projects to a near-plane BLOW-UP falls back, so the AABB is bounded
+        // Projected-T11 — a corner that projects to a near-plane BLOW-UP falls back, so the AABB is bounded
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T11 — the magnitude guard, F-W3-8.</b> A corner just IN FRONT of the camera plane passes the
+        /// <b>Projected-T11 — the magnitude guard.</b> A corner just IN FRONT of the camera plane passes the
         /// behind-camera test (<c>clip.w &gt; 0</c>) and then divides into an arbitrarily large screen
         /// coordinate. It is FINITE, so no NaN check sees it, and before this guard it made the collision AABB
-        /// unbounded — where the pre-W3 screen box was bounded by the cell. Proves: such a corner takes the
+        /// unbounded — where the screen box was bounded by the cell. Proves: such a corner takes the
         /// screen-box fallback, BIT-identically.
         ///
-        /// <para><b>Why this is a different state from W3-T7's</b>, and why one tooth cannot cover both: T7's
+        /// <para><b>Why this is a different state from Projected-T7's</b>, and why one tooth cannot cover both: that
         /// corner is BEHIND the camera and is rejected by <c>TryProjectPoint</c> itself. This corner
         /// PROJECTS — successfully, to a real finite number — and is rejected only by the magnitude test.
-        /// Removing the magnitude guard leaves T7 green (see the RED sweep), which is precisely why this tooth
+        /// Removing the magnitude guard leaves Projected-T7 green (see the RED sweep), which is precisely why this tooth
         /// exists.</para>
         ///
-        /// <para><b>The geometry.</b> Same GROUND-normal probe as W3-T7, so ŷ runs along the view axis and a
+        /// <para><b>The geometry.</b> Same GROUND-normal probe as Projected-T7, so ŷ runs along the view axis and a
         /// corner offset moves the corner in DEPTH. The cell's half-height is 6000 m at this ruler, so an
         /// anchor at 6001 m puts the near corner at <c>z ≈ 1 m</c> — in front, so it projects, but with a
         /// <c>clip.w</c> three orders of magnitude below the corner's own lateral offset.</para>
         ///
-        /// <para><b>Reachability: NONE, same as W3-T7.</b> This needs 1000 m per logical px at a 6 km depth.
+        /// <para><b>Reachability: NONE, same as Projected-T7.</b> This needs 1000 m per logical px at a 6 km depth.
         /// The shipped fixture's ruler is ~306 m/px at a look-at depth of tens of km. It is a guard for an
         /// unreachable state, kept because "unbounded" is not a state this system should be able to enter at
         /// all — not because a pose produces it.</para>
@@ -2512,7 +2509,7 @@ namespace MapRenderer.Tests.Text.Placement
             StageCornerProbe(ref blowUpScreen, default, hugeRulerMpp, blowUpDepthM);
 
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                "W3-T11  deep: [{0:F3}, {1:F3}]  blow-up projected: [{2:F3}, {3:F3}]  blow-up screen: [{4:F3}, {5:F3}]",
+                "Projected-T11  deep: [{0:F3}, {1:F3}]  blow-up projected: [{2:F3}, {3:F3}]  blow-up screen: [{4:F3}, {5:F3}]",
                 deepProjected.Boxes[0].Min.x, deepProjected.Boxes[0].Max.x,
                 blowUpProjected.Boxes[0].Min.x, blowUpProjected.Boxes[0].Max.x,
                 blowUpScreen.Boxes[0].Min.x, blowUpScreen.Boxes[0].Max.x));
@@ -2520,10 +2517,10 @@ namespace MapRenderer.Tests.Text.Placement
             // Non-vacuity 1: the deep arm must take the PROJECTED branch, or "falls back" below says nothing.
             Assert.That(BitsEqual(Bits(deepProjected.Boxes, deepProjected.BoxCount),
                                   Bits(blowUpScreen.Boxes, blowUpScreen.BoxCount)), Is.False,
-                "W3-T11 precondition: at a depth where every corner projects sanely the projected box must " +
+                "Projected-T11 precondition: at a depth where every corner projects sanely the projected box must " +
                 "differ from the screen box.");
 
-            // Non-vacuity 2: this must be a DIFFERENT state from W3-T7's, or the tooth is a duplicate that the
+            // Non-vacuity 2: this must be a DIFFERENT state from Projected-T7's, or the tooth is a duplicate that the
             // behind-camera rejection would satisfy on its own. The near corner sits one cell half-height
             // up-axis of the anchor, so its view depth is (anchor − halfHeight) — assert that is POSITIVE, i.e.
             // the corner is in FRONT of the camera and TryProjectPoint ACCEPTS it. Only the magnitude test can
@@ -2531,24 +2528,24 @@ namespace MapRenderer.Tests.Text.Placement
             const double cellHalfHeightM = 6.0 * hugeRulerMpp;         // 6 baked px at 1 em, in metres
             const double nearCornerDepthM = blowUpDepthM - cellHalfHeightM;
             Assert.That(nearCornerDepthM, Is.GreaterThan(0.0),
-                $"W3-T11 precondition: the near corner must be IN FRONT of the camera (depth " +
-                $"{nearCornerDepthM} m) — otherwise this duplicates W3-T7's behind-camera rejection.");
+                $"Projected-T11 precondition: the near corner must be IN FRONT of the camera (depth " +
+                $"{nearCornerDepthM} m) — otherwise this duplicates Projected-T7's behind-camera rejection.");
 
             // Non-vacuity 3: the fallback the tooth asserts must itself be bounded — that is the whole point.
             float guardedWidth = blowUpScreen.Boxes[0].Max.x - blowUpScreen.Boxes[0].Min.x;
             Assert.That(guardedWidth, Is.LessThan(SymbolScreenProjectionMaxProjectedPx),
-                $"W3-T11 precondition: the fallback box must be BOUNDED — got width {guardedWidth}.");
+                $"Projected-T11 precondition: the fallback box must be BOUNDED — got width {guardedWidth}.");
 
             AssertBitIdentical(Bits(blowUpScreen.Boxes, blowUpScreen.BoxCount),
                 Bits(blowUpProjected.Boxes, blowUpProjected.BoxCount),
-                "W3-T11: a corner projecting past MaxProjectedPx must take the pre-W3 screen box");
+                "Projected-T11: a corner projecting past MaxProjectedPx must take the screen box");
         }
 
         /// <summary>Mirror of <c>SymbolScreenProjection.MaxProjectedPx</c>. Re-stated here rather than read
         /// back, so a change to the production threshold does not silently move this tooth's expectation.</summary>
         private const float SymbolScreenProjectionMaxProjectedPx = 1e5f;
 
-        /// <summary>W3-T7's probe: the GROUND-normal fixture, whose ŷ runs along the view axis so a corner
+        /// <summary>Projected-T7's probe: the GROUND-normal fixture, whose ŷ runs along the view axis so a corner
         /// offset moves the corner in DEPTH.</summary>
         private static void StageCornerProbe(ref Pools p, SymbolViewTransform view, float mpp, double depthM)
         {
@@ -2556,7 +2553,7 @@ namespace MapRenderer.Tests.Text.Placement
                 cellSkirt: 0f, textSizePx: TextQuadLayout.OneEm, mpp,
                 depthM, lateralM: 0.0, roadHalfM: 1000.0,
                 iconRotateRadians: 0f, sortKey: 0f, featureIndex: 43, ordinal: 0);
-            Assert.That(staged, Is.EqualTo(1), "W3-T7 precondition: the probe label must stage.");
+            Assert.That(staged, Is.EqualTo(1), "Projected-T7 precondition: the probe label must stage.");
         }
 
         private static bool BitsEqual(uint[] a, uint[] b)
@@ -2567,11 +2564,11 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T8 — D7: `icon-rotate` is INSIDE the map-pitched box
+        // Projected-T8 — `icon-rotate` is INSIDE the map-pitched box
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T8 — the tooth behind E10's KL-B1 amendment.</b> Proves: the map-pitched box includes the
+        /// <b>Projected-T8 — the icon-rotate tooth.</b> Proves: the map-pitched box includes the
         /// constant <c>icon-rotate</c> the renderer rotates the drawn corners by. A one-glyph map-pitched icon
         /// on a NON-SQUARE cell is staged at <c>icon-rotate</c> 0 and at 90°, and the box's projected
         /// half-extents SWAP.
@@ -2584,7 +2581,7 @@ namespace MapRenderer.Tests.Text.Placement
         ///
         /// <para><b>Why 90° and not the shipped 180°.</b> 180° is the only <c>icon-rotate</c> any shipped
         /// map-pitched layer carries, and on a centre-anchored cell it is its own inverse — the AABB is
-        /// identical, so it CANNOT discriminate. That is also why D7 is numerically a no-op on every shipped
+        /// identical, so it CANNOT discriminate. That is also why icon-rotate is numerically a no-op on every shipped
         /// style even though it is a real change to the box.</para>
         /// </summary>
         [Test]
@@ -2604,26 +2601,26 @@ namespace MapRenderer.Tests.Text.Placement
             double expectedHalfHeight = SuppressionCellHalfHeightBaked * pxPerBaked;
 
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                "W3-T8  upright half-extents=({0:F4}, {1:F4}) px  turned=({2:F4}, {3:F4}) px  expected " +
+                "Projected-T8  upright half-extents=({0:F4}, {1:F4}) px  turned=({2:F4}, {3:F4}) px  expected " +
                 "upright=({4:F4}, {5:F4})",
                 HalfWidthPx(upright.Boxes[0]), HalfHeightPx(upright.Boxes[0]),
                 HalfWidthPx(turned.Boxes[0]), HalfHeightPx(turned.Boxes[0]),
                 expectedHalfWidth, expectedHalfHeight));
 
             Assert.That(math.abs(expectedHalfWidth - expectedHalfHeight), Is.GreaterThan(1.0),
-                $"W3-T8 precondition: the cell must be far from square in projection — half-extents " +
+                $"Projected-T8 precondition: the cell must be far from square in projection — half-extents " +
                 $"{expectedHalfWidth:F4} and {expectedHalfHeight:F4} px — or a 90° rotation changes nothing " +
                 "and this tooth discriminates nothing.");
             Assert.That(HalfWidthPx(upright.Boxes[0]), Is.EqualTo(expectedHalfWidth).Within(0.05),
-                "W3-T8: at icon-rotate 0 the box's projected half-WIDTH must be the cell's own half-width.");
+                "Projected-T8: at icon-rotate 0 the box's projected half-WIDTH must be the cell's own half-width.");
             Assert.That(HalfHeightPx(upright.Boxes[0]), Is.EqualTo(expectedHalfHeight).Within(0.05),
-                "W3-T8: at icon-rotate 0 the box's projected half-HEIGHT must be the cell's own half-height.");
+                "Projected-T8: at icon-rotate 0 the box's projected half-HEIGHT must be the cell's own half-height.");
             Assert.That(HalfWidthPx(turned.Boxes[0]), Is.EqualTo(expectedHalfHeight).Within(0.05),
-                $"W3-T8: at icon-rotate 90° the half-WIDTH must become the cell's half-HEIGHT " +
+                $"Projected-T8: at icon-rotate 90° the half-WIDTH must become the cell's half-HEIGHT " +
                 $"({expectedHalfHeight:F4} px), read {HalfWidthPx(turned.Boxes[0]):F4}. An unchanged " +
                 "half-width means the box omits icon-rotate and no longer bounds what the renderer draws.");
             Assert.That(HalfHeightPx(turned.Boxes[0]), Is.EqualTo(expectedHalfWidth).Within(0.05),
-                $"W3-T8: at icon-rotate 90° the half-HEIGHT must become the cell's half-WIDTH " +
+                $"Projected-T8: at icon-rotate 90° the half-HEIGHT must become the cell's half-WIDTH " +
                 $"({expectedHalfWidth:F4} px), read {HalfHeightPx(turned.Boxes[0]):F4}.");
         }
 
@@ -2634,15 +2631,15 @@ namespace MapRenderer.Tests.Text.Placement
                 cellSkirt: 0f, SuppressionTextSizePx, SuppressionMpp,
                 SuppressionDepthM, lateralM: 0.0, roadHalfM: 1000.0,
                 iconRotateRadians, sortKey: 0f, featureIndex: 44, ordinal: 0);
-            Assert.That(staged, Is.EqualTo(1), "W3-T8 precondition: the icon label must stage.");
+            Assert.That(staged, Is.EqualTo(1), "Projected-T8 precondition: the icon label must stage.");
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T9 — D9: the skirt is removed from the map-pitched box too
+        // Projected-T9 — the skirt is removed from the map-pitched box too
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T9 — the skirt contract, carried onto the projected box.</b> Proves: a map-pitched icon whose
+        /// <b>Projected-T9 — the skirt contract, carried onto the projected box.</b> Proves: a map-pitched icon whose
         /// cell carries a transparent border (<c>CurvedGlyph.CellSkirt</c>) gets the SAME projected box as the
         /// same symbol with that border already removed from the cell and a zero skirt — i.e. the box bounds the
         /// icon's INK, not its skirt. The exact shape
@@ -2672,36 +2669,36 @@ namespace MapRenderer.Tests.Text.Placement
             StageSkirtProbe(ref unshrunk, view, padded, 0f);
 
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                "W3-T9  withSkirt half-extents=({0:F4}, {1:F4})  preShrunk=({2:F4}, {3:F4})  unshrunk=" +
+                "Projected-T9  withSkirt half-extents=({0:F4}, {1:F4})  preShrunk=({2:F4}, {3:F4})  unshrunk=" +
                 "({4:F4}, {5:F4}) px",
                 HalfWidthPx(withSkirt.Boxes[0]), HalfHeightPx(withSkirt.Boxes[0]),
                 HalfWidthPx(preShrunk.Boxes[0]), HalfHeightPx(preShrunk.Boxes[0]),
                 HalfWidthPx(unshrunk.Boxes[0]), HalfHeightPx(unshrunk.Boxes[0])));
 
             Assert.That(HalfWidthPx(unshrunk.Boxes[0]), Is.GreaterThan(HalfWidthPx(withSkirt.Boxes[0]) + 1e-4),
-                "W3-T9 precondition (non-vacuity): a non-zero cell skirt must SHRINK the projected box — " +
+                "Projected-T9 precondition (non-vacuity): a non-zero cell skirt must SHRINK the projected box — " +
                 "otherwise this tooth proves nothing.");
             AssertBitIdentical(Bits(preShrunk.Boxes, preShrunk.BoxCount),
                 Bits(withSkirt.Boxes, withSkirt.BoxCount),
-                "W3-T9: the projected box of a skirted cell must equal that of the same cell pre-shrunk by it");
+                "Projected-T9: the projected box of a skirted cell must equal that of the same cell pre-shrunk by it");
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T10 — the ŷ SENSE of the projected box, on a cell that can actually see it
+        // Projected-T10 — the ŷ SENSE of the projected box, on a cell that can actually see it
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T10 — the observer for <c>TryBuildProjectedWorldGlyph</c>'s <c>ŷ = cross(x̂, up)</c>.</b>
+        /// <b>Projected-T10 — the observer for <c>TryBuildProjectedWorldGlyph</c>'s <c>ŷ = cross(x̂, up)</c>.</b>
         /// Proves: a positive y-UP cell coordinate lands ABOVE the anchor on screen, by the amount the cell's
         /// own corners predict.
         ///
         /// <para><b>Why it exists, and why nothing else in the stage does this job.</b> The box is an
         /// <b>AABB</b> of the four cell corners, and flipping ŷ maps corner <c>(cx, cy) → (cx, −cy)</c> — a
         /// PERMUTATION of the corner set whenever the cell is symmetric about its anchor in y, and the AABB of
-        /// a set is invariant under permutation. The shipped <c>'F'</c> cell is block-centred and W4 centres
+        /// a set is invariant under permutation. The shipped <c>'F'</c> cell is block-centred and the vertical-centring pass centres
         /// curved cells optically on the path, and every other synthetic cell here is <c>Cell(hw)</c> =
-        /// <c>(±hw, ±6)</c> — so a flipped ŷ was measured (injection I2) to leave the ENTIRE suite green,
-        /// W3-T1, W3-T2 and W3-T3 included. W2's 22.56 px flipped-sign separation was an ink-CENTROID reading
+        /// <c>(±hw, ±6)</c> — so a flipped ŷ was measured to leave the ENTIRE suite green,
+        /// Projected-T1, Projected-T2 and Projected-T3 included. The earlier 22.56 px flipped-sign separation was an ink-CENTROID reading
         /// and does not carry to an AABB. A sign must be
         /// read where the code is not inert, and for an AABB that means a cell whose y extent does NOT
         /// straddle its anchor.</para>
@@ -2710,10 +2707,10 @@ namespace MapRenderer.Tests.Text.Placement
         /// the whole box by <c>|top + bottom| · pxPerBaked</c> — asserted as a precondition to be well over a
         /// pixel, against edge expectations derived from the cell's own corners.</para>
         ///
-        /// <para><b>What this does NOT pin.</b> Like W3-T1's oracle it re-derives the sense rather than
+        /// <para><b>What this does NOT pin.</b> Like Projected-T1's oracle it re-derives the sense rather than
         /// importing it from an independent reference, so it catches a production-only flip, not a SHARED
-        /// convention error. The independent reference for the shader's own sign remains W2's tilt-0 ink
-        /// centroid (<c>MapPitchedGlyphSizeTiltZeroTests</c>), and for the CPU box the closest thing is W3-T2's
+        /// convention error. The independent reference for the shader's own sign remains the tilt-0 ink
+        /// centroid (<c>MapPitchedGlyphSizeTiltZeroTests</c>), and for the CPU box the closest thing is Projected-T2's
         /// ink containment — which, being a containment, only bites once the flip exceeds the box.</para>
         /// </summary>
         [Test]
@@ -2733,7 +2730,7 @@ namespace MapRenderer.Tests.Text.Placement
                 cellSkirt: 0f, SuppressionTextSizePx, SuppressionMpp,
                 SuppressionDepthM, lateralM: 0.0, roadHalfM: 1000.0,
                 iconRotateRadians: 0f, sortKey: 0f, featureIndex: 47, ordinal: 0);
-            Assert.That(staged, Is.EqualTo(1), "W3-T10 precondition: the off-centre-cell label must stage.");
+            Assert.That(staged, Is.EqualTo(1), "Projected-T10 precondition: the off-centre-cell label must stage.");
 
             double metresPerBaked = SuppressionTextSizePx * SuppressionMpp / TextQuadLayout.OneEm;
             double pxPerBaked = PxPerMetreAtUnitDepth * metresPerBaked / SuppressionDepthM;
@@ -2743,23 +2740,23 @@ namespace MapRenderer.Tests.Text.Placement
             double flipSeparationPx = (cellTopBaked + cellBottomBaked) * pxPerBaked;
 
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                "W3-T10  anchorY={0:F3}  box y=[{1:F4}, {2:F4}]  expected=[{3:F4}, {4:F4}]  a flipped ŷ would " +
+                "Projected-T10  anchorY={0:F3}  box y=[{1:F4}, {2:F4}]  expected=[{3:F4}, {4:F4}]  a flipped ŷ would " +
                 "move it by {5:F4} px", anchorY, p.Boxes[0].Min.y, p.Boxes[0].Max.y, expectedMinY, expectedMaxY,
                 flipSeparationPx));
 
             Assert.That(flipSeparationPx, Is.GreaterThan(1.0),
-                $"W3-T10 precondition: the cell must be genuinely OFF-CENTRE in y — a flip would move the box " +
+                $"Projected-T10 precondition: the cell must be genuinely OFF-CENTRE in y — a flip would move the box " +
                 $"by {flipSeparationPx:F4} px, and below ~1 px this tooth stops discriminating the sign it " +
                 "exists to read.");
             Assert.That(p.Boxes[0].Min.y, Is.EqualTo(expectedMinY).Within(0.05),
-                $"W3-T10: the box's LOWER edge must be the cell's own +{cellBottomBaked} baked px ABOVE the " +
+                $"Projected-T10: the box's LOWER edge must be the cell's own +{cellBottomBaked} baked px ABOVE the " +
                 $"anchor ({expectedMinY:F4}), read {p.Boxes[0].Min.y:F4}. A value BELOW the anchor means " +
                 "ŷ = cross(x̂, up) has been flipped and the box sits on the wrong side of the road.");
             Assert.That(p.Boxes[0].Max.y, Is.EqualTo(expectedMaxY).Within(0.05),
-                $"W3-T10: the box's UPPER edge must be the cell's own +{cellTopBaked} baked px above the " +
+                $"Projected-T10: the box's UPPER edge must be the cell's own +{cellTopBaked} baked px above the " +
                 $"anchor ({expectedMaxY:F4}), read {p.Boxes[0].Max.y:F4}.");
             Assert.That(p.Boxes[0].Min.y, Is.GreaterThan(anchorY),
-                $"W3-T10: a cell lying entirely above its anchor must produce a box lying entirely above the " +
+                $"Projected-T10: a cell lying entirely above its anchor must produce a box lying entirely above the " +
                 $"anchor's projection ({anchorY:F3}) — read a lower edge of {p.Boxes[0].Min.y:F4}.");
         }
 
@@ -2769,11 +2766,11 @@ namespace MapRenderer.Tests.Text.Placement
                 skirt, SuppressionTextSizePx, SuppressionMpp,
                 SuppressionDepthM, lateralM: 0.0, roadHalfM: 1000.0,
                 iconRotateRadians: 0f, sortKey: 0f, featureIndex: 45, ordinal: 0);
-            Assert.That(staged, Is.EqualTo(1), "W3-T9 precondition: the icon label must stage.");
+            Assert.That(staged, Is.EqualTo(1), "Projected-T9 precondition: the icon label must stage.");
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // GLOBE-A — the CPU ground frame with a NON-ZERO Gram-Schmidt axial term (GA-T1…GA-T3)
+        // The CPU ground frame with a NON-ZERO Gram-Schmidt axial term (GA-T1…GA-T3)
         //
         // SymbolBox.TryBuildProjectedWorldGlyph builds the glyph's ground frame as
         //
@@ -2782,7 +2779,7 @@ namespace MapRenderer.Tests.Text.Placement
         // On EVERY other fixture in this repo `axial` is EXACTLY ZERO — Mercator's surface normal is the
         // constant (0,1,0) and every baked road tangent is horizontal, so the tangent already lies IN the
         // surface and the subtraction is a no-op. The orthogonalisation has therefore never been exercised
-        // by anything (recorded as followUp F-W3-3, and F-W2-3 for the shader's own copy). These teeth are
+        // by anything (recorded, and still open for the shader's own copy). These teeth are
         // the first that reach it.
         //
         // SCOPE. The CPU copy ONLY. The shader's copy (SymbolWorldPitchAlign.hlsl:95-106) is unreachable
@@ -2869,9 +2866,9 @@ namespace MapRenderer.Tests.Text.Placement
         private const float GlobeCellTopBaked       = 18f;
         private const float GlobeCellBottomBaked    = 6f;
 
-        /// <summary>The globe teeth's glyph cell: y-OFF-CENTRE, entirely above its anchor. F-W3-6 measured
+        /// <summary>The globe teeth's glyph cell: y-OFF-CENTRE, entirely above its anchor. A measurement showed
         /// that an AABB is invariant under a ŷ flip on a y-symmetric cell, so a symmetric cell here would
-        /// leave the ŷ leg of the frame unobserved for free. W3-T10's shape, reused for the same reason.</summary>
+        /// leave the ŷ leg of the frame unobserved for free. Projected-T10's shape, reused for the same reason.</summary>
         private static SymbolQuad GlobeCell() => new SymbolQuad
         {
             TopLeft     = new float2(-GlobeCellHalfWidthBaked, GlobeCellTopBaked),
@@ -2910,7 +2907,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>Stages ONE map-pitched glyph on the globe arc, anchored at <paramref name="t"/>. The
         /// screen polyline is the TRUE projection of the world polyline (<see cref="ProjectPx"/>), so the
-        /// pre-W3 screen box the control arm reads is the box the shipped code would really have built.</summary>
+        /// screen box the control arm reads is the box the shipped code would really have built.</summary>
         private static int StageGlobeGlyph(ref Pools p, in SymbolViewTransform view, double t, int featureIndex)
         {
             BuildGlobeArc(t, out double3[] worldPath, out float3[] worldUps, out _, out _);
@@ -2985,14 +2982,14 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         /// <summary>
-        /// Stages the globe fixture TWICE — once with no camera (<c>view: default</c>, W3's D5 state ⇒ the
-        /// pre-W3 SCREEN box) and once through <see cref="OriginView"/> (the projected box) — and asserts the
+        /// Stages the globe fixture TWICE — once with no camera (<c>view: default</c>, the no-transform state ⇒ the
+        /// SCREEN box) and once through <see cref="OriginView"/> (the projected box) — and asserts the
         /// two differ substantially.
         ///
         /// <para><b>This is the control arm, and it is not optional.</b>
         /// <c>TryBuildProjectedWorldGlyph</c> sits behind five gates — <c>cornerMetresPerLogicalPixel &gt; 0</c>,
         /// <c>view.IsUsable</c>, a zero up, a zero tangent, and <c>|axial| &gt; 1 − 1e-3</c> — and every one
-        /// of them SILENTLY yields the screen box instead. W3-T5 in this epic held for exactly that reason
+        /// of them SILENTLY yields the screen box instead. Projected-T5 held for exactly that reason
         /// (an all-zero surface normal tripped guard 1 long before the quantity it claimed to test mattered),
         /// and it was found only because an injection failed to red it. A globe tooth that never checks which
         /// branch ran would be the same test.</para>
@@ -3013,11 +3010,11 @@ namespace MapRenderer.Tests.Text.Placement
             double separation = math.abs(HalfHeightPx(projected) - HalfHeightPx(screen));
 
             TestContext.WriteLine(string.Format(CultureInfo.InvariantCulture,
-                "{0}  control arm: projected half-height={1:F4} px  screen(pre-W3) half-height={2:F4} px  " +
+                "{0}  control arm: projected half-height={1:F4} px  screen half-height={2:F4} px  " +
                 "separation={3:F4} px", toothId, HalfHeightPx(projected), HalfHeightPx(screen), separation));
 
             Assert.That(separation, Is.GreaterThan(5.0),
-                $"{toothId} precondition (control arm): the projected box must differ from the pre-W3 screen " +
+                $"{toothId} precondition (control arm): the projected box must differ from the screen " +
                 $"box by well over a pixel, measured {separation:F4} px. If they agree, one of " +
                 "TryBuildProjectedWorldGlyph's five gates rejected this fixture and the box below is the " +
                 "SCREEN box — the assertions would then be testing BuildRotatedGlyph, not the ground frame.");
@@ -3025,7 +3022,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // GA-T1 — the fixture IS spherical, and its axial term IS non-zero. R1's precondition.
+        // GA-T1 — the fixture IS spherical, and its axial term IS non-zero.
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
@@ -3162,7 +3159,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// fixture's stated geometry — an explicit on-sphere arc, its explicit radial normals, x̂ as "the
         /// sampled normal rotated 90° in the arc's plane", ŷ as the arc plane's normal, and
         /// <see cref="ProjectPx"/>'s two-constant projection. Nothing here evaluates
-        /// <c>normalize(tangent − up·axial)</c> or <c>cross(x̂, up)</c>. (W3-T1's ŷ leg and F-W3-6 are what
+        /// <c>normalize(tangent − up·axial)</c> or <c>cross(x̂, up)</c>. (Projected-T1's ŷ leg is what
         /// this rule was learned from.)</para>
         ///
         /// <para><b>Scope.</b> The CPU copy only. The shader's identical expression
@@ -3228,7 +3225,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// </list>
         /// <para>That asymmetry is a property a reviewer can re-measure, and it is the reason a globe fixture
         /// built the obvious way — at the arc midpoint, as every other curved fixture in this repo is — would
-        /// have looked exactly like coverage while observing nothing (F-W3-3, still open for the shader).</para>
+        /// have looked exactly like coverage while observing nothing (still open for the shader).</para>
         /// </summary>
         [Test]
         public void MapPitched_SphericalArcAtTheChordMidpoint_IsBlindToTheOrthogonalisation()
@@ -3270,7 +3267,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// UMR-87: <see cref="ShapedSymbol"/> must live in a <see cref="NativeArray{T}"/> — the whole point of
+    /// <see cref="ShapedSymbol"/> must live in a <see cref="NativeArray{T}"/> — the whole point of
     /// interning its <c>Text</c>/<c>IconImage</c> strings into <c>TextId</c>/<c>IconImageId</c> ints. Before
     /// that change this struct held two managed <c>string</c> fields, so <c>NativeArray&lt;ShapedSymbol&gt;</c>
     /// construction threw at runtime (Collections' safety checks reject a non-blittable T) — the failure this
@@ -3279,7 +3276,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// <para><b>NOT <c>UnsafeUtility.IsBlittable&lt;T&gt;()</c>.</b> That API answers a STRICTER, CLR-marshaling
     /// question — it returns <c>false</c> for any struct containing a <c>bool</c> field, which
     /// <see cref="ShapedSymbol"/> has four of (<c>AllowOverlap</c>/<c>IgnorePlacement</c>/<c>KeepUpright</c>/
-    /// <c>PairOptional</c>) and always did, even before UMR-87. <see cref="IsBlittable_IsTheWrongPredicate_PointStageInputAlsoReadsFalse"/>
+    /// <c>PairOptional</c>) and always did. <see cref="IsBlittable_IsTheWrongPredicate_PointStageInputAlsoReadsFalse"/>
     /// below RUNS that API against <c>PointStageInput</c> — already a <c>NativeArray</c> element in production,
     /// also with <c>bool</c> fields — to prove it reads the SAME false there, so it is the wrong predicate for
     /// "can this live in a NativeArray", not a regression this tooth should chase.</para>
@@ -3320,7 +3317,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S105 Slice 3 (A4) — THE decisive test: a parsed symbol layer + the real fixture tile, run through
+    /// THE decisive test: a parsed symbol layer + the real fixture tile, run through
     /// <see cref="StyledSymbolTileBuilder"/> produces the expected set of
     /// shaped <see cref="ShapedSymbol"/>s. Real style + real tile → correct symbols, no synthetic stand-in.
     /// </summary>
@@ -3409,7 +3406,7 @@ namespace MapRenderer.Tests.Text.Placement
                         $"'{t}' must shape to {t.Length} glyph quads");
             }
 
-            // (b) The specific named feature — Aruba — is the first, shaped to 5 glyphs, at its A3 anchor.
+            // (b) The specific named feature — Aruba — is the first, shaped to 5 glyphs, at its cross-tile anchor.
             Assert.AreEqual("Aruba", extracted[0].Text, "feature[0] is Aruba");
             Assert.AreEqual(5, buffer.Symbols[0].QuadCount, "Aruba → 5 glyph quads");
 
@@ -3487,7 +3484,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── Per-symbol build isolation: one symbol whose build throws (e.g. S18's deferred mixed-direction
+        // ── Per-symbol build isolation: one symbol whose build throws (e.g. a deferred mixed-direction
         //    bidi NotSupportedException) must be SKIPPED, never abort the whole tile's symbols. ──
 
         private static SymbolStyle.SymbolFeature PointSymbol(string text) => new SymbolStyle.SymbolFeature
@@ -3534,7 +3531,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             // A glyph source that OBSERVES the token (FromRanges discards it), so the ensure step's await
             // surfaces the cancel. Pins that a cancelled ensure propagates an OperationCanceledException.
-            // (Shape never running as a consequence is pinned by T1/T5c, not here — this body never calls
+            // (Shape never running as a consequence is pinned by SymbolSubsystemWorkSchedulerTests' T1/T5c, not here — this body never calls
             // Shape, so an assertion about its output would be true under any implementation.)
             var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
             {
@@ -3564,7 +3561,7 @@ namespace MapRenderer.Tests.Text.Placement
                 await builder.EnsureGlyphRangesAsync(ranges, cts.Token));
         }
 
-        // ── I5a: icon symbols ride the same Shape loop as text, but must never touch the
+        // ── Icon symbols ride the same Shape loop as text, but must never touch the
         //    shaper/resolver/glyph-fetch machinery (an icon-only layer may carry no text-font at all). ──
 
         private static SymbolStyle.SymbolFeature Icon(in SymbolQuad iconQuad) => new SymbolStyle.SymbolFeature
@@ -3633,7 +3630,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(SymbolKind.Text, output.Symbols[2].Kind); Assert.AreEqual(builder.StringTable.Intern("Angola"), output.Symbols[2].TextId);
         }
 
-        // ── A3 (P-B): a MAP-aligned LINE icon must build as a ONE-GLYPH CURVED instance, not a point one.
+        // ── A MAP-aligned LINE icon must build as a ONE-GLYPH CURVED instance, not a point one.
         //    The point-icon branch above stays byte-identical (its own tooth is the pair above). ──
         [Test]
         public void Shape_AlongLineIcon_BuildsOneGlyphCurvedInstance_NotAPointInstance()
@@ -3669,7 +3666,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             Assert.AreEqual(1, output.Symbols.Count);
             ShapedSymbol built = output.Symbols[0];
-            // A point-shaped build (the pre-P-B behaviour) would leave GlyphCount 0 and Placement Point.
+            // A point-shaped build would leave GlyphCount 0 and Placement Point.
             Assert.AreEqual(SymbolPlacement.Line, built.Placement, "an along-line icon keeps LINE placement");
             Assert.AreEqual(1, built.GlyphCount, "exactly ONE glyph — the icon quad IS the whole run");
             Assert.AreEqual(0, built.QuadCount, "a curved instance carries no point quads");

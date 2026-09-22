@@ -5,7 +5,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Fill
     /// <summary>
     /// Cached <c>Shader.PropertyToID</c> integer ids for every property in <see cref="PropertyNames"/>.
     /// Use these for all <c>Material.SetFloat/SetColor/SetVector/HasProperty/GetFloat/…</c> calls that
-    /// target <c>Map/Fill</c>-specific properties. (S78)
+    /// target <c>Map/Fill</c>-specific properties.
     /// </summary>
     public static class PropertyId
     {

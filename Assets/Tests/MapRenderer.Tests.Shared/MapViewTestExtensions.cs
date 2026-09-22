@@ -36,9 +36,8 @@ namespace MapRenderer.Tests
         // ── Test camera rig ─────────────────────────────────────────────────────────────────────
         // MapCamera wraps a NON-NULL UnityEngine.Camera and the camera IS the viewport, so a headless
         // MapView test needs a real camera with a deterministic pixel size. This wires an offscreen,
-        // never-rendered camera whose square RenderTexture gives ViewportPx = (px, px) — reproducing the
-        // old `FallbackAspect = 1f` square viewport so tile selection is unchanged. The camera is parented
-        // to the view (destroyed with it); the RenderTexture is shared (the camera never renders to it).
+        // never-rendered camera whose square RenderTexture gives ViewportPx = (px, px). The camera is
+        // parented to the view (destroyed with it); the RenderTexture is shared (the camera never renders).
         private static RenderTexture _testViewportRt;
 
         // Off-main, matching production's desktop policy — LoadTestStyle exercises the source's own
@@ -109,9 +108,8 @@ namespace MapRenderer.Tests
                             "LoadTestStyle does not wire SymbolSubsystem, so symbol layers never place. Use the " +
                             "async MapView.SetStyle path (see VisualScene / GeoJsonPointSymbolFixtureTests), or " +
                             "pass symbolsIntentionallyUnwired: true if this test only needs the source wired.");
-            // Epic A / A2: mirrors the production skip (MapView.BuildSourceSpecs, post-A2) — only a layer
-            // with a non-empty StyleLayer.Source fetches; background is source-less by design (no Build-kind
-            // check any more — ViewGeometry is REMOVED).
+            // Mirrors the production skip in MapView.BuildSourceSpecs: only a layer with a non-empty
+            // StyleLayer.Source fetches, and background is source-less.
             for (int i = 0; i < layers.Count; i++)
                 if (!string.IsNullOrEmpty(layers[i].StyleLayer?.Source)) AddSpec(layers[i].StyleLayer.Source);
             mv.TileManager.SetSources(specs, view.Config.Backend);
@@ -119,8 +117,8 @@ namespace MapRenderer.Tests
             void AddSpec(string sid)
             {
                 sid ??= string.Empty;
-                // Epic A / A7: the raised seam — wrap the injected byte source into the MVT feature source,
-                // mirroring MapView.BuildSourceSpecs' production wrap.
+                // Wrap the injected byte source into the MVT feature source, mirroring
+                // MapView.BuildSourceSpecs' production wrap.
                 if (seen.Add(sid))
                     specs.Add(new TileManager.SourceSpec(
                         sid, default, 0, int.MaxValue, () => new MvtTileFeatureSource(source, decodeSched)));
@@ -188,46 +186,45 @@ namespace MapRenderer.Tests
         /// <summary>Number of tiles released while their mesh build was still in-flight.</summary>
         public static int ReleasedMidFlightCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleasedMidFlightCount : 0;
 
-        /// <summary>S84: number of tiles released while their FETCH was still in-flight.</summary>
+        /// <summary>Number of tiles released while their FETCH was still in-flight.</summary>
         public static int ReleasedMidFetchCount(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleasedMidFetchCount : 0;
 
-        /// <summary>S95: number of times the FULL cover recompute (select descent + request/release diff)
-        /// actually ran in the most recent Tick — 0 on an early-out Tick, else 1. Sum across N sub-tile
-        /// camera nudges to discriminate "recomputed every dirty tick" (today's behaviour) from a future
-        /// throttle.</summary>
+        /// <summary>Number of times the FULL cover recompute (select descent + request/release diff) ran in
+        /// the most recent Tick — 0 on an early-out Tick, else 1. Sum across N sub-tile camera nudges to
+        /// discriminate "recomputed every dirty tick" from a throttle.</summary>
         public static int CoverRecomputesLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.CoverRecomputesLastTick : 0;
 
-        /// <summary>job-scheduling-design.md §11 fork 2: tiles newly started (first kicked) in the
-        /// most recent Tick — once per tile, the quantity <c>MaxMeshBuildsPerTick</c> bounds.</summary>
+        /// <summary>Tiles newly started (first kicked) in the most recent Tick — once per tile, the quantity
+        /// <c>MaxMeshBuildsPerTick</c> bounds.</summary>
         public static int TileBuildsStartedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TileBuildsStartedLastTick : 0;
-        /// <summary>job-scheduling-design.md §3.2/§8 stage 2: Mesh.MeshDataArrays allocated by the graph
-        /// arm's write step in the most recent Tick.</summary>
+        /// <summary>Mesh.MeshDataArrays allocated by the graph arm's write step in the most recent
+        /// Tick.</summary>
         public static long MeshDataArraysAllocatedLastKick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshDataArraysAllocatedLastKick : 0;
-        /// <summary>S55: sum of vertex counts consumed in the most recent Tick.</summary>
+        /// <summary>Sum of vertex counts consumed in the most recent Tick.</summary>
         public static int VerticesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.VerticesConsumedLastTick : 0;
-        /// <summary>S55/S87: number of tiles that reached Built (fully consumed) in the most recent Tick.</summary>
+        /// <summary>Number of tiles that reached Built (fully consumed) in the most recent Tick.</summary>
         public static int TilesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesConsumedLastTick : 0;
-        /// <summary>S87: number of layer MESHES uploaded + registered in the most recent Tick (the per-frame mesh-count budget observable).</summary>
+        /// <summary>Number of layer MESHES uploaded + registered in the most recent Tick — the per-frame mesh-count budget observable.</summary>
         public static int MeshesConsumedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.MeshesConsumedLastTick : 0;
 
-        /// <summary>Stall #2: (tile, source) records fully released in the most recent Tick's DrainReleaseQueue.</summary>
+        /// <summary>(tile, source) records fully released in the most recent Tick's DrainReleaseQueue.</summary>
         public static int TilesReleasedLastTick(this MapViewComponent view) => view.TileManager != null ? view.TileManager.TilesReleasedLastTick : 0;
-        /// <summary>Stall #2: current deferred-release backlog depth (records that left cover and await drain).</summary>
+        /// <summary>Current deferred-release backlog depth (records that left cover and await drain).</summary>
         public static int ReleaseQueueDepth(this MapViewComponent view) => view.TileManager != null ? view.TileManager.ReleaseQueueDepth : 0;
-        /// <summary>Stall #2: batched DestroyEntity structural changes in the Entities backend's LAST RemoveItems call (0 or 1); 0 if not on the Entities backend.</summary>
+        /// <summary>Batched DestroyEntity structural changes in the Entities backend's LAST RemoveItems call (0 or 1); 0 if not on the Entities backend.</summary>
         public static int DestroyEntityBatchesLastRemove(this MapViewComponent view) => view.TileManager?.EntitiesRenderer != null ? view.TileManager.EntitiesRenderer.DestroyEntityBatchesLastRemove : 0;
-        /// <summary>Stall #2: entities destroyed by the Entities backend's last RemoveItems batch (layers + any emptied root).</summary>
+        /// <summary>Entities destroyed by the Entities backend's last RemoveItems batch (layers + any emptied root).</summary>
         public static int EntitiesDestroyedLastRemove(this MapViewComponent view) => view.TileManager?.EntitiesRenderer != null ? view.TileManager.EntitiesRenderer.EntitiesDestroyedLastRemove : 0;
-        /// <summary>Stall #3: live EG-registered meshes on the Entities backend (inc per AddTileLayer, dec per remove); -1 if not on the Entities backend.</summary>
+        /// <summary>Live EG-registered meshes on the Entities backend (inc per AddTileLayer, dec per remove); -1 if not on the Entities backend.</summary>
         public static int RegisteredMeshCount(this MapViewComponent view) => view.TileManager?.EntitiesRenderer != null ? view.TileManager.EntitiesRenderer.RegisteredMeshCount : -1;
 
-        /// <summary>S82: cumulative PreparedTileCache hit count (a revisit/style-toggle that skipped
+        /// <summary>Cumulative PreparedTileCache hit count (a revisit/style-toggle that skipped
         /// decode/build/upload).</summary>
         public static int PreparedCacheHits(this MapViewComponent view) => view.TileManager != null ? view.TileManager.PreparedCacheHits : 0;
-        /// <summary>S82: cumulative PreparedTileCache miss count (a cover-entry that genuinely re-prepared).</summary>
+        /// <summary>Cumulative PreparedTileCache miss count (a cover-entry that genuinely re-prepared).</summary>
         public static int PreparedCacheMisses(this MapViewComponent view) => view.TileManager != null ? view.TileManager.PreparedCacheMisses : 0;
 
-        /// <summary>S85: the pull-based tile/render telemetry snapshot.</summary>
+        /// <summary>The pull-based tile/render telemetry snapshot.</summary>
         public static TileTelemetrySnapshot CaptureTelemetry(this MapViewComponent view)
             => view.TileManager != null ? view.TileManager.CaptureTelemetry() : default;
 
@@ -278,14 +275,13 @@ namespace MapRenderer.Tests
 
         /// <summary>
         /// Assigns a committed production <see cref="MapMaterialSet"/> so the view can build per-layer
-        /// materials. Required since S58 retired the <c>Shader.Find</c> fallback — without a config the
-        /// factory returns null and <see cref="RenderLayerSet"/> builds zero layers. Returns the view for
-        /// chaining: <c>go.AddComponent&lt;MapView&gt;().WithTestMaterials()</c>.
+        /// materials. There is no <c>Shader.Find</c> fallback — without a config the factory returns null
+        /// and <see cref="RenderLayerSet"/> builds zero layers. Returns the view for chaining:
+        /// <c>go.AddComponent&lt;MapView&gt;().WithTestMaterials()</c>.
         /// </summary>
         /// <param name="mode">Which committed set to assign, and therefore whether the view renders lit or
-        /// unlit — render mode is a property of the SET, not a separate flag
-        /// (<c>RenderModeMaterialSelectionTests</c>). Defaults to <c>Lit</c>, the product default and the
-        /// mode every caller predating the parameter asked for implicitly.</param>
+        /// unlit — render mode is a property of the SET, not a separate flag. Defaults to <c>Lit</c>, the
+        /// product default.</param>
         public static MapViewComponent WithTestMaterials(
             this MapViewComponent view, RenderMode mode = RenderMode.Lit)
         {

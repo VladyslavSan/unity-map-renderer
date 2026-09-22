@@ -5,7 +5,7 @@
 //
 // Contents:
 //   MvtDecodeTagColumnHardeningTests  — MvtDecoder.FlattenFeatureColumn builds both tag-slice columns at the feature count by construction.
-//   MvtPropertyDecodeTests            — S39 — key table, value table and per-feature Properties/Id decoded correctly from the fixture and from synthetic tile bytes.
+//   MvtPropertyDecodeTests            — key table, value table and per-feature Properties/Id decoded correctly from the fixture and from synthetic tile bytes.
 //   MvtDecodePresizeTests             — the decoded value table is sized to the exact decoded count, no growth over-allocation.
 //   KeyBindingHoistTests              — FeatureSelector's per-layer bind step resolves a filter's constant-key names once per call, not once per feature.
 //   NativeTagStorageTests             — DensePropertyStore's flattened tag-word buffer: a shared Allocator.Persistent MvtLayer.FeatureTagWords view.
@@ -34,7 +34,7 @@ namespace MapRenderer.Tests.Mvt
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// N2 (whole-epic-review hardening, folded into the VM-wiring stage) — regression tooth for
+    /// Regression tooth for
     /// <see cref="MvtDecoder.ValidateTagSliceColumnsMatchFeatureCount"/>: the tag-slice columns' feature-
     /// count lockstep check must both (a) actually throw on a mismatch and (b) run BEFORE
     /// <c>MvtLayer.AdoptGeometry</c> inside <c>MvtDecoder.DecodeLayer</c> — the ordering that keeps a
@@ -148,27 +148,27 @@ namespace MapRenderer.Tests.Mvt
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MvtPropertyDecodeTests — S39 — key/value table and per-feature Properties/Id decoding
+    // MvtPropertyDecodeTests — key/value table and per-feature Properties/Id decoding
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S39 — MVT property/id decoding tests. Validates:
+    /// MVT property/id decoding tests. Validates:
     ///   1. Key table, value table, and per-feature Properties/Id decoded correctly from the fixture.
     ///   2. All MVT Value variant types (string, float, double, int, uint, sint, bool) decoded from
     ///      synthetic hand-built tile bytes.
     ///   3. Malformed tag input (odd-length, out-of-range index) is skip-tolerant, no throw.
     ///
-    /// Fixture numbers probed and pinned 2026-06-20 (see S39 implementation notes).
+    /// Fixture numbers probed and pinned 2026-06-20.
     /// </summary>
     [TestFixture]
     public class MvtPropertyDecodeTests
     {
 
-        /// <summary>IR C1 P3: the address the committed fixture is decoded at (its buffers are stamped with
+        /// <summary>The address the committed fixture is decoded at (its buffers are stamped with
         /// it). z0/0/0 — the fixture's own tile.</summary>
         private static readonly TileId FixtureTileId = new TileId { Z = 0, X = 0, Y = 0 };
 
-        /// <summary>IR C1 P3: a decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
+        /// <summary>A decoded tile owns Allocator.Persistent buffers — release them per test.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         // ── Fixture loader (walk-up from cwd then AppContext — works in Unity batch mode AND dotnet) ─
@@ -1074,7 +1074,7 @@ namespace MapRenderer.Tests.Mvt
                 "a second Dispose must be a no-op (idempotent write-back), not a throw.");
         }
 
-        // ── Tooth #5 — §0.1 use-after-free bound ───────────────────────────────────────────────
+        // ── Tooth #5 — use-after-free bound ────────────────────────────────────────────────────
 
         /// <summary>
         /// Reading a property after the owning tile is disposed must fail LOUD — the disposed-<c>NativeArray</c>

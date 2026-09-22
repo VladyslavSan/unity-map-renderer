@@ -1,5 +1,5 @@
-// A test double, so it lives in the test assembly rather than in engine-free Core (where it shipped
-// until the test-only-code cleanup). Engine-free, so core-tests compiles it too.
+// A test double, so it lives in the test assembly rather than in engine-free Core. Engine-free, so
+// core-tests compiles it too.
 
 using System.Collections.Generic;
 using MapRenderer.Core.Expressions;
@@ -15,9 +15,7 @@ namespace MapRenderer.Tests
     /// command stream), so the same double serves the mesh builders and can be handed to
     /// <c>MvtGeometryMaterializer</c> through <c>InMemoryTileLayer</c>. Leave <see cref="Geometry"/> null for
     /// pure expression/filter tests: a null stream materializes as zero commands, so such a feature
-    /// contributes no ring, exactly as a real geometry-less feature does.
-    /// <b>IR C1 P3:</b> the interface this used to name was production's <c>IMvtGeometryCarrier</c>, deleted
-    /// when the decoded LAYER took ownership of geometry; the replacement is test-assembly-only.</para>
+    /// contributes no ring, exactly as a real geometry-less feature does.</para>
     /// </summary>
     public sealed class DictionaryFeature : IFeature, ITileCommandStreamFeature
     {

@@ -17,7 +17,7 @@ namespace MapRenderer.Tests.Meshing
     /// Real Burst drivers over a decoded MVT layer: per-polygon (<see cref="RunLayer"/>, the production
     /// RingSelect → RingAssembly → gather → <see cref="EarcutJob"/> chain) or whole-layer raw triangle
     /// arrays from one <see cref="FillMeshGraph"/> dispatch (<see cref="BuildEarcutRootsFromFillGraph"/>).
-    /// Shared in A0 by the re-homed corpus, parity and full-pipeline teeth.
+    /// Shared by the re-homed corpus, parity and full-pipeline teeth.
     /// </summary>
     internal static class EarcutJobGatherHarness
     {

@@ -1,7 +1,6 @@
 #if UNITY_EDITOR
-// S58: MaterialFactory.Create* now require a MapMaterialSet (the legacy Shader.Find fallback was
-// retired). Tests that build live map materials load the committed PRODUCTION config asset here, so
-// they exercise the real baseline rather than synthesizing one.
+// MaterialFactory.Create* require a MapMaterialSet. Tests that build live map materials load the
+// committed PRODUCTION config asset here, so they exercise the real baseline, not a synthesized one.
 using NUnit.Framework;
 using UnityEditor;
 using MapRenderer.Unity.Rendering.Materials;
@@ -34,8 +33,7 @@ namespace MapRenderer.Tests
                 $"[{string.Join(", ", matchingPaths)}].");
             Assert.IsNotNull(set.FillMaterial, "MapMaterialSet.FillMaterial must be assigned for tests.");
             Assert.IsNotNull(set.LineMaterial, "MapMaterialSet.LineMaterial must be assigned for tests.");
-            // SymbolTextWorld is REQUIRED (MapMaterialSet.Validate) — the only point-text draw path after the
-            // screen-space path was retired.
+            // SymbolTextWorld is REQUIRED (MapMaterialSet.Validate) — it is the only point-text draw path.
             Assert.IsNotNull(set.SymbolTextWorld, "MapMaterialSet.SymbolTextWorld must be assigned for tests.");
             return set;
         }

@@ -52,8 +52,8 @@ namespace MapRenderer.Tests
         /// XZ; need not be pre-normalised).
         ///
         /// <para>SYMMETRIC ABOUT THE CENTRE ON PURPOSE: a one-sided probe travels to a different depth and
-        /// picks up its own foreshortening — that IS the S111 defect
-        /// (<c>LineProbeSymmetrySnapshotTests.cs:5–10</c>). Do not "simplify" this to a one-sided probe.</para>
+        /// picks up its own foreshortening, which is the very defect these fixtures measure (see
+        /// <c>LineProbeSymmetrySnapshotTests</c>). Do not "simplify" this to a one-sided probe.</para>
         /// </summary>
         public static double GroundSegmentSpanPx(
             Camera camera, double3 centreWorld, double2 groundDirXZ, double lengthMetres)
@@ -64,25 +64,23 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>Converts a STYLED px width to a world-metre width via the frame constant
-        /// (<c>docs/line-rendering-design.md</c> §1's conversion, given one site here). Unused by T's own
-        /// teeth (T2/T3 use world metres deliberately, per §3.2) — exists for the P3 symbol-offset consumer
-        /// and the caps/joins stage, whose styled sizes are in px.</summary>
+        /// (<c>docs/line-rendering-design.md</c>'s conversion, given one site here). The tilt teeth measure in
+        /// world metres and do not use it; it exists for the consumers whose styled sizes are in px.</summary>
         public static double StyledPixelsToWorldMetres(double styledPx, double metresPerDevicePixel)
             => styledPx * metresPerDevicePixel;
 
         /// <summary>The closed-form screen span, AT THE LOOK-AT ONLY, of a world segment of
-        /// <paramref name="lengthMetres"/> lying along the tilt axis: <c>lengthMetres / mpp · cos(tilt)</c> —
-        /// §1.2's table row, written out once. Used ONLY by T1 to cross-check the projective ruler
-        /// (<see cref="GroundSegmentSpanPx"/>) at the one point a closed form is known; every consumer uses
-        /// the projective ruler, which is valid off-centre and at other depths where this closed form is
-        /// not.
+        /// <paramref name="lengthMetres"/> lying along the tilt axis: <c>lengthMetres / mpp · cos(tilt)</c>.
+        /// Used ONLY to cross-check the projective ruler (<see cref="GroundSegmentSpanPx"/>) at the one point
+        /// a closed form is known; every consumer uses the projective ruler, which stays valid off-centre and
+        /// at other depths where this closed form does not.
         ///
         /// <para><b>THE BLIND SPOT, NAMED.</b> <c>mpp</c> is a per-FRAME constant — the ruler at the look-at
-        /// depth — so this form is silently wrong at any other depth, by exactly the depth ratio. Every
-        /// fixture in the pitch-alignment epic anchored its symbol at the look-at, where that error is
-        /// identically zero, and therefore could not observe the quantity the epic is about. The
-        /// depth-GENERAL sibling is <see cref="ClosedFormPerpendicularSpanPx"/>; prefer it whenever the
-        /// measurand is not at the look-at.</para></summary>
+        /// depth — so this form is wrong at any other depth, by the depth ratio. A fixture that anchors its
+        /// symbol at the look-at sees that error as identically zero and therefore cannot observe
+        /// depth-dependent behaviour at all. The depth-GENERAL sibling is
+        /// <see cref="ClosedFormPerpendicularSpanPx"/>; prefer it whenever the measurand is not at the
+        /// look-at.</para></summary>
         public static double ClosedFormAcrossAzimuthSpanPx(
             double lengthMetres, double metresPerDevicePixel, Angle tilt)
             => lengthMetres / metresPerDevicePixel * tilt.Cos;

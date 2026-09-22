@@ -6,7 +6,7 @@ using MapRenderer.Unity.Rendering.Map;
 namespace MapRenderer.App.Menu
 {
     /// <summary>
-    /// Style-switcher page (UMR-143): a button per committed style; clicking one applies it to the live map
+    /// Style-switcher page: a button per committed style; clicking one applies it to the live map
     /// via <see cref="MapViewComponent.SetStyle(string,System.Threading.CancellationToken)"/> — the same
     /// path <see cref="MapHost"/> uses at startup, so a runtime switch exercises real restyle behaviour
     /// (not a scene reload). The currently-applied style is marked.

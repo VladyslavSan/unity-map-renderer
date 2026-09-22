@@ -26,7 +26,7 @@ namespace MapRenderer.Unity.Rendering.Backend
     {
         /// <summary>
         /// Registers a tile-layer mesh as a draw item. <paramref name="tileOriginRender"/> is the tile's
-        /// SW-corner projected render origin (S91-C, <c>double3</c>: Mercator <c>(mercX, 0, mercZ)</c>, globe
+        /// SW-corner projected render origin (<c>double3</c>: Mercator <c>(mercX, 0, mercZ)</c>, globe
         /// ECEF) — the Level-2 <see cref="Rebuild"/> places the item relative to the frame's scene origin.
         /// <paramref name="materialIndex"/> is the layer's global SLOT (its
         /// <c>Style.IRenderLayer.DrawIndex</c>), indexing the full-width layer-material list; non-tile-mesh
@@ -55,7 +55,7 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// Per-frame: recompute every draw item's object-to-world from <paramref name="frame"/> (the
         /// camera-relative <see cref="SceneFrame"/> — scene origin + rebase) and refresh backend state for the
         /// upcoming render. For Mercator <paramref name="frame"/> is identity-rebase, so placement reduces to
-        /// the pre-S91 translation.
+        /// a translation.
         /// </summary>
         void Rebuild(in SceneFrame frame);
 
@@ -78,7 +78,7 @@ namespace MapRenderer.Unity.Rendering.Backend
         /// <summary>Replaces the full-width, SLOT-aligned per-layer material/shadow-mode lists —
         /// restyle-time counterpart of construction's. A slot unchanged BY REFERENCE keeps its registration
         /// and every live item; a slot going to null retires its own items its OWN way (the three backends
-        /// deliberately differ, and the caller MUST set every survivor's draw order first) — `docs/tile-pipeline-design.md` §1.10.</summary>
+        /// differ by design, and the caller MUST set every survivor's draw order first) — `docs/tile-pipeline-design.md`.</summary>
         void SetLayerMaterials(IReadOnlyList<Material> layerMaterials, IReadOnlyList<ShadowCastingMode> layerShadowModes);
 
         /// <summary>

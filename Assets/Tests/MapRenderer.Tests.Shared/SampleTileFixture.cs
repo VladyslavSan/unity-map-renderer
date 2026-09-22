@@ -8,7 +8,6 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// Shared reader for the committed sample MVT tile (<c>Assets/Fixtures/sample-tile.bytes</c>).
-    /// Replaces the byte-identical <c>FixtureBytes()</c> copies that had accumulated across the suite.
     /// </summary>
     internal static class SampleTileFixture
     {

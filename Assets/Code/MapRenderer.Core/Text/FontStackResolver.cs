@@ -7,9 +7,9 @@ namespace MapRenderer.Core.Text
 {
     /// <summary>
     /// Resolves a codepoint against an ordered <see cref="FontStack"/>: per-glyph fallback across the
-    /// stack (T5) — the first font (in <see cref="FontStack.Names"/> order) whose decoded range
+    /// stack — the first font (in <see cref="FontStack.Names"/> order) whose decoded range
     /// contains the codepoint wins; a codepoint present in no font's range yields the defined
-    /// not-found outcome (§6.3: notdef/skip, never throw). Range math is
+    /// not-found outcome (notdef/skip, never throw). Range math is
     /// <c>rangeStart = (codepoint / 256) * 256</c>, the glyph-PBF 256-codepoint range convention.
     ///
     /// <para>

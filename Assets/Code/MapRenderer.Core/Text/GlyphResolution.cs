@@ -5,7 +5,7 @@ namespace MapRenderer.Core.Text
 {
     /// <summary>
     /// The result of <see cref="FontStackResolver.Resolve"/>: the resolved glyph and which font in the
-    /// stack it came from, or a defined not-found outcome (S18 §6.3, locked: notdef/skip, never throw).
+    /// stack it came from, or a defined not-found outcome (notdef/skip, never throw).
     /// </summary>
     public readonly struct GlyphResolution
     {
@@ -21,7 +21,7 @@ namespace MapRenderer.Core.Text
         /// </summary>
         public string ResolvedFontName { get; init; }
 
-        /// <summary>The defined not-found outcome (§6.3: notdef/skip) — never throw.</summary>
+        /// <summary>The defined not-found outcome (notdef/skip) — never throw.</summary>
         public static GlyphResolution NotFound() => default;
     }
 }

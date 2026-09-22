@@ -12,8 +12,8 @@ using MapViewComponent = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 
 namespace MapRenderer.Tests
 {
-    /// <summary>Scaffold shared by the SetStyle commit-atomicity fixtures. Identical helpers had been
-    /// pasted into both files; hoisted here so a change to the gate/spin protocol lands once.</summary>
+    /// <summary>Scaffold shared by the SetStyle commit-atomicity fixtures, so a change to the gate/spin
+    /// protocol lands once.</summary>
     internal static class SetStyleAtomicity
     {
         /// <summary>A background-only style (no fetching layer ⇒ its own SetStyle commits synchronously).</summary>

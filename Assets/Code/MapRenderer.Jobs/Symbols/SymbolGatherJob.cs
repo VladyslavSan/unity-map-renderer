@@ -9,16 +9,15 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
-    /// Burst-gather Stage 1 (docs/symbol-label-perf-design.md §10.9): a LINE-FOR-LINE Burst transliteration of
-    /// <c>SymbolPlacementSystem.GatherIntoMirror</c>'s two managed loops (<c>SymbolPlacementSystem.cs:1050-1157</c>)
-    /// — compact every winner's pre-baked <see cref="BlockView"/> slice into one contiguous set of native
-    /// mirror pools, remapping every <c>Detail</c>/<c>*Start</c> field by the running pool offset. Run
-    /// SYNCHRONOUSLY (<c>.Run()</c>) inside <c>PmGather</c>, strictly before <c>TickCore</c> reads a single
-    /// element — no double-buffering, no swap, no resize under a reader (unchanged from the managed gather).
+    /// The Burst gather (docs/symbol-label-perf-design.md): compacts every winner's pre-baked
+    /// <see cref="BlockView"/> slice into one contiguous set of native mirror pools, remapping every
+    /// <c>Detail</c>/<c>*Start</c> field by the running pool offset. Runs SYNCHRONOUSLY through
+    /// <c>.Run()</c>, strictly before <c>TickCore</c> reads a single element — no double-buffering, no swap,
+    /// no resize under a reader.
     ///
-    /// <para><b>Byte-identical, by construction.</b> Every value written is either an integer running offset or
-    /// a struct copied element-for-element from a block's own array — no new floating-point arithmetic is
-    /// introduced anywhere. <c>SymbolGatherParityTests.Gather_MatchesBuildOracle_FieldByField</c> is the teeth.</para>
+    /// <para><b>Byte-identical to the managed gather it replaces.</b> Every value written is either an
+    /// integer running offset or a struct copied element-for-element from a block's own array; no new
+    /// floating-point arithmetic appears anywhere.</para>
     ///
     /// <para>Resizes the caller's <c>Allocator.Persistent</c> mirror <see cref="NativeList{T}"/> outputs itself:
     /// pass 1 totals the per-pool sizes, pass 2 fills — so the resize is bounded and single-shot, not
@@ -64,8 +63,8 @@ namespace MapRenderer.Jobs.Symbols
         public NativeList<LineAnchor>  MAnchors;
         public NativeList<long>        MFadeIds;
         public NativeList<double3>     MWorldPoints;
-        // P2: index-parallel to MWorldPoints (same MWorldStart/MWorldCount slice) — the unit surface normal at
-        // each world point. Copied in lockstep with MWorldPoints below; not yet consumed by any downstream reader.
+        // Index-parallel to MWorldPoints (same MWorldStart/MWorldCount slice) — the unit surface normal at
+        // each world point. Copied in lockstep with MWorldPoints below; no downstream reader consumes it yet.
         public NativeList<float3>      MWorldUps;
 
         // ── output counts (see the Count* consts above) ──
@@ -75,8 +74,7 @@ namespace MapRenderer.Jobs.Symbols
         {
             int winners = WinnerCount;
 
-            // Pass 1 (mirrors SymbolPlacementSystem.cs:1050-1070): total per-pool sizes, so each mirror list is
-            // resized ONCE.
+            // Pass 1: total the per-pool sizes, so each mirror list is resized ONCE.
             int records = winners, points = 0, curveds = 0, quads = 0, glyphs = 0, anchors = 0, fades = 0, worlds = 0;
             for (int r = 0; r < winners; r++)
             {

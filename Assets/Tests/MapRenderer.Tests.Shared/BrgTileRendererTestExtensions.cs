@@ -1,24 +1,17 @@
 // Unity EditMode only — real BatchRendererGroup state. NOT registered in core-tests.csproj.
 //
-// Namespace is MapRenderer.Tests (not .Visual), matching the GameObjects and Entities files: C# resolves
+// Namespace is MapRenderer.Tests, not .Visual, matching the GameObjects and Entities files: C# resolves
 // extension methods only through the call site's ENCLOSING namespaces, and callers live in both
-// MapRenderer.Tests (BrgTileRendererEvictionTests) and MapRenderer.Tests.Visual (the snapshot/readback
-// fixtures). The parent namespace is the one both can see.
+// MapRenderer.Tests and MapRenderer.Tests.Visual. The parent namespace is the one both can see.
 //
 // Observability for the BRG backend, living in the TEST assembly rather than on the production class.
-// These eight sat on Backend.BRG.TileRenderer under two "Test observability" banners with ZERO production
-// callers between them. They read the backend's _plan/_items/_cpuBuffer/_sortedItems/_instanceBuffer,
-// broadened private -> internal, which IS the sanctioned footprint.
+// These read the backend's _plan/_items/_cpuBuffer/_sortedItems/_instanceBuffer, broadened
+// private -> internal, which IS the sanctioned footprint.
 //
-// Unlike the GameObjects and Entities moves, nothing here dropped a post-dispose guard: BRG never had
-// observability leniency. Its four IsDisposed sites are on RemoveItem/RemoveItems/Rebuild/ReRegisterBatch —
-// drive methods, deliberately left alone.
-//
-// Two of these are DECODERS of the production SoA packing rather than trivial read-backs
-// (GetInstanceTranslation, GetInstancePropValue). Having them in the test assembly is the point: a readback
-// test that decodes the buffer with its own copy of the layout rules fails when the writer's layout drifts,
-// which is precisely the regression those teeth exist to catch. Keep them in sync with Rebuild deliberately,
-// not by sharing code with it.
+// Two of them DECODE the production SoA packing rather than reading a value back
+// (GetInstanceTranslation, GetInstancePropValue). Holding a second copy of the layout rules is the point: a
+// readback test fails when the writer's layout drifts, which is the regression those teeth exist to catch.
+// Keep them in sync with Rebuild by hand, never by sharing code with it.
 
 using System.Collections.Generic;
 using BrgTileRenderer = MapRenderer.Unity.Rendering.Backend.BRG.TileRenderer;

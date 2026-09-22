@@ -11,10 +11,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
     /// One fill-extrusion layer's <see cref="ILayerMeshBuild"/> — owns the request columns plus the roof AND
-    /// wall geometry as ONE <see cref="FillExtrusionGraphOutput"/> (job-scheduling-design.md §8 stage 5's own
-    /// unpacking argument no longer applies once a build owns both: <see cref="FillExtrusionGraphOutput.Dispose"/>
-    /// already IS the roof/walls completion-then-free order, so this type reuses it rather than restating it).
-    /// Pooled via <see cref="LayerMeshBuildPool{T}"/>.
+    /// wall geometry as ONE <see cref="FillExtrusionGraphOutput"/>:
+    /// <see cref="FillExtrusionGraphOutput.Dispose"/> already IS the roof/walls completion-then-free order,
+    /// so this type reuses it rather than restating it. Pooled via <see cref="LayerMeshBuildPool{T}"/>.
     /// </summary>
     internal sealed class FillExtrusionLayerBuild : ILayerMeshBuild
     {
@@ -80,7 +79,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             }
 
             // No empty check here — StyledFillExtrusionTileBuilder.ScheduleWrite is self-guarding by design
-            // (DIV-A5): it returns IsCreated == false itself for an empty roof, unlike the fill arm above.
+            // It returns IsCreated == false itself for an empty roof, unlike the fill arm above.
             TileGeometryBuffers geometry = _input.Geometry;
             _write = StyledFillExtrusionTileBuilder.ScheduleWrite(
                 _ext.Roof, _featureColors, _featureBake, _ext.Walls, _input.Projection, geometry.Tile, geometry.Extent);

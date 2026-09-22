@@ -16,21 +16,12 @@ namespace MapRenderer.Jobs.Projection
     /// replaces an enum switch (the struct type IS the discriminator). Adding a projection = its struct + one
     /// <c>case</c> here + its <c>RegisterGenericJobType</c> line in <see cref="ProjectPointsJob{TProj}"/>.</para>
     ///
-    /// <para>job-scheduling-design.md §8 stage 4 Group B retired the synchronous entry point
-    /// (<c>Run</c>/<c>RunTyped</c>) with its only caller at the time, <c>FillMeshPipeline.Schedule</c>. The
-    /// wall-job stage (§8 stage 5's invariant block) reinstated it for <c>WriteWalls</c>' off-main
-    /// <c>IWorkScheduler</c> worker body, where §4 rule 1 made <see cref="Schedule"/> illegal there. The
-    /// wall-job-GRAPH stage (§8 stage 5, this file's current state) retired it a second time: the wall chain
-    /// moved from a synchronous <c>.Run()</c> loop inside <c>WriteWalls</c> to <see cref="Schedule"/>/
-    /// <see cref="ScheduleTyped{TProj}"/>, scheduled by <c>FillExtrusionMeshGraph</c> alongside the roof —
-    /// there is no longer an off-main call site needing <c>.Run()</c>. Correct in place, not appended: this
-    /// paragraph names what is true NOW, the two lines above are the record of what was true when
-    /// written.</para>
+    /// <para>There is no synchronous entry point. Every caller schedules, including the extrusion wall
+    /// chain, so no call site needs <c>.Run()</c>.</para>
     /// </summary>
     public static class ProjectionDispatch
     {
-        /// <summary>Scheduled entry point — the fill(-extrusion) graph's tile→geo/project node
-        /// (job-scheduling-design.md §3.2 node 9).
+        /// <summary>Scheduled entry point — the fill(-extrusion) graph's tile→geo/project node.
         /// <paramref name="points"/>/<paramref name="world"/>/<paramref name="normals"/> are lists whose
         /// deferred views the scheduled <see cref="ProjectPointsJob{TProj}"/> reads/writes — resolved inside
         /// the job at execute time, so their lengths need only be correct by then, not at this call.</summary>
@@ -55,20 +46,15 @@ namespace MapRenderer.Jobs.Projection
             }
         }
 
-        /// <summary>Vertices per batch for <see cref="ProjectPointsJob{TProj}"/> (job-scheduling-design.md §8
-        /// stage 6) — shared by all three mesh graphs (fill, line, extrusion), since this is the one place
-        /// projection dispatch happens. <c>1024</c>: one transcendental cluster per point, tens of ns each,
-        /// so 1024 points is roughly 10-50 µs of work — comfortably above a batch hand-off's own cost. A
-        /// starting value chosen by this reasoning, not a measured optimum — see the design doc's dated
-        /// measurement before moving it.</summary>
+        /// <summary>Vertices per batch for <see cref="ProjectPointsJob{TProj}"/>, shared by all three mesh
+        /// graphs because this is the one place projection dispatch happens. One transcendental cluster per
+        /// point, so 1024 points carries enough work to cover a batch hand-off. A starting value, not a
+        /// measured optimum.</summary>
         internal const int VertexBatch = 1024;
 
-        /// <summary><c>internal</c> (was <c>private</c>): job-scheduling-design.md §8 stage 5 —
-        /// <c>RightHandedSphereProjectionWindingTests</c> drives a right-handed curved projection Burst
-        /// never registers generically, through <c>LineMeshGraph.ScheduleTyped</c>, which needs this entry
-        /// point directly rather than going through <see cref="Schedule"/>'s closed switch (tooth (g)). The
-        /// switch in <see cref="Schedule"/> stays the production enumeration — this widened visibility does
-        /// not add a case to it.</summary>
+        /// <summary><c>internal</c>, not <c>private</c>, so a test can drive a projection Burst never
+        /// registers generically without going through <see cref="Schedule"/>'s closed switch. That switch
+        /// stays the production enumeration; this visibility adds no case to it.</summary>
         internal static JobHandle ScheduleTyped<TProj>(
             TProj projection, double3 originWorld,
             NativeList<GeoCoordinate> points, NativeList<double3> world, NativeList<double3> normals,

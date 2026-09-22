@@ -7,15 +7,14 @@ namespace MapRenderer.App.View
 {
     /// <summary>
     /// Pure (engine-free, allocation-free) input → <see cref="CameraPropertiesUpdate"/> patch helpers.
-    /// Factored out of <c>MapController</c> so the pan/zoom/tilt logic is unit-testable headless — reading
+    /// Engine-free so the pan/zoom/tilt logic is unit-testable headless; reading
     /// <c>UnityEngine.Input</c> in <c>Update()</c> directly would have zero test coverage.
     ///
-    /// <para><b>S50 — patch producers (D2).</b> Each method takes the current
-    /// <see cref="CameraProperties"/> and returns a <see cref="CameraPropertiesUpdate"/> patch that sets
-    /// only the fields it changes (the rest stay null). This aligns the whole input path with the S45
-    /// patch model — <c>MapController</c> merges the returned patch directly, no parallel mutation path.</para>
+    /// <para><b>Patch producers.</b> Each method takes the current <see cref="CameraProperties"/> and
+    /// returns a <see cref="CameraPropertiesUpdate"/> patch that sets only the fields it changes; the rest
+    /// stay null. The caller merges the returned patch directly, with no parallel mutation path.</para>
     ///
-    /// <para><b>S63 — interaction-point-aware (D4).</b> All gesture methods take an <see cref="IProjection"/>
+    /// <para><b>Interaction-point-aware.</b> All gesture methods take an <see cref="IProjection"/>
     /// and operate on absolute screen positions (cursor + grabbed ground point), so the ground point under
     /// the cursor is pinned during the gesture. The projection layer owns all Mercator constants.</para>
     ///
@@ -60,8 +59,8 @@ namespace MapRenderer.App.View
 
         /// <summary>
         /// Heading-only patch: rotates bearing by <paramref name="headingDeltaDeg"/> degrees, re-applying
-        /// the [0, 360) <see cref="MapRenderer.Core.Geo.AngleConstraint.Wrap"/> constraint from
-        /// the S68 <c>ConstrainedAngle</c> model. <b>Tilt is not set</b> (stays <c>null</c> on the patch).
+        /// the [0, 360) <see cref="MapRenderer.Core.Geo.AngleConstraint.Wrap"/> constraint from the
+        /// <c>ConstrainedAngle</c> model. <b>Tilt is not set</b> (stays <c>null</c> on the patch).
         /// </summary>
         /// <returns>A patch with only <see cref="CameraPropertiesUpdate.Heading"/> set.</returns>
         public static CameraPropertiesUpdate ApplyHeadingDelta(in CameraProperties current, double headingDeltaDeg)

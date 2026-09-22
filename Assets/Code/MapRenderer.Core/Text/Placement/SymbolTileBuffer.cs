@@ -7,7 +7,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B): one build's per-symbol placement input, held as
+    /// One build's per-symbol placement input, held as
     /// a REUSED buffer instead of a fresh managed carrier list per tile — <see cref="Symbols"/>
     /// (one <see cref="ShapedSymbol"/> per successfully-shaped symbol; the list is dense, since a per-symbol build
     /// failure is skipped rather than recorded)
@@ -39,10 +39,10 @@ namespace MapRenderer.Core.Text.Placement
         /// <see cref="ShapedSymbol.GlyphCount"/> span indexes here.</summary>
         public List<CurvedGlyph> Glyphs { get; } = new List<CurvedGlyph>();
 
-        /// <summary>Pooled curved along-line anchors (build-time topology, A-2) — a symbol's
+        /// <summary>Pooled curved along-line anchors (build-time topology) — a symbol's
         /// <see cref="ShapedSymbol.AnchorStart"/>/<see cref="ShapedSymbol.AnchorCount"/> span indexes here.
         /// UNCLAMPED (the baker's own <c>SymbolStagingMath.MaxAnchorsPerLine</c> clamp is applied at bake time,
-        /// exactly as it was applied over the raw per-symbol carrier's <c>LineAnchors</c> array before).</summary>
+        /// over this list).</summary>
         public List<LineAnchor> Anchors { get; } = new List<LineAnchor>();
 
         /// <summary>Pooled curved world (pre-RTC render-space) path vertices — a symbol's

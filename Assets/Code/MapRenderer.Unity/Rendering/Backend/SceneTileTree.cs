@@ -24,7 +24,7 @@ namespace MapRenderer.Unity.Rendering.Backend
     /// caller — the world-anchored symbol draw path, which owns its OWN instance ("Map Symbols" root) so
     /// symbols are organized identically to tile fills regardless of which tile backend is drawing them
     /// (Entities/BRG draw tile fills GameObject-free, so there is no tile-backend container to piggyback on;
-    /// see the symbol-draw-backend-rework design §5).</para>
+    /// see the symbol-draw-backend-rework design).</para>
     /// </summary>
     internal sealed class SceneTileTree : VerifiedDisposable
     {

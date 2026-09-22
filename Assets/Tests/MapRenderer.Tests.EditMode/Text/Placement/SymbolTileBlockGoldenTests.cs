@@ -24,17 +24,16 @@ using Symbol = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Symbol-label perf Phase 1 / Stage 1 (docs/symbol-label-perf-design.md §4, §5 B): the
-    /// block-byte-identity golden — pins <see cref="SymbolTileBlockBaker.Bake"/>'s output shape
-    /// so a later refactor of the bake path (4.4b sheds the resident graph, 4.4c retypes <c>Shape</c> onto
-    /// reused buffer) cannot silently change what gets baked, only how it gets there.
+    /// The block-byte-identity golden (docs/symbol-label-perf-design.md) — pins
+    /// <see cref="SymbolTileBlockBaker.Bake"/>'s output shape so a later refactor of the bake path
+    /// cannot silently change what gets baked, only how it gets there.
     ///
     /// <para><b>Two fixtures, two golden strategies.</b> <see cref="Bake_HandBuiltHazardFixture_MatchesExplicitGolden"/>
-    /// hand-builds a <see cref="SymbolTileBuffer"/> (via <see cref="TestSymbolTileBuffer"/>) that deliberately
-    /// exercises every §4.4a hazard (see its own doc) and asserts EXPLICIT, hand-derivable expected values per
+    /// hand-builds a <see cref="SymbolTileBuffer"/> (via <see cref="TestSymbolTileBuffer"/>) that
+    /// exercises every hazard (see its own doc) and asserts EXPLICIT, hand-derivable expected values per
     /// column — a real oracle, not a value
     /// pasted from a first run (<c>handed-down-formula-is-never-re-derived</c>). But because its input never
-    /// passes through <c>StyledSymbolTileBuilder.Shape</c>, it CANNOT catch a 4.4c regression in that
+    /// passes through <c>StyledSymbolTileBuilder.Shape</c>, it CANNOT catch a regression in that
     /// tail's own emit sites (the four record-append calls and the quad-layout
     /// migration) — only <see cref="Bake_ProducedFixture_MatchesCommittedGoldenHash"/> (built the same way
     /// <c>SymbolProcessorParityTests.BuildOracle</c> is) exercises that path, so BOTH fixtures are required,
@@ -65,7 +64,7 @@ namespace MapRenderer.Tests.Text.Placement
         private static int PublicPropertyCount<T>() => typeof(T).GetProperties(BindingFlags.Public | BindingFlags.Instance).Length;
 
         // ── the hand-built hazard fixture ──
-        // Raw list (8 dense slots), designed so EVERY §4.4a hazard is present and unambiguous:
+        // Raw list (8 dense slots), designed so EVERY hazard is present and unambiguous:
         //   i0 PointA (layer 0)              — normal point, 1 quad
         //   i1 PointB (layer 0, LAST)        — normal point, 2 quads
         //   i2 CurvedC (layer 1, first)      — curved record
@@ -130,7 +129,7 @@ namespace MapRenderer.Tests.Text.Placement
                 featureIndex: featureIndex, tileKey: TileKeyValue, paint: SymbolPaint.Default, stringTable: stringTable);
         }
 
-        // UMR-87: `stringTable` is now REQUIRED (not a fresh-per-call default) — the golden below asserts
+        // `stringTable` is REQUIRED (not a fresh-per-call default) — the golden below asserts
         // TextIds/IconImageIds' LITERAL values, which only hold for an isolated table interning in this exact
         // call order; the shared/default table `TestSymbolTileBuffer` otherwise falls back to accumulates ids
         // from every OTHER test in the run.
@@ -183,8 +182,8 @@ namespace MapRenderer.Tests.Text.Placement
                 };
                 CollectionAssert.AreEqual(expectedRepAnchor, ToArray(block.RepAnchor), "RepAnchor (curved: path[pathLen/2] = path[1])");
 
-                // Intern order: Text before IconImage, per symbol, in BuildHazardFixture's call order (UMR-87:
-                // interning now happens at symbol-construction time, not at Bake — the ORDER is unchanged).
+                // Intern order: Text before IconImage, per symbol, in BuildHazardFixture's call order. Interning
+                // happens at symbol-construction time, not at Bake.
                 CollectionAssert.AreEqual(new[] { 1, 2, 3, 4, 5, 6, 7, 9 }, ToArray(block.TextIds), "TextIds");
                 CollectionAssert.AreEqual(new[] { 0, 0, 0, 0, 0, 0, 8, 0 }, ToArray(block.IconImageIds), "IconImageIds ('shield' on i6 takes id 8, between i6's Text=7 and i7's Text=9)");
 
@@ -386,7 +385,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// <c>BlockColumnHash.HashPointStageInput</c> reproduced the old digest exactly, and no other column
         /// moved. Hold any future move to that same standard.</para>
         ///
-        /// <para><b>Moved a second time, UMR-87:</b> <c>Points</c> -1357632509 → -1461293497 — every other
+        /// <para><b>Moved a second time:</b> <c>Points</c> -1357632509 → -1461293497 — every other
         /// column is byte-identical (confirmed by diffing the failure output; the two strings first differ
         /// inside the <c>Points</c> field). Cause: <c>PointStageInput.FadeId</c> is folded by
         /// <c>SymbolPlacementSystem.PointFadeId</c>, which used to hash <c>string.GetHashCode()</c> on the

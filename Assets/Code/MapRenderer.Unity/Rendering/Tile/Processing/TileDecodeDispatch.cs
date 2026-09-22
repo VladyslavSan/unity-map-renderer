@@ -19,7 +19,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// (<c>TrySet*</c>) and runs its continuation INLINE on whichever thread the policy dispatched the body
     /// to — never marshalled to the PlayerLoop — so <c>TileManager.DrainMeshBuilds</c> and <c>DoDispose</c>,
     /// which spin on <c>req.Status.IsCompleted()</c> from the main thread <b>without pumping the
-    /// PlayerLoop</b>, never deadlock on it (§G-1). WHICH thread that is is the scheduler's call:
+    /// PlayerLoop</b>, never deadlock on it. WHICH thread that is is the scheduler's call:
     /// <see cref="ThreadPoolWorkScheduler"/> (desktop) reproduces yesterday's off-main decode;
     /// <see cref="InlineWorkScheduler"/> (WebGL) runs it on the calling thread by design — the off-PlayerLoop
     /// property holds either way. The second contract is the profiler marker name, which must stay stable
@@ -46,7 +46,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// reach exactly one release site.
         ///
         /// <para>A decoder throw becomes a <see cref="TileDecodeException"/> and faults the returned task —
-        /// nothing is minted, so a failed decode can never leak a reference. IR C1 P3: the tile address
+        /// nothing is minted, so a failed decode can never leak a reference. The tile address
         /// goes IN here, at the only mint site, and is never supplied again.</para></summary>
         /// <param name="bytes">The encoded payload, or <see langword="null"/> for a source whose decoder
         /// carries its own payload (the GeoJSON dataset) — <see cref="ITileDecoder.Decode"/> documents it.</param>

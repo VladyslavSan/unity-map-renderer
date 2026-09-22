@@ -10,7 +10,7 @@ using MapRenderer.Core.Geometry;
 namespace MapRenderer.Tests.Geometry
 {
     /// <summary>
-    /// S4: unit tests for <see cref="LineCurvatureSubdivision"/> — the shared projection-subdivision policy
+    /// Unit tests for <see cref="LineCurvatureSubdivision"/> — the shared projection-subdivision policy
     /// (<see cref="LineCurvatureSubdivision.SegmentSteps"/>) and its managed densifier
     /// (<see cref="LineCurvatureSubdivision.Subdivide"/>). Engine-free; both runners.
     /// </summary>
@@ -23,7 +23,7 @@ namespace MapRenderer.Tests.Geometry
         private static (double3 a, double3 b) UpsApart(double angleRad)
             => (new double3(1.0, 0.0, 0.0), new double3(math.cos(angleRad), math.sin(angleRad), 0.0));
 
-        // ─── S4-T1: Mercator ∞ = identity ──────────────────────────────────────────────────
+        // ─── T1: Mercator ∞ = identity ─────────────────────────────────────────────────────
 
         [Test]
         public void Subdivide_InfiniteTolerance_ReturnsPathValueUnchanged()
@@ -42,7 +42,7 @@ namespace MapRenderer.Tests.Geometry
             }
         }
 
-        // ─── S4-T2: globe splits a long segment; inserted points collinear ────────────────
+        // ─── T2: globe splits a long segment; inserted points collinear ───────────────────
 
         [Test]
         public void Subdivide_LargeArc_SplitsIntoExpectedCountWithCollinearInsertions()
@@ -76,7 +76,7 @@ namespace MapRenderer.Tests.Geometry
             }
         }
 
-        // ─── S4-T3: bounded — always-bound-loops ───────────────────────────────────────────
+        // ─── T3: bounded — always-bound-loops ──────────────────────────────────────────────
 
         [Test]
         public void Subdivide_PathologicalTolerance_CapsAtMaxCurveSegments()
@@ -93,7 +93,7 @@ namespace MapRenderer.Tests.Geometry
                 "a pathological tolerance must still be bounded by MaxCurveSegments");
         }
 
-        // ─── S4-T4: SegmentSteps policy parity ─────────────────────────────────────────────
+        // ─── T4: SegmentSteps policy parity ────────────────────────────────────────────────
 
         [Test]
         public void SegmentSteps_InfiniteTolerance_ReturnsOneForAnyUps()

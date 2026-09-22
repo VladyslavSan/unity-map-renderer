@@ -198,7 +198,7 @@ namespace MapRenderer.Tests.Tiles
             int held = fake.Probe.DecodeCount - fake.Probe.DisposedCount;
             Assert.AreEqual(loaded, held,
                 $"ANTI-VACUITY: EVERY decoded tile must still be ALIVE and held by its RECORD when the funnel " +
-                $"runs ({held} of {fake.Probe.DecodeCount} are). Under R1 a kick no longer steals the record's " +
+                $"runs ({held} of {fake.Probe.DecodeCount} are). A kick no longer steals the record's " +
                 "reference — KickMeshBuild takes its OWN separate one (decode.Acquire()) and RenderTeardownRecord " +
                 "alone ends the record's ownership, kicked or not — so even the single tile the observe tick may " +
                 "kick at a cap of one per tick is still held here, and nothing has reached a final release yet " +
@@ -332,7 +332,7 @@ namespace MapRenderer.Tests.Tiles
         // ── T-D3: teardown ────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Teardown, and the reason D0 routed <c>DoDispose</c> through the funnel instead of leaving it with
+        /// Teardown, and the reason <c>DoDispose</c> is routed through the funnel instead of leaving it with
         /// its own hand-rolled loops: a per-record obligation added to the funnel would otherwise be missed
         /// by exactly one of the four paths, and it would be the one no test drives twice.
         ///

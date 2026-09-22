@@ -45,7 +45,7 @@ namespace MapRenderer.Jobs.Mvt
     /// <summary>
     /// The Burst-compiled opcode VM: evaluates one <see cref="NativeFilterProgram"/> against every feature
     /// at ordinal <c>[0, FeatureCount)</c> of one tile-layer, in a single dispatch. A post-order stack
-    /// machine with real short-circuit jumps for <c>all</c> (design doc §5.8) over a bounded
+    /// machine with real short-circuit jumps for <c>all</c>, over a bounded
     /// <see cref="FixedList128Bytes{T}"/> operand stack — never throws; see <see cref="NativeFilterError"/>
     /// for the threaded-error-code contract this job exists to prove compiles cleanly under Burst.
     ///
@@ -251,8 +251,8 @@ namespace MapRenderer.Jobs.Mvt
                 byte matched = 0;
                 if (error == NativeFilterError.None)
                 {
-                    // No top-level coercion: the compiler only accepts a statically-Boolean root (design doc
-                    // §5.4), so a clean run leaves exactly one Boolean on the stack.
+                    // No top-level coercion: the compiler only accepts a statically-Boolean root, so a
+                    // clean run leaves exactly one Boolean on the stack.
                     if (stack.Length == 1 && stack[0].Type == ValueType.Boolean)
                         matched = stack[0].BoolValue ? (byte)1 : (byte)0;
                     else
@@ -266,8 +266,7 @@ namespace MapRenderer.Jobs.Mvt
 
         /// <summary>Mirrors <see cref="DensePropertyStore.TryGetByKeyIndex"/> verbatim: walks this
         /// feature's tag pairs backward, returning the first (= last in tag order) whose key index matches
-        /// and whose value index is in range. Bounded by this feature's own tag-pair count (design doc
-        /// §5.9).
+        /// and whose value index is in range. Bounded by this feature's own tag-pair count.
         ///
         /// <para><paramref name="found"/> is the presence bit <c>TryGetByKeyIndex</c> returns — set iff such
         /// a tag pair exists, <b>independent of the decoded value's type</b>. It is NOT

@@ -1,16 +1,15 @@
 // Unity EditMode only — real Camera/Mesh/GameObject/Texture2D (WorldSymbolRenderer's SceneTileTree creates
 // real GameObjects). NOT registered in core-tests.csproj.
 //
-// The symbol-draw-backend-rework corrective (design §3/§4/§6/§7): A1
-// (876e7103) grouped world symbols into a bespoke FLAT Dictionary<(TileKey,Slot,Kind)> of root-parented
-// GameObjects, each re-writing the tile's floating-origin transform every frame. This pins the FIX — symbols
-// now join the SAME root → per-tile-container → per-symbol-layer-node → text/icon-sibling-children tree the
-// GameObjects tile backend uses (Rendering/Backend/GameObjects/TileRenderer.cs), via the shared
-// SceneTileTree:
+// World symbols join the SAME root → per-tile-container → per-symbol-layer-node →
+// text/icon-sibling-children tree the GameObjects tile backend uses
+// (Rendering/Backend/GameObjects/TileRenderer.cs), via the shared SceneTileTree. A flat
+// Dictionary<(TileKey,Slot,Kind)> of root-parented GameObjects, each re-writing the tile's
+// floating-origin transform every frame, is the regression this pins against:
 //   • Grouping: two symbols (text + icon) on the SAME tile+slot must be SIBLINGS under ONE layer node under
 //     ONE tile container; a THIRD symbol on a DIFFERENT tile must get its OWN separate container — but the
 //     LIVE tile-container count must equal the number of DISTINCT TILES (2), never the number of slots (3),
-//     which is exactly what an A1-shaped regression (one root-parented GO per slot) would fail. Asked via
+//     which a one-GameObject-per-slot regression would fail. Asked via
 //     WorldSymbolTileCount(), not the root's raw childCount: the root also carries the inactive pool nodes
 //     that recycled leaves and containers park under.
 //   • One transform write per tile, not per slot: a text/icon child's own LOCAL transform must stay at
@@ -71,9 +70,9 @@ namespace MapRenderer.Tests.Text.Placement
             TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, float2.zero, new float2(18f, 18f),
                 paint: SymbolPaint.Default, textSizePx: 24f, sortKey: 0f, featureIndex: featureIndex, tileKey: tileKey,
                 allowOverlap: true,
-                // R3: PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey
+                // PointFadeId hashes (AnchorRender, MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey
                 // — so two symbols sharing the SAME anchor (as every call site here does) with Text left at its
-                // default would collide on FadeId. Under R3, FadeId is the display key (SymbolCandidate.FadeId's
+                // default would collide on FadeId. FadeId is the display key (SymbolCandidate.FadeId's
                 // uniqueness contract), so co-live candidates sharing an id both show when one wins. Distinct
                 // per-featureIndex text keeps every call site's identity unique.
                 text: "T" + featureIndex);
@@ -92,7 +91,7 @@ namespace MapRenderer.Tests.Text.Placement
             TestSymbolTileBuffer.AddPoint(buffer, anchorRender, quads, new float2(-8f, -8f), new float2(8f, 8f),
                 kind: SymbolKind.Icon, paint: SymbolPaint.Default, textSizePx: TextQuadLayout.OneEm, sortKey: 0f,
                 featureIndex: featureIndex, tileKey: tileKey, allowOverlap: true,
-                // R3: same FadeId-uniqueness note as AddText — IconImage (not Text) is the icon-kind
+                // Same FadeId-uniqueness note as AddText — IconImage (not Text) is the icon-kind
                 // identity fold; distinct per-featureIndex.
                 iconImage: "icon" + featureIndex);
         }
@@ -131,7 +130,7 @@ namespace MapRenderer.Tests.Text.Placement
                 AddText(buffer, frame.SceneOriginRender, tileAKey, featureIndex: 0);
                 AddIcon(buffer, frame.SceneOriginRender, tileAKey, featureIndex: 1);
                 AddText(buffer, frame.SceneOriginRender, tileBKey, featureIndex: 2);
-                // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+                // Duplicate — the collision verdict is harvested one Tick late.
                 system.TickSymbols(in frame, buffer, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
                 system.TickSymbols(in frame, buffer, atlasTexture, mapCamera.Projection, deltaTime: float.PositiveInfinity, spriteTexture: spriteTexture);
 
@@ -148,7 +147,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // ── Grouping: text + icon on tileA are SIBLINGS under ONE layer node under ONE container ──
                 Assert.AreSame(textA.parent, iconA.parent,
                     "tileA's text and icon children must be SIBLINGS under the SAME per-symbol-layer node — " +
-                    "the A1 defect made them separate root-parented GameObjects instead.");
+                    "the defect made them separate root-parented GameObjects instead.");
                 Transform layerNodeA = textA.parent;
                 Assert.AreEqual(2, layerNodeA.childCount, "the shared layer node must have exactly the 2 registered children (text, icon).");
 
@@ -156,18 +155,18 @@ namespace MapRenderer.Tests.Text.Placement
                 Transform containerB = textB.parent.parent;
                 Assert.AreNotSame(containerA, containerB, "tileA and tileB must get SEPARATE tile containers.");
 
-                // ── Root's DIRECT children must be counted per TILE, not per SLOT (the A1 defect) ──
+                // ── Root's DIRECT children must be counted per TILE, not per SLOT ──────────────────
                 Assert.AreSame(system.WorldSymbolTreeRoot(), containerA.parent, "tileA's container must be a DIRECT child of the \"Map Symbols\" root.");
                 Assert.AreSame(system.WorldSymbolTreeRoot(), containerB.parent, "tileB's container must be a DIRECT child of the \"Map Symbols\" root.");
                 Assert.AreEqual(2, system.WorldSymbolTileCount(),
                     "the root must have exactly 2 direct children (one per DISTINCT tile) even though 3 slots " +
-                    "(text+icon on tileA, text on tileB) are live — under A1's flat dict this would be 3.");
+                    "(text+icon on tileA, text on tileB) are live — under the old flat dict this would be 3.");
                 Assert.AreEqual("Map Symbols", system.WorldSymbolTreeRoot().name);
                 Assert.IsTrue(containerA.name.StartsWith("Tile "), $"container name '{containerA.name}' must follow the tile backend's \"Tile z/x/y\" convention.");
 
                 // ── One transform write per tile, not per slot: children sit at LOCAL identity; only the ──
                 // ── container carries the per-frame floating-origin placement.                            ──
-                Assert.AreEqual(Vector3.zero, textA.localPosition, "a text/icon child must NOT carry its own placement — A1 wrote one onto every slot's own GameObject.");
+                Assert.AreEqual(Vector3.zero, textA.localPosition, "a text/icon child must NOT carry its own placement — the old path wrote one onto every slot's own GameObject.");
                 Assert.AreEqual(Vector3.zero, iconA.localPosition, "a text/icon child must NOT carry its own placement.");
                 Assert.AreEqual(Quaternion.identity, textA.localRotation);
                 Assert.AreEqual(Vector3.zero, textB.localPosition);

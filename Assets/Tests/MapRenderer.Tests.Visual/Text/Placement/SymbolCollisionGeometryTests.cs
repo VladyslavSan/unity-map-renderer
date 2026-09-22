@@ -1,4 +1,4 @@
-// Pitched-camera symbol collision-box and corner geometry GPU/visual acceptance tests (UMR-176 pack: text/placement sub-topic).
+// Pitched-camera symbol collision-box and corner geometry GPU/visual acceptance tests.
 //
 // Contents:
 //   MapPitchedCollisionBoxTests  — Unity EditMode only — real TiltedGroundScene (MapCamera + Camera/RenderTexture) + a REAL SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader.
@@ -24,31 +24,31 @@ namespace MapRenderer.Tests.Visual
     // SymbolPlacementSystem.Tick + the real Map/Symbol/TextWorld shader. NOT registered in
     // Tools/core-tests/core-tests.csproj (it renders).
     //
-    // Stage W3 — THE RENDERED ARM of the projected-world-corner collision box (W3-T1, T2, T3).
+    // THE RENDERED ARM of the projected-world-corner collision box (T1, T2, T3).
     //
-    // THE DEFECT. Since W2 a map-pitched glyph is DRAWN as a world-metre quad lying in the ground plane at its
+    // THE DEFECT. A map-pitched glyph is DRAWN as a world-metre quad lying in the ground plane at its
     // anchor, so its screen size foreshortens with depth. Its collision box was still a SCREEN box sized from
     // `TextSizePx` with no depth term anywhere, so it OVER-reserved — always, and only. At the shipped
     // OffLookAtSymbolScene pose the receding glyph advance is 29.07 px at the look-at and 0.19 px at 8× that
     // depth, so the box reserved roughly 150× the screen area the ink covers. Over-reservation can only ever
     // SUPPRESS a symbol; it can never make letters overlap and it can never misplace one. An eyeball symptom of
-    // overlap or misplacement is therefore NOT this stage.
+    // overlap or misplacement is therefore NOT what these teeth are about.
     //
     // THE THREE TEETH HERE, AND WHAT EACH CAN AND CANNOT SEE:
-    //   • W3-T1 (headline) — the box IS the drawn quad's screen AABB, at ten view depths spanning >2×. Its
+    //   • T1 (headline) — the box IS the drawn quad's screen AABB, at ten view depths spanning >2×. Its
     //     oracle is built from the EMITTED VERTEX STREAM and the LIVE Unity camera, calling no SymbolStagingMath,
     //     no SymbolBox and no SymbolScreenProjection. Its PROJECTION leg is genuinely independent; its ŷ-SENSE leg
     //     is NOT — it re-derives the same sense production uses, so T1 alone cannot catch a shared sign error.
-    //   • W3-T2 — the box CONTAINS the rendered ink. Containment also holds under the (strictly larger) pre-W3
-    //     box, so T2 is NOT the depth discriminator; its job is the other direction — that W3 did not make the
-    //     box too SMALL, and that the mesh-derived oracle T1 leans on lands where the GPU actually put ink.
-    //   • W3-T3 — the ABSOLUTE SCALE and the DPR factor, at tilt 0, against the VIEWPORT arm, which shares no
+    //   • T2 — the box CONTAINS the rendered ink. Containment also holds under the (strictly larger) earlier
+    //     box, so T2 is NOT the depth discriminator; its job is the other direction — that the projected box
+    //     is not too SMALL, and that the mesh-derived oracle T1 leans on lands where the GPU put ink.
+    //   • T3 — the ABSOLUTE SCALE and the DPR factor, at tilt 0, against the VIEWPORT arm, which shares no
     //     code with the map branch (`SymbolWorldIsMapPitched` sends them down mutually exclusive paths and the
     //     two staging branches are selected by one predicate). It also observes the ruler conjunct (measured by
     //     injection I6). It does NOT pin the ŷ SIGN: this box is an AABB, and a ŷ flip only permutes the corners
     //     of a y-symmetric cell — injection I2 flipped the sign in production and left the whole suite green.
-    //     W3-T10 (in MapPitchedWorldArcStagingTests, on a deliberately off-centre cell) is the sign's sole
-    //     observer. F-W3-6.
+    //     T10 (in MapPitchedWorldArcStagingTests, on a deliberately off-centre cell) is the sign's sole
+    //     observer.
     //
     // NO METRE LITERALS in the tilt-0 harness: every world length is a multiple of `scene.MetresPerDevicePixel`,
     // the same rule TiltFixtureSelfTests, OffLookAtSymbolScene and MapPitchedGlyphSizeTiltZeroTests enforce.
@@ -65,37 +65,37 @@ namespace MapRenderer.Tests.Visual
         /// float-narrowed Level-1 RTC <c>AnchorLocal</c> (~1 ulp of ~10⁶ m ≈ 0.06 m, and at this pose one
         /// device px is ~306 m, so ≈ 2·10⁻⁴ px); and <c>float4x4</c> arithmetic against Unity's own
         /// <c>WorldToScreenPoint</c> (~10⁻³ px). The bound is ~500× the expected residual and ~60× below the
-        /// signal — at <c>RecedingFar</c> the pre-W3 box is ~30 px tall against a true quad of ~1.4 px.</summary>
+        /// signal — at <c>RecedingFar</c> the earlier box is ~30 px tall against a true quad of ~1.4 px.</summary>
         private const double BoxAgreementPx = 0.5;
 
         /// <summary>Rasterisation slack, per edge, for the ink-containment reading.</summary>
         private const int InkSlackPx = 1;
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T1 — THE HEADLINE: the box IS the drawn quad's screen AABB, at ten depths on the receding arm
+        // T1 — THE HEADLINE: the box IS the drawn quad's screen AABB, at ten depths on the receding arm
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T1 — the stage's headline tooth.</b> For every glyph of both receding symbols, the staged
+        /// <b>T1 — the headline tooth.</b> For every glyph of both receding symbols, the staged
         /// <see cref="SymbolBox"/> equals the axis-aligned screen bound of the FOUR WORLD CORNERS the renderer
         /// actually emitted, to <see cref="BoxAgreementPx"/>.
         ///
         /// <para><b>The oracle calls no production placement code.</b> It reads each glyph's four
         /// <c>WorldBillboardVertex</c>es off the built mesh, rebuilds the ground frame from that vertex's OWN
         /// <c>Up</c>/<c>Tangent</c> through the slot transform, displaces by <c>Offset</c> (y-DOWN, per the
-        /// A0-F2 negation, so the y-UP amount is <c>−Offset.y</c>), and projects through the LIVE Unity
+        /// y-DOWN negation, so the y-UP amount is <c>−Offset.y</c>), and projects through the LIVE Unity
         /// camera with <c>GroundRuler.ProjectPx</c> — a different code path and a different matrix from
         /// <c>SymbolScreenProjection</c>'s.</para>
         ///
         /// <para><b>Honest reach.</b> The oracle's PROJECTION leg is genuinely independent. Its <b>ŷ-sense leg
         /// is not</b>: it re-derives <c>ŷ = cross(x̂, up)</c>, the same sense production uses, so a shared sign
-        /// error would move both sides together and this tooth would stay GREEN. <b>W3-T10 is what closes
-        /// that</b> — not W3-T3, whose AABB cannot see the sign at all on a y-symmetric cell (F-W3-6,
-        /// measured by injection I2).</para>
+        /// error would move both sides together and this tooth would stay GREEN. <b>T10 is what closes
+        /// that</b> — not T3, whose AABB cannot see the sign at all on a y-symmetric cell (measured by
+        /// injection I2).</para>
         ///
-        /// <para><b>The anti-P3c precondition.</b> Within <c>RecedingNear</c> alone the reconstructed quad's
-        /// screen height must vary by ≥ 4 px between its first and last glyph. A box scaled by ONE constant
-        /// per symbol — the model that got P3c reverted, and the one <c>CrossNear</c>/<c>CrossFar</c> cannot
+        /// <para><b>The anti-per-symbol-constant precondition.</b> Within <c>RecedingNear</c> alone the
+        /// reconstructed quad's screen height must vary by ≥ 4 px between its first and last glyph. A box
+        /// scaled by ONE constant per symbol — the model <c>CrossNear</c>/<c>CrossFar</c> cannot
         /// refute because they are iso-depth by construction — is then provably unable to clear the 0.5 px
         /// bound.</para>
         /// </summary>
@@ -208,7 +208,7 @@ namespace MapRenderer.Tests.Visual
                     "camera-facing fallback and this oracle is reconstructing a quad the GPU never drew.");
 
                 // The SAME frame the shader builds (Gram-Schmidt into the surface, then ŷ = cross(x̂, up)),
-                // and the SAME y-DOWN Offset convention (A0-F2), so −Offset.y is the y-UP amount.
+                // and the SAME y-DOWN Offset convention, so −Offset.y is the y-UP amount.
                 double3 xh = math.normalize(tangent - up * math.dot(tangent, up));
                 double3 yh = math.cross(xh, up);
                 Vector3 anchorUnity = slot.TransformPoint(
@@ -223,19 +223,19 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T2 — the box contains the RENDERED INK, at both receding depths
+        // T2 — the box contains the RENDERED INK, at both receding depths
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T2 — corroboration, in the other direction.</b> Every per-glyph ink run of both receding
+        /// <b>T2 — corroboration, in the other direction.</b> Every per-glyph ink run of both receding
         /// symbols lies INSIDE that glyph's staged box (mapped into ink-buffer coordinates,
         /// <c>row = SizePx − 1 − y</c>), with <see cref="InkSlackPx"/> of rasterisation slack per edge.
         ///
-        /// <para><b>What this does and does not prove.</b> Containment ALSO holds under the pre-W3 box, which
-        /// is strictly larger — so <b>T2 is not the depth discriminator; W3-T1 is</b>. T2's job is that W3 did
-        /// not make the box too SMALL, and that the mesh-derived oracle T1 leans on actually lands where the
+        /// <para><b>What this does and does not prove.</b> Containment ALSO holds under the earlier box, which
+        /// is strictly larger — so <b>T2 is not the depth discriminator; T1 is</b>. T2's job is that the
+        /// projected box is not too SMALL, and that the mesh-derived oracle T1 leans on lands where the
         /// GPU put ink. It reaches both receding depths because containment, unlike a ratio, does not need a
-        /// resolvable run width — which is precisely the limit W2-T1b measured and recorded
+        /// resolvable run width — which is precisely the limit T1b measured and recorded
         /// (<c>RecedingFar</c>'s runs are 1–2 px).</para>
         /// </summary>
         [Test]
@@ -332,11 +332,11 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W3-T3 — the ABSOLUTE SCALE and the DPR factor, at tilt 0, against the viewport arm
+        // T3 — the ABSOLUTE SCALE and the DPR factor, at tilt 0, against the viewport arm
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W3-T3 — the absolute scale and the DPR factor, calibrated against an arm that shares no code
+        /// <b>T3 — the absolute scale and the DPR factor, calibrated against an arm that shares no code
         /// with the one under test.</b> At tilt 0 a map-pitched curved
         /// symbol's collision box must equal its viewport-pitched twin's, edge for edge, at both device-pixel
         /// ratios and three road angles.
@@ -352,26 +352,26 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para><b>The reference shares no code with the arm under test.</b> The two symbols differ in exactly
         /// one field, <c>ShapedSymbol.PitchAlignment</c>; that one predicate selects
-        /// <c>SymbolStagingMath</c>'s world-arc walk, the metre corner unit, and W3's projected box. P3a's
-        /// rebuilt-T2 is the recorded lesson about references drawn from the arm under test.</para>
+        /// <c>SymbolStagingMath</c>'s world-arc walk, the metre corner unit, and the projected box. A
+        /// reference drawn from the arm under test cancels the very defect it is meant to catch.</para>
         ///
         /// <para><b>What each failure mode looks like.</b> A wrong
-        /// <c>emScale</c> (the <c>arcScale</c> substitution §1.3 warns about, or a dropped DPR factor) shows as
+        /// <c>emScale</c> (an <c>arcScale</c> substitution, or a dropped DPR factor) shows as
         /// a proportional SIZE error at DPR 2 while staying invisible at DPR 1 — which is why both ratios run.
-        /// A total failure to project reads as the pre-W3 screen box — <b>which at tilt 0 IS the same box</b>,
+        /// A total failure to project reads as the earlier screen box — <b>which at tilt 0 IS the same box</b>,
         /// so this tooth cannot by itself tell "correctly projected" from "never projected at all". That is the
         /// price of the pose that makes the comparison exact, and it is stated rather than papered over: the
-        /// MECHANISM's presence is pinned at tilt by W3-T1/T2 and by W3-T4, which all go RED if the projected
+        /// MECHANISM's presence is pinned at tilt by T1/T2 and by T4, which all go RED if the projected
         /// branch stops being taken. What T3 adds, and only T3 has, is the absolute-scale and DPR calibration
         /// against an arm that shares no code with the one under test.</para>
         ///
         /// <para><b>⚠ This tooth does NOT pin the ŷ sign — measured, not assumed.</b> The box is an AABB of
         /// the cell's corners, so a ŷ flip merely PERMUTES that set whenever the cell is symmetric about its
-        /// anchor in y, and an AABB is invariant under permutation — and W4 centres curved glyph cells on the
-        /// path. Injection I2 flipped the sign in production and left the ENTIRE suite green, this tooth
-        /// included. <b>W3-T10</b> (<c>MapPitchedWorldArcStagingTests</c>, on a deliberately off-centre cell)
-        /// is the sign's sole observer. F-W3-6; W2's 22.56 px flipped-ŷ separation was an ink-CENTROID
-        /// reading and does not carry over to an AABB.</para>
+        /// anchor in y, and an AABB is invariant under permutation — and curved glyph cells are centred on
+        /// the path. Injection I2 flipped the sign in production and left the ENTIRE suite green, this tooth
+        /// included. <b>T10</b> (<c>MapPitchedWorldArcStagingTests</c>, on a deliberately off-centre cell)
+        /// is the sign's sole observer; the 22.56 px flipped-ŷ separation the size teeth report is an
+        /// ink-CENTROID reading and does not carry over to an AABB.</para>
         /// </summary>
         [Test]
         public void MapPitchedBox_AtTiltZero_EqualsTheViewportBox(
@@ -506,13 +506,13 @@ namespace MapRenderer.Tests.Visual
                 textSizePx: textSizePx,
                 maxAngleDeg: 180f,
                 keepUpright: false,
-                // P3a's recorded lesson: at coarse zoom the dedup/collision machinery decides who emits and a
-                // fixture silently loses its symbol.
+                // At coarse zoom the dedup/collision machinery decides who emits and a fixture silently
+                // loses its symbol.
                 allowOverlap: true,
                 featureIndex: 0,
                 tileKey: tileKey);
 
-            // R3: duplicate Tick — the collision verdict is harvested one Tick late.
+            // Duplicate Tick — the collision verdict is harvested one Tick late.
             system.Tick(in frame, plan.Build(buffer), atlas);
             system.Tick(in frame, plan.Build(buffer), atlas);
             Assert.That(system.LastQuadCount, Is.EqualTo(1),
@@ -558,15 +558,13 @@ namespace MapRenderer.Tests.Visual
     // Unity EditMode only — real TiltedGroundScene + a REAL SymbolPlacementSystem.Tick, read back off the built
     // slot mesh. NOT registered in Tools/core-tests/core-tests.csproj.
     //
-    // Stage W2 — the CORNER-UNIT teeth that need the RENDERER (W2-T7, W2-T8).
+    // The CORNER-UNIT teeth that need the RENDERER (T7, T8).
     //
-    // PLACEMENT NOTE, deliberate and worth stating. The W2 plan filed T7 under `BillboardMathTests` and T8 under
-    // `MapPitchedWorldArcStagingTests`. Both of those are engine-free files that reach only `MapRenderer.Core`,
-    // and both of these teeth are claims about `WorldSymbolRenderer.Emit` — "the four WorldBillboardVertexs
-    // produced by the RENDERER", and "the renderer scales the translate delta by the corner unit". Asserting
-    // either one without the renderer in the loop would be asserting the test's own arithmetic, which is the
-    // self-referential-oracle failure this epic already made once. So they live here, on the real emit path, and
-    // the deviation from the plan's filing is recorded rather than silently taken.
+    // PLACEMENT NOTE. `BillboardMathTests` and `MapPitchedWorldArcStagingTests` are engine-free files that
+    // reach only `MapRenderer.Core`, and both of these teeth are claims about `WorldSymbolRenderer.Emit` —
+    // "the four WorldBillboardVertexs produced by the RENDERER", and "the renderer scales the translate delta
+    // by the corner unit". Asserting either one without the renderer in the loop asserts the test's own
+    // arithmetic. So they live here, on the real emit path.
     //
     // WHY tilt 0. Neither tooth reads a projected quantity — both read the emitted VERTEX STREAM off the built
     // mesh — so the pose only has to be one where the symbols stage reliably. Tilt 0 is the simplest such pose and
@@ -587,25 +585,25 @@ namespace MapRenderer.Tests.Visual
         /// nothing (the same reason <c>WorldSymbolGroupingTests</c> asserts its hierarchy names literally).</summary>
         private const float AlongLineBit = 2f;
 
-        /// <summary>`AlignFlags` bit2 — W2's map-pitch bit, same rationale.</summary>
+        /// <summary>`AlignFlags` bit2 — the map-pitch bit, same rationale.</summary>
         private const float MapPitchBit = 4f;
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W2-T7 — the flag and the unit cannot disagree (R3)
+        // T7 — the flag and the unit cannot disagree
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W2-T7, clause 1 — the STRUCTURAL statement of R3: the non-map path is BITWISE unchanged.</b>
+        /// <b>T7, clause 1 — the non-map path is BITWISE unchanged.</b>
         /// Proves: for a curved symbol whose <c>CornerMetresPerLogicalPixel</c> is 0 (every viewport- and
         /// auto-pitched symbol, and every point symbol), the four <see cref="WorldBillboardVertex"/>s the
         /// renderer emitted are bit-for-bit equal to a <see cref="BillboardMath.BuildWorldQuad"/> call made
-        /// with the PRE-W2 arguments — <c>q.TextSizePx</c> unscaled, <c>emit.TranslateDeltaPx</c> unscaled,
+        /// with the UNSCALED arguments — <c>q.TextSizePx</c> unscaled, <c>emit.TranslateDeltaPx</c> unscaled,
         /// <c>alignFlags = AlongLineAlignFlag</c>.
         ///
-        /// <para><b>Compared as raw float BITS, not with a tolerance.</b> The claim W2's stage invariant
-        /// makes is not "close enough" — it is that <c>cornerScale</c> is the literal <c>1f</c> on every
+        /// <para><b>Compared as raw float BITS, not with a tolerance.</b> The claim is not "close enough" —
+        /// it is that <c>cornerScale</c> is the literal <c>1f</c> on every
         /// non-map path and <c>x * 1f</c> is bitwise identity for every finite float and for ±0/±Inf/NaN
-        /// payloads alike, so the vertex stream is EXACTLY what it was before this stage. A tolerance would
+        /// payloads alike, so the non-map vertex stream is EXACTLY unchanged. A tolerance would
         /// let a real unit slip through as rounding.</para>
         ///
         /// <para><b>The reference does not come from the arm under test.</b> The expected quad is built from
@@ -640,17 +638,17 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>W2-T7, clause 2 — the flag tracks the unit, and the scope FENCE is asserted.</b> Proves: when
+        /// <b>T7, clause 2 — the flag tracks the unit, and the scope FENCE is asserted.</b> Proves: when
         /// the corner unit is metres, every corner's <c>AlignFlags</c> has bit2 set — and bit1 as well,
-        /// because in W2 map-pitch never occurs without along-line.
+        /// because map-pitch never occurs without along-line.
         ///
-        /// <para>Bit1 is not decoration here. E7's <c>emit.AlongLine</c> conjunct is the scope fence the plan
-        /// drew: point/icon map-pitch is a LATER stage. Asserting that bit2 never appears without bit1 is what
-        /// makes that fence observable instead of merely commented — if a future stage lifts it, this tooth
+        /// <para>Bit1 is not decoration here. The <c>emit.AlongLine</c> conjunct is the scope fence: point
+        /// and icon map-pitch are not implemented. Asserting that bit2 never appears without bit1 is what
+        /// makes that fence observable instead of merely commented — if a later change lifts it, this tooth
         /// says so.</para>
         ///
         /// <para>A separate <c>[Test]</c> from clause 1 on purpose: NUnit throws on the first failure, so two
-        /// clauses in one method means the second never runs. That has already cost this epic two teeth.</para>
+        /// clauses in one method means the second never runs.</para>
         /// </summary>
         [Test]
         public void MapPitchedCorners_CarryBit2_AndNeverWithoutBit1()
@@ -671,18 +669,18 @@ namespace MapRenderer.Tests.Visual
         }
 
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
-        // W2-T8 — the recorded `text-translate` limitation's observer (R4 / followUp F-W2-2)
+        // T8 — the recorded `text-translate` limitation's observer
         // ═══════════════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// <b>W2-T8 — the observer for followUp F-W2-2.</b> Proves: under map pitch the <c>text-translate</c>
+        /// <b>T8 — the observer for a recorded limitation.</b> Proves: under map pitch the <c>text-translate</c>
         /// delta rides the corner offsets in the SAME unit they do — i.e. it is scaled by
         /// <c>CornerMetresPerLogicalPixel</c> and becomes a WORLD translate.
         ///
         /// <para><b>Why this is a recorded limitation and not a design position.</b> The shader has ONE
         /// displacement path, so the corners and the translate must share whichever unit is in force; keeping
         /// the translate in screen px would mean a second, clip-space displacement path, which re-creates the
-        /// two-rulers-in-one-shader shape that got three stages reverted. The Style Spec's proper control for
+        /// two-rulers-in-one-shader shape. The Style Spec's proper control for
         /// whether a translate is a screen or a map offset is <c>text-translate-anchor</c>, not
         /// <c>text-pitch-alignment</c>, so the behaviour is recorded rather than defended.</para>
         ///
@@ -695,7 +693,7 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para><b>This tooth is the answer to "which test goes RED if this stops being deliberate?"</b>
         /// A recorded limitation needs a tooth that observes it. Without one the scaling is an unobserved
-        /// path, and this epic has already shipped one of those.</para>
+        /// path.</para>
         ///
         /// <para><b>Method: a DIFFERENCE, so the corner geometry cancels.</b> The same map-pitched symbol is
         /// emitted twice, once with a translate and once without, and the per-corner offset difference must
@@ -703,8 +701,8 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para><b>Component MAGNITUDES, not signed values — and that is a scope statement, not a
         /// weakening.</b> The Y sense of a translate is set by <c>SymbolTranslate.ApplyTranslate</c>'s own
-        /// convention composed with <c>BuildWorldQuad</c>'s A0-F2 negation, both of which predate W2 and
-        /// neither of which this stage touches; measured, the two compose to a POSITIVE Y here. W2's claim is
+        /// convention composed with <c>BuildWorldQuad</c>'s own negation, neither of which this tooth owns;
+        /// measured, the two compose to a POSITIVE Y here. The claim is
         /// exclusively about the UNIT, and the unit is what the magnitude states. Re-pinning the sign would
         /// duplicate a convention that already has its own owners, and would make this tooth go RED for a
         /// reason that has nothing to do with the corner unit. The discrimination is unaffected: injection I6
@@ -722,7 +720,8 @@ namespace MapRenderer.Tests.Visual
             WorldBillboardVertex[] translated = EmitAndRead(AlignmentMode.Map, translatePx,
                 out _, out double metresPerLogicalPixel);
 
-            // Component MAGNITUDES — the Y sense belongs to ApplyTranslate ∘ A0-F2, not to W2 (see the doc).
+            // Component MAGNITUDES — the Y sense belongs to ApplyTranslate composed with BuildWorldQuad's
+            // own negation, not to the corner unit (see the doc).
             var expected = new float2(
                 (float)(translatePx.x * metresPerLogicalPixel),
                 (float)(translatePx.y * metresPerLogicalPixel));
@@ -802,7 +801,7 @@ namespace MapRenderer.Tests.Visual
                     worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
                 plan = new TestSymbolPlan(scene.MapCam.Projection);
 
-                // R3: duplicate Tick — the collision verdict is harvested one Tick late.
+                // Duplicate Tick — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(buffer), atlas);
                 system.Tick(in frame, plan.Build(buffer), atlas);
                 Assert.That(system.LastQuadCount, Is.EqualTo(1),

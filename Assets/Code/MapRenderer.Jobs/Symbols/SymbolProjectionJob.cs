@@ -7,7 +7,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Jobs.Symbols
 {
     /// <summary>
-    /// B-2: the parallel per-frame SYMBOL projection — projects a flat buffer of render-space world points
+    /// The parallel per-frame SYMBOL projection — projects a flat buffer of render-space world points
     /// (every visible symbol's screen geometry this frame: a point symbol's anchor, a line symbol's path
     /// vertices) to logical screen pixels + NDC depth, culling only behind-camera. It is deliberately GENERIC
     /// over what a symbol renders — text today, an icon later, both together — because a symbol is projected as

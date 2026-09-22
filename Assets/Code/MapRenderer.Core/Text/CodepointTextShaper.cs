@@ -6,13 +6,13 @@ using System.Collections.Generic;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// S18 Slice 3 (decision 7, Option Y) shaper: pure clean-room C#, no HarfBuzz. Pipeline: split the
+    /// Text shaper: pure clean-room C#, no HarfBuzz. Pipeline: split the
     /// source string into codepoints -> detect direction -> for an RTL run, apply Arabic joining
     /// (<see cref="ArabicJoining"/>) to reach presentation-form atlas codepoints -> attach advances from
     /// <see cref="IGlyphMetricsProvider"/> -> reorder to visual order (<see cref="BidiReorder"/>).
     ///
     /// Render-path-agnostic: no <c>Mesh</c>/<c>MeshData</c>/<c>IRenderLayer</c>, no anchor/offset/quad
-    /// assumptions (S19 owns those). Not on any per-frame hot path — shaping runs at tile-layout time.
+    /// assumptions — layout owns those. Not on any per-frame hot path; shaping runs at tile-layout time.
     /// </summary>
     public sealed class CodepointTextShaper
     {
@@ -44,7 +44,7 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// S18 Slice 5 (T4) no-GC caller-buffer overload: writes positioned glyphs directly into
+        /// No-GC caller-buffer overload: writes positioned glyphs directly into
         /// <paramref name="output"/> (cleared first; reused across calls by the caller) instead of
         /// allocating a <see cref="ShapedRun"/>. Guaranteed zero managed allocation on the steady LTR
         /// path (the common map-symbol case: Latin/Cyrillic/Greek/digits/punctuation) once
@@ -53,7 +53,7 @@ namespace MapRenderer.Core.Text
         ///
         /// <para>
         /// RTL (Arabic joining + bidi) still runs through the existing allocating helpers internally
-        /// (<see cref="ArabicJoining"/>/<see cref="BidiReorder"/> — out of T4's zero-alloc scope, which
+        /// (<see cref="ArabicJoining"/>/<see cref="BidiReorder"/> — out of the zero-alloc scope, which
         /// is the steady/cached path only) but still avoids the <see cref="ShapedRun"/> allocation by
         /// copying its glyphs into the caller's buffer.
         /// </para>
@@ -122,13 +122,13 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// S18 decision 8: detect a single strong direction for the whole run. A run mixing strong RTL
+        /// Detects a single strong direction for the whole run. A run mixing strong RTL
         /// and strong LTR codepoints throws — full UAX #9 (mixed-direction) bidi is a deferred
         /// follow-up (see <see cref="BidiReorder"/>). Direction-neutral text (digits/punctuation/
         /// whitespace only) defaults to left-to-right.
         ///
-        /// Reads codepoints directly off <paramref name="text"/> (no intermediate list) — S18 Slice 5
-        /// (T4) needs this scan allocation-free so the caller-buffer <see cref="Shape(in ShapingRequest, List{PositionedGlyph})"/>
+        /// Reads codepoints directly off <paramref name="text"/> (no intermediate list): this scan must be
+        /// allocation-free so the caller-buffer <see cref="Shape(in ShapingRequest, List{PositionedGlyph})"/>
         /// overload has no per-call heap traffic on its steady LTR path.
         /// </summary>
         private static TextDirection DetermineDirection(string text)
@@ -149,15 +149,15 @@ namespace MapRenderer.Core.Text
             {
                 throw new NotSupportedException(
                     "CodepointTextShaper: mixed strong-direction text (RTL + LTR) is not supported by " +
-                    "S18's single-run bidi (decision 8). Full UAX #9 bidi is a deferred follow-up that " +
+                    "this single-run bidi. Full UAX #9 bidi is a deferred follow-up that " +
                     "will adopt a managed ICU-derived library.");
             }
 
             return hasRtl ? TextDirection.RightToLeft : TextDirection.LeftToRight;
         }
 
-        // Rough strong-direction classification by Unicode block — sufficient for decision 8's
-        // single-run scope (Arabic-vs-Latin discrimination); NOT a full UAX #9 bidi-class table.
+        // Rough strong-direction classification by Unicode block — enough for the single-run scope
+        // (Arabic-vs-Latin discrimination); NOT a full UAX #9 bidi-class table.
         private static bool IsStrongRightToLeft(uint c)
             => (c >= 0x0590 && c <= 0x08FF)   // Hebrew, Arabic, Syriac, Thaana, NKo, Arabic Extended-A, etc.
             || (c >= 0xFB1D && c <= 0xFDFF)   // Hebrew presentation forms + Arabic Presentation Forms-A

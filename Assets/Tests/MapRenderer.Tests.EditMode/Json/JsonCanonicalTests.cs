@@ -212,7 +212,7 @@ namespace MapRenderer.Tests.Json
                 "type replaces: two different inline datasets would be one source.");
         }
 
-        // ── CacheKey (UMR-95): the prepared-cache token wraps Write's canonical text in a short hash ──────
+        // ── CacheKey: the prepared-cache token wraps Write's canonical text in a short hash ───────────────
 
         /// <summary>CacheKey inherits Write's key-order insensitivity — two DOMs with the same values in
         /// different key order must fold to the same token, or an equivalent style re-parsed in a different

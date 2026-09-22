@@ -1,7 +1,7 @@
 // Unity EditMode only — tests that require NativeArray (engine API) or the NUnit GC-alloc recorder
 // (UnityEngine.TestTools.Constraints). NOT included in Tools/core-tests.
 //
-// S61 acceptance:
+// Covered:
 //   T4-alloc: Forward(span,out) allocates 0 bytes when caller owns the buffers.
 //   T5-NativeArray: GeoCoordinate3D is usable as NativeArray<T> element type (blittable).
 //   T4-NativeArray: NativeArray<GeoCoordinate3D>.AsReadOnlySpan() bridges correctly to Forward.

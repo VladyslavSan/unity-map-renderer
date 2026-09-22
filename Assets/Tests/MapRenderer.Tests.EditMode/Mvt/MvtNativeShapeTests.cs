@@ -30,7 +30,7 @@ namespace MapRenderer.Tests.Mvt
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// D1a — dense MVT property storage (<see cref="DensePropertyStore"/>), the GC-eliminating alternative
+    /// Dense MVT property storage (<see cref="DensePropertyStore"/>), the GC-eliminating alternative
     /// to an eager per-feature dictionary and the sole production property store. Two things this stage
     /// must prove:
     /// <list type="bullet">

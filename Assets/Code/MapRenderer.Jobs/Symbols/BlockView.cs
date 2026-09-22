@@ -15,10 +15,9 @@ namespace MapRenderer.Jobs.Symbols
     /// built it (<c>SymbolPlacementSystem.BuildBlockViews</c> + the immediately following
     /// <c>SymbolGatherJob.Run()</c>) — it must never be stored across a frame boundary.</para>
     ///
-    /// <para>Field order mirrors <c>SymbolTileBlock.cs:46-78</c> so the two read side by side. Per-block
-    /// pool COUNTS (<c>PointCount</c>/<c>CurvedCount</c>/<c>QuadCount</c>/… ) are deliberately omitted — the
-    /// gather only ever indexes a block's arrays by a winner's own <c>LocalIndex</c>/<c>Detail</c>/<c>*Start</c>,
-    /// never by a block-level pool count.</para>
+    /// <para>Field order mirrors <c>SymbolTileBlock</c>'s so the two read side by side. Per-block pool
+    /// COUNTS are omitted: the gather only ever indexes a block's arrays by a winner's own
+    /// <c>LocalIndex</c>/<c>Detail</c>/<c>*Start</c>, never by a block-level pool count.</para>
     /// </summary>
     public struct BlockView
     {
@@ -47,8 +46,8 @@ namespace MapRenderer.Jobs.Symbols
         public UnsafeList<CurvedGlyph> Glyphs;
         public UnsafeList<LineAnchor>  Anchors;
         public UnsafeList<double3>     WorldPoints;
-        // P2: index-parallel to WorldPoints (same WorldStart/WorldCount slice) — the unit surface normal at
-        // each world point. Written by the gather copy; not yet consumed by any downstream Burst reader.
+        // Index-parallel to WorldPoints (same WorldStart/WorldCount slice) — the unit surface normal at
+        // each world point. Written by the gather copy; no downstream Burst reader consumes it yet.
         public UnsafeList<float3>      WorldUps;
         public UnsafeList<long>        AnchorFadeIds;
     }

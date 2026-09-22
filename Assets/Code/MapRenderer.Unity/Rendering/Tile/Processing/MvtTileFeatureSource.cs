@@ -9,11 +9,11 @@ using MapRenderer.Unity.Concurrency;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Epic A / A7 (design §B): the MVT implementation of the raised <see cref="ITileFeatureSource"/> seam —
+    /// The MVT implementation of the raised <see cref="ITileFeatureSource"/> seam —
     /// byte-fetch (<see cref="IDataSource"/>), scheduling/caching (<see cref="TileScheduler"/>/
     /// <see cref="TileCache"/>), and <see cref="ITileDecoder"/> resolution all live HERE now, encapsulated
     /// behind <see cref="GetTile"/>; the coordinator (<c>TileManager</c>) never names any of them. Wraps the
-    /// UNCHANGED <see cref="TileScheduler"/> — this is a boundary re-seam, not a fetch-behaviour change (§D).
+    /// <see cref="TileScheduler"/> unchanged — this is a boundary seam, not a fetch-behaviour change.
     ///
     /// <para><see cref="GetTile"/> fetches, then DECODES — once, on the pool, through
     /// <see cref="TileDecodeDispatch.DecodeAsync"/> — and hands back a <see cref="SharedDisposable{T}"/>
@@ -60,7 +60,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         public async UniTask<SharedDisposable<IDecodedTile>> GetTile(TileId id, CancellationToken ct = default)
         {
             TileResponse resp = await _scheduler.Request(id, ct);
-            // IR C1 P3: the tile address goes IN here, at the only decode site, and is never supplied again.
+            // The tile address goes IN here, at the only decode site, and is never supplied again.
             // Everything downstream reads it off the decoded buffer instead of carrying its own copy.
             return (resp.HasData && resp.Bytes != null)
                 ? await TileDecodeDispatch.DecodeAsync(

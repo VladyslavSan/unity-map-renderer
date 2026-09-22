@@ -1,27 +1,19 @@
 // Unity EditMode only — real World/EntityManager. NOT registered in core-tests.csproj.
 //
-// Namespace is MapRenderer.Tests (not .Visual) deliberately, matching GameObjectTileRendererTestExtensions:
-// C# resolves extension methods only through the call site's ENCLOSING namespaces, so the parent namespace
-// is reachable from both. Today's callers all sit in MapRenderer.Tests.Visual; the parent costs nothing and
-// keeps the two backends' observability files symmetrical.
+// Namespace is MapRenderer.Tests, not .Visual, matching GameObjectTileRendererTestExtensions: C# resolves
+// extension methods only through the call site's ENCLOSING namespaces, so the parent namespace is reachable
+// from both.
 //
 // Observability for the Entities backend, living in the TEST assembly rather than on the production class.
-// These nine sat on Backend.Entities.TileRenderer under a "Test / debug observability" banner with ZERO
-// production callers between them — the shape the conventions rule out ("a member that exists solely for a
-// test does not belong on the production class"). They read the backend's `_items`/`_tileRoots`/`_em`,
-// broadened private -> internal, which IS the sanctioned footprint.
+// These read the backend's `_items`/`_tileRoots`/`_em`, broadened private -> internal, which IS the
+// sanctioned footprint.
 //
-// They also drop the post-dispose leniency the production versions carried (-1 / false / NaN). That existed
-// so a test could read a torn-down backend; using an object after Dispose is a bug rather than a case to
-// accommodate. Note the failure MODE changed with the location: post-dispose `_em` refers to a destroyed
-// World, so these now throw from inside EntityManager instead of returning a sentinel.
+// Post-dispose access is strict here: `_em` then refers to a destroyed World, so these throw from inside
+// EntityManager rather than returning a -1 / false / NaN sentinel.
 //
-// GetTileRootName is not here — it had no callers in either assembly and was deleted outright.
-//
-// The two Editor-only members lost their `#if UNITY_EDITOR`: this assembly's .asmdef carries
-// defineConstraints:["UNITY_INCLUDE_TESTS"], so it never compiles into a release player and the guard
-// was unconditionally true here. The guard still matters on the production SIDE, where the names are
-// written.
+// No `#if UNITY_EDITOR` is needed on the Editor-only members: this assembly's .asmdef carries
+// defineConstraints:["UNITY_INCLUDE_TESTS"], so it never compiles into a release player. The guard still
+// matters on the production SIDE, where the names are written.
 
 using Unity.Entities;
 using Unity.Entities.Graphics;

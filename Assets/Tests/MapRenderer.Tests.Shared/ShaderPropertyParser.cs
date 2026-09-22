@@ -104,7 +104,7 @@ namespace MapRenderer.Tests
             return null;
         }
 
-        // ── DOTS block parser (moved here from InstanceStructShaderParityTests) ──────────────────
+        // ── DOTS block parser ────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// Parses a <c>*_LitInput.hlsl</c> file for <c>UNITY_DOTS_INSTANCED_PROP</c> entries within the

@@ -1,4 +1,4 @@
-// Unity EditMode only — Stage G-V0, the declarative visual-test authoring kit.
+// Unity EditMode only — the declarative visual-test authoring kit.
 // NOT registered in Tools/core-tests/core-tests.csproj.
 
 #if UNITY_EDITOR
@@ -11,10 +11,9 @@ namespace MapRenderer.Tests
 {
     /// <summary>
     /// The result of a <see cref="VisualScene.Render"/> call: the decoded frame plus the seams a
-    /// fixture asserts over — the exact <see cref="StyleDocument"/> handed to <c>SetStyle</c> (the T-Parse
-    /// seam), and the live <see cref="MapViewComponent"/> + <see cref="Camera"/> handles a LATER stage's
-    /// <c>Ink(layerId)</c>/<c>GlyphAnchors(layerId)</c> accessors will read (plan §10 — not implemented now,
-    /// the handles are kept so adding them touches no composer).
+    /// fixture asserts over — the exact <see cref="StyleDocument"/> handed to <c>SetStyle</c>, and the live
+    /// <see cref="MapViewComponent"/> + <see cref="Camera"/> handles. The handles are kept so a later
+    /// per-layer ink or anchor accessor can be added without touching the composer.
     /// </summary>
     internal sealed class VisualFrame
     {
@@ -35,8 +34,8 @@ namespace MapRenderer.Tests
         public Color32 Background { get; }
 
         /// <summary>The exact <see cref="StyleDocument"/> instance <see cref="VisualScene.Render"/> handed to
-        /// <c>MapViewComponent.SetStyle</c> — the T-Parse seam: it can only carry the shape the REAL
-        /// <c>StyleParser.Parse</c> produces (plan §6).</summary>
+        /// <c>MapViewComponent.SetStyle</c> — it can only carry the shape the REAL
+        /// <c>StyleParser.Parse</c> produces.</summary>
         public StyleDocument ParsedStyle { get; }
 
         /// <summary>The live view this frame was rendered from — kept for a later ink/anchor accessor and for
@@ -92,11 +91,10 @@ namespace MapRenderer.Tests
         /// also bottom-left, <c>+y</c> up — so <paramref name="x0"/>/<paramref name="y0"/> here compare
         /// directly against an oracle screen pixel with no coordinate conversion at all.</para>
         ///
-        /// <para><b>Deferred: a per-layer <c>Ink(layerId)</c>.</b> A shared frame cannot attribute a
-        /// pixel to a style layer, and this stage renders exactly one inking layer (the symbol text), so all
-        /// non-background ink already IS that layer's ink — a <c>layerId</c> parameter would be vacuous. A
-        /// real per-layer accessor waits for a stage that renders two inking layers together and needs to
-        /// tell them apart.</para></summary>
+        /// <para><b>No per-layer <c>Ink(layerId)</c>.</b> A shared frame cannot attribute a pixel to a style
+        /// layer. While the kit renders exactly one inking layer, all non-background ink already IS that
+        /// layer's ink, so a <c>layerId</c> parameter would be vacuous. A real per-layer accessor waits for
+        /// a scene that renders two inking layers together.</para></summary>
         /// <param name="x0">Window left edge, px (inclusive).</param>
         /// <param name="y0">Window bottom edge, px (inclusive) — bottom-left origin, see above.</param>
         /// <param name="x1">Window right edge, px (exclusive).</param>

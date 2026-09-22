@@ -10,18 +10,17 @@ using MapRenderer.Jobs.Expressions;
 namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>
-    /// IR B7: one selected feature, carried <b>beside</b> its position in the source-layer's own feature list.
+    /// One selected feature, carried <b>beside</b> its position in the source-layer's own feature list.
     ///
     /// <para><b>Why the ordinal travels beside the feature and not on it.</b> Once every consumer reads one
     /// shared per-source-layer geometry buffer, each consumer's per-feature side arrays have to be joined to
     /// the buffer's <c>RingFeatureIdx</c>, which indexes <see cref="ITileLayer.Features"/> — not the
     /// consumer's own selected list. The obvious alternative, an <c>Ordinal</c> member on the feature, would
-    /// put a geometry-join concern on the neutral evaluation surface — <see cref="IFeature"/>, whose shape
-    /// <c>Structure/NeutralGeometryPathTests</c> pins by reflection
-    /// (<c>TheNeutralSurfaces_ExposeNoCommandStream</c>, <c>TheRetiredFeatureSidecars_AreGone</c>).</para>
+    /// put a geometry-join concern on the neutral evaluation surface, <see cref="IFeature"/>, whose shape
+    /// a structural test pins by reflection.</para>
     ///
-    /// <para>A <b>single</b> list of pairs, never two parallel lists: two positionally-joined columns are the
-    /// desync class this epic has already had to retire once.</para>
+    /// <para>A <b>single</b> list of pairs, never two parallel lists: two positionally-joined columns
+    /// desync.</para>
     /// </summary>
     public readonly struct SelectedTileFeature
     {
@@ -40,7 +39,7 @@ namespace MapRenderer.Jobs.Tiles
     /// Design:
     /// <list type="bullet">
     ///   <item>Source-layer resolution is delegated to <see cref="SourceLayerResolver.ResolveTileLayer"/> —
-    ///     single resolution point, not reimplemented here (S08 seam).</item>
+    ///     a single resolution point, not reimplemented here.</item>
     ///   <item>The layer's <c>filter</c> is compiled <b>once per filter</b> and memoized (see
     ///     <see cref="FilterFor"/>), then evaluated per feature.</item>
     ///   <item>Null/absent source-layer → empty result (mirrors <see cref="SourceLayerResolver"/> null-tolerance).</item>
@@ -62,7 +61,7 @@ namespace MapRenderer.Jobs.Tiles
         public static IReadOnlyList<IFeature> SelectFeatures(
             StyleLayer layer, IDecodedTile tile, double zoom = 0.0)
         {
-            // 1. Resolve the tile layer through the S08 seam (single resolution point).
+            // 1. Resolve the tile layer through the one resolution point.
             var tileLayer = SourceLayerResolver.ResolveTileLayer(layer, tile);
             if (tileLayer == null)
                 return System.Array.Empty<IFeature>();
@@ -121,7 +120,7 @@ namespace MapRenderer.Jobs.Tiles
         }
 
         /// <summary>
-        /// IR B7: the ordinal-returning form — appends every feature of <paramref name="tileLayer"/> that
+        /// The ordinal-returning form — appends every feature of <paramref name="tileLayer"/> that
         /// passes <paramref name="layer"/>'s filter at <paramref name="zoom"/> into <paramref name="into"/>,
         /// each paired with its position in <see cref="ITileLayer.Features"/>.
         ///

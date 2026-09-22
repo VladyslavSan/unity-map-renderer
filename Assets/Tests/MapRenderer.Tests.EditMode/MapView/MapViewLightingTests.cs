@@ -146,7 +146,7 @@ namespace MapRenderer.Tests.MapViews
         [Test]
         public void EnsureEnvironmentLighting_UnlitMode_LeavesDegenerateProbeUntouched()
         {
-            // S4 (unlit epic): the mode gate — under Unlit, the SAME degenerate-probe scenario that Lit
+            // The mode gate — under Unlit, the SAME degenerate-probe scenario that Lit
             // populates above must be left untouched (no DynamicGI.UpdateEnvironment call). Unlit map
             // geometry has no indirect-lighting term to fill, so generating a probe for it is dead work.
             var prevMode  = RenderSettings.ambientMode;

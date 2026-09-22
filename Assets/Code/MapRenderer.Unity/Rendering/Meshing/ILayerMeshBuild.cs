@@ -4,8 +4,7 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
-    /// One <c>(tile, layer)</c> build — the replacement for the tagged-union
-    /// <c>TileBuildGraph.LayerRequest</c>/<c>LayerBuild</c> pair (job-scheduling-design.md §3.2, §3.7): a
+    /// One <c>(tile, layer)</c> build (job-scheduling-design.md): a
     /// single object per geometry kind (<see cref="FillLayerBuild"/>, <see cref="FillExtrusionLayerBuild"/>,
     /// <see cref="LineLayerBuild"/>) owns its own request columns, measure output and write output, so
     /// <c>TileBuildGraph</c> dispatches nothing per kind — it only calls these four members through the

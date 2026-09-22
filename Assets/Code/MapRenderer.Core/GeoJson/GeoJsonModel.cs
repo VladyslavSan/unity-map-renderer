@@ -6,7 +6,7 @@ using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Core.GeoJson
 {
-    /// <summary>Thrown when input violates RFC 7946, or uses a construct this source deliberately does not
+    /// <summary>Thrown when input violates RFC 7946, or uses a construct this source does not
     /// support (a GeometryCollection, an antimeridian-crossing segment). Loud beats silently-wrong: this
     /// source exists to serve declarative fixtures, where malformed input must fail, not render less.</summary>
     public sealed class GeoJsonFormatException : Exception

@@ -16,10 +16,10 @@ namespace MapRenderer.Jobs.Lines
     /// <para>Join (miter / bevel / round), cap (butt / square / round) and index topology are all built from
     /// first principles: the per-segment extrusion direction is
     /// <c>across = normalize(cross(along, up))</c> — tied to the SAME <c>up</c> the centerline was projected with,
-    /// so ribbon winding is UNIFORM across projections BY CONSTRUCTION (no per-projection flip). OUTPUT WINDING:
-    /// CCW — the pipeline's single canonical winding, reversed once to
-    /// Unity-front at the mesh-write boundary (<c>StyledLineTileBuilder</c>) for stock Cull Back; see
-    /// <c>docs §7.1</c> and <c>GlobeLineWindingTests</c>. Round arcs are swept in the local tangent-plane basis
+    /// so ribbon winding is uniform across projections with no per-projection flip. OUTPUT WINDING: CCW —
+    /// the pipeline's single canonical winding, reversed once to Unity-front at the mesh-write boundary for
+    /// stock Cull Back, and pinned by <c>GlobeLineWindingTests</c>. Round arcs are swept in the local
+    /// tangent-plane basis
     /// (<c>cos·e0 + sin·e1</c>) — an equal-angle sweep generalised to a curved surface.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
@@ -101,10 +101,9 @@ namespace MapRenderer.Jobs.Lines
         }
 
         // ── IJob ──────────────────────────────────────────────────────────────────────────────
-        //
-        // The working buffers (pts/ups/along/cumDist) are LOCALS, not job fields: the job-safety system validates every
-        // NativeContainer FIELD at schedule time, so a default field would throw ("not assigned or constructed").
-        // Allocator.Temp is off-main-thread safe on a worker (BurstJobRunOffMainSpikeTests pins it).
+        // The working buffers (pts/ups/along/cumDist) are LOCALS, not job fields: the safety system validates
+        // every NativeContainer FIELD at schedule time, so a default field would throw. Allocator.Temp is
+        // off-main-thread safe on a worker.
         public void Execute()
         {
             OutVertexCount[0] = 0;
@@ -164,12 +163,10 @@ namespace MapRenderer.Jobs.Lines
                     double3 n1 = Across(along[seg],     upJ);  // incoming segment across, at the join point's up
                     double3 n2 = Across(along[seg + 1], upJ);  // outgoing segment across, same up
 
-                    // Left turn ⇔ the segment direction rotates left about the surface up. Sign calibrated to the
-                    // planar oracle: mapping flat 2D (x,y)→3D (x,0,y), managed's t1×t2 z-component equals
-                    // −dot(cross(along_in,along_out), up), so the left-turn test is the NEGATIVE dot (docs §7.1).
-                    // (This predicate only says which way the path turns; it does not by itself say which side
-                    // is outer/convex — see EmitBevelJoin/EmitRoundJoin below, mirroring the managed §1.2 proof
-                    // that a left turn puts the CONCAVE side on the left.)
+                    // Left turn ⇔ the segment direction rotates left about the surface up. Mapping flat 2D
+                    // (x,y)→3D (x,0,y), the planar cross product's z equals −dot(cross(in,out), up), so the
+                    // left-turn test is the NEGATIVE dot. This predicate says only which way the path turns;
+                    // which side is convex is EmitBevelJoin/EmitRoundJoin's business.
                     bool leftTurn = math.dot(math.cross(along[seg], along[seg + 1]), upJ) < 0.0;
 
                     // A Round join whose corner is shallow enough (f ≤ roundLimit) collapses to the miter
@@ -236,8 +233,8 @@ namespace MapRenderer.Jobs.Lines
 
         /// <summary>Unit extrusion across-direction for a segment running in <paramref name="along"/> at a point
         /// whose surface up is <paramref name="up"/> — <c>normalize(cross(along, up))</c>. The <c>cross(along, up)</c>
-        /// sign (vs <c>cross(up, along)</c>) is calibrated so the flat Mercator ribbon reproduces the
-        /// confirmed-correct 2D left normal; the same formula then winds the globe identically (docs §7.1).</summary>
+        /// sign, against <c>cross(up, along)</c>, is calibrated so the flat Mercator ribbon reproduces the
+        /// 2D left normal; the same formula then winds the globe identically.</summary>
         private static double3 Across(double3 along, double3 up)
             => math.normalize(math.cross(along, up));
 
@@ -278,14 +275,13 @@ namespace MapRenderer.Jobs.Lines
         /// <summary>
         /// Inner-vertex normal for a bevel/round join: the SAME miter-factor magnitude the miter
         /// join's <see cref="ComputeMiterNormals"/> emits, saturated at <paramref name="miterLimit"/>
-        /// instead of falling back to bevel. Returns the MAGNITUDE along <c>+mu</c> only (not signed) — the caller applies the
-        /// turn-direction sign (<c>leftTurn ? +innerN : -innerN</c>) when placing the vertex on the
-        /// concave side (see <see cref="EmitBevelJoin"/>/<see cref="EmitRoundJoin"/>).
+        /// instead of falling back to bevel. Returns the MAGNITUDE along <c>+mu</c> only; the caller applies
+        /// the turn-direction sign when placing the vertex on the concave side.
         /// </summary>
         private static double3 ComputeInnerNormal(double3 n1, double3 n2, double miterLimit)
         {
             if (!TryJoinBisector(n1, n2, out double3 mu, out double cosHalf))
-                return n1; // 180° hairpin — exactly today's fallback.
+                return n1; // 180° hairpin.
 
             if (math.abs(cosHalf) < 1e-12)
                 // Saturated answer; avoids 1/0 → ±Inf through Burst. mu's DIRECTION here is
@@ -368,16 +364,13 @@ namespace MapRenderer.Jobs.Lines
         {
             double3 innerN = ComputeInnerNormal(n1, n2, miterLimit);
 
-            // Convex-rim arc start/end (mirrors managed §2.3): a left turn's convex side is the right,
-            // i.e. −n1/−n2.
+            // Convex-rim arc start/end: a left turn's convex side is the right, i.e. −n1/−n2.
             double3 arcStart = leftTurn ? -n1 : n1;
             double3 arcEnd   = leftTurn ? -n2 : n2;
 
-            // Sweep the convex arc in the local tangent-plane basis (e0 = arcStart, e1 ⊥ e0 in-plane). The signed
-            // angle to arcEnd is measured in THIS basis, so the e1-sign is self-cancelling and the intermediate
-            // directions are basis-independent — the same equal-angle fan the 2D atan2 sweep produces.
-            // `sweep` is bit-invariant under the joint negation arcStart→−arcStart, arcEnd→−arcEnd (e0→−e0,
-            // e1→−e1, and dot(arcEnd,e{0,1}) is a product of two negated terms) — no edit needed here.
+            // Sweep the convex arc in the local tangent-plane basis (e0 = arcStart, e1 ⊥ e0 in-plane). The
+            // signed angle to arcEnd is measured in THIS basis, so the e1-sign is self-cancelling and the
+            // intermediate directions are basis-independent.
             double3 e0 = arcStart;
             double3 e1 = math.normalize(math.cross(up, e0));
             double  sweep = math.atan2(math.dot(arcEnd, e1), math.dot(arcEnd, e0));
@@ -463,11 +456,10 @@ namespace MapRenderer.Jobs.Lines
                         AddVertex(ref v, MakeVertex(p, dir, up, dist, +1f));
                     }
 
-                    // Fan seed: geometrically identical to rightButt (same p, same −across) but tagged +1.
-                    // Seeding the fan from rightButt itself gave the seam triangle an OUTER edge — a true
-                    // silhouette — interpolating side +1 → −1 and passing through 0 at its midpoint, so
-                    // anything keyed on |side| read that one arc segment as deep interior. Emitted BEFORE the
-                    // two butts so Execute()'s verts[v-2]=left / verts[v-1]=right contract still holds.
+                    // Fan seed: geometrically identical to rightButt but tagged +1. Seeding the fan from
+                    // rightButt itself would give the seam triangle a side +1 → −1 edge, passing through 0
+                    // at its midpoint, so anything keyed on |side| reads that arc segment as deep interior.
+                    // Emitted BEFORE the two butts, so Execute's verts[v-2]=left/verts[v-1]=right holds.
                     AddVertex(ref v, MakeVertex(p, -across, up, dist, +1f));  // capSeed
 
                     AddVertex(ref v, MakeVertex(p,  across, up, dist, +1f));  // leftButt  [v-2]

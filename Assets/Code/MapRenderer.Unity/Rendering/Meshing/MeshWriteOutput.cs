@@ -8,7 +8,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
     /// The write graph's per-layer output — the write-side mirror of <c>FillGraphOutput</c>
-    /// (job-scheduling-design.md §3.2 rule 1). Mesh-neutral: these five fields are exactly what any write
+    /// (job-scheduling-design.md). Mesh-neutral: these five fields are exactly what any write
     /// step returns (<see cref="StyledFillTileBuilder.ScheduleWrite"/> today; a line write step mints its
     /// own copy rather than this type becoming fill-specific-in-name-only). Returned with <see cref="Handle"/>
     /// UNCOMPLETED: the caller polls/completes it, then calls <see cref="TakePayload"/> (handle already

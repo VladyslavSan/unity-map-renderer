@@ -4,7 +4,7 @@
 // header). MapViewLiveLoopTests.cs stays its own file: it imports System, and every file here calls bare
 // Object.DestroyImmediate (UnityEngine.Object) — a using collision the merge rule resolves by not
 // merging, never by qualifying. SceneIntegrityTests.cs stays its own file too — its [TearDown] calls
-// EditorSceneManager.NewScene, process-state per test-conventions.md §4.
+// EditorSceneManager.NewScene, process-state per test-conventions.md.
 //
 // Contents:
 //   MapRootWiringTests          — MapHost.Wire() wiring graph: MapController.Map/.Camera and the MapView built over the camera.
@@ -46,9 +46,9 @@ namespace MapRenderer.Tests.MapViews
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S41 wiring tests for <see cref="MapHost.Wire"/>.
+    /// Wiring tests for <see cref="MapHost.Wire"/>.
     ///
-    /// These tests fail on the pre-S41 code-base (where Map was set only in Play via GetComponent
+    /// These tests fail on a code-base where Map is set only in Play via GetComponent
     /// on the same Camera GO — never tested). They are the regression guard for the "unset Map
     /// reference" class of bug.
     /// </summary>
@@ -82,7 +82,7 @@ namespace MapRenderer.Tests.MapViews
                 // Act.
                 MapHost.Wire(rootGo, cam, initialView);
 
-                // Assert — tooth 1 of S41 acceptance:
+                // Assert — tooth 1:
                 var ctrl    = rootGo.GetComponent<MapController>();
                 var mapView = rootGo.GetComponent<MapView>();
 
@@ -138,10 +138,10 @@ namespace MapRenderer.Tests.MapViews
                 "Wire must not throw even when MapView is absent from the root.");
         }
 
-        // ── (4) S74 — TouchController wired by Wire() ────────────────────────────────────────────
+        // ── (4) TouchController wired by Wire() ──────────────────────────────────────────────────
 
         /// <summary>
-        /// S74: Wire() must add (or find) a <see cref="TouchController"/> on root and set its
+        /// Wire() must add (or find) a <see cref="TouchController"/> on root and set its
         /// Map and Camera fields — locks the wiring so touch can't silently un-wire.
         /// </summary>
         [Test]
@@ -163,10 +163,10 @@ namespace MapRenderer.Tests.MapViews
                 MapHost.Wire(rootGo, cam, initialView);
 
                 var touch = rootGo.GetComponent<TouchController>();
-                Assert.IsNotNull(touch,    "S74: Wire() must add TouchController to root");
-                Assert.IsNotNull(touch.Map, "S74: TouchController.Map must be set after Wire()");
+                Assert.IsNotNull(touch,    "Wire() must add TouchController to root");
+                Assert.IsNotNull(touch.Map, "TouchController.Map must be set after Wire()");
                 Assert.AreEqual(cam, touch.camera,
-                    "S74: TouchController.camera must equal the camera passed to Wire()");
+                    "TouchController.camera must equal the camera passed to Wire()");
             }
         }
 
@@ -262,7 +262,7 @@ namespace MapRenderer.Tests.MapViews
 
         /// <summary>
         /// The PUBLISH path must be allocation-free too — and this is the boxing tooth of
-        /// docs/telemetry-design.md §6: the provider→reader path must stay copy-free and unboxed. Returning a
+        /// docs/telemetry-design.md: the provider→reader path must stay copy-free and unboxed. Returning a
         /// snapshot by value, or erasing one to <c>object</c> / a non-generic interface anywhere on the path,
         /// shows up here as a per-frame allocation.
         /// </summary>
@@ -309,7 +309,7 @@ namespace MapRenderer.Tests.MapViews
             }
         }
 
-        // ── ConsumeBacklog: the S95 "measure first" signal ────────────────────────────────────────
+        // ── ConsumeBacklog: the "measure first" signal ────────────────────────────────────────────
         // EditMode-only: this test blocks CONSUME (MaxConsumesPerTick=0) so completed mesh builds pile up
         // as an unconsumed backlog. It needs the ThreadPool builds to COMPLETE (wall-clock) WITHOUT being
         // consumed — DrainMeshBuilds would consume them to Built (backlog→0, defeating the scenario), and a
@@ -326,7 +326,7 @@ namespace MapRenderer.Tests.MapViews
             {
                 view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
                 view.WithTestCamera();
-                view.Config.MaxConsumesPerTick        = 0;  // blocks consume entirely (the S87 backlog-builder)
+                view.Config.MaxConsumesPerTick        = 0;  // blocks consume entirely (the backlog-builder)
                 view.Config.MaxMeshBuildsPerTick = 64; // don't cap mesh build kicks
 
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
@@ -374,14 +374,13 @@ namespace MapRenderer.Tests.MapViews
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S47 async non-blocking mesh build acceptance tests.
+    /// Async non-blocking mesh build acceptance tests.
     ///
     /// Architecture note on tooth 1 / .Schedule().Complete() greppability:
     ///   The stage names 5 sites. Only ONE is on the live Update path: the old
     ///   StyledFillTileBuilder.cs:125 site (now replaced by managed projection in BuildMeshData).
     ///   The other sites are off-path test-only utilities:
     ///     - FillMeshPipeline.cs:208,245,443 — test-only jobified path; no MapView caller.
-    ///   (S54 retired the Gen-1 MapFillBootstrap single-tile sync bootstrap entirely.)
     ///   A naive grep of the full tree finds these; they are intentionally not in the live Update path.
     /// </summary>
     [TestFixture]
@@ -435,24 +434,19 @@ namespace MapRenderer.Tests.MapViews
 
         // ── Tooth 2: RETIRED — see this file's header comment for the before/after. ───────────
 
-        // ── Tooth 2b: S46 profiler-marker harness — main-thread PmBuildMesh count == 0 ────────
+        // ── Tooth 2b: profiler-marker harness — main-thread PmBuildMesh count == 0 ────────────
 
         /// <summary>
-        /// Pins the concrete numeric criterion for S47 Tooth 2 ("max single-frame stall drops sharply
-        /// vs the S46 baseline") using the S46 profiler-marker harness (ProfilerRecorder), as required
-        /// by the reviewer.
+        /// Pins the numeric criterion for Tooth 2 ("max single-frame stall drops sharply") with the
+        /// profiler-marker harness (ProfilerRecorder).
         ///
-        /// S46 baseline (pre-S47 sync path): PmBuildMesh fired on the MAIN THREAD (>0 main-thread
-        ///   hits) because BuildMesh was called synchronously inside Tick on the main thread.
-        ///   Concrete baseline: ≥1 main-thread sample per tile built.
-        ///
-        /// S47 async path: BuildMeshData (which fires PmBuildMesh) runs inside Task.Run on a
-        ///   ThreadPool thread. The main thread never enters BuildMeshData during Tick.
-        ///   Concrete bound: ZERO main-thread PmBuildMesh samples after a full async tile load.
+        /// A synchronous build fires PmBuildMesh on the MAIN THREAD: ≥1 main-thread sample per tile.
+        /// The async path runs BuildMeshData (which fires PmBuildMesh) inside Task.Run on a ThreadPool
+        /// thread, so a full async tile load must leave ZERO main-thread PmBuildMesh samples.
         ///
         /// Two recorders (both CollectOnlyOnCurrentThread = main thread only):
         ///   A) MapRenderer.Meshing.StyledFillTileBuilder.BuildLayerInput → must be ZERO (prologue off main
-        ///      thread; job-scheduling-design.md §8 stage 3 — production fires this marker now, not
+        ///      thread; production fires this marker, not
         ///      WriteMeshData, which stays reachable only through a direct call, e.g. from tests)
         ///   B) MapRenderer.Mesh.Upload      → must be > ZERO (consume/upload still runs on main thread)
         ///
@@ -529,17 +523,15 @@ namespace MapRenderer.Tests.MapViews
                     "Check AllTilesSettled() and that the fixture path is correct.");
 
                 // ── Concrete bound: PmBuildMesh == 0 on the main thread ─────────────────────────
-                // S46 baseline: ≥1 main-thread PmBuildMesh hit per tile (BuildMesh was synchronous).
-                // S47 bound:    0 main-thread PmBuildMesh hits (BuildMeshData runs in Task.Run).
-                // Delta: main-thread build cost drops from full-tile duration to ZERO — the
-                // largest possible improvement in main-thread blocking, confirming S47's headline fix.
+                // A synchronous build: ≥1 main-thread PmBuildMesh hit per tile.
+                // The bound here: 0 main-thread PmBuildMesh hits (BuildMeshData runs in Task.Run).
                 Assert.AreEqual(0L, tessMainHits,
                     $"Tooth 2b: PmBuildMesh ('{buildMarkerName}') fired {tessMainHits} time(s) "        +
                     $"on the main thread — expected 0. "                                                +
-                    "S46 baseline: ≥1 main-thread hit per tile (sync BuildMesh path). "                 +
-                    "S47 async path: BuildMeshData runs in Task.Run (off main thread), so "             +
+                    "Baseline: ≥1 main-thread hit per tile (sync BuildMesh path). "                 +
+                    "Async path: BuildMeshData runs in Task.Run (off main thread), so "             +
                     "PmBuildMesh must NEVER fire on the main thread during Tick. "                      +
-                    "If non-zero, mesh build is still synchronous on the main thread (S47 regressed). " +
+                    "If non-zero, mesh build is still synchronous on the main thread (regressed). " +
                     $"Upload hits (positive control) = {uploadMainHits}.");
             }
             finally
@@ -594,7 +586,7 @@ namespace MapRenderer.Tests.MapViews
         /// Sanity test: BuildMeshData → UploadMesh round-trip produces the same vertex count and positions
         /// as the synchronous BuildMesh convenience.
         ///
-        /// job-scheduling-design.md §8 stage 4 Group B: <c>WriteMeshData</c> now SCHEDULES the graph rather
+        /// <c>WriteMeshData</c> SCHEDULES the graph rather
         /// than running it, and job scheduling is main-thread-only (see <c>WriteMeshData</c>'s own doc) — so
         /// this write happens on the main thread too, matching what production actually does (the graph
         /// arm's write step is scheduled from the pump, never from a worker). Both paths still go through
@@ -626,7 +618,7 @@ namespace MapRenderer.Tests.MapViews
             // Split path (production shape): allocate, schedule+write (WriteMeshData is main-thread-only —
             // see its own doc), apply — all on THIS (main) thread.
             var mda = Mesh.AllocateWritableMeshData(1);
-            // IR C1 P3: the layer's own buffer, BORROWED — the decoded tile owns and frees it.
+            // The layer's own buffer, BORROWED — the decoded tile owns and frees it.
             TileGeometryBuffers geometry = mvtLayer.Geometry;
             SyncMeshWrite.Fill(
                 mda[0], TestTileMeshBuilder.Select(fillLayer, mvtLayer, 0.0), geometry, paint, 0.0,

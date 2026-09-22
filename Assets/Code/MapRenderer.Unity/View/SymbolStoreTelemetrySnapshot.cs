@@ -1,5 +1,5 @@
 // Engine-free: compiled by both the Unity EditMode runner and the fast dotnet core-tests project.
-// No UnityEngine references — plain int fields only (mirrors TileTelemetrySnapshot's S85 decision 1).
+// No UnityEngine references — plain int fields only, like TileTelemetrySnapshot.
 
 namespace MapRenderer.Unity.View
 {
@@ -23,9 +23,9 @@ namespace MapRenderer.Unity.View
         /// the tile without a re-fetch (the zoom-out-then-in fix). These do NOT render.</summary>
         public int CachedSymbolTiles { get; init; }
 
-        /// <summary>§1.5 tile-coverage pre-cull: symbols classified DROP because their tile is steadily below the
-        /// on-screen coverage threshold (never-visible, or the fade-out grace has expired). D1: kept resident in
-        /// the mirror but masked out of placement (never staged) — the per-frame savings. Watch this against
+        /// <summary>Tile-coverage pre-cull: symbols classified DROP because their tile is steadily below the
+        /// on-screen coverage threshold (never-visible, or the fade-out grace has expired). They stay resident
+        /// in the mirror but are masked out of placement, so they are never staged. Watch this against
         /// <c>MapViewConfig.SymbolTileCoverageCull</c> to tune it.</summary>
         public int CoverageDroppedSymbols { get; init; }
     }

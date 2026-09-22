@@ -37,8 +37,8 @@ namespace MapRenderer.Core.Text
         /// <param name="width">Fixed atlas width in pixels.</param>
         /// <param name="fixedHeight">0 (default) = classic height-grows-by-shelf atlas; a positive value =
         /// a FIXED-capacity atlas of exactly this height, whose <see cref="Size"/> never changes and which
-        /// reports overflow via <see cref="TryPack"/> instead of growing (S105: a big fixed atlas keeps
-        /// every tile's baked UVs valid).</param>
+        /// reports overflow via <see cref="TryPack"/> instead of growing (a big fixed atlas keeps every
+        /// tile's baked UVs valid).</param>
         public GlyphAtlasPacker(int width = DefaultWidth, int fixedHeight = 0)
         {
             if (width <= 0) throw new ArgumentOutOfRangeException(nameof(width), "atlas width must be positive");

@@ -11,9 +11,9 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// The arc-walk geometry of curved along-line text: pure, allocation-free static functions over
     /// caller-owned spans. Blittable-shaped (spans of value types, no class state) so the same math drives
-    /// both <see cref="SymbolStagingMath"/>'s per-frame walk AND the future Burst staging job (Lever C) — one
-    /// source of truth, no divergence. The caller owns the cumulative-length buffer and the resumable cursor
-    /// (Lever A) as plain locals, threaded across calls by <c>ref</c>.
+    /// both <see cref="SymbolStagingMath"/>'s per-frame walk AND a future Burst staging job — one source of
+    /// truth, no divergence. The caller owns the cumulative-length buffer and the resumable cursor as plain
+    /// locals, threaded across calls by <c>ref</c>.
     /// </summary>
     public static class PolylineArcMath
     {
@@ -68,7 +68,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// Point + tangent angle (radians) at arc distance <paramref name="arc"/> from the start, clamped to the
-        /// endpoints. <paramref name="cursor"/> is a resumable segment hint (Lever A): the caller queries arcs in
+        /// endpoints. <paramref name="cursor"/> is a resumable segment hint: the caller queries arcs in
         /// monotonic order per symbol, so resuming from the last hit is O(1) amortized instead of O(count) per glyph.
         /// Robust to out-of-order queries — the two guarded walks land on the containing segment regardless of where
         /// the cursor started. Pass a cursor seeded to 0 at the start of each polyline.
@@ -103,10 +103,10 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>
         /// Resolves arc distance <paramref name="arc"/> (already known to be strictly inside (0, total) — the
         /// caller handles the two endpoint cases directly, see <see cref="At"/>'s doc) to its containing
-        /// <paramref name="seg"/>/<paramref name="t"/>, via the SAME resumable-cursor walk <see cref="At"/> used
-        /// inline before this extraction (Stage AC: factored out so a WORLD sampler can share the segment
-        /// search without re-deriving <c>(seg,t)</c> from a second, potentially-diverging walk).
-        /// <paramref name="cursor"/> is a resumable segment hint (Lever A) — see <see cref="At"/>.
+        /// <paramref name="seg"/>/<paramref name="t"/>, via the SAME resumable-cursor walk <see cref="At"/>
+        /// uses, so a WORLD sampler can share the segment search without re-deriving <c>(seg,t)</c> from a
+        /// second, potentially-diverging walk.
+        /// <paramref name="cursor"/> is a resumable segment hint — see <see cref="At"/>.
         /// </summary>
         public static void SegmentAt(ReadOnlySpan<float> cumulative, int count, float total, float arc,
             ref int cursor, out int seg, out float t)
@@ -147,7 +147,7 @@ namespace MapRenderer.Core.Text.Placement
             dir = double3.zero;
         }
 
-        /// <summary>P2 (curved arm): the unit-surface-normal analogue of <see cref="SampleWorld"/> — lerps the
+        /// <summary>The unit-surface-normal analogue of <see cref="SampleWorld"/> — lerps the
         /// per-vertex ups at the SAME already-resolved <c>(seg,t)</c> <see cref="SampleWorld"/> was handed (so
         /// the up and the anchor are sampled at the identical point), then re-normalizes (a lerp of two unit
         /// vectors is not itself unit length). Falls back to <paramref name="ups"/>[seg] on a degenerate

@@ -2,9 +2,9 @@
 // this file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to
 // a (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the
 // namespace-collision trap in GlyphAtlasTexture.cs.
-// BLITTABLE: kept to blittable fields only so a future Burst collision job (F3) can take it as a
-// NativeArray<SymbolBox> element without change (mirrors PlacedQuad / LineRibbonVertex). The Slice-2 first
-// cut runs the greedy pass managed over a reused SymbolBox[] (still zero per-frame GC — T4), so no job yet.
+// BLITTABLE: kept to blittable fields only so a future Burst collision job can take it as a
+// NativeArray<SymbolBox> element without change (mirrors PlacedQuad / LineRibbonVertex). The greedy pass
+// runs managed today, over a reused SymbolBox[], so there is no job yet.
 
 using Unity.Mathematics;
 using MapRenderer.Core.Text;
@@ -12,7 +12,7 @@ using MapRenderer.Core.Text;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// S20 Slice 2: one symbol's screen-space collision record — the axis-aligned bounding box
+    /// One symbol's screen-space collision record — the axis-aligned bounding box
     /// <c>CollisionJob</c> tests for overlap, plus the greedy placement-order key
     /// (<see cref="SortKey"/> + the <see cref="FeatureIndex"/>/<see cref="TileKey"/> stable tiebreak) and
     /// the per-symbol overlap flags. <see cref="Min"/>/<see cref="Max"/> are in logical screen pixels with
@@ -48,7 +48,7 @@ namespace MapRenderer.Core.Text.Placement
         public bool IgnorePlacement;
 
         /// <summary>
-        /// Builds the screen-space collision box for a symbol from its projected anchor, S19 block bbox
+        /// Builds the screen-space collision box for a symbol from its projected anchor, the block bbox
         /// (baked-px, anchor-relative — <see cref="TextLayoutBounds.Min"/>/<c>Max</c>), the
         /// resolved <c>text-size</c>, and <c>text-padding</c>. Applies the SAME <c>textSizePx / OneEm</c>
         /// scale <see cref="BillboardMath.BuildQuad"/> uses for the visible quads (so the collision box
@@ -84,7 +84,7 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         /// <summary>
-        /// #5 (B3): the tight axis-aligned bound of ONE curved-symbol glyph — the AABB of the four ROTATED
+        /// The tight axis-aligned bound of ONE curved-symbol glyph — the AABB of the four ROTATED
         /// cell corners, so the collision box tracks the drawn glyph on a sloped line. Mirrors
         /// <see cref="BillboardMath.BuildQuad"/> exactly: same <c>textSizePx / OneEm</c> scale, same CCW
         /// rotation about <paramref name="anchorScreenPx"/>, then grown by <paramref name="paddingPx"/> on
@@ -133,13 +133,12 @@ namespace MapRenderer.Core.Text.Placement
         /// <para>Returns <c>false</c> — meaning <b>take the pre-W3 screen box</b>, not "fail" — when the
         /// ground frame is degenerate (zero/parallel <paramref name="surfaceUp"/>/<paramref name="tangentRender"/>)
         /// or any corner fails to project — behind the camera, or projecting past
-        /// <see cref="SymbolScreenProjection.MaxProjectedPx"/> in a near-plane blow-up (F-W3-8), which would
+        /// <see cref="SymbolScreenProjection.MaxProjectedPx"/> in a near-plane blow-up, which would
         /// otherwise make this AABB unbounded. <paramref name="box"/> is then untouched, so a
         /// half-built box is not expressible. <b>This is a KNOWING divergence from the shader</b>, whose own
         /// degenerate fallback is a camera-facing METRE frame (<c>SymbolWorldPitchAlign.hlsl</c>): in that case
         /// the box will not track the ink. Reproducing the camera-facing frame needs the view basis in render
-        /// space and a fresh handedness derivation, to serve a state unreachable in production — recorded as
-        /// followUp F-W3-1 and pinned by W3-T6/T7 rather than left implicit.</para>
+        /// space and a fresh handedness derivation, to serve a state unreachable in production.</para>
         ///
         /// <para><b><paramref name="emScaleMetres"/> must be built as
         /// <c>TextSizePx · CandidateEmit.CornerMetresPerLogicalPixel</c></b> — the RENDERER's own association
@@ -152,19 +151,17 @@ namespace MapRenderer.Core.Text.Placement
         ///
         /// <para><b>The ŷ sense.</b> The shader displaces by
         /// <c>off.y · SYMBOL_WORLD_MAP_Y_SIGN · _ProjectionParams.x · cross(up, x̂)</c> with
-        /// <c>off.y = −c_y</c> (the A0-F2 negation), so at the measured <c>_ProjectionParams.x == −1</c> the
+        /// <c>off.y = −c_y</c> (the corner Y negation), so at the measured <c>_ProjectionParams.x == −1</c> the
         /// world displacement for a y-UP corner <c>c_y</c> is <c>c_y · cross(x̂, up)</c> — which is what this
         /// uses. <b>The CPU must not reproduce <c>_ProjectionParams.x</c>:</b> it cancels out of the DISPLAY
         /// sense of an ordinary projection (there is no flipped target here) but not out of the shader's WORLD
         /// displacement, so the shader's runtime read is load-bearing and this side simply picks the
         /// geometrically-correct sense. If the shader is ever wrong at <c>+1</c>, the box is right and the ink
-        /// is wrong — a shader defect, not a box defect. <b>The sense is pinned by W3-T10, and by nothing
-        /// else</b> (F-W3-6, measured — injection I2 flipped this sign and left the whole suite green):
-        /// this box is an AABB, and for a cell that is y-symmetric about its anchor a ŷ flip merely
-        /// PERMUTES the corner set, which an AABB is invariant under. Every other fixture cell is symmetric,
-        /// so W3-T10 uses a deliberately off-centre one. Note W3-T10 re-derives this sense rather than
-        /// importing it, so a SHARED convention error is still unobserved on the CPU side; the independent
-        /// reference is W2's tilt-0 ink centroid, which pins the SHADER's sign only.</para>
+        /// is wrong — a shader defect, not a box defect. <b>Only ONE test pins this sense</b>: the box is an
+        /// AABB, and for a cell that is y-symmetric about its anchor a ŷ flip merely PERMUTES the corner set,
+        /// which an AABB is invariant under, so that test needs an off-centre cell. It also re-derives the
+        /// sense rather than importing it, so a SHARED convention error stays unobserved on the CPU
+        /// side.</para>
         ///
         /// <para><paramref name="cellSkirt"/> is removed BEFORE the corners are built, exactly as
         /// <see cref="BuildRotatedGlyph"/> does — the box bounds the icon's ink, not its transparent border.
@@ -216,12 +213,12 @@ namespace MapRenderer.Core.Text.Placement
 
             // Gram-Schmidt — keeps x̂ IN the surface. INERT on every Mercator fixture (up is (0,1,0) and every
             // baked road tangent is horizontal ⇒ axial == 0 exactly), which is the second copy of the
-            // shader's own inert projection: followUp F-W3-3. A spherical curved-map fixture closes both.
+            // shader's own inert projection. A spherical curved-map fixture closes both.
             double3 xh = math.normalize(tangentRender - up * axial);
             double3 yh = math.cross(xh, up); // see the ŷ-sense paragraph above
 
-            // D9 — the skirt comes off FIRST, in BAKED units, so the one scale below is applied once and a
-            // skirted cell is bit-identical to the same cell pre-shrunk by it (W3-T9). Text carries a 0
+            // The skirt comes off FIRST, in BAKED units, so the one scale below is applied once and a
+            // skirted cell is bit-identical to the same cell pre-shrunk by it. Text carries a 0
             // skirt, which makes both terms an exact `x ± 0f`. Only the two corners are carried: the atlas UVs
             // play no part in a collision box.
             var content = new SymbolQuad
@@ -263,10 +260,10 @@ namespace MapRenderer.Core.Text.Placement
                     view.ViewportLogicalPx, view.Rebase, out screenPx, out _))
                 return false;
 
-            // F-W3-8: a corner just IN FRONT of the camera plane has a tiny positive clip.w, which survives
+            // A corner just IN FRONT of the camera plane has a tiny positive clip.w, which survives
             // the behind-camera test above and then divides into an arbitrarily large — but finite, so no NaN
-            // guard sees it — screen coordinate. Unbounded here means an unbounded collision AABB, where the
-            // pre-W3 screen box was bounded by the cell. The same threshold bounds a path VERTEX one level up
+            // guard sees it — screen coordinate. Unbounded here means an unbounded collision AABB, unlike the
+            // screen box, which the cell bounds. The same threshold bounds a path VERTEX one level up
             // (SymbolStagingMath.StageCurved); rejecting the corner takes the screen-box fallback, which is the
             // bounded answer.
             return math.abs(screenPx.x) < SymbolScreenProjection.MaxProjectedPx

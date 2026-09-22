@@ -4,20 +4,20 @@
 //
 // Contents:
 //   BurstJobRunOffMainSpikeTests       — (Established as a spike: the geometry kernels take CALLER-provided Persistent scratch — no internal Allocator.Temp — so allocating NativeArrays and .Run()-ing them off the main thread is safe.
-//   DecodedLayerGeometryTests          — IR B7a's two store teeth, REHOMED to their P3 owner.
-//   DecodedTileOwnershipTests          — IR C1 P3, tooth B — the ownership relation: a decoded tile cannot be paired with another tile's geometry.
-//   FillSizingJobTests                 — job-scheduling-design.md §8 stage 6, C.2: the offset-table monotonicity assertion.
-//   GeoJsonTileDecoderTests            — GeoJSON S2 — the decoder half: T2 (a geojson tile answers with its sole layer whatever source-layer says, and moving that accommodation out of SourceLayerResolver left the MVT answer where it was) and T4 (the sliced layer's ordinal domain — one slot per…
-//   GraphDeterminismTests              — B.6 (same file, §8 stage 6): one arm per batch constant, each reading THAT node's OWN constant — a developer restoring one tuned constant to 1<<20 must red exactly that arm, and no other.
-//   JobGraphInstrumentTests            — job-scheduling-design.md §8 stage 2, Group 0 — the probes the substrate stage is planned against, plus the delay-job instrument E2 settled on (option iii: FillMeshGraph.Schedule's existing deps parameter, not a test-only production hook).
+//   DecodedLayerGeometryTests          — the decoded layer's two store teeth: a source-layer's geometry belongs to the layer.
+//   DecodedTileOwnershipTests          — tooth B, the ownership relation: a decoded tile cannot be paired with another tile's geometry.
+//   FillSizingJobTests                 — job-scheduling-design.md: the offset-table monotonicity assertion.
+//   GeoJsonTileDecoderTests            — the GeoJSON decoder half: the source-layer answer, and the sliced layer's ordinal domain.
+//   GraphDeterminismTests              — One arm per batch constant, each reading THAT node's OWN constant — a developer restoring one tuned constant to 1<<20 must red exactly that arm, and no other.
+//   JobGraphInstrumentTests            — job-scheduling-design.md — the probes the substrate stage is planned against, plus the delay-job instrument E2 settled on (option iii: FillMeshGraph.Schedule's existing deps parameter, not a test-only production hook).
 //   LineRibbonSizingJobTests           — Claim honestly (an earlier review said the missing arm here "is the gap that would have caught" the original fill bug — it is not; fill's identical sizing-only arm did not catch fill's identical bug, see FillSizingJobTests.cs's header): Arm B is the parity…
 //   MvtCommandStream                   — Test-only helper (not a fixture): authors MVT geometry command streams so a test can hand MvtGeometryMaterializer an exact ring layout.
-//   MvtGeometryMaterializerTests       — IR stage B2: the teeth on the MVT end of Waist 1's producer seam — what the materializer puts in the buffer, and who owns the buffer afterwards.
-//   OrdinalDomainTests                 — IR C1 — tooth B's missing half: the selection/buffer relation, where B closed only the TileId/buffer one (P2 recorded finding 3).
-//   ProjectionManagedVersusBurstTests  — RED-verified by perturbing one arm alone, run and reverted by hand — never left in this file:   (i)  feed one arm Extent + 1.0 (a COARSE injection — a single-ULP TileCoords bump cannot red this probe;        see the wall plan §5(b) for the magnitude…
+//   MvtGeometryMaterializerTests       — the teeth on the MVT end of Waist 1's producer seam — what the materializer puts in the buffer, and who owns the buffer afterwards.
+//   OrdinalDomainTests                 — tooth B's missing half: the selection/buffer relation, where B closed only the TileId/buffer one.
+//   ProjectionManagedVersusBurstTests  — RED-verified by perturbing one arm alone, run and reverted by hand — never left in this file:   (i)  feed one arm Extent + 1.0 (a COARSE injection — a single-ULP TileCoords bump cannot red this probe;        see the file header for the magnitude…
 //   RingAssemblyDeferredCountTests     — The load-bearing claim: RingAssemblyJob.RingOffsets, taken as list.AsDeferredJobArray() BEFORE the list is populated, resolves to the list's EXECUTE-time length (after a preceding scheduled job populates it), not its length at the moment…
-//   RingAssemblyHoleAttributionTests   — IR B7a T0 — the property the whole byte-identity argument for earcut's hole-bridge order rests on: every hole belongs to the same source-layer feature as its polygon's outer ring.
-//   RingAssemblyKindGateTests          — IR B7a T5 — RingAssemblyJob's kind gate: a ring whose feature is not a Polygon is never classified, whatever its area.
+//   RingAssemblyHoleAttributionTests   — T0 — the property the whole byte-identity argument for earcut's hole-bridge order rests on: every hole belongs to the same source-layer feature as its polygon's outer ring.
+//   RingAssemblyKindGateTests          — T5 — RingAssemblyJob's kind gate: a ring whose feature is not a Polygon is never classified, whatever its area.
 
 using System;
 using System.Threading;
@@ -250,11 +250,11 @@ namespace MapRenderer.Tests.Jobs
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // DecodedLayerGeometryTests — IR B7a's two store teeth, rehomed to their P3 owner
+    // DecodedLayerGeometryTests — the two store teeth, rehomed to the decoded layer
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR B7a's two store teeth, REHOMED to their P3 owner. The claims are unchanged — a source-layer is
+    /// The two store teeth, rehomed to the decoded layer. The claims are unchanged — a source-layer is
     /// materialized <b>once</b> (T4c) and what a consumer reads is genuinely <b>borrowed</b>, so it can be run
     /// over twice and left intact (T2) — but their subject moved: the memo that used to live in
     /// <c>TileGeometryStore</c> is now the decoded LAYER's own field, so "the store memoizes" becomes
@@ -285,7 +285,7 @@ namespace MapRenderer.Tests.Jobs
         /// <para><c>NativeArray&lt;T&gt;</c> equality is pointer + length, so <c>AreEqual</c> on
         /// <c>Vertices</c> is an identity test rather than a content test — which is exactly what
         /// discriminates "the layer holds ONE buffer" from "the getter materializes again with identical
-        /// contents". The latter is the P3 shape of the 108-materializations-per-tile defect, and it is
+        /// contents". The latter is the current shape of the 108-materializations-per-tile defect, and it is
         /// invisible to every output test.</para>
         /// </summary>
         [Test]
@@ -461,7 +461,7 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR C1 P3, tooth <b>B</b> — the ownership relation: <b>a decoded tile cannot be paired with another
+    /// Tooth <b>B</b> — the ownership relation: <b>a decoded tile cannot be paired with another
     /// tile's geometry</b>.
     ///
     /// <para>Two clauses, both required, because they close the hazard from opposite ends. <b>B1</b> is
@@ -471,10 +471,10 @@ namespace MapRenderer.Tests.Jobs
     /// address its own decode was given, over real multi-layer fixtures at two tiles differing in z, x AND
     /// y.</para>
     ///
-    /// <para><b>Why the shape mattered.</b> Until P3 the buffer's tile came from
+    /// <para><b>Why the shape mattered.</b> The buffer's tile used to come from
     /// <c>TileGeometryStore.GetOrMaterialize(tileLayer, tile)</c> — a caller-supplied second copy, so a store
     /// could be handed one tile's layers and another tile's id with nothing in the type system able to tell.
-    /// P3 moves the id into <c>ITileDecoder.Decode(TileId, byte[])</c>, where it enters the pipeline once.</para>
+    /// The id now enters through <c>ITileDecoder.Decode(TileId, byte[])</c>, where it enters the pipeline once.</para>
     /// </summary>
     [TestFixture]
     public class DecodedTileOwnershipTests
@@ -517,7 +517,7 @@ namespace MapRenderer.Tests.Jobs
             Assert.IsEmpty(offenders,
                 "no production method may take BOTH a TileGeometryBuffers and a TileId. That parameter pair " +
                 "is the mispairing shape itself: it lets a caller hand one tile's geometry an unrelated " +
-                "tile's address. Since IR C1 P3 the address is read off the buffer (`geometry.Tile`), which " +
+                "tile's address. The address is read off the buffer (`geometry.Tile`), which " +
                 "the decoder stamped from the id the fetch already had. " +
                 $"Offenders: {string.Join(", ", offenders)}");
 
@@ -597,7 +597,7 @@ namespace MapRenderer.Tests.Jobs
         ///
         /// <para><b>Why both exist — a blind tooth found by injection.</b> The sibling runs over
         /// <c>InMemoryTileLayer</c>, the test double. RED-verifying "a <c>Geometry</c> getter that
-        /// re-materializes per read" (the P3 shape of the silent per-consumer mint) injected into
+        /// re-materializes per read" (the silent per-consumer mint) injected into
         /// <c>MvtLayer</c> left that sibling GREEN: it was pinning the double's behaviour, not production's.
         /// This clause is the production configuration — nothing else in the repo reads a real decoded
         /// layer's buffer twice and compares the allocation.</para>
@@ -770,7 +770,7 @@ namespace MapRenderer.Tests.Jobs
             }
         }
 
-        /// <summary>The finding that changed this stage's shape (job-scheduling-design.md §7 rule 2 and
+        /// <summary>The finding that changed this stage's shape (job-scheduling-design.md's rule 2 and
         /// <see cref="SizingJob"/>'s own doc, both above <see cref="SizingJob.Execute"/>):
         /// <see cref="FillGatherJob{TComparer}"/> is the third node found bounding its own loop by a column
         /// this job's early return never touches, and the only one of the three that WRITES. A sizing-only
@@ -929,17 +929,17 @@ namespace MapRenderer.Tests.Jobs
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // GeoJsonTileDecoderTests — GeoJSON S2 decoder half: source-layer answer + ordinal domain
+    // GeoJsonTileDecoderTests — the GeoJSON decoder half: source-layer answer + ordinal domain
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// GeoJSON S2 — the decoder half: <b>T2</b> (a geojson tile answers with its sole layer whatever
+    /// The GeoJSON decoder half: <b>T2</b> (a geojson tile answers with its sole layer whatever
     /// <c>source-layer</c> says, and moving that accommodation out of <c>SourceLayerResolver</c> left the MVT
     /// answer where it was) and <b>T4</b> (the sliced layer's ordinal domain — one slot per feature, and the
     /// slots ADDRESS the buffer).
     ///
     /// <para><b>Why T2 needs a hand-encoded MVT tile.</b> The resolver used to short-circuit an empty
-    /// <c>source-layer</c> to null; S2 deleted that and let each tile answer for its own format. Over any
+    /// <c>source-layer</c> to null; that short-circuit is gone and each tile answers for its own format. Over any
     /// real MVT fixture the replacement guard is INERT — <c>GetLayer("")</c> compares against layer names and
     /// no real layer is named <c>""</c>, so the arm passes with or without it. The discriminating input is a
     /// layer whose <c>name</c> field is ABSENT, which decodes to a <b>null</b> name and which a style layer
@@ -1064,7 +1064,7 @@ namespace MapRenderer.Tests.Jobs
         /// <summary>
         /// <b>T2 arm A</b> — the recorded bug, at the production seam: a spec-conformant geojson style layer
         /// omits <c>source-layer</c>, and <see cref="SourceLayerResolver.ResolveTileLayer"/> must still
-        /// resolve it. Before S2 the resolver short-circuited a null/empty <c>source-layer</c> to null, so
+        /// resolve it. The resolver used to short-circuit a null/empty <c>source-layer</c> to null, so
         /// such a layer selected zero features and rendered NOTHING, silently.
         /// </summary>
         [Test]
@@ -1458,7 +1458,7 @@ namespace MapRenderer.Tests.Jobs
             // Vacuity guard 1 — a single-worker machine would make every "parallel" pass below run on the
             // one worker Editor's own thread anyway, silently vacuous.
             Assert.Greater(JobsUtility.JobWorkerCount, 1,
-                "JobsUtility.JobWorkerCount must exceed 1 or every tooth in this stage is vacuous (A0.1 check 10)");
+                "JobsUtility.JobWorkerCount must exceed 1 or every tooth in this stage is vacuous");
 
             PassResult defaultPass = RunOnePass(projection, curved);
 
@@ -1485,7 +1485,7 @@ namespace MapRenderer.Tests.Jobs
 
             // Contention guard — sized to the machine, not to "> 1": at max(8, JobWorkerCount) batches no
             // worker contends twice, so fewer batches would make the two-pass equality below run uncontended
-            // and prove nothing. A4's corpus measurement (fill: maxTileVertices=228276, maxPolygonCount=3218)
+            // and prove nothing. The corpus measurement (fill: maxTileVertices=228276, maxPolygonCount=3218)
             // clears this by a wide margin at JobWorkerCount=14 — see the design doc's dated row.
             int minBatches = math.max(8, JobsUtility.JobWorkerCount);
             Assert.GreaterOrEqual(defaultPass.MaxPolygonCount, minBatches,
@@ -1613,7 +1613,7 @@ namespace MapRenderer.Tests.Jobs
             IProjection projection)
         {
             Assert.Greater(JobsUtility.JobWorkerCount, 1,
-                "JobsUtility.JobWorkerCount must exceed 1 or every tooth in this stage is vacuous (A0.1 check 10)");
+                "JobsUtility.JobWorkerCount must exceed 1 or every tooth in this stage is vacuous");
 
             var defaultPass = RunOneLinePass(projection);
 
@@ -1779,7 +1779,7 @@ namespace MapRenderer.Tests.Jobs
 
         /// <summary>Reconstructs <see cref="LineMeshGraph.ScheduleTyped{TProj}"/>'s gather→tile-geo→project→
         /// subdivide sub-chain far enough to read the SUBDIVIDED centerline point count — the exact quantity
-        /// the graph's SECOND <c>TileToGeoJob</c> call processes (job-scheduling-design.md §8 stage 6, B.3).
+        /// the graph's SECOND <c>TileToGeoJob</c> call processes (job-scheduling-design.md).
         /// A raw pre-subdivision count would be a valid but weaker lower bound (subdivision only inserts
         /// points); this measures the real quantity instead of a proxy for it.
         ///
@@ -1915,10 +1915,10 @@ namespace MapRenderer.Tests.Jobs
         }
 
         // ── The zero-worker-count finding, kept as a PASSING test — job-scheduling-design.md's original
-        // assumption for E2's instrument. Originally written expecting IsCompleted == false (a RED,
+        // assumption for the delay instrument. Originally written expecting IsCompleted == false (a RED,
         // correctly reporting a false premise); renamed and inverted to assert what is actually true, so the
         // gate is green and the knowledge survives (docs/lessons-learned.md doesn't have a slot for "a probe
-        // that disproves its own premise" — this is that slot). E2's instrument is the deps-parameter delay
+        // that disproves its own premise" — this is that slot). The instrument is the deps-parameter delay
         // job below, not this knob — this test exists only to record why that knob was rejected. ──────────
         //
         // Complete() and Dispose() run UNCONDITIONALLY, before any assertion that could throw — an
@@ -1950,7 +1950,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         // ── The MeshData-view probe — decides FillStreamWriteJob's field set: a SCHEDULED job over a
-        // MeshData-derived view (job-scheduling-design.md §9 measurement 5). ─────────────────────────────
+        // MeshData-derived view (job-scheduling-design.md). ─────────────────────────────
 
         [BurstCompile(CompileSynchronously = true)]
         private struct FillPositionsJob : IJob
@@ -1988,7 +1988,7 @@ namespace MapRenderer.Tests.Jobs
                 Assert.AreEqual(new Vector3(i, i, i), verts[i], $"vertex {i}");
         }
 
-        // ── The deps-seam delay instrument — job-scheduling-design.md E2, option (iii). ──────────────────────
+        // ── The deps-seam delay instrument — job-scheduling-design.md. ───────────────────────────────────────
         //
         // FillMeshGraph.Schedule already takes `JobHandle deps = default` and threads it into its first node
         // (a production parameter, not test surface — every node in the design takes `deps`). A test can
@@ -1996,7 +1996,7 @@ namespace MapRenderer.Tests.Jobs
         // genuinely incomplete. Calibrated here under the DEFAULT worker count — the finding above is why
         // JobWorkerCount is never touched for this instrument.
         //
-        // Two failure modes this calibration exists to catch (both already bit this stage once, per E2's
+        // Two failure modes this calibration exists to catch (both already bit this suite once, per the design doc’s
         // brief): a spin that Burst folds to a closed form (silently-instant "delay" — teeth would pass while
         // proving nothing), and a loop-invariant hoist of the gate read (spins forever, or never spins at
         // all, depending on what gets hoisted). SpinUntilGateJob and WaitForStart now live in
@@ -2258,8 +2258,8 @@ namespace MapRenderer.Tests.Jobs
     /// Authors MVT geometry command streams (spec §4.3: <c>command = id &amp; 0x7</c>,
     /// <c>count = id &gt;&gt; 3</c>; MoveTo=1, LineTo=2, ClosePath=7; parameters are zigzag deltas against a
     /// running cursor) so a test can hand <see cref="MvtGeometryMaterializer"/> an exact ring layout.
-    /// The encoding is the one <c>MvtDecodeJob</c> decodes; production hand-authored no such stream after
-    /// IR B5 retired the background quad's (see <c>FullExtentRingCommandStream</c>, its frozen record).
+    /// The encoding is the one <c>MvtDecodeJob</c> decodes; production hand-authors no such stream now
+    /// that the background quad's is retired (see <c>FullExtentRingCommandStream</c>, its frozen record).
     /// </summary>
     internal static class MvtCommandStream
     {
@@ -2321,14 +2321,14 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR stage B2: the teeth on the MVT end of Waist 1's producer seam — what the materializer puts in the
+    /// The teeth on the MVT end of Waist 1's producer seam — what the materializer puts in the
     /// buffer, and who owns the buffer afterwards.
     ///
     /// <para><c>RingCapacity</c> is exercised here rather than beside the other
     /// <c>TileGeometryBuffers</c> cases because it exists for this seam: once the sizing pre-pass moved into
     /// the materializer, the capacity a fill mesher's own sizing stage needs (<c>SizingJob</c>, on the
-    /// graph now — job-scheduling-design.md §8 stage 4 Group B retired the synchronous
-    /// <c>FillMeshPipeline.Schedule</c> that used to size it) has to come back off the buffer.</para>
+    /// graph now; there is no synchronous <c>FillMeshPipeline.Schedule</c> sizing it) has to come back
+    /// off the buffer.</para>
     /// </summary>
     [TestFixture]
     public class MvtGeometryMaterializerTests
@@ -2440,7 +2440,7 @@ namespace MapRenderer.Tests.Jobs
 
         /// <summary>
         /// T4b — <c>RingCapacity</c> is the producer's sized upper bound, never the decoded count.
-        /// <c>Schedule</c> sizes Stage 2's per-polygon arrays from it, so a value that tracked
+        /// <c>Schedule</c> sizes the per-polygon arrays from it, so a value that tracked
         /// <c>RingCount</c> would under-allocate the moment the two differ.
         /// </summary>
         [Test]
@@ -2484,10 +2484,10 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// B5 T6 — the kind column is filled from <b>each feature's own declared kind</b>, never a literal.
-        /// This is the surviving half of the retired parallel-list desync guard (B3 T9): with one feature
+        /// T6 — the kind column is filled from <b>each feature's own declared kind</b>, never a literal.
+        /// This is the surviving half of the retired parallel-list desync guard (T9): with one feature
         /// list instead of two positionally-joined columns there is nothing left to desync, so that guard is
-        /// retired <b>by construction</b> rather than weakened. What still needs an observer is landmine #1 —
+        /// retired <b>by construction</b> rather than weakened. What still needs an observer is the remaining landmine —
         /// a materializer that wrote a constant <c>Polygon</c> would make every consumer's ring gate
         /// inert, and every downstream stage would keep passing.
         /// </summary>
@@ -2518,7 +2518,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// B5 T7 — the MVT materializer reads bytes off <see cref="IMvtGeometryCarrier"/>, MVT's own
+        /// T7 — the MVT materializer reads bytes off <see cref="IMvtGeometryCarrier"/>, MVT's own
         /// contract, not off the neutral feature interface. A feature that is an <see cref="IFeature"/>
         /// but not a carrier is a <b>wiring error</b> — some other format's feature routed to the MVT
         /// producer — and must fail loudly, naming the index, rather than materialize as an empty layer that
@@ -2534,14 +2534,10 @@ namespace MapRenderer.Tests.Jobs
         {
             uint[] stream = MvtCommandStream.Feature(MvtCommandStream.Ring(10, 10, 20, 10, 20, 20));
 
-            // IR C1 P3 — RESTATED. This clause used to assert that a feature the MVT materializer could not
-            // downcast to IMvtGeometryCarrier threw, naming its index and type. That hazard no longer exists
-            // as a shape: geometry does not travel on features at all, so there is nothing to downcast and no
-            // non-carrier to reject — a non-MVT source has its OWN layer with its own buffer. What survives
-            // is the hazard the two-list input introduces in its place: the kind column and the command
-            // column are joined by POSITION, so a length mismatch would mis-classify every ring. It must
-            // throw BEFORE Allocate (the same standard PathGeometryMaterializer is held to), or four
-            // Allocator.Persistent arrays are stranded with no caller able to free them.
+            // The two-list input's hazard: the kind column and the command column are joined by POSITION, so a
+            // length mismatch would mis-classify every ring. It must throw BEFORE Allocate (the same standard
+            // PathGeometryMaterializer is held to), or four Allocator.Persistent arrays are stranded with no
+            // caller able to free them.
             using (var flat = MvtGeometryMaterializerTestFactory.Flatten(new List<uint[]> { stream, stream })) // 2 command streams
             {
                 var ex = Assert.Throws<ArgumentException>(
@@ -2573,7 +2569,7 @@ namespace MapRenderer.Tests.Jobs
 
         // ── Fixture helpers ────────────────────────────────────────────────────────────────────────
 
-        /// <summary>IR C1 P3: the materializer takes (tile, extent, kinds, commands) rather than a feature
+        /// <summary>The materializer takes (tile, extent, kinds, commands) rather than a feature
         /// list — the sidecar interface it used to downcast through is gone. This adapter keeps the fixtures
         /// authored as features, which is still the readable shape, and splits the two columns here.
         /// 2a: flattens the split columns via <see cref="MvtGeometryMaterializerTestFactory"/> and
@@ -2618,8 +2614,8 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR C1 — tooth <b>B</b>'s missing half: the <b>selection</b>/buffer relation, where B closed only the
-    /// <b>TileId</b>/buffer one (P2 recorded finding 3).
+    /// Tooth <b>B</b>'s missing half: the <b>selection</b>/buffer relation, where B closed only the
+    /// <b>TileId</b>/buffer one.
     ///
     /// <para><b>The hazard as recorded.</b> Three consumers size a per-feature array and index it by
     /// <see cref="SelectedTileFeature.Ordinal"/> — fill and line by <c>geometry.FeatureCount</c>, symbol by
@@ -2668,7 +2664,7 @@ namespace MapRenderer.Tests.Jobs
         /// — real decoder, real <see cref="MvtGeometryMaterializer"/>, real <see cref="MvtLayer"/>, real
         /// <see cref="FeatureSelector"/>. Neither ring-less shape appears in any committed fixture, which is
         /// not an accident of the corpus but the reason this clause has to hand-encode its own input: RED row
-        /// R2 compacted every ring-less feature out of the decoder and clause B, over two real multi-layer
+        /// Every ring-less feature is compacted out of the decoder and clause B, over two real multi-layer
         /// tiles, stayed GREEN.</para>
         ///
         /// <para><b>Catches</b> any future "skip the features with nothing to draw" compaction in the decoder
@@ -2916,9 +2912,9 @@ namespace MapRenderer.Tests.Jobs
         // ── Test doubles ──────────────────────────────────────────────────────────────────────────────
 
         /// <summary>Captures what the processor actually handed <c>BuildGraphRequest</c> — the selection and
-        /// the buffer, the two things clause C exists to compare — and builds no request (§3.5-analogous:
+        /// the buffer, the two things clause C exists to compare — and builds no request —
         /// <c>selected</c>/<c>geometry</c> are BuildGraphRequest parameters too, so recording them needs no
-        /// new production observability).</summary>
+        /// new production observability.</summary>
         private sealed class RecordingTileMeshRenderLayer : ITileMeshRenderLayer
         {
             public int                       BuildGraphRequestCallCount { get; private set; }
@@ -3018,7 +3014,7 @@ namespace MapRenderer.Tests.Jobs
 
                 for (int i = 0; i < n; i++)
                 {
-                    // Longitude is LINEAR in the inputs (a single scale + offset) — bit-exact, E5's table.
+                    // Longitude is LINEAR in the inputs (a single scale + offset) — bit-exact, per the design doc's table.
                     AssertBitEqualDouble(managedGeo[i].Longitude, burstGeo[i].Longitude, fixture, proj, i, "Longitude");
                     // Latitude is downstream of atan/sinh — bounded at its measured worst case.
                     AssertUlpBound(managedGeo[i].Latitude, burstGeo[i].Latitude, LatitudeMaxUlp, fixture, proj, i, "Latitude");
@@ -3034,7 +3030,7 @@ namespace MapRenderer.Tests.Jobs
         // ── (ii) IProjection.ProjectPoint vs ProjectPointsJob<TProj>. Compared as double3, NO float3 cast — ─
         // ── a managed↔Burst difference below a float ulp would otherwise compare equal and this probe would ─
         // ── report green while measuring nothing. This is the ONE sanctioned .Schedule in the wall stage: ──
-        // ── this [Test] body runs on the main thread (where scheduling is legal), and A0 runs before A1.0 ──
+        // ── this [Test] body runs on the main thread, where scheduling is legal ────────────────────────────
         // ── reinstates the off-main .Run() entry point this probe's own subject does not need yet. ────────
         [TestCase("boundary-6-34-21.pbf.bytes",   6,  34,  21)]
         [TestCase("boundary-9-274-168.pbf.bytes", 9, 274, 168)]
@@ -3084,7 +3080,7 @@ namespace MapRenderer.Tests.Jobs
 
             ProjectionDispatch.Schedule(proj, origin, points, world, normals, default).Complete();
 
-            // E5's bound is per-projection AND per-component — WebMercator's World.x/y and every Up
+            // The bound is per-projection AND per-component — WebMercator's World.x/y and every Up
             // component are linear (bit-exact); everything else is downstream of sin/cos or sinh/atan.
             bool mercator = proj is WebMercatorProjection;
             ulong worldXMaxUlp = mercator ? 0UL : SphericalWorldXMaxUlp;
@@ -3105,7 +3101,7 @@ namespace MapRenderer.Tests.Jobs
             }
         }
 
-        // ── E5's measured bounds (job-scheduling-design.md §8 stage 5's invariant block) — worst case across ─
+        // ── The measured bounds (job-scheduling-design.md) — worst case across ───────────────────────────────
         // ── both boundary fixtures, both projections, measured 2026-09-04 against these two exact jobs. ─────
         private const ulong LatitudeMaxUlp           = 3;
         private const ulong WebMercatorWorldZMaxUlp  = 4;
@@ -3123,7 +3119,7 @@ namespace MapRenderer.Tests.Jobs
         {
             ulong m = math.asulong(managed), b = math.asulong(burst);
             Assert.AreEqual(m, b,
-                $"{label}[{index}] diverges (expected bit-exact, E5's table) — {fixture} ({proj.GetType().Name}): " +
+                $"{label}[{index}] diverges (expected bit-exact, per the design doc's table) — {fixture} ({proj.GetType().Name}): " +
                 $"managed=0x{m:X16} ({managed:R}) burst=0x{b:X16} ({burst:R})");
         }
 
@@ -3149,8 +3145,8 @@ namespace MapRenderer.Tests.Jobs
         {
             ulong delta = UlpDistance(managed, burst);
             Assert.LessOrEqual(delta, maxUlp,
-                $"{label}[{index}] exceeds its measured {maxUlp}-ULP bound (E5, job-scheduling-design.md §8 " +
-                $"stage 5) — {fixture} ({proj.GetType().Name}): managed=0x{math.asulong(managed):X16} " +
+                $"{label}[{index}] exceeds its measured {maxUlp}-ULP bound (job-scheduling-design.md's measured " +
+                $"bounds) — {fixture} ({proj.GetType().Name}): managed=0x{math.asulong(managed):X16} " +
                 $"({managed:R}) burst=0x{math.asulong(burst):X16} ({burst:R}) delta={delta} ULP");
         }
     }
@@ -3234,14 +3230,13 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR B7a T0 — the property the whole byte-identity argument for earcut's <b>hole-bridge order</b> rests
+    /// T0 — the property the whole byte-identity argument for earcut's <b>hole-bridge order</b> rests
     /// on: <b>every hole belongs to the same source-layer feature as its polygon's outer ring</b>.
     ///
-    /// <para><b>Why it matters.</b> B7 replaces "the materializer receives exactly this layer's features" with
+    /// <para><b>Why it matters.</b> The shared buffer replaces "the materializer receives exactly this layer's features" with
     /// "the buffer is shared and each consumer walks a ring <i>visit order</i>". Fill's visit order groups by
     /// feature and keeps decode order <i>within</i> a feature. The hole sort — <c>FillMeshPipeline.HoleRingComparer</c>,
-    /// run from <c>FillGatherJob</c> on the graph (job-scheduling-design.md §8 stage 4 Group B retired the
-    /// synchronous <c>FillMeshPipeline.Schedule</c> that used to run it directly) — tiebreaks on <b>ring
+    /// run from <c>FillGatherJob</c> on the graph — tiebreaks on <b>ring
     /// index</b>, so bridge order is preserved iff the
     /// holes being compared are always rings whose relative order the derive did not disturb — which is true
     /// exactly when a polygon's holes share its outer ring's feature.</para>
@@ -3253,7 +3248,7 @@ namespace MapRenderer.Tests.Jobs
     /// be attached to an outer of its own feature.</para>
     ///
     /// <para>This test is the <b>positive</b> check of that argument, run over real data rather than argued.
-    /// It was run at baseline before B7a's first edit; it is kept because the property is cheap to state and
+    /// It was run at baseline; it is kept because the property is cheap to state and
     /// expensive to rediscover.</para>
     /// </summary>
     [TestFixture]
@@ -3281,10 +3276,10 @@ namespace MapRenderer.Tests.Jobs
                     ITileLayer layer = tile.GetLayer(layerName);
                     if (layer == null) continue;
 
-                    // Exactly the feature set fill hands the materializer today, and exactly the set B7a's
+                    // Exactly the feature set fill hands the materializer today, and exactly the set the shared buffer’s
                     // ring visit order will name: the layer's Polygon features, in layer order.
-                    // IR C1 P3: the LAYER's own buffer — the whole layer, exactly what every consumer
-                    // borrows. (Pre-P3 this re-materialized the polygon subset; the ring→feature attribution
+                    // The LAYER's own buffer — the whole layer, exactly what every consumer
+                    // borrows. (This used to re-materialize the polygon subset; the ring→feature attribution
                     // this tooth measures is per-feature and unaffected by the wider feature set, and the
                     // kind column keeps the non-polygon features out of the ring assembly.)
                     bool anyPolygon = false;
@@ -3304,7 +3299,7 @@ namespace MapRenderer.Tests.Jobs
                     }
                     finally
                     {
-                        // BORROWED from the decoded layer (IR C1 P3) — the `using` on the tile frees it.
+                        // BORROWED from the decoded layer — the `using` on the tile frees it.
                     }
                 }
             }
@@ -3321,7 +3316,7 @@ namespace MapRenderer.Tests.Jobs
                 "fixture rather than deleting the clause.");
             Assert.Greater(totalHoles, 0, "anti-vacuity: zero holes were classified");
 
-            Debug.Log($"[B7a T0] corpus: {layersExamined} layers, {totalPolygons} polygons, " +
+            Debug.Log($"[T0] corpus: {layersExamined} layers, {totalPolygons} polygons, " +
                       $"{totalPolygonsWithHoles} with holes, {totalHoles} holes — all holes shared their " +
                       "outer's feature.");
         }
@@ -3373,7 +3368,7 @@ namespace MapRenderer.Tests.Jobs
                             $"{where}: polygon {pi} (outer ring {polyOuterIdx[pi]}, feature {outerFeature}) " +
                             $"was given hole ring {holeRi}, which belongs to feature " +
                             $"{geometry.RingFeatureIdx[holeRi]}. Cross-feature hole attribution breaks the " +
-                            "hole-bridge-order half of IR B7's byte-identity argument: the hole sort " +
+                            "hole-bridge-order half of the byte-identity argument: the hole sort " +
                             "tiebreaks on ring index, which is only order-preserving within one feature.");
                     }
                 }
@@ -3415,13 +3410,13 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// IR B7a T5 — <see cref="RingAssemblyJob"/>'s <b>kind gate</b>: a ring whose feature is not a Polygon is
+    /// T5 — <see cref="RingAssemblyJob"/>'s <b>kind gate</b>: a ring whose feature is not a Polygon is
     /// never classified, whatever its area.
     ///
     /// <para><b>Why the job needs its own gate.</b> The assembler classifies purely by signed area, and a
     /// LineString ring is the same shape of data as a polygon ring — so an ungated job reads a road as a
     /// spurious exterior (or, worse, as a hole of the polygon before it) and corrupts the triangulation
-    /// silently. Until B7 the only guard was the caller choosing what to hand the materializer. Since the
+    /// silently. The only guard used to be the caller choosing what to hand the materializer. Since the
     /// geometry buffer is shared across consumers, that caller-side filter now decides which ring INDICES go
     /// into an int array — bookkeeping-shaped code in a loop whose obvious purpose is "compute a draw order",
     /// and therefore much easier to lose than a filter that reads "select my features". Two independent
@@ -3434,7 +3429,7 @@ namespace MapRenderer.Tests.Jobs
         /// The gate, with its <b>anti-vacuity twin in the same test</b>: the SAME 4-vertex ring with a large
         /// signed area assembles to <b>1</b> polygon when its feature is a Polygon and <b>0</b> when it is a
         /// LineString. Without the positive arm this could not tell "the gate works" from "this fixture never
-        /// produces a polygon at all" — the inert-injection shape this epic has already produced once.
+        /// produces a polygon at all" — the inert-injection shape this suite has produced once.
         /// </summary>
         [Test]
         public void KindGate_ALineStringRingIsNeverClassified_ButTheSameRingAsAPolygonIs()

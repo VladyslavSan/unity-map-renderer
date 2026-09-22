@@ -1,6 +1,6 @@
 // Engine-free: no UnityEngine dependency.
 // Construction convention: object initializer with named members.
-// BLITTABLE: this struct crosses into the S19/S20 Burst jobs as a NativeArray<GlyphAtlasEntry> element
+// BLITTABLE: this struct crosses into the Burst jobs as a NativeArray<GlyphAtlasEntry> element
 // at the MapRenderer.Jobs boundary (the same Core-defines-the-struct/Jobs-creates-the-NativeArray
 // pattern LineRibbonVertex/GeoCoordinate already use) — keep it to blittable fields only: no byte[],
 // no string, no reference types.
@@ -10,10 +10,9 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// One packed glyph's location + metrics inside a <see cref="GlyphAtlas"/>. Deliberately does NOT
-    /// bake a UV rect — Core stays float/precision-free; S19 computes
-    /// <c>uv = AtlasOrigin / atlasSize</c> (dividing by the <see cref="GlyphAtlas.Size"/> the atlas
-    /// exposes) at the point it actually needs UVs.
+    /// One packed glyph's location + metrics inside a <see cref="GlyphAtlas"/>. Does NOT bake a UV rect —
+    /// Core stays float/precision-free. The quad builder computes <c>uv = AtlasOrigin / atlasSize</c>
+    /// (dividing by the <see cref="GlyphAtlas.Size"/> the atlas exposes) at the point it needs UVs.
     /// </summary>
     public readonly struct GlyphAtlasEntry
     {
@@ -39,7 +38,7 @@ namespace MapRenderer.Core.Text
         public int Advance { get; init; }
 
         /// <summary>
-        /// Stage M: which <see cref="GlyphAtlas"/> page (Texture2DArray layer) this glyph was packed
+        /// Which <see cref="GlyphAtlas"/> page (Texture2DArray layer) this glyph was packed
         /// into. 0 for every glyph until the atlas overflows a page's fixed capacity (single-page
         /// behaviour is byte-identical — every entry stays <c>Page == 0</c>).
         /// </summary>

@@ -3,20 +3,17 @@ using NUnit.Framework;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// Root of the test fixture hierarchy: a per-test <c>[SetUp]</c>/<c>[TearDown]</c> pair delegating
-    /// to overridable <see cref="OnSetUp"/>/<see cref="OnTearDown"/> hooks, plus a per-test
-    /// <see cref="ObjectDisposalBag"/> every fixture gets for free — <see cref="Track{T}"/> replaces the
-    /// hand-written <c>using var bag = new ObjectDisposalBag();</c> ceremony most test methods used to
-    /// carry. Protected because a PRIVATE attributed method on an abstract base is never invoked by
-    /// NUnit (measured, both standalone NUnit 3.14 and Unity's vendored NUnit 3.5.0.0); non-virtual so a
-    /// subclass cannot shadow or skip it. Engine-agnostic: this file compiles for EditMode AND PlayMode,
-    /// so it must never reference <c>UnityEditor</c>.
+    /// Root of the test fixture hierarchy: a per-test <c>[SetUp]</c>/<c>[TearDown]</c> pair that calls the
+    /// overridable <see cref="OnSetUp"/>/<see cref="OnTearDown"/> hooks, plus a per-test
+    /// <see cref="ObjectDisposalBag"/> every fixture reaches through <see cref="Track{T}"/>. The hooks are
+    /// protected because NUnit never invokes a PRIVATE attributed method on an abstract base (measured on
+    /// standalone NUnit 3.14 and Unity's vendored 3.5.0.0), and non-virtual so a subclass cannot shadow or
+    /// skip them. This file compiles for EditMode AND PlayMode, so it must never reference
+    /// <c>UnityEditor</c>.
     ///
-    /// <para>The bag destroys <see cref="OnTearDown"/> AFTER it runs, not before — a behaviour change
-    /// from the per-method bag this replaces, which destroyed at end-of-method, before <c>[TearDown]</c>.
-    /// A test that needs a second, narrower-scoped lifetime (two builds that must never coexist) still
-    /// declares its own <c>ObjectDisposalBag</c> in its own brace block; this one is only the default.
-    /// </para>
+    /// <para>The bag destroys its objects AFTER <see cref="OnTearDown"/> runs. A test that needs a
+    /// narrower lifetime (two builds that must never coexist) declares its own <c>ObjectDisposalBag</c> in
+    /// its own brace block.</para>
     /// </summary>
     public abstract class BaseTestFixture
     {

@@ -1,8 +1,7 @@
-// UMR-151 T6/T7: the real-SetStyle drive scaffold, lifted from PreparedCacheTests (Tiles/) so a second
-// fixture can drive a settled cover through MapView.SetStyle without pasting it. EditMode-only by
-// construction: Object.Destroy is immediate here, so CountMeshObjects and every fake-null read below are
-// honest; PlayMode defers destruction to end-of-frame and breaks both. The same holds for every fixture
-// that drives through this scaffold.
+// The real-SetStyle drive scaffold: a fixture drives a settled cover through MapView.SetStyle
+// without pasting it. EditMode-only by construction: Object.Destroy is immediate here, so
+// CountMeshObjects and every fake-null read below are honest; PlayMode defers destruction to
+// end-of-frame and breaks both. The same holds for every fixture that drives through this scaffold.
 
 using Cysharp.Threading.Tasks;
 using UnityEngine;

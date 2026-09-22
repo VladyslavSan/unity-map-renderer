@@ -128,11 +128,11 @@ namespace MapRenderer.Tests
             return sb.ToString();
         }
 
-        // ── General-direction extensions (Stage T) — add-only, no existing member's behaviour changes ────
+        // ── General-direction extensions ─────────────────────────────────────────────────────────────────
         //
-        // Everything above this line is column-cut (axis-aligned) and untouched: DevicePixelRatioSnapshotTests
-        // and LineProbeSymmetrySnapshotTests depend on its exact behaviour. Below is a general-direction cut
-        // for fixtures under tilt, where the silhouette a tooth wants to measure is not vertical on screen.
+        // Everything above this line is a column cut (axis-aligned), and DevicePixelRatioSnapshotTests and
+        // LineProbeSymmetrySnapshotTests depend on its exact behaviour. Below is a general-direction cut for
+        // fixtures under tilt, where the silhouette a tooth measures is not vertical on screen.
 
         /// <summary>Bilinear sample in SCREEN coordinates (not a pixel index). Pixel index j's centre is at
         /// screen coordinate j + 0.5 (<see cref="GroundRowSolver"/> is the authority on this half-pixel, and

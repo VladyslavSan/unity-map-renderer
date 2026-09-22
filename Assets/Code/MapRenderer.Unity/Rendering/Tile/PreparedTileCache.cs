@@ -8,7 +8,7 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Rendering.Tile
 {
     /// <summary>
-    /// S82: the composite key for a prepared (built) tile-layer <see cref="Mesh"/> — a style token, the tile
+    /// The composite key for a prepared (built) tile-layer <see cref="Mesh"/> — a style token, the tile
     /// address, and the global material index (layerId) of the render layer the mesh belongs to. Value-type +
     /// <see cref="IEquatable{T}"/> so a <see cref="Dictionary{TKey,TValue}"/> keyed by it is zero-boxing
     /// (mirrors <c>TileManager.LoadedKey</c>).
@@ -43,7 +43,7 @@ namespace MapRenderer.Unity.Rendering.Tile
     }
 
     /// <summary>
-    /// S82: a byte-budgeted LRU cache of prepared (built) per-tile-layer <see cref="Mesh"/> objects, keyed by
+    /// A byte-budgeted LRU cache of prepared (built) per-tile-layer <see cref="Mesh"/> objects, keyed by
     /// <see cref="PreparedKey"/> — a structural clone of <see cref="MapRenderer.Core.Data.TileCache"/>
     /// (Dictionary + intrusive <see cref="LinkedList{T}"/> + single lock), specialised for byte-budget
     /// eviction and <see cref="Mesh"/> ownership/destruction instead of count-bounded raw-byte storage.
@@ -82,18 +82,15 @@ namespace MapRenderer.Unity.Rendering.Tile
         private readonly object _lock = new object();
         private long _bytesHeld;
 
-        // S82: a pre-warmed pool of LinkedListNode<Entry> instances — Put/TryTake/eviction reuse a detached
+        // A pre-warmed pool of LinkedListNode<Entry> instances — Put/TryTake/eviction reuse a detached
         // node instead of `new LinkedListNode<Entry>(...)`, so a Tick that evicts a Built tile into this
         // cache (a REAL scenario — a heading/tilt change rotates the viewport quad and can churn which
         // tiles cover a whole-world zoom level even at a constant tile COUNT) stays allocation-free,
         // preserving the pre-existing zero-alloc Tick contract
         // (MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory — specifically its
         // heading/tilt sub-case, which exercises exactly this ReleaseTile -> TransferBuiltMeshesToCache ->
-        // Put path) that S82 must not regress. VERIFIED empirically (not merely asserted): with this pool
-        // removed, that test fails deterministically (a `new LinkedListNode<Entry>` allocation on the
-        // cover-churn Put) — 3/3 runs, including full isolation (a single Editor launch running only this
-        // one test method). This is the "prove it" evidence the S82 review comment asked for; see the
-        // developer report for the removal-vs-pass A/B.
+        // Put path). Verified empirically: with this pool removed, that test fails deterministically on a
+        // `new LinkedListNode<Entry>` allocation in the cover-churn Put.
         //
         // Pre-filled once at construction to <c>min(countCap, MaxPrewarmedNodes)</c> — the cache can never
         // hold more than countCap entries simultaneously, so that many nodes cover every Put without a
@@ -108,7 +105,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         internal int Hits;
         internal int Misses;
 
-        /// <summary>S82: cumulative count of LRU-evicted entries (bumped internally, once per entry evicted
+        /// <summary>Cumulative count of LRU-evicted entries (bumped internally, once per entry evicted
         /// out of <see cref="Put"/>'s while-loop — never by the caller). Telemetry only, never read from the
         /// live tile loop's own decisions.</summary>
         internal int Evictions;
@@ -119,12 +116,12 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Current entry count (produced meshes AND empty-layer markers).</summary>
         internal int Count { get { lock (_lock) return _map.Count; } }
 
-        /// <summary>S82: the effective byte budget this cache evicts against (the constructor clamps a
+        /// <summary>The effective byte budget this cache evicts against (the constructor clamps a
         /// non-positive <c>byteBudget</c> argument up to <see cref="long.MaxValue"/> — "unbounded" — so this
         /// is the LIVE applied value, not necessarily the raw configured one).</summary>
         internal long ByteBudget => _byteBudget;
 
-        /// <summary>S82: the effective entry-count cap this cache evicts against (see <see cref="ByteBudget"/>
+        /// <summary>The effective entry-count cap this cache evicts against (see <see cref="ByteBudget"/>
         /// — a non-positive <c>countCap</c> argument clamps up to <see cref="int.MaxValue"/>).</summary>
         internal int MaxCount => _countCap;
 

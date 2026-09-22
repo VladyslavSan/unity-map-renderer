@@ -18,9 +18,8 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// Fill <see cref="ITileMeshRenderLayer"/>: a MapLibre <c>fill</c> layer as a runtime render object.
-    /// Wraps the managed <see cref="Meshing.StyledFillTileBuilder"/> (unchanged) — this is pure indirection
-    /// over the existing mesh-building code, so it is behaviour-preserving.
-    /// Axes (design §"Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
+    /// Wraps <see cref="Meshing.StyledFillTileBuilder"/>.
+    /// Axes (design "Axis pinning"): <see cref="RenderLayerBuild.TileMesh"/> / <see cref="DrawPersistence.Persistent"/>.
     /// </summary>
     internal sealed class FillRenderLayer : ITileMeshRenderLayer, ISpriteConsumerRenderLayer, IFadeableRenderLayer
     {
@@ -30,9 +29,7 @@ namespace MapRenderer.Unity.Rendering.Style
         internal static class ProfilerMarkerNames
         {
             // Nested under MapRenderer.View.ApplyZoom — the fill applier loop (expression eval → SetFloat/
-            // SetColor), scales with fill-layer count. Preserved verbatim from the retired StyledLayerSet so
-            // the S46 greppable-marker set is intact; it now fires once per fill layer (was once around the
-            // whole fill loop).
+            // SetColor), scales with fill-layer count. Fires once per fill layer.
             internal const string ApplyZoomFills = "MapRenderer.View.ApplyZoom.Fills";
         }
 
@@ -211,8 +208,8 @@ namespace MapRenderer.Unity.Rendering.Style
             PushPatternScale();
         }
 
-        // job-scheduling-design.md §8 stage 5 Group B: the graph is the only mesher — rents the build the
-        // graph's write step consumes; FillMeshGraph does the mesh write.
+        // The graph is the only mesher — rents the build the graph's write step consumes; FillMeshGraph
+        // does the mesh write.
         public Meshing.ILayerMeshBuild BuildGraphRequest(
             IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
             in TileLayerProcessContext context, int materialIndex, string payloadName)
@@ -220,9 +217,8 @@ namespace MapRenderer.Unity.Rendering.Style
             FillMeshPipeline.LayerInput input = Meshing.StyledFillTileBuilder.BuildLayerInput(
                 selected, geometry, _paint, context.Zoom, context.TileOriginRender, out var colors,
                 context.Projection, _layout, context.BufferClip, context.Buffers);
-            // The relocated emptiness gate (job-scheduling-design.md §3.2's HasWork, moved here) — precondition
-            // 8's own contract is what makes the null path leak nothing: every BuildLayerInput empty path
-            // returns `default` with every `out` column left `default`, so there is nothing to dispose here.
+            // The emptiness gate. Every BuildLayerInput empty path returns `default` with every `out`
+            // column left `default`, so the null path has nothing to dispose.
             if (!input.RingVisitOrder.IsCreated) return null;
             return Meshing.FillLayerBuild.Rent(input, colors, materialIndex, payloadName);
         }

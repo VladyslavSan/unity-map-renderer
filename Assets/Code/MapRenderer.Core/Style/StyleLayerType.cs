@@ -3,8 +3,8 @@ namespace MapRenderer.Core.Style
     /// <summary>
     /// The 10 MapLibre layer types (Style Spec, <c>layers[].type</c>) plus <see cref="Unknown"/> for
     /// forward-compat: an unrecognized <c>type</c> string parses to <see cref="Unknown"/> rather than
-    /// throwing. Each later layer stage (S13 fill, S14 line, S15 circle, S16 background, …) owns the
-    /// typed paint/layout parsing for its type; S08 only recognizes and dispatches on this enum.
+    /// throwing. Each layer type owns the typed paint/layout parsing for itself; this enum only
+    /// recognizes and dispatches.
     /// </summary>
     public enum StyleLayerType
     {

@@ -7,10 +7,10 @@ namespace MapRenderer.Unity.Rendering.Style
     /// The one predicate every symbol COLOUR carrier reads — <c>text-color</c> and <c>text-halo-color</c>
     /// alike: <c>Constant</c> rides the <c>_TextColor</c>/<c>_HaloColor</c> uniform
     /// (<see cref="SymbolRenderLayer.BindColorTint"/>); every other kind bakes into the vertex COLOR stream
-    /// (<c>SymbolFeatureExtractor.EvaluatePaint</c>). Not <c>!DependsOnFeature</c> (stage 1's fill-color guard)
-    /// — a Zoom-kind value stays on the vertex-bake carrier by the decision recorded in
-    /// SSOT §6; the restyle survivor gate reads this same predicate (<see cref="SurvivingLayerGate"/>), so
-    /// widening it here would silently free a key the in-place path cannot re-bake.
+    /// (<c>SymbolFeatureExtractor.EvaluatePaint</c>). Not <c>!DependsOnFeature</c> (the fill-color guard) —
+    /// a Zoom-kind value stays on the vertex-bake carrier by decision. The restyle survivor gate reads this
+    /// same predicate (<see cref="SurvivingLayerGate"/>), so widening it here would free a key the in-place path
+    /// cannot re-bake.
     /// </summary>
     internal static class SymbolTextColorCarrier
     {

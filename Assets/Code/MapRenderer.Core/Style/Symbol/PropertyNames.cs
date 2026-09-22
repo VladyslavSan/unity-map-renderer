@@ -5,8 +5,8 @@ namespace MapRenderer.Core.Style.Symbol
     /// layout AND paint. Every other class in <c>Style.Symbol</c> references these constants; no
     /// <c>"text-…"</c>/<c>"icon-…"</c>/<c>"symbol-…"</c> string literal lives anywhere else (enforced by a
     /// test, mirroring <c>Style.Line</c>). Clean-room: keys from the public MapLibre Style Spec §symbol
-    /// layer. The point <c>icon-*</c> layout/paint keys (§5.1 IN) are included; <c>icon-color</c> and the
-    /// <c>icon-halo-*</c> trio are deferred to the SDF epic.
+    /// layer. The point <c>icon-*</c> layout/paint keys are included; <c>icon-color</c> and the
+    /// <c>icon-halo-*</c> trio are not modelled yet.
     /// </summary>
     public static class PropertyNames
     {
@@ -55,7 +55,7 @@ namespace MapRenderer.Core.Style.Symbol
         public const string TextTranslateAnchor = "text-translate-anchor";
         public const string IconOpacity        = "icon-opacity";
 
-        // ── symbol-placement values (S20 is point-only; the others render unlabeled until a follow-up) ──
+        // ── symbol-placement values ──
         public const string PlacementPoint      = "point";
         public const string PlacementLine       = "line";
         public const string PlacementLineCenter = "line-center";

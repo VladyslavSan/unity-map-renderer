@@ -1,23 +1,22 @@
 // Engine-free: no UnityEngine dependency. Pure 2D (float2 only, no float4x4/camera) — every screen-space
 // position here is already resolved (SymbolScreenProjection did the 3D→screen work); this is just the
-// baked-px quad → screen-px quad scale, per S19 T8a / S20 decision 6.
+// baked-px quad → screen-px quad scale.
 
 using Unity.Mathematics;
 
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// Epic A / A1: builds one quad's 4 <see cref="WorldBillboardVertex"/>s for the world-anchored
-    /// point/icon/curved-text draw path. zoom-independent (the anchor moves with zoom; the quad's
+    /// Builds one quad's 4 <see cref="WorldBillboardVertex"/>s for the world-anchored
+    /// point/icon/curved-text draw path. Zoom-independent (the anchor moves with zoom; the quad's
     /// screen-pixel SIZE does not, because <c>emScale</c> is built from the resolved `text-size`, not
-    /// from zoom/distance). F7 (S20 stage doc §6):
-    /// only the <c>emScale / TextQuadLayout.OneEm</c> scale is applied — S19 already baked
-    /// `text-offset`/`text-radial-offset` into the quad's baked-px corners, so there is no second screen-space
-    /// offset here (double-apply would be a bug).
+    /// from zoom/distance). Only the <c>emScale / TextQuadLayout.OneEm</c> scale is applied — layout already
+    /// baked `text-offset`/`text-radial-offset` into the quad's baked-px corners, so there is no second
+    /// screen-space offset here (double-apply would be a bug).
     ///
-    /// <para><b>W2 — <see cref="WorldBillboardVertex.Offset"/> now carries TWO possible units, selected by
-    /// <see cref="WorldBillboardVertex.AlignFlags"/> bit2.</b> Clear ⇒ logical screen pixels, the unit every
-    /// path used before W2, added to <c>clip.xy</c> after projection so the glyph is a fixed screen size at
+    /// <para><b><see cref="WorldBillboardVertex.Offset"/> carries TWO possible units, selected by
+    /// <see cref="WorldBillboardVertex.AlignFlags"/> bit2.</b> Clear ⇒ logical screen pixels,
+    /// added to <c>clip.xy</c> after projection so the glyph is a fixed screen size at
     /// any depth. Set ⇒ WORLD METRES, displaced in the ground plane at the anchor BEFORE projection, so the
     /// glyph is a fixed world size and the perspective divide foreshortens it (a map-pitched `text-size` is
     /// X px TOP-DOWN — the same principle as `line-width`). This method does not know which: it just scales
@@ -27,11 +26,11 @@ namespace MapRenderer.Core.Text.Placement
     /// path in the shader, so a mixed <c>off</c> is not expressible.</para>
     ///
     /// <para>A <c>rotationRadians</c> spins the quad about its anchor — 0 for the default upright/viewport
-    /// billboard, the map bearing for <c>text-rotation-alignment:map</c> (#4). The same per-corner rotation is
-    /// what along-line text (#5) reuses per glyph.</para>
+    /// billboard, the map bearing for <c>text-rotation-alignment:map</c>. Along-line text reuses the same
+    /// per-corner rotation per glyph.</para>
     ///
     /// <para><b>Which way it turns on screen: COUNTER-clockwise for a positive angle</b> — the corners are
-    /// rotated in the quad's y-up LOCAL frame and then Y is negated (A0-F2, below), which lands
+    /// rotated in the quad's y-up LOCAL frame and then Y is negated (below), which lands
     /// <see cref="WorldBillboardVertex.Offset"/> in a y-DOWN screen frame, and a rotation read through a
     /// mirrored axis reverses sense. MEASURED through the real GPU path, not derived — see
     /// <see cref="SymbolBearing.IconRotationRadians"/>, which is where a style value whose own convention is
@@ -52,29 +51,28 @@ namespace MapRenderer.Core.Text.Placement
         /// <see cref="MapRenderer.Unity.Text.Placement.WorldSymbolRenderer"/>'s index emit follows the same
         /// TL/TR/BR/BL pattern throughout.
         ///
-        /// <para><b>A0-F2 negation (carried from the A0 test scaffold into production, per the design's
-        /// carried finding):</b> the retired screen-space render path's shader baked an extra on-screen
+        /// <para><b>The Y negation:</b> the retired screen-space render path's shader baked an extra on-screen
         /// calibration flip (<c>ndc.y = -ndc.y</c>) that this world path's stock
         /// <c>TransformObjectToHClip</c> has no equivalent of — reconciled here, not in the shader, by
         /// negating each corner's (and the translate delta's) Y before it becomes <c>Offset</c>. UV stays
         /// attached to its ORIGINAL corner (no flip) — only the screen-space offset sign changes.</para>
         ///
-        /// <para><b>NEW-F2 — no gamma conversion:</b> <paramref name="colorRgb"/> is carried onto
+        /// <para><b>No gamma conversion:</b> <paramref name="colorRgb"/> is carried onto
         /// <see cref="WorldBillboardVertex.ColorRGB"/> VERBATIM — the caller (<c>WorldSymbolRenderer</c>) is
         /// responsible for handing in the already-linear colour (<c>PlacedQuad.Color</c>, sRGB→linear
         /// baked once at batch build — see <c>SymbolPlacementSystem.LinearColor</c>); this method performs no
-        /// second conversion (a double-convert would break A/B colour equivalence).</para>
+        /// second conversion.</para>
         ///
         /// <para><see cref="WorldBillboardVertex.AnchorLocal"/> is <paramref name="anchorLocal"/> on all four
-        /// corners (the Level-1 RTC bake, §3.4 — <c>anchorRender − tileOriginRender</c>, computed by the
+        /// corners (the Level-1 RTC bake — <c>anchorRender − tileOriginRender</c>, computed by the
         /// caller). <see cref="WorldBillboardVertex.AlignFlags"/> carries <paramref name="alignFlags"/>
-        /// verbatim onto every corner — 0 for point/icon (A1: viewport-aligned only; the map-bearing shader
-        /// branch is A3), bit1 set for Stage AC's along-line rotation (curved). <paramref name="tangentLocal"/>
-        /// rides onto <see cref="WorldBillboardVertex.Tangent"/> identically — <see cref="float3.zero"/> for
+        /// verbatim onto every corner — 0 for point/icon (viewport-aligned only), bit1 set for the along-line
+        /// rotation (curved). <paramref name="tangentLocal"/> rides onto
+        /// <see cref="WorldBillboardVertex.Tangent"/> identically — <see cref="float3.zero"/> for
         /// point/icon (unread there). <paramref name="surfaceUp"/> rides onto <see cref="WorldBillboardVertex.Up"/>
-        /// identically (P2) — the unit surface normal at the anchor, pre-RTC render-space direction, WRITTEN
-        /// here and UNREAD by every shader (the pitch-alignment tangent-frame branch is P3). Opacity (stream 1)
-        /// is NOT set here — the renderer appends it separately per corner (the A-4 fade × the quad's own alpha).</para>
+        /// identically — the unit surface normal at the anchor, pre-RTC render-space direction, written here
+        /// and not yet read by any shader. Opacity (stream 1) is NOT set here — the renderer appends it
+        /// separately per corner (the fade × the quad's own alpha).</para>
         /// </summary>
         /// <param name="emScale">What ONE em maps to, in <see cref="WorldBillboardVertex.Offset"/>'s output
         /// unit — logical px for a screen billboard (<see cref="PlacedQuad.TextSizePx"/>), METRES for a
@@ -98,7 +96,7 @@ namespace MapRenderer.Core.Text.Placement
             QuadCornersLocal(in quad, emScale, rotationRadians,
                 out float2 tlCorner, out float2 trCorner, out float2 brCorner, out float2 blCorner);
 
-            // A0-F2: negate the corner's Y (and the translate delta's Y, same convention) — UV stays
+            // Negate the corner's Y (and the translate delta's Y, same convention) — UV stays
             // attached to its ORIGINAL corner (no flip).
             float2 translateOffset = new float2(translateDeltaPx.x, -translateDeltaPx.y);
             float2 tlOffset = new float2(tlCorner.x, -tlCorner.y) + translateOffset;
@@ -120,11 +118,10 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         /// <summary>
-        /// W3 — the four ROTATED cell corners of a quad, in the quad's y-UP LOCAL frame, before the A0-F2
+        /// The four ROTATED cell corners of a quad, in the quad's y-UP LOCAL frame, before the
         /// Y-negation and before any translate: <c>Rotate(corner · emScale / OneEm, rotationRadians)</c>.
-        /// Extracted VERBATIM out of <see cref="BuildWorldQuad"/>, which now calls it — so the drawn quad and
-        /// the collision box are built from ONE expression rather than from two hand-maintained copies (which
-        /// is what <see cref="SymbolBox.BuildRotatedGlyph"/>'s "mirrors BuildQuad exactly" claim rested on).
+        /// <see cref="BuildWorldQuad"/> and <see cref="SymbolBox.BuildRotatedGlyph"/> both call it, so the
+        /// drawn quad and the collision box are built from ONE expression.
         ///
         /// <para><b>Deliberately does NOT take the translate delta.</b> That add stays in
         /// <see cref="BuildWorldQuad"/>, next to the Y-negation it shares a convention with, so the caller's

@@ -7,7 +7,7 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// #5: lays out a shaped run for CURVED along-line placement — one <see cref="CurvedGlyph"/> per visible
+    /// Lays out a shaped run for CURVED along-line placement — one <see cref="CurvedGlyph"/> per visible
     /// glyph, each carrying its along-run <see cref="CurvedGlyph.ArcCenter"/> and a cell centred on the path
     /// (horizontally on that arc center, vertically on the run's optical centre — see
     /// <see cref="TextQuadLayout.OpticalCentreBelowReferencePx"/>). Unlike <see cref="TextQuadLayout"/>
@@ -57,7 +57,7 @@ namespace MapRenderer.Core.Text
                     // Same TOP-referenced cell as TextQuadLayout.PlaceGlyph, but placed relative to THIS
                     // glyph's own pen origin and centered HORIZONTALLY on arcCenter — and VERTICALLY on the
                     // path, by the same OpticalCentreBelowReferencePx a point symbol's Centre vertical anchor
-                    // applies (§11 D12), so a curved and a point symbol of the same string have the same
+                    // applies, so a curved and a point symbol of the same string have the same
                     // optical relationship to their anchor. That shift is one constant per LABEL (no `entry`
                     // term), so the run's own typography is untouched: ascenders and descenders keep their
                     // relative offsets instead of each glyph bobbing onto its own ink centre.

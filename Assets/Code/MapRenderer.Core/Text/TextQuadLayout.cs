@@ -7,12 +7,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// S19: turns a <see cref="ShapedRun"/> + atlas metrics + <see cref="TextLayoutOptions"/> into
+    /// Turns a <see cref="ShapedRun"/> + atlas metrics + <see cref="TextLayoutOptions"/> into
     /// symbol-local, anchor-relative <see cref="SymbolQuad"/>s in baked-pixel space (<see cref="OneEm"/>
-    /// = 24px — the fixed size MapLibre bakes glyph-PBFs at). Deliberately takes NO text-size parameter
-    /// (T8a): layout is size-independent, S20 applies the zoom-dependent <c>text-size/24</c> screen
-    /// scale and builds the actual <c>Mesh</c>/vertices per frame. Point placement only
-    /// (<c>symbol-placement: line</c> is a follow-up, S19 stage doc §2.3).
+    /// = 24px — the fixed size MapLibre bakes glyph-PBFs at). Takes NO text-size parameter: layout is
+    /// size-independent, and placement applies the zoom-dependent <c>text-size/24</c> screen scale per
+    /// frame. Point placement only; <c>symbol-placement: line</c> lives in <see cref="CurvedTextLayout"/>.
     ///
     /// <para>
     /// <b>Baseline convention:</b> y-up; line 0's origin is at y=0, line n's origin is at
@@ -22,7 +21,7 @@ namespace MapRenderer.Core.Text
     /// unanchored block spans <c>y ∈ [-blockHeight, 0]</c> as a LAYOUT BOX before
     /// <see cref="TextLayoutOptions.Anchor"/>/<see cref="TextLayoutOptions.Offset"/> translate it:
     /// <c>Top</c>/<c>Bottom</c> anchor that box's edges, while <c>Centre</c> positions the block's OPTICAL
-    /// centre, which is deliberately not the box midpoint (<c>docs/road-shields-design.md</c> §11 D12).
+    /// centre, which is not the box midpoint (<c>docs/road-shields-design.md</c>).
     /// </para>
     ///
     /// <para>
@@ -52,7 +51,7 @@ namespace MapRenderer.Core.Text
         /// (<see cref="GlyphSdf.BaselineBelowReferencePx"/>), less half a cap height
         /// (<see cref="GlyphSdf.NominalCapHeightEm"/>) — applied by <see cref="VerticalAnchorShiftPx"/>'s
         /// <see cref="VerticalAnchor.Centre"/> case on the point path, and by
-        /// <see cref="CurvedTextLayout"/> on the along-line path (<c>docs/road-shields-design.md</c> §11 D12).
+        /// <see cref="CurvedTextLayout"/> on the along-line path (<c>docs/road-shields-design.md</c>).
         /// Not the midpoint of the line box: the box's top edge carries the font's ascent slack, so the box
         /// midpoint sits noticeably above the ink's actual optical centre.
         /// <para>
@@ -71,10 +70,10 @@ namespace MapRenderer.Core.Text
 
         /// <summary>
         /// The three cases <see cref="TextAnchor"/>'s vertical component ever resolves to. Kept as a
-        /// dedicated enum rather than a bare 0/0.5/1 <c>float</c> (which the old code used) precisely
-        /// because <see cref="VerticalAnchor.Centre"/> is deliberately NOT the midpoint of
-        /// <see cref="VerticalAnchor.Top"/> and <see cref="VerticalAnchor.Bottom"/> (§11 D12) — a bare
-        /// lerp factor would invite exactly the interpolation bug this stage removes.
+        /// dedicated enum rather than a bare 0/0.5/1 <c>float</c>, because
+        /// <see cref="VerticalAnchor.Centre"/> is NOT the midpoint of <see cref="VerticalAnchor.Top"/>
+        /// and <see cref="VerticalAnchor.Bottom"/> — a bare lerp factor would invite that very
+        /// interpolation bug.
         /// </summary>
         private enum VerticalAnchor
         {
@@ -114,8 +113,8 @@ namespace MapRenderer.Core.Text
                 _ => 0.5f,
             };
 
-            // Decision 4 (S19 stage doc): RTL runs are already visual-order (S18) and are single-line
-            // only in S19 — multi-line RTL wrap needs logical order S18 doesn't currently expose.
+            // RTL runs arrive in visual order and stay single-line: multi-line RTL wrap would need the
+            // logical order the shaper does not expose.
             bool singleLine = run.Direction == TextDirection.RightToLeft;
 
             int lineIndex = 0;
@@ -172,7 +171,7 @@ namespace MapRenderer.Core.Text
 
                         if (wouldOverflow)
                         {
-                            // Greedy word-wrap (decision 3 / plan (e)): the breaking space is dropped
+                            // Greedy word-wrap: the breaking space is dropped
                             // (never placed, doesn't advance the pen on either line).
                             ApplyJustifyToLine(output, lineOutputStart, currentLineWidth, justifyFactor);
                             blockWidth = math.max(blockWidth, currentLineWidth);
@@ -248,7 +247,7 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// Missing-entry policy (S18 §6.3 mirrored): a codepoint absent from the atlas (notdef) emits
+        /// Missing-entry policy: a codepoint absent from the atlas (notdef) emits
         /// no quad and falls back to the shaped glyph's own <see cref="PositionedGlyph.XAdvance"/> —
         /// present glyphs use the atlas entry's integer <see cref="GlyphAtlasEntry.Advance"/> as the
         /// canonical pen step (cross-check: XAdvance ≈ round(Advance) for a resolved glyph).
@@ -293,8 +292,8 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// Whitespace classification (plan (h)): NOT <see cref="SdfGlyph.HasBitmap"/> (S18's atlas
-        /// entry doesn't carry that flag) — a padded SDF cell no larger than the bare buffer border on
+        /// Whitespace classification: NOT <see cref="SdfGlyph.HasBitmap"/> (the atlas entry does not
+        /// carry that flag) — a padded SDF cell no larger than the bare buffer border on
         /// either axis (space's Cell(6,6) at Buffer=3) carries no visible glyph.
         /// </summary>
         private static bool IsWhitespaceEntry(in GlyphAtlasEntry entry)
@@ -337,7 +336,7 @@ namespace MapRenderer.Core.Text
             }
         }
 
-        /// <summary>hAlign: Left*=0, Right*=1, else .5. vertical: Top*-&gt;Top, Bottom*-&gt;Bottom, else Centre (plan (b)).</summary>
+        /// <summary>hAlign: Left*=0, Right*=1, else .5. vertical: Top*-&gt;Top, Bottom*-&gt;Bottom, else Centre.</summary>
         private static (float hAlign, VerticalAnchor vertical) ResolveAlignFactors(TextAnchor anchor)
         {
             float hAlign = anchor switch
@@ -356,9 +355,9 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// The whole vertical anchoring rule in one place (§11 D12). <see cref="VerticalAnchor.Top"/> and
-        /// <see cref="VerticalAnchor.Bottom"/> anchor the block's LAYOUT-BOX edges (unchanged from before
-        /// this stage); <see cref="VerticalAnchor.Centre"/> anchors the block's OPTICAL centre — the
+        /// The whole vertical anchoring rule in one place. <see cref="VerticalAnchor.Top"/> and
+        /// <see cref="VerticalAnchor.Bottom"/> anchor the block's LAYOUT-BOX edges;
+        /// <see cref="VerticalAnchor.Centre"/> anchors the block's OPTICAL centre — the
         /// midpoint between the FIRST line's optical centre and the LAST line's, which is why it scales by
         /// <c>(lineCount - 1)</c> rather than <c>lineCount</c>: line spacing is untouched, and the whole
         /// block simply moves by one constant (<see cref="OpticalCentreBelowReferencePx"/>) regardless of
@@ -371,7 +370,7 @@ namespace MapRenderer.Core.Text
             _ => OpticalCentreBelowReferencePx + (lineCount - 1) * lineHeightPx * 0.5f,
         };
 
-        /// <summary>Auto resolves from anchor (plan (d)): Left*-&gt;Left, Right*-&gt;Right, else Center.</summary>
+        /// <summary>Auto resolves from the anchor: Left*-&gt;Left, Right*-&gt;Right, else Center.</summary>
         private static TextJustify ResolveJustify(TextJustify justify, TextAnchor anchor)
         {
             if (justify != TextJustify.Auto) return justify;
@@ -384,13 +383,12 @@ namespace MapRenderer.Core.Text
         }
 
         /// <summary>
-        /// Radial offset (ems), resolved from the anchor (plan (c)): pure axis anchors (Left/Right/
+        /// Radial offset (ems), resolved from the anchor: pure axis anchors (Left/Right/
         /// Top/Bottom) push straight along that axis; corner anchors split into a diagonal
         /// (RadialOffset/sqrt2 on each axis, preserving total magnitude); Center has no direction (0,0).
         /// Signs push AWAY from the anchored edge — e.g. a Left anchor (block's left edge at the
         /// anchor, text extending +x) pushes further +x; a Top anchor (text extending -y) pushes
-        /// further -y. Self-pinned by the T3 golden (no MapLibre source consulted); flagged for the
-        /// S20 visual reconcile.
+        /// further -y. Self-pinned by a golden; no MapLibre source consulted.
         /// </summary>
         private static float2 ComputeRadialOffset(float hAlign, VerticalAnchor vertical, float radialOffsetEm)
         {

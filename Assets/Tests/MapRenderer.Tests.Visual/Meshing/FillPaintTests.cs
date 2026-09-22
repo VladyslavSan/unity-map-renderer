@@ -1,4 +1,4 @@
-// Fill-paint and boundary-band pixel-color GPU/visual acceptance tests (UMR-176 pack: meshing topic).
+// Fill-paint and boundary-band pixel-color GPU/visual acceptance tests.
 //
 // The three-way split follows TWO using collisions, not the line cap: `CameraProperties`
 // (MapRenderer.Core.Geo vs UnityEngine.Rendering) and bare `Object` (System.Object vs
@@ -8,8 +8,8 @@
 // per-feature color, FillPaint-driven rendering, and the boundary band's own pixels).
 //
 // Contents:
-//   DataDrivenFillSnapshotTests  — S12 acceptance snapshot tests — data-driven per-feature colors baked into the fill mesh.
-//   FillPaintSnapshotTests       — S13 snapshot tests for FillPaint-driven rendering behavior.
+//   DataDrivenFillSnapshotTests  — acceptance snapshot tests — data-driven per-feature colors baked into the fill mesh.
+//   FillPaintSnapshotTests       — snapshot tests for FillPaint-driven rendering behavior.
 //   FillBoundaryBandRenderTests  — Unity EditMode only — the outward boundary band, observed in rendered pixels.
 
 using System;
@@ -26,11 +26,11 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Tests.Visual
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // DataDrivenFillSnapshotTests — S12 acceptance snapshot tests
+    // DataDrivenFillSnapshotTests — acceptance snapshot tests
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S12 acceptance snapshot tests — data-driven per-feature colors baked into the fill mesh.
+    /// Acceptance snapshot tests — data-driven per-feature colors baked into the fill mesh.
     ///
     /// The DataDrivenColorBakeTests (Unity EditMode) are the load-bearing CPU teeth for distinctness.
     /// These snapshot tests confirm the full pipeline: bake → mesh → shader → GPU output.
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Visual
     ///           key → all features fall through to default → render is single-cluster / uniform.
     ///           Proves the data-driven path without breaking when vertex colors are all the same.
     ///   Test 3: White-fallback regression — no FillColorExpression → vertex colors default to white
-    ///           → behavior identical to S11 (uniform fill from _BaseColor). Mesh must still build.
+    ///           → a uniform fill from _BaseColor. Mesh must still build.
     ///
     /// Camera: top-down ortho 512×512, Y=200, orthoSize=70.
     /// Background: distinctive dark slate (same as LitFillSnapshotTests).
@@ -83,7 +83,6 @@ namespace MapRenderer.Tests.Visual
             Background = BgColor,
         });
 
-        // S54: replaces MapFillBootstrap with FillSceneHelper (StyledFillTileBuilder-backed).
         private static (GameObject mapGo, Material liveMaterial) BuildFillGo(
             string colorExpr = null)
         {
@@ -297,7 +296,7 @@ namespace MapRenderer.Tests.Visual
         [Test]
         public void NoColorExpression_MeshBuilds_AndShaderCompiles()
         {
-            // Regression: MeshBuilder.SetColors(white) must not break existing S11 behavior.
+            // Regression: MeshBuilder.SetColors(white) must not break the uniform-fill behaviour.
             var (cameraGo, camera) = BuildCamera();
             Track(cameraGo);
             var (mapGo, mat)       = BuildFillGo(null); // no data-driven expression
@@ -319,7 +318,7 @@ namespace MapRenderer.Tests.Visual
                     {
                         var msgs = ShaderUtil.GetShaderMessages(shader);
                         var sb = new System.Text.StringBuilder();
-                        sb.AppendLine("Map/Fill shader has compile error(s) after S12 shader edits:");
+                        sb.AppendLine("Map/Fill shader has compile error(s) after the shader edits:");
                         foreach (var m in msgs)
                             sb.AppendLine($"  [{m.severity}] {m.message} (file:{m.file} line:{m.line})");
                         Assert.Fail(sb.ToString());
@@ -331,11 +330,11 @@ namespace MapRenderer.Tests.Visual
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // FillPaintSnapshotTests — S13 snapshot tests for FillPaint-driven rendering behavior.
+    // FillPaintSnapshotTests — snapshot tests for FillPaint-driven rendering behavior.
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S13 snapshot tests for FillPaint-driven rendering behavior.
+    /// Snapshot tests for FillPaint-driven rendering behavior.
     ///
     /// These are Unity-only tests (use UnityEngine.Mesh, rendering, etc.).
     /// The CPU-side counterparts live in FillPaintTests.cs (also Unity EditMode only, not shared with
@@ -347,7 +346,7 @@ namespace MapRenderer.Tests.Visual
     ///       RGB-toward-background (lower composite luminance at opacity=0 than at opacity=1).
     ///
     ///   #6: Non-white _BaseColor gamma calibration — baked vertex colors (sRGB via Core) are
-    ///       linearized before Mesh.SetColors (D2 fix). With _BaseColor=white, the channel multiply
+    ///       linearized before Mesh.SetColors. With _BaseColor=white, the channel multiply
     ///       is identity and the rendered color matches the baked vertex color (in linear space).
     ///       With _BaseColor=gray (0.5,0.5,0.5 sRGB), the composite is darkened. This test
     ///       confirms the vertex color × _BaseColor product is lower than vertex color alone —
@@ -392,7 +391,6 @@ namespace MapRenderer.Tests.Visual
 
 
         // ── Build a fill mesh with a given color expression and material setup ──
-        // S54: replaces MapFillBootstrap with FillSceneHelper (StyledFillTileBuilder-backed).
 
         private static (GameObject go, Mesh mesh, Material mat) BuildFillWithColor(
             string colorExpr, Action<Material> matSetup = null)
@@ -552,8 +550,7 @@ namespace MapRenderer.Tests.Visual
             RenderSettings.ambientLight = prevAmbientLight;
         }
 
-        // ── #7: StyledFillTileBuilder linearizes vertex colors (D2 fix) ────────
-        // S54: migrated from MapFillBootstrap / MeshBuilder to StyledFillTileBuilder.
+        // ── #7: StyledFillTileBuilder linearizes vertex colors ─────────────────
         // StyledFillTileBuilder stores colors in stream-3 via SetVertexBufferData<Vector4>,
         // so we read them back with Mesh.GetColors (reads the COLOR attribute on any stream).
 
@@ -561,7 +558,7 @@ namespace MapRenderer.Tests.Visual
         public void DataDrivenVertexColor_IsLinearized_BeforeSetColors()
         {
             // Verify that StyledFillTileBuilder.BuildMeshData() applied Color.linear to baked
-            // vertex colors (D2 gamma fix). Inspect the mesh Color stream directly.
+            // vertex colors. Inspect the mesh Color stream directly.
             //
             // A baked sRGB (127/255≈0.498, 0, 0, 1):
             //   sRGB R ≈ 0.498 → linear R ≈ ((0.498+0.055)/1.055)^2.4 ≈ 0.212.
@@ -587,7 +584,7 @@ namespace MapRenderer.Tests.Visual
                     Assert.Fail("Mesh not built for linearization test.");
                 }
 
-                // S54: StyledFillTileBuilder bakes the linearized fill color into the COLOR vertex
+                // StyledFillTileBuilder bakes the linearized fill color into the COLOR vertex
                 // stream (stream-3). Mesh.GetColors reads the COLOR attribute regardless of which
                 // stream it lives on, so it reflects the raw stored float values (NOT re-gamma'd).
                 var colorList = new System.Collections.Generic.List<Color>();
@@ -955,7 +952,7 @@ namespace MapRenderer.Tests.Visual
             Assert.Greater(outerRampPx, 0.4,
                 $"precondition: the abutting pair's outer silhouette must carry a real band; measured " +
                 $"{outerRampPx:F3} px. A hard silhouette leaves no background at a shared edge either, so " +
-                "without this the seam assertion below is satisfied by the very state this stage removes.");
+                "without this the seam assertion below is satisfied by the very state this tooth exists to reject.");
 
             int seamLo = (int)(mid * SnapPx) - 4, seamHi = (int)(mid * SnapPx) + 4;
             double peak = 0.0;

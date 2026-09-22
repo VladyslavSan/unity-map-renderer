@@ -11,7 +11,7 @@ namespace MapRenderer.Core.Geo
     /// </summary>
     public struct ProjectedPoint
     {
-        /// <summary>Render-space position (pre-RTC; east=+X, up=+Y, north=+Z, docs §7).</summary>
+        /// <summary>Render-space position (pre-RTC; east=+X, up=+Y, north=+Z).</summary>
         public double3 World;
 
         /// <summary>Unit surface up at the point. Constant +Y for planar Mercator; geodetic normal for the globe.</summary>

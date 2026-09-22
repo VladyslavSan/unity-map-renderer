@@ -8,16 +8,12 @@ namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>One decoded tile layer: name, extent, its features — and <b>its geometry</b>.
     ///
-    /// <para>The element type of <see cref="Features"/> is <see cref="IFeature"/> — the evaluation surface
-    /// itself. IR C1 deleted the zero-member <c>ITileFeature</c> that used to sit between them: an interface
-    /// declaring nothing is a naming device, not a type.</para>
+    /// <para>The element type of <see cref="Features"/> is <see cref="IFeature"/>, the evaluation surface
+    /// itself.</para>
     ///
-    /// <para><b>IR C1 P3 — the layer OWNS its coordinates.</b> Before P3 a consumer had to ask a separate
-    /// object (<c>TileGeometryStore</c>) to materialize a layer's geometry, handing it the layer <i>and</i> a
-    /// <c>TileId</c> it carried alongside; nothing in the type system could tell it had paired the wrong two.
-    /// Now <see cref="Geometry"/> is a member of the layer, minted eagerly by the decoder — which was itself
-    /// handed the tile address — so the buffer's <c>Tile</c>/<c>Extent</c> and the layer they describe cannot
-    /// disagree, by construction rather than by care.</para>
+    /// <para><b>The layer OWNS its coordinates.</b> <see cref="Geometry"/> is a member of the layer, minted
+    /// eagerly by the decoder, which was itself handed the tile address — so the buffer's
+    /// <c>Tile</c>/<c>Extent</c> and the layer they describe cannot disagree.</para>
     /// </summary>
     public interface ITileLayer
     {
@@ -39,10 +35,10 @@ namespace MapRenderer.Jobs.Tiles
     /// this same level, not additions to the vector-feature shape above. Implemented by <see cref="MvtTile"/>
     /// (and, later, any other <see cref="ITileDecoder"/> output).
     ///
-    /// <para><b>IR C1 P3 — <see cref="IDisposable"/>.</b> A decoded tile now holds
-    /// <c>Allocator.Persistent</c> native memory (its layers' <see cref="ITileLayer.Geometry"/>), so it has a
-    /// definite lifetime and a single owner. That owner is the <c>SharedDisposable{IDecodedTile}</c> that
-    /// wraps it: consumers read layers inside a held reference and <b>never</b> dispose the tile themselves.</para>
+    /// <para><b>Why <see cref="IDisposable"/>.</b> A decoded tile holds <c>Allocator.Persistent</c> native
+    /// memory (its layers' <see cref="ITileLayer.Geometry"/>), so it has a definite lifetime and a single
+    /// owner. That owner is the <c>SharedDisposable{IDecodedTile}</c> that wraps it: consumers read layers
+    /// inside a held reference and <b>never</b> dispose the tile themselves.</para>
     /// </summary>
     public interface IDecodedTile : IDisposable
     {

@@ -5,7 +5,7 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties
     /// <summary>
     /// Cached <c>Shader.PropertyToID</c> integer ids for every property in <see cref="PropertyNames"/>.
     /// Use these for all <c>Material.SetFloat/SetColor/SetVector/SetTexture/HasProperty/GetFloat/…</c>
-    /// calls — they eliminate the per-call string hash lookup that the string overloads incur. (S78)
+    /// calls — they eliminate the per-call string hash lookup that the string overloads incur.
     ///
     /// <para>Ids are computed once via <see langword="static"/> field initializers (Unity guarantees
     /// <c>Shader.PropertyToID</c> is safe to call from any thread after the engine is initialised).</para>

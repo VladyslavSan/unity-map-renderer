@@ -3,7 +3,7 @@
 **Status:** the model below ships. A multi-stage tile build is a `JobHandle` dependency chain scheduled from
 the main thread and polled at the tile pump. This doc is the SSOT for how Burst work is chained, for the
 `.Run()`/`.Schedule()` discriminator, for the disposal and cancellation invariant an in-flight `JobHandle`
-imposes, and for which parts of `docs/tile-pipeline-design.md` §4 this design owns (§12).
+imposes, and for which parts of `docs/tile-pipeline-design.md`'s build seam this design owns.
 
 **Read with:** `docs/web-target.md` §"Measured in THIS project" (what the web target can and cannot run
 off-main), `docs/async-architecture.md` §"Disposal & cancellation contract" (the lifetime contract §8
@@ -455,7 +455,7 @@ holding a build genuinely in flight so teardown can be exercised against it — 
 Burst job cannot park on a `WaitHandle`, but it can spend a bounded, fixture-chosen number of iterations, and
 it needs no mutual exclusion because it is policy-independent.
 
-## 12. What this design owns from `docs/tile-pipeline-design.md` §4
+## 12. What this design owns from `docs/tile-pipeline-design.md`
 
 §4 there plans the same seam. This design owns the two-phase split and its exact-size allocation, and nothing
 about chunking.

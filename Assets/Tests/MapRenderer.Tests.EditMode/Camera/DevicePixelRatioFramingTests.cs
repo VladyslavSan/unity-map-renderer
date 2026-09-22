@@ -1,18 +1,18 @@
-// Unity EditMode only — S108 Stage 3: the device→logical conversion has ONE home, and the tile-cover
+// Unity EditMode only — the device→logical conversion has ONE home, and the tile-cover
 // framing viewport is the SAME definition the camera altitude frames from.
 //
 // Teeth covered:
 //   T3-3 (MapView leg) — a non-positive DevicePixelRatio yields a FINITE framing viewport (the stage's one
 //        named behaviour change). Observed on BuildTileSelectionConfig() DIRECTLY, never through
-//        LateUpdate/Tick: against the pre-S108 code the infinite viewport NaN-poisons the frustum planes so
+//        LateUpdate/Tick: with an unguarded ratio the infinite viewport NaN-poisons the frustum planes so
 //        every tile intersects while the LOD ratio collapses to 0, and the planar cover then enumerates the
 //        whole quadtree — the RED would arrive as a gate timeout instead of a failure.
 //   T3-4 — at dpr 2 the selector's framing viewport IS MapCamera.ViewportLogicalPx, exactly. The only
 //        tile-selection coverage at dpr ≠ 1 anywhere in the suite. It pins that LateUpdate refreshes the
 //        camera's ratio AT ALL, but NOT the ordering of the refresh against the build — see the method's
-//        own doc; the ordering is held by construction, recorded as design-doc §6.1 finding 7.
-//   T3-6 — the implausible-ratio fallback exists in exactly one production file. (S109 widened the guard
-//        from "non-positive" to a plausibility band, so the sweep predicate moved with it.)
+//        own doc. The ordering is held by the code shape, not by this tooth.
+//   T3-6 — the implausible-ratio fallback exists in exactly one production file. The guard is a
+//        plausibility band, so the sweep predicate matches that band.
 
 using System.Collections.Generic;
 using MapRenderer.App;
@@ -35,9 +35,9 @@ namespace MapRenderer.Tests.Cameras
         // ── T3-4 — one definition, shared by the altitude and the cover framing ─────────────────
 
         /// <summary>
-        /// S108 T3-4: the tile selector's framing viewport and the camera's altitude framing must be the SAME
+        /// T3-4: the tile selector's framing viewport and the camera's altitude framing must be the SAME
         /// quantity — <see cref="MapRenderer.Unity.Rendering.Map.MapCamera.ViewportLogicalPx"/> — so render
-        /// framing and selection framing cannot diverge (the S86/S92 "render far == selection far" invariant).
+        /// framing and selection framing cannot diverge (the "render far == selection far" invariant).
         ///
         /// <para>This is the only place the selection path runs at a ratio other than 1 anywhere in the suite.</para>
         ///
@@ -80,11 +80,11 @@ namespace MapRenderer.Tests.Cameras
         // ── T3-3 (MapView leg) — the ONE named behaviour change ─────────────────────────────────
 
         /// <summary>
-        /// S108 T3-3: a non-positive <c>DevicePixelRatio</c> must produce a FINITE framing viewport (the dpr-1
+        /// T3-3: a non-positive <c>DevicePixelRatio</c> must produce a FINITE framing viewport (the dpr-1
         /// fallback), not <c>+∞</c>. Reachable through <c>MapViewConfig.DevicePixelRatio</c>, a plain
         /// serialized field nothing validates.
         ///
-        /// <para><b>Deliberately does not call <c>LateUpdate</c>.</b> Against the pre-S108 body the framing
+        /// <para><b>Does not call <c>LateUpdate</c>.</b> With an unguarded ratio the framing
         /// viewport is <c>+∞</c>, which survives the selector's <c>vp &lt;= 0</c> early-out, drives the
         /// altitude to <c>+∞</c> and the pose to NaN — every frustum-plane test against NaN is false, so
         /// <c>IntersectsAabb</c> accepts every tile, while <c>lodRatio = finite/∞ = 0</c> stops the LOD from
@@ -125,32 +125,29 @@ namespace MapRenderer.Tests.Cameras
         // ── T3-6 — the implausible-ratio fallback has exactly one home ──────────────────────────
 
         /// <summary>
-        /// S108 T3-6: D2 ("the ratio is applied ONCE, at the conversion") made structural for the device→logical
-        /// direction. Before this stage the fallback was written out by hand in four production files and had
-        /// already diverged three ways — two sites carried no fallback at all. Sweeps production sources for a
+        /// T3-6: "the ratio is applied ONCE, at the conversion", made structural for the device→logical
+        /// direction. Written out by hand the fallback had diverged three ways across four production files,
+        /// and two of them carried none at all. Sweeps production sources for a
         /// ratio guard and requires the only match to be <c>DeviceScaling.cs</c>.
         ///
-        /// <para>The predicate is deliberately narrow (the ratio's name, then a comparison against a number or
+        /// <para>The predicate is narrow (the ratio's name, then a comparison against a number or
         /// a named bound): a bare <c>&gt; 0.0 ? … : 1.0</c> sweep matches four unrelated production sites that
         /// have nothing to do with display density. The sweep covers production only: the test tree now lives
         /// outside <c>Assets/Code</c>, so it needs no exclusion and legitimately quotes the guard when
-        /// explaining it. Note the sweep reads comments too, so
+        /// explaining it. The sweep reads comments too, so
         /// production prose in <b>any</b> swept file must never put the ratio's name next to a comparison
         /// operator — say "outside the plausible band", never the expression itself. That fence binds
         /// <c>MapViewConfig</c>'s tooltip and <c>MapHost</c>'s comment as much as it binds
         /// <c>DeviceScaling</c>'s own doc.</para>
         ///
-        /// <para>S109 STRENGTHENED the predicate rather than merely porting it to the plausibility band. The
-        /// previous <c>devicepixelratio[^;]*&gt;\s*0</c> spanned everything up to the next semicolon, so it
-        /// matched at <c>DevicePixelRatioFromDpi(double screenDpi)</c> and landed on the unrelated
-        /// <c>Debug.Assert(screenDpi &gt; 0.0)</c> three lines below: the positive leg would have passed even
-        /// with <c>SafeRatio</c>'s guard deleted outright. The replacement requires the operator to be
-        /// ADJACENT to the ratio's name, which that form cannot satisfy. It is wider in operator reach
-        /// (<c>&lt;</c>/<c>&lt;=</c>/<c>&gt;=</c> now count, so a hand-written <c>… &lt;= 0.0</c> copy is
-        /// caught, which the old one missed entirely) and narrower in span; the net is a strengthening.
-        /// <c>IgnoreCase</c> is deliberately ABSENT — with it, the <c>[0-9A-Z]</c> tail starts matching the
-        /// <c>s</c> of a following <c>&lt;see cref=…</c>, which would make the sweep sensitive to prose that
-        /// merely names the ratio near an XML tag.</para>
+        /// <para>The operator must be ADJACENT to the ratio's name. A span-to-semicolon form
+        /// (<c>devicepixelratio[^;]*&gt;\s*0</c>) matches at <c>DevicePixelRatioFromDpi(double screenDpi)</c>
+        /// and lands on the unrelated <c>Debug.Assert(screenDpi &gt; 0.0)</c> below it, so its positive leg
+        /// passes even with <c>SafeRatio</c>'s guard deleted. The operator set is wide
+        /// (<c>&lt;</c>/<c>&lt;=</c>/<c>&gt;=</c> count, so a hand-written <c>… &lt;= 0.0</c> copy is caught).
+        /// <c>IgnoreCase</c> is ABSENT: with it, the <c>[0-9A-Z]</c> tail starts matching the <c>s</c> of a
+        /// following <c>&lt;see cref=…</c>, making the sweep sensitive to prose that names the ratio near an
+        /// XML tag.</para>
         /// </summary>
         [Test]
         public void RatioFallback_HasExactlyOneHome_InDeviceScaling()
@@ -180,8 +177,8 @@ namespace MapRenderer.Tests.Cameras
                 "never loosen this sweep.");
             Assert.IsEmpty(offenders,
                 "the device-pixel-ratio fallback must exist in exactly one production file (Unity/View/" +
-                "DeviceScaling.cs). Hand-written copies diverge: before S108 the camera's logical viewport " +
-                "and the selector's framing viewport carried none at all and went infinite. NOTE the sweep " +
+                "DeviceScaling.cs). Hand-written copies diverge: the camera's logical viewport " +
+                "and the selector's framing viewport once carried none at all and went infinite. NOTE the sweep " +
                 "reads COMMENTS too — if a named file carries no such code, its prose spells the guard out " +
                 "and the fix is one word of wording there, not a change to DeviceScaling.cs. Offenders: " +
                 string.Join(", ", offenders));

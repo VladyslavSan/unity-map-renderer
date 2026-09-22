@@ -3,15 +3,15 @@
 // Pair wiring and steady-state allocation first, then projection/screen-projection parity, then tile-block baking, the up-carrier chain, the zoom gate, then the two world-billboard fixtures.
 //
 // Contents:
-//   SymbolPairWiringTests             — Road-shields §10 D8/D9 (docs/road-shields-design.md) P10 — the Tick()-level wiring tooth for a centred icon+text pair: a Owner(icon)+Rider(text) pair must stage as ONE SymbolCandidate (LastCandidateCount) yet still place BOTH halves' quads (LastQuadCount)…
-//   SymbolPlacementAllocTests         — S20 T4: over a STABLE synthetic symbol set, a steady-state Tick (project → billboard-build → submit) allocates ZERO managed garbage.
-//   SymbolProjectionJobTests          — B-2: the parallel symbol-projection pass.
-//   SymbolScreenProjectionUnityTests  — S20 T2 (Core-vs-real-camera pin): a synthetic world anchor's TryProjectAnchor pixel must MATCH the real WorldToScreenPoint pixel for the SAME (origin-relative) local position, and a behind-camera anchor must be culled by both.
-//   SymbolTileBlockBakerTests         — Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B): Bake against a REAL SymbolTileBlock — the native-lifetime half of the Stage-1 acceptance teeth (the dispose-SITE teeth — commit-overwrite / FIFO-evict / true-release / Clear — live in…
-//   SymbolUpCarrierChainTests         — P2 REQUIRED-1 — the Up CARRIER CHAIN from Block A, driven end to end through the REAL BuildAsync (which itself calls the real Extract), asserted against a closed form written out here — never obtained from ProjectPoint or any production sampler.
+//   SymbolPairWiringTests             — Road-shields (docs/road-shields-design.md) — the Tick()-level wiring tooth for a centred icon+text pair: a Owner(icon)+Rider(text) pair must stage as ONE SymbolCandidate (LastCandidateCount) yet still place BOTH halves' quads (LastQuadCount)…
+//   SymbolPlacementAllocTests         — over a STABLE synthetic symbol set, a steady-state Tick (project → billboard-build → submit) allocates ZERO managed garbage.
+//   SymbolProjectionJobTests          — the parallel symbol-projection pass.
+//   SymbolScreenProjectionUnityTests  — Core-vs-real-camera pin: a synthetic world anchor's TryProjectAnchor pixel must MATCH the real WorldToScreenPoint pixel for the SAME (origin-relative) local position, and a behind-camera anchor must be culled by both.
+//   SymbolTileBlockBakerTests         — Bake against a REAL SymbolTileBlock — the native-lifetime half of the acceptance teeth (the dispose-SITE teeth — commit-overwrite / FIFO-evict / true-release / Clear — live in…
+//   SymbolUpCarrierChainTests         — the Up CARRIER CHAIN from Block A, driven end to end through the REAL BuildAsync (which itself calls the real Extract), asserted against a closed form written out here — never obtained from ProjectPoint or any production sampler.
 //   SymbolZoomGateGatherTests         — The pre-projection ZOOM gate: a symbol whose style layer is out of the live camera zoom's [minzoom, maxzoom) is hard-skipped in GatherSymbolPoints — never projected/staged/collided — instead of being projected, staged, collided and only THEN marked…
-//   WorldBillboardVertexLayoutTests   — P2 T-1: the vertex-layout/struct sync tooth.
-//   WorldSurfaceUpPopulationTests     — P2 T-3: the byte-identical invariant (§1 of the P2 plan) means the RENDER cannot tell you whether Up is populated correctly — a zeroed, a hardcoded +Y, and a correct per-projection Up would all render IDENTICALLY (the vertex attribute is written and unread…
+//   WorldBillboardVertexLayoutTests   — the vertex-layout/struct sync tooth.
+//   WorldSurfaceUpPopulationTests     — The byte-identical invariant means the RENDER cannot tell you whether Up is populated correctly — a zeroed, a hardcoded +Y, and a correct per-projection Up would all render IDENTICALLY (the vertex attribute is written and unread…
 
 using System.Collections.Generic;
 using NUnit.Framework;
@@ -94,8 +94,8 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // A centred icon+text pair: Owner (icon) immediately followed by its Rider (text) — the adjacency
-        // contract §10 D10 relies on (SymbolTileBlockBaker/TestSymbolPlan preserve list order per tile).
-        // Stage C: <paramref name="textOptional"/> stamps text-optional on the RIDER, and
+        // contract relies on (SymbolTileBlockBaker/TestSymbolPlan preserve list order per tile).
+        // <paramref name="textOptional"/> stamps text-optional on the RIDER, and
         // <paramref name="textTranslatePx"/> pushes the text's box clear of the icon's so a blocker can
         // address one half alone (at a shared anchor the two boxes overlap by construction).
         private static void AddPairSymbols(SymbolTileBuffer buffer, double3 sceneOriginRender,
@@ -109,7 +109,7 @@ namespace MapRenderer.Tests.Text.Placement
                     UvTopLeft = new float2(0f, 0f), UvBottomRight = new float2(1f, 1f), LineIndex = 0,
                 },
             };
-            // Owner (icon) then Rider (text), in that order — the adjacency contract §10 D10 relies on.
+            // Owner (icon) then Rider (text), in that order — the adjacency contract relies on.
             TestSymbolTileBuffer.AddPoint(buffer, sceneOriginRender, iconQuads, new float2(-8f, -8f), new float2(8f, 8f),
                 kind: SymbolKind.Icon,
                 iconImage: "shield", // a REAL identity — a null one would dedup-collide with any other
@@ -159,7 +159,6 @@ namespace MapRenderer.Tests.Text.Placement
             return (camGo, mapCamera, frame);
         }
 
-        // ── P10 (§10) ──────────────────────────────────────────────────────────────────────────────────────
         [Test]
         public void CentredPair_Tick_DrawsBothTextAndIconMeshes_OneCandidateBothHalves()
         {
@@ -179,13 +178,13 @@ namespace MapRenderer.Tests.Text.Placement
                 var pairBuffer = new SymbolTileBuffer();
                 AddPairSymbols(pairBuffer, frame.SceneOriginRender);
 
-                // R3: duplicate — the collision verdict is harvested one Tick late.
+                // Duplicate — the collision verdict is harvested one Tick late.
                 system.Tick(in frame, plan.Build(pairBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
                 system.Tick(in frame, plan.Build(pairBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
 
-                // §10 D8: TWO symbols (icon+text), ONE candidate — the whole point of the pairing fix (fewer
+                // TWO symbols (icon+text), ONE candidate — the whole point of the pairing fix (fewer
                 // sort/grid/fade operations than the pre-fix two-independent-candidates shape).
                 Assert.AreEqual(1, system.LastCandidateCount, "a centred pair must stage as exactly ONE candidate");
                 Assert.AreEqual(2, system.LastQuadCount, "both halves' quads must still be placed (icon quad + text quad)");
@@ -215,7 +214,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── C8 (stage C) at the Tick level: text-optional lets the ICON survive its text's collision loss ────
+        // ── C8 at the Tick level: text-optional lets the ICON survive its text's collision loss ──────────────
         //    The two runs differ ONLY by the property, so anything else that could explain a missing text mesh
         //    (the blocker, the translate, the tile split) is held constant.
         [Test]
@@ -262,7 +261,7 @@ namespace MapRenderer.Tests.Text.Placement
                     translatePx: new float2(TextOffsetPx, 0f),
                     translateAnchor: TextTranslateAnchor.Viewport);
 
-                // Two Ticks: the first schedules the collision, the second harvests its verdict (R3) — and,
+                // Two Ticks: the first schedules the collision, the second harvests its verdict — and,
                 // for the optional case, seeds the per-half drop mask the emit loop reads.
                 system.Tick(in frame, plan.Build(mixedBuffer), atlasTexture, deltaTime: float.PositiveInfinity,
                     symbolLayers: layers, spriteTexture: spriteTexture);
@@ -283,7 +282,7 @@ namespace MapRenderer.Tests.Text.Placement
                 else
                 {
                     Assert.AreEqual(1, system.LastQuadCount,
-                        "without text-optional only the blocker places — the pair drops all-or-nothing (§10 P3)");
+                        "without text-optional only the blocker places — the pair drops all-or-nothing (P3)");
                     Assert.IsFalse(iconShows, "un-optional: the icon drops WITH its text");
                     Assert.IsFalse(textShows, "un-optional: the text drops too");
                 }
@@ -301,7 +300,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── P3/P4 at the Tick level: a real collision loss drops BOTH halves, not just the icon ──────────────
+        // ── At the Tick level: a real collision loss drops BOTH halves, not just the icon ────────────────────
         [Test]
         public void CentredPair_Tick_BlockedByHigherPrioritySymbol_BothHalvesDropTogether_NoBareNumber()
         {
@@ -367,7 +366,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S20 T4: over a STABLE synthetic symbol set, a steady-state <see cref="SymbolPlacementSystem.Tick"/>
+    /// Over a STABLE synthetic symbol set, a steady-state <see cref="SymbolPlacementSystem.Tick"/>
     /// (project → billboard-build → submit) allocates ZERO managed garbage.
     /// </summary>
     [TestFixture]
@@ -488,10 +487,10 @@ namespace MapRenderer.Tests.Text.Placement
                 "a steady-state Tick (same label count/shape as the warm-up) must allocate ZERO managed garbage");
         }
 
-        // ── Epic A / A1 hardening round (B): the tooth above never supplies worldTextBase, so
+        // ── The tooth above never supplies worldTextBase, so
         //    WorldSymbolRenderer.EndFrame's WorldBillboardMeshBuilder.Build + material-bind +
         //    EnsureChild/present branch never runs (every world slot resolves a null material and
-        //    takes the "hide" branch) — the built+presented path A1 actually ships was unmeasured. This adds
+        //    takes the "hide" branch) — the built+presented path production ships was unmeasured. This adds
         //    that arm: a world text base (so TEXT slots build+present for real) PLUS one Icon-kind symbol with
         //    NO world icon material configured (worldIconBase omitted) — its world slot is emitted-but-
         //    unrenderable every Tick, the exact steady-state shape the round's fix-A idle-reclaim bug hits
@@ -515,7 +514,7 @@ namespace MapRenderer.Tests.Text.Placement
             };
 
             using var atlasTexture = BuildTinyAtlasTexture();
-            long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 5); // matches camera zoom (Risk R1 + coverage-cull realism)
+            long tileKey = TestTileKeys.PackedContaining(lookAt, zoom: 5); // matches camera zoom (coverage-cull realism)
             // allowOverlap: true — the 20 symbols sit within a few px of each other (i*10, i*5 offsets), so
             // WITHOUT it collision would cull all but the sort-key winner (this tooth wants a stable, fully-
             // placed scene every Tick, not a collision fixed-point).
@@ -539,11 +538,11 @@ namespace MapRenderer.Tests.Text.Placement
                 sortKey: 0f,
                 featureIndex: textCount,
                 tileKey: tileKey,
-                // R3: this symbol's AnchorRender coincides exactly with textSymbols[0]'s (both sit at
+                // This symbol's AnchorRender coincides exactly with textSymbols[0]'s (both sit at
                 // frame.SceneOriginRender + zero offset), and PointFadeId hashes (AnchorRender,
                 // MaterialIndex, Text, IconImage) — NOT FeatureIndex/TileKey — so with both Text and
                 // IconImage left at their default null, this candidate shared a FadeId with textSymbols[0].
-                // Under R3, FadeId is the display key (SymbolCandidate.FadeId's uniqueness contract), so a
+                // FadeId is the display key (SymbolCandidate.FadeId's uniqueness contract), so a
                 // co-live collision fires AssertFadeIdsUnique's Debug.LogAssertion every steady-state Tick
                 // — a real per-Tick managed allocation this GC-zero tooth exists to catch. Distinct
                 // IconImage keeps this candidate's identity unique (harmless here — IconImage is an
@@ -577,7 +576,7 @@ namespace MapRenderer.Tests.Text.Placement
                 "TEXT slot AND an emitted-but-unrenderable ICON slot must allocate ZERO managed garbage.");
         }
 
-        // ── Stage AC (curved-world) T-ALLOC: extends the tooth above to a CURVED-emitting frame — the
+        // ── T-ALLOC: extends the tooth above to a CURVED-emitting frame — the
         //    curved arm of WorldSymbolRenderer.Emit must reuse the slot's NativeLists exactly as point does,
         //    not allocate per glyph. Curved now shares the SAME world sink as point/icon (StageCurved's
         //    emit.IsWorld=true), so this is the analogous steady-state warm-up + Not.AllocatingGCMemory check. ──
@@ -648,7 +647,7 @@ namespace MapRenderer.Tests.Text.Placement
                 "curved arm of WorldSymbolRenderer.Emit reuses the slot's NativeLists exactly like point.");
         }
 
-        // ── §10 D8 P11: a centred icon+text pair's steady-state Tick allocates ZERO. The pair collapses two
+        // ── P11: a centred icon+text pair's steady-state Tick allocates ZERO. The pair collapses two
         //    records into ONE SymbolCandidate/emit-range pair, which is fewer sort/grid/fade operations than
         //    before, not more — SymbolPairing is a stateless O(1) helper and AppendPointHalf reuses the existing
         //    emit NativeArray, so nothing here should allocate any differently than the lone-icon tooth above. ──
@@ -731,7 +730,7 @@ namespace MapRenderer.Tests.Text.Placement
                 "must allocate ZERO managed garbage.");
         }
 
-        // ── C8 (stage C): the same steady-state zero-alloc claim for a pair that is ACTUALLY placing without
+        // ── C8: the same steady-state zero-alloc claim for a pair that is ACTUALLY placing without
         //    one half — the state that exercises every new branch (the collision write-back, the dropped-halves
         //    map write in HarvestCollision, the stage job's probe, the emit skip). The map is a persistent
         //    NativeHashMap cleared and refilled in place, so none of that may reach the managed heap. ──
@@ -826,7 +825,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(2, system.LastCandidateCount, "precondition: the blocker + the pair.");
             Assert.AreEqual(2, system.LastQuadCount,
                 "precondition: the blocker's quad and the pair's ICON quad — the text half must be dropped, " +
-                "or this measures the ordinary all-or-nothing path rather than stage C's.");
+                "or this measures the ordinary all-or-nothing path rather than the optional-half one.");
 
             Assert.That(() =>
                 {
@@ -837,7 +836,7 @@ namespace MapRenderer.Tests.Text.Placement
                 "managed garbage.");
         }
 
-        // ── Stage 2 (symbols-async-reconcile) T-ALLOC: a WARM per-frame cross-tile dedup allocates ZERO. The
+        // ── T-ALLOC: a WARM per-frame cross-tile dedup allocates ZERO. The
         //    interning happens ONCE at CompleteBuild, so the per-frame CollectInto does no string work; and the
         //    integer DedupKey (a `readonly struct : IEquatable<DedupKey>`) does NOT box in the reused _dedup.
         //    RED-verify: make DedupKey a `class` (or drop IEquatable, forcing boxed comparisons) → per-symbol
@@ -880,12 +879,12 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// B-2: the parallel symbol-projection pass. Every visible symbol's screen geometry (point anchors + line
+    /// The parallel symbol-projection pass. Every visible symbol's screen geometry (point anchors + line
     /// paths) is projected up front by the Burst <see cref="SymbolProjectionJob"/> — dispatched with .Run()
     /// (Burst inline, no Schedule/Complete, no count threshold) — and the staging pass reads the precomputed
     /// positions. Teeth: (1) the job's per-point output equals the inline
     /// <see cref="SymbolScreenProjection.TryProjectPoint"/> (one copy of the math); (2) over an INTERLEAVED scene
-    /// (point + curved + B-3-culled + null) the pass places the gathered symbols and excludes the ungathered ones
+    /// (point + curved + distance-culled + null) the pass places the gathered symbols and excludes the ungathered ones
     /// (the far point is culled, the null is skipped) with a STABLE mesh across repeated Ticks — the real risk is
     /// the symbol→flat-point index mapping drifting when some symbols aren't gathered.
     /// </summary>
@@ -944,7 +943,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── S2-T2: same parity, but with a NON-identity Rebase (a real globe rebase) — proves the Burst job
+        // ── T2: same parity, but with a NON-identity Rebase (a real globe rebase) — proves the Burst job
         //    carries the rotation identically to the inline (managed) seam, not just the identity fast-path. ──
         [Test]
         public void SymbolProjectionJob_MatchesInlineProjection_PerPoint_NonIdentityRebase()
@@ -1007,12 +1006,12 @@ namespace MapRenderer.Tests.Text.Placement
 
         // ── Tooth 2: over an INTERLEAVED scene (on-screen point + null gap + far-culled point + curved line + on-
         //    screen point) the .Run() projection pass must (a) exclude the ungathered symbols — the far point is
-        //    B-3 distance-culled — and (b) still place the on-screen symbols, with a mesh that is
+        //    distance-culled — and (b) still place the on-screen symbols, with a mesh that is
         //    STABLE across repeated Ticks. This is the symbol→flat-point index-mapping tooth: a mapping that drifted
         //    when some symbols aren't gathered (point/curved advance the flat cursor by 1 vs N; a culled symbol advances
         //    by 0) would mis-project the on-screen symbols off-screen (quads→0) or corrupt the cull count. The
         //    stability check also guards the UninitializedMemory output buffers against a partial fill. Sort keys
-        //    are distinct so A-5 incumbency is a no-op across Ticks, and the default (+inf) deltaTime snaps the fade
+        //    are distinct so incumbency is a no-op across Ticks, and the default (+inf) deltaTime snaps the fade
         //    both times, so a second Tick over identical inputs is byte-identical iff the fill is deterministic. ──
         [Test]
         public void JobFill_OverInterleavedScene_PlacesGathered_ExcludesUngathered_AndIsStable()
@@ -1022,20 +1021,20 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 var buffer = new SymbolTileBuffer();
                 h.AddPoint(buffer, h.Origin, 0f, "A", 0);                             // on-screen point
-                h.AddPoint(buffer, h.Origin + new double3(1e8, 0, 1e8), 1f, "F", 1);  // far → B-3 distance culled
+                h.AddPoint(buffer, h.Origin + new double3(1e8, 0, 1e8), 1f, "F", 1);  // far → distance culled
                 h.AddCurvedAcrossView(buffer, 2);                                     // line symbol (N path points)
                 h.AddPoint(buffer, h.Origin + new double3(50_000, 0, 0), 3f, "B", 3); // another on-screen point
                 return buffer;
             }
 
-            // R3: the collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick (§2.6) —
+            // The collision verdict a Tick's emit reads is harvested from the PREVIOUS Tick —
             // duplicate the first Tick (same scene content — FadeIds are stable across separate Scene() calls
             // building structurally-identical symbols) so the assertions below read a settled state.
             h.System.TickSymbols(in h.Frame, Scene(), h.Atlas, h.Camera.Projection);
             h.System.TickSymbols(in h.Frame, Scene(), h.Atlas, h.Camera.Projection);
 
-            // Epic A / A1 (hardening round C) + Stage AC: the two POINT symbols ("A"/"B") draw through the
-            // WORLD path since A1, and the curved line ALSO draws through it since Stage AC — so the
+            // The two POINT symbols ("A"/"B") draw through the
+            // WORLD path, and the curved line ALSO draws through it — so the
             // index-mapping stability this tooth exists for is pinned entirely on the world surface (points
             // AND the curved symbol share ONE world text slot: same TileKey=0L/Slot=0/Kind=Text — see
             // Harness.Point/CurvedAcrossView).
@@ -1080,7 +1079,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Origin = Camera.Projection.Project(new GeoCoordinate { Latitude = 20.0, Longitude = 20.0 });
                 Frame = new SceneFrame { SceneOriginRender = Origin, Rebase = float3x3.identity };
                 Atlas = BuildTinyAtlasTexture();
-                // Epic A / A1: point symbols now draw through the world path — needs its own world base
+                // Point symbols draw through the world path — needs its own world base
                 // material for the stability tooth to observe real world-mesh content.
                 System = new SymbolPlacementSystem(Camera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
             }
@@ -1151,7 +1150,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S20 T2 (Core-vs-real-camera pin): a synthetic world anchor's <see cref="SymbolScreenProjection.TryProjectAnchor"/>
+    /// Core-vs-real-camera pin: a synthetic world anchor's <see cref="SymbolScreenProjection.TryProjectAnchor"/>
     /// pixel must MATCH the real <see cref="Camera.WorldToScreenPoint"/> pixel for the SAME
     /// (origin-relative) local position, and a behind-camera anchor must be culled by both.
     /// </summary>
@@ -1247,7 +1246,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Symbol-label perf Phase 1 / Stage 1 (design §4, §5 B): <see cref="SymbolTileBlockBaker.Bake"/>
+    /// <see cref="SymbolTileBlockBaker.Bake"/>
     /// against a REAL <see cref="SymbolTileBlock"/> — the native-lifetime half of the Stage-1 acceptance
     /// teeth (the dispose-SITE teeth — commit-overwrite / FIFO-evict / true-release / Clear — live
     /// in <c>SymbolTileStoreTests</c> against a fake <see cref="IDisposable"/> counter, since the store
@@ -1387,7 +1386,7 @@ namespace MapRenderer.Tests.Text.Placement
         // ── Native-representation migration: PairRoles is a per-raw-slot column of the RESOLVED pair role
         //    (the same SymbolPairing resolution the baker already applies), so the reconciler reads it instead of
         //    re-resolving over the tile list. A resolved owner+rider adjacent pair → Owner/Rider; a plain point
-        //    and a curved record → None (§10 fence). ──
+        //    and a curved record → None (the pairing fence). ──
         [Test]
         public void Bake_PairRolesColumn_MirrorsResolvedPairing()
         {
@@ -1417,7 +1416,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── Native-representation migration (additive): TextIds/IconImageIds are per-symbol raw-order columns of the
-        //    INTERNED text/icon ids — UMR-87: interned at symbol-construction time (mirroring
+        //    INTERNED text/icon ids — interned at symbol-construction time (mirroring
         //    StyledSymbolTileBuilder.Shape's emit sites), Bake now just copies them onto the block. Pins:
         //    (1) distinct strings take distinct ids in construction order (Text before IconImage, per symbol,
         //    call order); (2) a null field bakes id 0; (3) a shared string (symbol a's icon reused by b)
@@ -1454,7 +1453,7 @@ namespace MapRenderer.Tests.Text.Placement
             finally { block.Dispose(); }
         }
 
-        // ── Positive control (S48/S51 idiom): an un-Disposed block IS visible in DebugLiveAllocCount, proving
+        // ── Positive control: an un-Disposed block IS visible in DebugLiveAllocCount, proving
         //    the counter has teeth before the throwing-bake test below leans on it. ──
         [Test]
         public void Bake_PositiveControl_UndisposedBlock_CounterNonZeroDelta()
@@ -1519,7 +1518,7 @@ namespace MapRenderer.Tests.Text.Placement
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// P2 REQUIRED-1 — the `Up` CARRIER CHAIN from Block A, driven end to end through the REAL
+    /// The `Up` CARRIER CHAIN from Block A, driven end to end through the REAL
     /// <see cref="StyledSymbolTileBuilder.BuildAsync"/> (which itself calls the real
     /// <see cref="SymbolFeatureExtractor.Extract"/>), asserted against a closed form written
     /// out here — never obtained from <see cref="IProjection.ProjectPoint"/> or any production sampler.
@@ -1541,9 +1540,9 @@ namespace MapRenderer.Tests.Text.Placement
     public class SymbolUpCarrierChainTests
     {
 
-        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// <summary>A synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
         /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
-        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        /// leak would be invisible, which is the failure class this guard exists to catch.</summary>
         [TearDown]
         public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
         private static readonly TileId TileId0 = new TileId { Z = 10, X = 500, Y = 500 };
@@ -1995,7 +1994,7 @@ namespace MapRenderer.Tests.Text.Placement
                     "triggers the instant this is violated, REGARDLESS of which stream each attribute is on.");
 
             // The array's LAST element must be TexCoord7 (SdfWidenPx) — the frozen "append, never
-            // reshuffle" rule, now one append further on than P2's Up.
+            // reshuffle" rule, now one append further on than the Up carrier.
             Assert.AreEqual(VertexAttribute.TexCoord7, descriptors[descriptors.Length - 1].attribute,
                 "TexCoord7 (SdfWidenPx) must be the new truly-last descriptor");
         }
@@ -2059,7 +2058,7 @@ namespace MapRenderer.Tests.Text.Placement
             using var atlasTexture = BuildTinyAtlasTexture();
             using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
-            // R3: collision verdicts apply one Tick late — duplicate before reading placement.
+            // Collision verdicts apply one Tick late — duplicate before reading placement.
             system.TickSymbols(in frame, buffer, atlasTexture, projection);
             system.TickSymbols(in frame, buffer, atlasTexture, projection);
             Assert.AreEqual(1, system.LastQuadCount, "precondition: the label must place (not cull).");
@@ -2079,11 +2078,11 @@ namespace MapRenderer.Tests.Text.Placement
             double sinPhi = math.sin(phi), cosPhi = math.cos(phi);
             double sinLam = math.sin(lambda), cosLam = math.cos(lambda);
             // Closed form written out here, not derived by calling ProjectPoint: render axes are (X,Z,Y) —
-            // SphericalProjection.cs's own documented axis-swap (docs §7) — so Up.y carries sinφ.
+            // SphericalProjection.cs's own documented axis-swap — so Up.y carries sinφ.
             var expectedUp = new float3((float)(cosPhi * cosLam), (float)sinPhi, (float)(cosPhi * sinLam));
 
             double3 anchorRender = projection.Project(Anchor);
-            double3 upRender = projection.ProjectPoint(Anchor).Up; // the value the extractor threads through P2's chain
+            double3 upRender = projection.ProjectPoint(Anchor).Up; // the value the extractor threads through the carrier chain
 
             WorldBillboardVertex[] v = RunPointTick(projection, MakePointSymbol(anchorRender, upRender));
             Assert.AreEqual(4, v.Length, "one point quad, 4 corners");
@@ -2203,7 +2202,7 @@ namespace MapRenderer.Tests.Text.Placement
             // fractions — never out of order, never a duplicate. NOT hardcoded ascending: SymbolStagingMath.
             // StageCurvedAnchor's text-keep-upright reversal ("a centre tangent pointing leftward reads
             // right-to-left; walk the arc reversed...") flips the WHOLE symbol's walk direction when the
-            // anchor's on-screen tangent points leftward — a real, pre-existing (P1, untouched by P2) branch
+            // anchor's on-screen tangent points leftward — a real, pre-existing, untouched branch
             // this fixture's camera/anchor geometry happens to trigger, producing DESCENDING t here. Either
             // direction is a correct render; only a MIXED order (a glyph out of step with its neighbours) or
             // a duplicate (all three landing on one point) would be a real defect.

@@ -13,11 +13,9 @@ namespace MapRenderer.Tests
     /// Test-only adapter between the per-feature <c>uint[]</c> command streams fixtures still author
     /// (<c>MvtCommandStream</c>, <c>MvtFixtureStreams</c>, hand-written literals) and the native-flat
     /// <c>(commands, featureOffsets, featureLengths)</c> shape <see cref="MvtGeometryMaterializer"/>'s
-    /// constructor takes since 2a. Production (<c>MvtDecoder</c>) builds that shape directly off the wire and
-    /// has no need of this; test fixtures still find the per-feature-array shape the readable one to author,
-    /// so this is the one place that converts between the two — the "computed adapter in the test assembly"
-    /// footprint the repo's test-code-bloat convention allows in place of a test-only member on the
-    /// production class.
+    /// constructor takes. Production (<c>MvtDecoder</c>) builds that shape directly off the wire and has no
+    /// need of this; test fixtures find the per-feature-array shape the readable one to author, so this is
+    /// the one place that converts between the two.
     /// </summary>
     internal static class MvtGeometryMaterializerTestFactory
     {
@@ -89,8 +87,7 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>One-shot convenience: flatten, construct, materialize once, dispose the flattened
-        /// buffers. The shape almost every call site wants — the direct replacement for the pre-2a
-        /// <c>new MvtGeometryMaterializer(tile, extent, kinds, commands).Materialize()</c>.</summary>
+        /// buffers — the shape almost every call site wants.</summary>
         internal static TileGeometryBuffers Materialize(
             TileId tile, double extent, IReadOnlyList<TileGeometryType> kinds, IReadOnlyList<uint[]> featureCommands)
         {

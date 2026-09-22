@@ -16,7 +16,7 @@ namespace MapRenderer.Unity.View
     ///
     /// <para><see cref="Logical"/> — the consumer already divides by the device-pixel ratio (the symbol
     /// shaders' <c>_ScreenParamsLogical</c>, or the CPU's <c>WebMercator.TilePixelSize</c> / camera-altitude
-    /// framing). No conversion is owed: <see cref="Logical"/> is the IDENTITY by construction.</para>
+    /// framing). No conversion is owed: <see cref="Logical"/> is the IDENTITY.</para>
     ///
     /// <para><see cref="Device"/> — the consumer measures against the PHYSICAL framebuffer (the line/fill
     /// shaders' <c>MapPixelsToWorld</c>, which spans against <c>_ScreenParams</c>; the SDF text shader's
@@ -65,17 +65,17 @@ namespace MapRenderer.Unity.View
         }
 
         /// <summary>
-        /// The ONE px→consumer-space conversion for the style's px-valued properties (S107 Stage 1).
+        /// The ONE px→consumer-space conversion for the style's px-valued properties.
         /// <paramref name="logicalPx"/> is a logical (CSS) pixel value straight off the style;
         /// <paramref name="target"/> names which space the consumer measures in (see <see cref="PixelSpace"/>).
         ///
-        /// <para><see cref="PixelSpace.Logical"/> returns <paramref name="logicalPx"/> unchanged — the
-        /// identity, by construction. <see cref="PixelSpace.Device"/> multiplies by the ratio.</para>
+        /// <para><see cref="PixelSpace.Logical"/> returns <paramref name="logicalPx"/> unchanged.
+        /// <see cref="PixelSpace.Device"/> multiplies by the ratio.</para>
         ///
         /// <para>A <paramref name="devicePixelRatio"/> outside the plausible band falls back to 1 via
         /// <see cref="SafeRatio"/> — the same fallback <see cref="DeviceToLogicalPx(double,double)"/> and the
-        /// camera framing take, so an unconfigured ratio cannot scale the paint and the camera differently.
-        /// Since S108 that is structural (one guard, one home), not a claim two call sites keep in step.</para>
+        /// camera framing take, so an unconfigured ratio cannot scale the paint and the camera
+        /// differently.</para>
         /// </summary>
         public static double LogicalToDevicePx(double logicalPx, PixelSpace target, double devicePixelRatio)
         {
@@ -84,7 +84,7 @@ namespace MapRenderer.Unity.View
         }
 
         /// <summary>
-        /// The ONE device→logical conversion (S108 Stage 3), the inverse direction of
+        /// The ONE device→logical conversion, the inverse direction of
         /// <see cref="LogicalToDevicePx"/>: <c>logicalPx = devicePx / dpr</c>. Every site that takes a
         /// PHYSICAL measurement into the map's logical-pixel basis routes through it — the camera's framing
         /// viewport, the tile selector's framing viewport, and the mouse/touch interaction seams.
@@ -112,10 +112,9 @@ namespace MapRenderer.Unity.View
         /// (<c>CameraPoseMath.MetersPerPixel(zoom)</c> is metres per logical px) meets a <c>_Width</c> that
         /// reached the shader in DEVICE px, so the two must share a basis.
         ///
-        /// <para>Deliberately NOT <see cref="DeviceToLogicalPx(double,double)"/>, whose doc is explicit that its
-        /// input is a physical <b>measurement</b> — a framebuffer size, a cursor coordinate. This input is a
-        /// per-pixel RATE and so is the output; the arithmetic coincides, the meaning does not. Same reason the
-        /// two existing directions were kept as separate named members rather than unified (S108).</para>
+        /// <para>NOT <see cref="DeviceToLogicalPx(double,double)"/>, whose input is a physical
+        /// <b>measurement</b> — a framebuffer size, a cursor coordinate. This input is a per-pixel RATE and
+        /// so is the output; the arithmetic coincides, the meaning does not.</para>
         ///
         /// <para>Routed through <see cref="SafeRatio"/> because that is the plausibility-band guard: a raw
         /// <c>/ devicePixelRatio</c> sends the ruler to <c>+∞</c> at dpr 0 and propagates NaN into every dashed
@@ -124,7 +123,7 @@ namespace MapRenderer.Unity.View
         public static double PerLogicalPxToPerDevicePx(double perLogicalPx, double devicePixelRatio)
             => perLogicalPx / SafeRatio(devicePixelRatio);
 
-        /// <summary>The floor of the plausible band — 40 dpi. Deliberately far below anything that ships:
+        /// <summary>The floor of the plausible band — 40 dpi. Far below anything that ships:
         /// Android's sparsest bucket (<c>ldpi</c>, 120 dpi) is 0.75 and a ~100-dpi desktop panel is 0.625.
         /// It is NOT 1, because sub-1 ratios are legitimate — a floor of 1 would silently rebase the map on
         /// every low-density device rather than reject a bad reading.</summary>
@@ -136,27 +135,21 @@ namespace MapRenderer.Unity.View
         private const double MaxPlausibleRatio = 8.0;
 
         /// <summary>The ratio actually applied: one outside the plausible band is unusable, so it degrades to
-        /// 1. How badly it fails varies with how far out it is — a non-positive or infinite ratio blanks or
-        /// mirrors the paint and sends the camera framing to infinity, while a merely implausible one (0.1,
-        /// 100) rescales the whole map by that factor. Neither is a value any display reports. The single home of that
-        /// fallback for both directions — pinned by <c>DevicePixelRatioFramingTests.RatioFallback_HasExactlyOneHome_InDeviceScaling</c>,
-        /// which sweeps production sources and requires this file to be the only match.
+        /// 1. A non-positive or infinite ratio blanks or mirrors the paint and sends the camera framing to
+        /// infinity; a merely implausible one (0.1, 100) rescales the whole map by that factor. Neither is a
+        /// value any display reports. This is the single home of that fallback for both directions, pinned by
+        /// <c>DevicePixelRatioFramingTests.RatioFallback_HasExactlyOneHome_InDeviceScaling</c>.
         ///
         /// <para>The band is <see cref="MinPlausibleRatio"/>…<see cref="MaxPlausibleRatio"/>, inclusive at
-        /// both ends; each bound's own doc says why it sits where it does. Both are placed far from real
-        /// hardware on purpose, so nothing a panel legitimately reports lands near a bound and anything that
-        /// does is garbage.</para>
+        /// both ends; each bound's own doc says why it sits where it does. Both sit far from real hardware,
+        /// so nothing a panel legitimately reports lands near a bound.</para>
         ///
-        /// <para>A fallback, deliberately NOT a clamp. A clamp invents a plausible-looking value — a map
-        /// drawn at the floor still looks like a map, so the substitution is invisible to inspection — where
-        /// the fallback yields the documented neutral default, which is the known baseline every test runs
-        /// at. It also keeps ONE behaviour for "unusable" instead of splitting the guard's semantics at the
-        /// bounds.</para>
+        /// <para>A fallback, NOT a clamp. A clamp invents a plausible-looking value — a map drawn at the
+        /// floor still looks like a map, so the substitution is invisible to inspection — where the fallback
+        /// yields the neutral default every test runs at, and keeps ONE behaviour for "unusable".</para>
         ///
-        /// <para><c>NaN</c> and both infinities fail the band by DECISION, not by accident (S108 §6.1
-        /// finding 6): they fail both comparisons, so a not-a-number ratio is simply "not plausible" like any
-        /// other rejected value. That also closes a live hole — <c>+∞</c> satisfied the old positivity test
-        /// and PROPAGATED, taking the paint to <c>+∞</c> and the logical viewport to 0.</para></summary>
+        /// <para><c>NaN</c> and both infinities fail both comparisons, so they are rejected like any other
+        /// implausible value. That is the DECISION, not an accident.</para></summary>
         private static double SafeRatio(double devicePixelRatio)
             => devicePixelRatio >= MinPlausibleRatio && devicePixelRatio <= MaxPlausibleRatio
                 ? devicePixelRatio

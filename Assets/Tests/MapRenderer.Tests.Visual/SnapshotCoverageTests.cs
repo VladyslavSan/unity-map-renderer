@@ -1,14 +1,14 @@
-// Fast-lane tests of the SnapshotCoverage/SnapshotVerdict test-infra types (UMR-176 pack).
+// Fast-lane tests of the SnapshotCoverage/SnapshotVerdict test-infra types.
 //
 // Stays at Visual/'s root, not a topic subfolder: these test a Tests.Shared test-harness
 // type, not a Core/Unity/Jobs production type, so no commit-scope topic word fits, and
-// docs/test-conventions.md §1's vocabulary does not answer 'which folder' for a fixture
+// docs/test-conventions.md's vocabulary does not answer 'which folder' for a fixture
 // that tests test-infrastructure. Both classes are also this assembly's only fast-lane
 // members (Tools/core-tests/core-tests.csproj) — merging them together is the ceiling;
 // neither can join any GPU-touching Visual/ file without breaking the fast-lane compile.
 //
 // Contents:
-//   SnapshotColorTests     — S07 — unit tests for the region samplers added to SnapshotCoverage (SampleRegionMeanColor + RegionColorVariance), used by the multi-layer reorder snapshot test.
+//   SnapshotColorTests     — unit tests for the region samplers on SnapshotCoverage (SampleRegionMeanColor + RegionColorVariance), used by the multi-layer reorder snapshot test.
 //   SnapshotCoverageTests  — Unit tests for SnapshotCoverage and SnapshotVerdict.
 
 using NUnit.Framework;
@@ -18,11 +18,11 @@ using UnityEngine;
 namespace MapRenderer.Tests.Visual
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // SnapshotColorTests — S07 — unit tests for the region samplers added to SnapshotCoverage (SampleRegionMeanColor…
+    // SnapshotColorTests — unit tests for the region samplers on SnapshotCoverage (SampleRegionMeanColor…
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S07 — unit tests for the region samplers added to <see cref="SnapshotCoverage"/>
+    /// Unit tests for the region samplers on <see cref="SnapshotCoverage"/>
     /// (<c>SampleRegionMeanColor</c> + <c>RegionColorVariance</c>), used by the multi-layer
     /// reorder snapshot test. Engine-free → runs in both the Unity EditMode runner and the
     /// fast dotnet core-tests project. Hand-built frames with KNOWN regions pin exact
@@ -530,7 +530,7 @@ namespace MapRenderer.Tests.Visual
                 "Pixels outside tolerance must be counted as fill.");
         }
 
-        // ─── MeanLuminanceOfNonBackground tests (S32) ────────────────────────────────
+        // ─── MeanLuminanceOfNonBackground tests ─────────────────────────────────────
 
         [Test]
         public void MeanLuminance_SolidBackground_ReturnsZero()

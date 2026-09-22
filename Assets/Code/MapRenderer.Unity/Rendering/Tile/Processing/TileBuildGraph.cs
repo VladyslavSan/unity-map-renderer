@@ -11,7 +11,7 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// The per-tile graph-arm build (job-scheduling-design.md §3.2, §8 stage 3) — every tile's owner from
+    /// The per-tile graph-arm build (job-scheduling-design.md) — every tile's owner from
     /// measure to consume. <see cref="TilePrologueOutput"/> is the hand-off into it: its dense
     /// <c>ILayerMeshBuild[]</c>, one per the kick's <c>ITileMeshRenderLayer</c>s, becomes this graph's own
     /// <see cref="_layers"/> ALIAS — not a copy — the moment <see cref="ScheduleMeasure"/> is called. This
@@ -41,8 +41,8 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         /// <summary>The consumer-kind sibling of <see cref="_ownedGeometry"/>: a SOURCE tile's every
         /// layer's own request input borrows its geometry straight from the decoded tile this
-        /// reference keeps alive, rather than from a buffer this graph mints itself (Q1,
-        /// job-scheduling-design.md §8 stage 3). Transferred to this graph the moment
+        /// reference keeps alive, rather than from a buffer this graph mints itself
+        /// (job-scheduling-design.md). Transferred to this graph the moment
         /// <see cref="ScheduleMeasureFromDecode"/> is called — including on that call's own throw path —
         /// and released exactly once, LAST in
         /// <see cref="Dispose"/> (after every layer and after <see cref="_ownedGeometry"/>): the layers'
@@ -93,14 +93,14 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <paramref name="layers"/>, not incrementally per element.</para>
         /// </summary>
         /// <param name="layers">One build per background layer, in SLOT order — this graph ALIASES the
-        /// array (§2.4), it does not copy it. A <c>null</c> element is a layer with nothing to build. Every
+        /// array, it does not copy it. A <c>null</c> element is a layer with nothing to build. Every
         /// non-null build's own input is expected to borrow <paramref name="ownedGeometry"/> itself (or
         /// another buffer this graph does not own) — a build's own <c>Dispose</c> never disposes it.</param>
         /// <param name="ownedGeometry">The ONE per-tile geometry buffer this graph takes ownership of,
         /// disposed exactly once in <see cref="Dispose"/> — see that field's own doc for why a per-layer
         /// buffer would be wrong here. <c>default</c> (uncreated) is a valid "nothing to own" value.</param>
         /// <param name="deps">Upstream dependency every layer's graph must wait for — the seam a test uses
-        /// to hold this genuinely in flight (job-scheduling-design.md E2: a delay job's handle passed here,
+        /// to hold this genuinely in flight (job-scheduling-design.md: a delay job's handle passed here,
         /// not a test-only production hook), and in production simply <c>default</c>.</param>
         internal static TileBuildGraph ScheduleMeasure(
             ILayerMeshBuild[] layers, TileGeometryBuffers ownedGeometry, JobHandle deps = default)
@@ -125,7 +125,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// default)</c> is ambiguous (CS0121) between <c>TileGeometryBuffers</c> and
         /// <c>SharedDisposable{IDecodedTile}</c> — the compiler cannot pick an arm from a bare <c>default</c>
         /// literal. A SOURCE tile's layers
-        /// borrow their geometry from a decoded tile instead of a buffer this graph mints itself (Q1).
+        /// borrow their geometry from a decoded tile instead of a buffer this graph mints itself.
         /// <paramref name="decode"/> is transferred on entry, including on this call's own throw path (the
         /// catch releases it after <see cref="ScheduleLayers"/> has freed what it built) — the caller must
         /// not release it too.</summary>
@@ -196,7 +196,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <summary>Completes the measure graphs, then asks each non-null layer to schedule its own write
         /// step — <see cref="ILayerMeshBuild.TryScheduleWrite"/> reads its own kind's error flag, settles a
         /// faulted or empty layer as zero-vertex (no payload, no array — the observable half of
-        /// job-scheduling-design.md §3.2's "settles a faulted layer as zero-vertex, mirroring a faulting
+        /// job-scheduling-design.md's "settles a faulted layer as zero-vertex, mirroring a faulting
         /// processor"), and returns <c>false</c> for one. This type itself dispatches nothing per kind.</summary>
         /// <param name="meshDataArraysAllocated">Count of layers that produced a real array this call.</param>
         internal void CompleteMeasureAndScheduleWrite(out int meshDataArraysAllocated)

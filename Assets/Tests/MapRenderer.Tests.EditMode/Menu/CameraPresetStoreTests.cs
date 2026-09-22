@@ -4,7 +4,7 @@ using MapRenderer.App.Menu;
 namespace MapRenderer.Tests.EditMode.Menu
 {
     /// <summary>Round-trip / lifecycle teeth for <see cref="CameraPresetStore"/> — the debug-menu camera-preset
-    /// persistence (UMR-78). Writes to editor PlayerPrefs, so it uses a TEST-ONLY key prefix (never the production
+    /// persistence. Writes to editor PlayerPrefs, so it uses a TEST-ONLY key prefix (never the production
     /// <see cref="CameraPresetStore.DefaultKeyPrefix"/>): editor PlayerPrefs are one per-project store shared with
     /// Play mode, and a suite that cleared the production slots would delete the user's real saved presets on every
     /// gate run (the "presets keep resetting" bug). Every slot is cleared before and after each test so the suite
