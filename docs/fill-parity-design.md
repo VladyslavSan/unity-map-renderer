@@ -335,7 +335,7 @@ than pinning direction against a wrong-direction build. Its GREEN is what pins t
 
 ### A raster-orientation trap this stage walked into
 
-`SnapshotRenderer.RawPixels` documented itself as top-left origin. It is **bottom-left** (Unity's native
+`SnapshotRenderer.Pixels` documented itself as top-left origin. It is **bottom-left** (Unity's native
 `ReadPixels`/`GetRawTextureData` convention; this class does not flip, unlike `SpriteSheet`, which
 deliberately does). The first sign test was built on the doc and reported a correct southward move as a
 shader bug. Doc corrected in place. Nothing caught this sooner because every other consumer measures counts,

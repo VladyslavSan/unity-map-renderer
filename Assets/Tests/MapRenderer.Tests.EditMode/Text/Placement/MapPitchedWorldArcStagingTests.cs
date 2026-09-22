@@ -1,43 +1,1326 @@
-// Unity EditMode only — NOT registered in Tools/core-tests/core-tests.csproj (W1 plan §9: that project's
-// file list has no Text/Placement entry, and this stage must not add one; the Unity gate is the only
-// instrument here).
+// Text/Placement/MapPitchedWorldArcStagingTests.cs — collision-grid/job placement, cross-tile store, horizon cull, icon-skirt carrier chain, curved world-arc staging under a pitched camera, and the shaped-symbol blittability/tile-builder teeth.
 //
-// Stage W1 — the STAGING arm of the map-pitched WORLD-ARC layout teeth (W1-T6…T10). These call
-// SymbolStagingMath.StageCurved directly over hand-built synthetic paths, which is the only way to reach the
-// three properties the rendered fixture (MapPitchedWorldArcLayoutTests) structurally cannot:
+// No single production area dominates; kept in the order the topic-and-lane pack assembled them, each fixture independent of its neighbours.
 //
-//   • T6/T7 — the two DELIBERATE approximations W1 records. A comment is not a tooth; each of these is the
-//     test that goes RED the moment the approximation stops being deliberate.
-//   • T8/T9 — the stage INVARIANT and the degradation guard, as properties of the code rather than claims
-//     about the suite: a non-map-pitched symbol cannot observe the new per-frame ruler at all, and a
-//     map-pitched symbol whose ruler was never patched degrades to the screen walk instead of collapsing.
-//   • T10 — R3's named trap. The chord probe's half-width is an ARC quantity; leaving it on the px scale
-//     while the walk runs in metres silently undoes the vertex-straddling rotation fix. On a STRAIGHT road
-//     that defect is a no-op, so the whole rendered fixture and every existing curved test are blind to it.
-//     This tooth is on a BENT path, which is what makes it the observer.
-//
-// Stage GLOBE-A adds GA-T1…GA-T3 at the bottom of the file: the first fixture anywhere in this repo whose
-// ground frame has a NON-ZERO Gram-Schmidt axial term, on a genuine on-sphere arc. It reuses this file's W3
-// apparatus (OriginView/ProjectPx/Pools/Stage) rather than standing up a second hand-built camera.
-//
-// WHY THESE PATHS ARE SYNTHETIC AND NOT "PHYSICAL". StageCurved takes the screen polyline and the world
-// polyline as INDEPENDENT parameters. T7 exploits that directly (a screen-kinked, world-straight path is not
-// a pose any camera produces, but it is exactly the input that separates a screen-tangent gate from a
-// world-tangent one). Where a tooth's claim would be weakened by the two disagreeing, they are built
-// geometrically similar and the correspondence is stated at the site.
+// Contents:
+//   CollisionGridContractTests      — Unit-level contract teeth for the collision grid, kept independently of the placement tests that also exercise it (see the note at SymbolPlacementSystem.cs:732).
+//   CollisionJobPlacementTests      — CollisionJob's placement teeth: named/permutation-invariant/sort-key-driven survivor sets over hand-built scenes, plus AssertGreedyContract exercised over adversarial random scenes (wide boxes, the MaxGridDim cell-enlargement path, dense clusters, and…
+//   CrossTileIdentityStoreTests     — A-3: cross-tile point-symbol identity — SymbolTileStore's dedup (the store-level half of CrossTileIdentityTests, moved here at the reader cutover, 4.2 — see that file's header).
+//   HorizonCullGatherTests          — S3: the globe far-side horizon cull as a GatherSymbolPoints fade trigger (peer of the tile/ distance/departing culls) — a two-sided EditMode proof over a REAL SphericalProjection MapCamera.
+//   IconSkirtCarrierChainTests      — The icon skirt's CARRIER CHAIN, driven end to end from a genuinely padded SpriteAtlasView: SymbolFeatureExtractor (computes IconQuadLayout.SkirtPx) → SymbolFeature.IconSkirtPx → StyledSymbolTileBuilder → the point symbol's Layout.Bounds* and the along-line…
+//   MapPitchedWorldArcStagingTests  — W3 / Stage AC / GLOBE-A: curved (along-line) symbol staging under a genuinely pitched camera and, for GLOBE-A, a non-zero-axial on-sphere arc — catches a metres-vs-pixels sign confusion a straight path is blind to.
+//   ShapedSymbolBlittabilityTests   — UMR-87: ShapedSymbol must live in a NativeArray{T} — the whole point of interning its Text/IconImage strings into TextId/IconImageId ints.
+//   StyledSymbolTileBuilderTests    — S105 Slice 3 (A4) — THE decisive test: a parsed symbol layer + the real fixture tile, run through StyledSymbolTileBuilder produces the expected set of shaped ShapedSymbols.
 
-#if UNITY_EDITOR
-using System.Collections.Generic;
-using System.Globalization;
 using NUnit.Framework;
+using Unity.Collections;
+using Unity.Jobs;
 using Unity.Mathematics;
-using MapRenderer.Core.Geo;
-using MapRenderer.Core.Text;
 using MapRenderer.Core.Text.Placement;
+using MapRenderer.Jobs.Symbols;
+using System.Collections.Generic;
+using MapRenderer.Core.Text;
 using MapRenderer.Tests.TestSupport;
+using MapRenderer.Core.Geo;
+using MapRenderer.Core.Style.Symbol;
+using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Text.Placement;
+using UnityEngine;
+using MapRenderer.Unity.Rendering.Backend;
+using MapRenderer.Unity.Rendering.Map;
+using System.Threading.Tasks;
+using MapRenderer.Core.Text.Sprites;
+using MapRenderer.Core.Tiles;
+using SymbolStyle = MapRenderer.Core.Style.Symbol;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Core.Expressions;
+using System.Globalization;
+using Unity.Collections.LowLevel.Unsafe;
+using System;
+using System.IO;
+using System.Threading;
+using Cysharp.Threading.Tasks;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests; // TestGlyphSource
+using Object = UnityEngine.Object;
+using TextAnchor = MapRenderer.Core.Text.TextAnchor;
+using static MapRenderer.Tests.TestSupport.NativeCollisionRunner;
+
 
 namespace MapRenderer.Tests.Text.Placement
 {
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // CollisionGridContractTests — unit-level contract teeth for the collision grid
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class CollisionGridContractTests
+    {
+        // Regression (live-demo crash at a dense scene): the node pool is pre-sized on the MAIN thread
+        // (CollisionGridSizing, managed float) but filled by the job in BURST — a coordinate on a cell
+        // boundary can truncate one cell wider in Burst than the managed sizing counted, so the job needs one
+        // more node than the pool holds. A Burst job CANNOT grow a NativeArray (the retired managed grid could,
+        // so it never overflowed), and an under-count was an out-of-range WRITE → IndexOutOfRangeException from
+        // CollisionJob.Insert, crashing the frame every time at that scene. Insert now guards every write
+        // against NodeBox.Length. This forces the under-count directly (a starved pool over a scene that places
+        // many boxes) and asserts the job COMPLETES instead of throwing. RED without the guard: NodeBox[cap]
+        // write throws. Survivors stay correct here because the boxes are disjoint (a dropped node only removes
+        // a blocker prefilter entry — disjoint boxes never block anyway).
+        [Test]
+        public void StarvedNodePool_GuardsInsteadOfThrowing()
+        {
+            // 12 disjoint single-cell boxes on a coarse grid → all place, each inserts ≥1 node (≥12 total).
+            const int n = 12;
+            var cands = new SymbolCandidate[n];
+            var boxes = new SymbolBox[n];
+            for (int i = 0; i < n; i++)
+            {
+                float x = i * 500f, y = i * 500f; // far apart → disjoint → all survive
+                boxes[i] = new SymbolBox { Min = new float2(x, y), Max = new float2(x + 20f, y + 12f),
+                    SortKey = 0, FeatureIndex = i, TileKey = 0, SymbolIndex = i };
+                cands[i] = new SymbolCandidate { BoxStart = i, BoxCount = 1, SortKey = 0,
+                    FeatureIndex = i, TileKey = 0, SymbolIndex = i };
+            }
+
+            var nc = new NativeArray<SymbolCandidate>(n, Allocator.TempJob);
+            var nb = new NativeArray<SymbolBox>(n, Allocator.TempJob);
+            var ns = new NativeArray<byte>(n, Allocator.TempJob);
+            var outCount = new NativeArray<int>(1, Allocator.TempJob);
+            try
+            {
+                for (int i = 0; i < n; i++) { nc[i] = cands[i]; nb[i] = boxes[i]; }
+                CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(nb, n);
+                int cells = dims.W * dims.H;
+                var cellHead = new NativeArray<int>(cells, Allocator.TempJob);
+                var nodeBox  = new NativeArray<int>(3, Allocator.TempJob); // STARVED: 3 nodes for ≥12 inserts
+                var nodeNext = new NativeArray<int>(3, Allocator.TempJob);
+                try
+                {
+                    for (int c = 0; c < cells; c++) cellHead[c] = -1;
+                    Assert.DoesNotThrow(() =>
+                        new CollisionJob
+                        {
+                            Candidates = nc, CandidateCount = n, Boxes = nb, BoxCount = n,
+                            Survivors = ns, OutSurvivorCount = outCount,
+                            CellHead = cellHead, NodeBox = nodeBox, NodeNext = nodeNext,
+                            GridMinX = dims.MinX, GridMinY = dims.MinY, GridInvCell = dims.InvCell,
+                            GridW = dims.W, GridH = dims.H,
+                        }.Schedule().Complete(),
+                        "Insert must guard writes against a starved node pool (Burst cannot grow it), not throw IndexOutOfRange");
+                    Assert.AreEqual(n, outCount[0], "disjoint boxes all survive even when node inserts are dropped by the guard");
+                }
+                finally { cellHead.Dispose(); nodeBox.Dispose(); nodeNext.Dispose(); }
+            }
+            finally { nc.Dispose(); nb.Dispose(); ns.Dispose(); outCount.Dispose(); }
+        }
+
+        // The node-storage bound carries a ±1-cell margin (each axis, each side) so a Mono/Burst boundary-cell
+        // truncation drift can never overflow the pre-sized pool. Assert the margin is present: the bound must
+        // exceed the tight (exact) per-box cell count for a scene of multi-cell boxes.
+        [Test]
+        public void NodeUpperBound_CarriesDriftMargin()
+        {
+            var (_, boxes) = RandomScene(40, 9, 3000f, 2000f, 100f, 300f, 100f, 300f);
+            var nb = new NativeArray<SymbolBox>(boxes.Length, Allocator.TempJob);
+            try
+            {
+                for (int i = 0; i < boxes.Length; i++) nb[i] = boxes[i];
+                CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(nb, boxes.Length);
+                int bound = CollisionGridSizing.NodeUpperBound(nb, boxes.Length, in dims);
+
+                int tight = 0;
+                for (int i = 0; i < boxes.Length; i++)
+                {
+                    SymbolBox b = nb[i];
+                    int cx0 = (int)math.clamp((b.Min.x - dims.MinX) * dims.InvCell, 0, dims.W - 1);
+                    int cx1 = (int)math.clamp((b.Max.x - dims.MinX) * dims.InvCell, 0, dims.W - 1);
+                    int cy0 = (int)math.clamp((b.Min.y - dims.MinY) * dims.InvCell, 0, dims.H - 1);
+                    int cy1 = (int)math.clamp((b.Max.y - dims.MinY) * dims.InvCell, 0, dims.H - 1);
+                    tight += (cx1 - cx0 + 1) * (cy1 - cy0 + 1);
+                }
+                Assert.Greater(bound, tight, "NodeUpperBound must exceed the tight per-box cell count (the ±1-cell drift margin)");
+            }
+            finally { nb.Dispose(); }
+        }
+
+        // ROOT CAUSE of the live dense-scene crash: candidate box ranges are NOT guaranteed disjoint — a box can
+        // be referenced by more than one candidate. The job (CollisionJob.Insert) inserts every box in every
+        // placed candidate's [BoxStart,BoxStart+BoxCount) range, so a SHARED box is inserted once PER candidate.
+        // The old per-UNIQUE-box bound (NodeUpperBound) counts it once → under-count → pool overflow. Even the
+        // ±1-cell margin only raises the overflow THRESHOLD; enough sharing still overflows it (proven here).
+        // NodeUpperBoundByCandidates counts per reference (matches the job), so it scales with the sharing.
+        [Test]
+        public void SharedBox_PerCandidateBound_CoversJobInserts_PerUniqueUndercounts()
+        {
+            // One 1-cell box referenced by MANY AllowOverlap candidates → the job inserts it once per candidate.
+            const int shares = 10;
+            var boxes = new NativeArray<SymbolBox>(1, Allocator.TempJob);
+            var cands = new NativeArray<SymbolCandidate>(shares, Allocator.TempJob);
+            var ns = new NativeArray<byte>(shares, Allocator.TempJob);
+            var outCount = new NativeArray<int>(1, Allocator.TempJob);
+            try
+            {
+                boxes[0] = new SymbolBox { Min = new float2(10f, 10f), Max = new float2(30f, 22f),
+                    SortKey = 0, FeatureIndex = 0, TileKey = 0, SymbolIndex = 0 }; // < 64px → 1 cell
+                for (int i = 0; i < shares; i++)
+                    cands[i] = new SymbolCandidate { BoxStart = 0, BoxCount = 1, AllowOverlap = true,
+                        SortKey = 0, FeatureIndex = i, TileKey = 0, SymbolIndex = i };
+
+                CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(boxes, 1);
+                int perUnique = CollisionGridSizing.NodeUpperBound(boxes, 1, in dims);
+                int perCand   = CollisionGridSizing.NodeUpperBoundByCandidates(cands, shares, boxes, 1, in dims);
+                const int jobInserts = shares; // box 0 is one cell → one node per referencing candidate
+
+                Assert.Less(perUnique, jobInserts,
+                    "the per-UNIQUE-box bound (even with the ±1 margin) under-counts a box shared by many candidates — the overflow bug");
+                Assert.GreaterOrEqual(perCand, jobInserts,
+                    "the per-CANDIDATE bound counts the shared box per reference, covering every insert — the fix");
+
+                // Functional: sized by the per-candidate bound, the job fits and every AllowOverlap candidate places.
+                var cellHead = new NativeArray<int>(dims.W * dims.H, Allocator.TempJob);
+                var nodeBox  = new NativeArray<int>(perCand, Allocator.TempJob);
+                var nodeNext = new NativeArray<int>(perCand, Allocator.TempJob);
+                try
+                {
+                    for (int c = 0; c < cellHead.Length; c++) cellHead[c] = -1;
+                    new CollisionJob
+                    {
+                        Candidates = cands, CandidateCount = shares, Boxes = boxes, BoxCount = 1,
+                        Survivors = ns, OutSurvivorCount = outCount,
+                        CellHead = cellHead, NodeBox = nodeBox, NodeNext = nodeNext,
+                        GridMinX = dims.MinX, GridMinY = dims.MinY, GridInvCell = dims.InvCell,
+                        GridW = dims.W, GridH = dims.H,
+                    }.Schedule().Complete();
+                    Assert.AreEqual(shares, outCount[0], "every AllowOverlap candidate places");
+                }
+                finally { cellHead.Dispose(); nodeBox.Dispose(); nodeNext.Dispose(); }
+            }
+            finally { boxes.Dispose(); cands.Dispose(); ns.Dispose(); outCount.Dispose(); }
+        }
+
+        // The hazard the differential used to hold implicitly (§3.1.1): the caller pre-sizes the grid node
+        // storage and a Burst job cannot grow it, so an under-count silently drops blocker inserts — a
+        // candidate isn't blocked, and wrong survivors follow with no crash to notice. Directly observable
+        // with no mirroring of the job's cell mapping: CellHead/NodeBox/NodeNext are plain public
+        // NativeArray<int> on CollisionJob, so a test can walk each cell's CellHead -> NodeNext chain and
+        // count linked nodes after Complete().
+        public enum SceneShape { Small, Wide, HugeSpan, Dense }
+
+        [Test]
+        public void NodeConsumption_StaysWithinBound_AndABoundSizedPoolSkipsNoInsert([Values] SceneShape shape)
+        {
+            (SymbolCandidate[] cands, SymbolBox[] boxes) = shape switch
+            {
+                SceneShape.Small    => RandomScene(500, 1, 2000f, 1200f, 30f, 300f, 10f, 50f),
+                SceneShape.Wide     => RandomScene(200, 3, 3000f, 2000f, 400f, 900f, 300f, 700f),
+                SceneShape.HugeSpan => RandomScene(400, 5, 200000f, 150000f, 50f, 400f, 20f, 80f),
+                SceneShape.Dense    => RandomScene(300, 17, 100f, 100f, 40f, 60f, 20f, 30f),
+                _ => throw new System.ArgumentOutOfRangeException(nameof(shape)),
+            };
+            int n = cands.Length;
+
+            var nb = new NativeArray<SymbolBox>(boxes.Length, Allocator.TempJob);
+            var nc = new NativeArray<SymbolCandidate>(n, Allocator.TempJob);
+            try
+            {
+                for (int i = 0; i < n; i++) nc[i] = cands[i];
+                for (int i = 0; i < boxes.Length; i++) nb[i] = boxes[i];
+                CollisionGridSizing.Dims dims = CollisionGridSizing.ComputeDims(nb, boxes.Length);
+                int bound = CollisionGridSizing.NodeUpperBoundByCandidates(nc, n, nb, boxes.Length, in dims);
+
+                // MaxGridDim (512) caps CELL SIZE, not grid dimension: ComputeDims sets invCell = 512/span on
+                // the max axis, so W/H can land at 513 (verified numerically for the HugeSpan shape; the
+                // boundary is also span-dependent, so a tight <= 512 bound would be flaky, not just wrong).
+                Assert.LessOrEqual(dims.W, 513, $"grid W must never exceed 513 ({shape})");
+                Assert.LessOrEqual(dims.H, 513, $"grid H must never exceed 513 ({shape})");
+
+                (int[] boundSurvivors, int linkedBound) = RunSized(cands, boxes, dims, bound);
+                (int[] generousSurvivors, int linkedGenerous) = RunSized(cands, boxes, dims, bound * 4 + 16);
+
+                Assert.Greater(linkedGenerous, 0, $"non-degeneracy: the generous run must link at least one node ({shape})");
+                Assert.LessOrEqual(linkedGenerous, bound, $"the bound must actually bound consumption ({shape})");
+                Assert.AreEqual(linkedGenerous, linkedBound,
+                    $"a bound-sized pool must skip no insert the generous pool made — CollisionJob.Insert's guard must never have to fire ({shape})");
+                CollectionAssert.AreEqual(generousSurvivors, boundSurvivors,
+                    $"a bound-sized pool must produce the identical survivor set as a generous one ({shape})");
+            }
+            finally { nc.Dispose(); nb.Dispose(); }
+        }
+
+        // Runs CollisionJob with a node pool of exactly `poolLength`, returning the per-sorted-position
+        // survivor flags (0/1) and the number of nodes actually linked — walked via CellHead -> NodeNext,
+        // bounded by the pool length so a corrupt chain fails loudly rather than looping forever.
+        private static (int[] Survivors, int Linked) RunSized(SymbolCandidate[] cands, SymbolBox[] boxes,
+            CollisionGridSizing.Dims dims, int poolLength)
+        {
+            int n = cands.Length;
+            var nc = new NativeArray<SymbolCandidate>(n, Allocator.TempJob);
+            var nb = new NativeArray<SymbolBox>(boxes.Length, Allocator.TempJob);
+            var ns = new NativeArray<byte>(n, Allocator.TempJob);
+            var outCount = new NativeArray<int>(1, Allocator.TempJob);
+            var cellHead = new NativeArray<int>(dims.W * dims.H, Allocator.TempJob);
+            var nodeBox  = new NativeArray<int>(math.max(1, poolLength), Allocator.TempJob);
+            var nodeNext = new NativeArray<int>(math.max(1, poolLength), Allocator.TempJob);
+            try
+            {
+                for (int i = 0; i < n; i++) nc[i] = cands[i];
+                for (int i = 0; i < boxes.Length; i++) nb[i] = boxes[i];
+                for (int c = 0; c < cellHead.Length; c++) cellHead[c] = -1;
+                new CollisionJob
+                {
+                    Candidates = nc, CandidateCount = n, Boxes = nb, BoxCount = boxes.Length,
+                    Survivors = ns, OutSurvivorCount = outCount,
+                    CellHead = cellHead, NodeBox = nodeBox, NodeNext = nodeNext,
+                    GridMinX = dims.MinX, GridMinY = dims.MinY, GridInvCell = dims.InvCell,
+                    GridW = dims.W, GridH = dims.H,
+                }.Schedule().Complete();
+
+                var survivors = new int[n];
+                for (int i = 0; i < n; i++) survivors[i] = ns[i];
+
+                int linked = 0;
+                for (int cell = 0; cell < cellHead.Length; cell++)
+                {
+                    int node = cellHead[cell];
+                    int guard = 0;
+                    while (node != -1)
+                    {
+                        linked++;
+                        node = nodeNext[node];
+                        guard++;
+                        Assert.LessOrEqual(guard, nodeBox.Length, "a corrupt node chain must not exceed the pool length");
+                    }
+                }
+                return (survivors, linked);
+            }
+            finally
+            {
+                nc.Dispose(); nb.Dispose(); ns.Dispose(); outCount.Dispose();
+                cellHead.Dispose(); nodeBox.Dispose(); nodeNext.Dispose();
+            }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // CollisionJobPlacementTests — CollisionJob's placement teeth over hand-built and adversarial scenes
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// <see cref="CollisionJob"/>'s placement teeth: named/permutation-invariant/sort-key-driven survivor
+    /// sets over hand-built scenes, plus <see cref="NativeCollisionRunner.AssertGreedyContract"/> exercised
+    /// over adversarial random scenes (wide boxes, the <c>MaxGridDim</c> cell-enlargement path, dense
+    /// clusters, and Stage C's per-box optional mask). Every named-set assertion is OUTCOME-based (WHICH
+    /// symbols survive, by <see cref="SymbolCandidate.SymbolIndex"/> — not a count).
+    /// </summary>
+    [TestFixture]
+    public class CollisionJobPlacementTests
+    {
+        // ── Hand-built scenes, moved from SymbolCollisionTests.cs (point symbols as 1-box candidates) ──────
+
+        private static SymbolBox Box(
+            float minX, float minY, float maxX, float maxY,
+            float sortKey, int featureIndex, long tileKey = 0L,
+            bool allowOverlap = false, bool ignorePlacement = false)
+            => new SymbolBox
+            {
+                Min = new float2(minX, minY),
+                Max = new float2(maxX, maxY),
+                SortKey = sortKey,
+                FeatureIndex = featureIndex,
+                TileKey = tileKey,
+                SymbolIndex = featureIndex,
+                AllowOverlap = allowOverlap,
+                IgnorePlacement = ignorePlacement,
+            };
+
+        // Runs collision over a COPY (so the caller's array order is preserved across permutations) and
+        // returns the set of surviving SymbolIndex values, as 1-box candidates through CollisionJob.
+        private static HashSet<int> Survivors(IReadOnlyList<SymbolBox> input)
+        {
+            var boxes = new SymbolBox[input.Count];
+            for (int i = 0; i < input.Count; i++) boxes[i] = input[i];
+            var cands = new SymbolCandidate[boxes.Length];
+            for (int i = 0; i < boxes.Length; i++)
+                cands[i] = new SymbolCandidate
+                {
+                    BoxStart = i, BoxCount = 1, SortKey = boxes[i].SortKey, FeatureIndex = boxes[i].FeatureIndex,
+                    TileKey = boxes[i].TileKey, SymbolIndex = boxes[i].SymbolIndex,
+                    AllowOverlap = boxes[i].AllowOverlap, IgnorePlacement = boxes[i].IgnorePlacement,
+                };
+            var flags = new bool[cands.Length];
+            int n = NativeCollisionRunner.RunCollision(cands, cands.Length, boxes, boxes.Length, flags);
+
+            var set = new HashSet<int>();
+            for (int i = 0; i < cands.Length; i++) if (flags[i]) set.Add(cands[i].SymbolIndex);
+            Assert.AreEqual(n, set.Count, "returned survivor count must match the number of set flags");
+            return set;
+        }
+
+        // A cluster of three mutually-overlapping boxes over region A (all cover [0,20]x[0,20]) with
+        // distinct sort keys, plus one DISJOINT box over region B ([100,120]) that can never collide.
+        // Placement order (sort key asc): L1(10) -> L2(20) -> L0(30) -> L3(99). L1 wins region A; L2/L0
+        // collide with it and drop; L3 is alone. Survivors = {1, 3}.
+        private static List<SymbolBox> NamedScenario() => new List<SymbolBox>
+        {
+            Box(0, 0, 20, 20, sortKey: 30f, featureIndex: 0),   // region A
+            Box(2, 2, 18, 18, sortKey: 10f, featureIndex: 1),   // region A (best key)
+            Box(4, 4, 16, 16, sortKey: 20f, featureIndex: 2),   // region A
+            Box(100, 0, 120, 20, sortKey: 99f, featureIndex: 3) // region B (disjoint — always survives)
+        };
+
+        [Test]
+        public void GreedyOverCluster_KeepsExactNamedSet()
+        {
+            CollectionAssert.AreEquivalent(new[] { 1, 3 }, Survivors(NamedScenario()),
+                "greedy (sort-key asc) keeps the best-key label in the overlapping cluster plus the " +
+                "disjoint label — NOT cull-all ({}), cull-none ({0,1,2,3}), or an insertion-order pick.");
+        }
+
+        [Test]
+        public void IsPermutationInvariant()
+        {
+            var forward = NamedScenario();
+            var reversed = new List<SymbolBox>(forward);
+            reversed.Reverse();
+            var rotated = new List<SymbolBox> { forward[2], forward[0], forward[3], forward[1] };
+
+            var expected = new[] { 1, 3 };
+            CollectionAssert.AreEquivalent(expected, Survivors(forward));
+            CollectionAssert.AreEquivalent(expected, Survivors(reversed));
+            CollectionAssert.AreEquivalent(expected, Survivors(rotated),
+                "an insertion-order-dependent impl would place a different cluster winner under reordering");
+        }
+
+        [Test]
+        public void LowerSortKeyWins_AndSwappingKeysFlipsIt()
+        {
+            var control = Box(100, 0, 120, 20, sortKey: 5f, featureIndex: 9);
+
+            var l0Wins = new List<SymbolBox>
+            {
+                Box(0, 0, 20, 20, sortKey: 10f, featureIndex: 0), // lower key -> placed first -> wins
+                Box(5, 5, 25, 25, sortKey: 20f, featureIndex: 1),
+                control,
+            };
+            CollectionAssert.AreEquivalent(new[] { 0, 9 }, Survivors(l0Wins));
+
+            var l1Wins = new List<SymbolBox>
+            {
+                Box(0, 0, 20, 20, sortKey: 20f, featureIndex: 0),
+                Box(5, 5, 25, 25, sortKey: 10f, featureIndex: 1), // now the lower key -> wins
+                control,
+            };
+            CollectionAssert.AreEquivalent(new[] { 1, 9 }, Survivors(l1Wins),
+                "reversing the two overlapping labels' sort keys must flip which one survives");
+        }
+
+        [Test]
+        public void AllowOverlap_KeepsBoth()
+        {
+            var pair = new List<SymbolBox>
+            {
+                Box(0, 0, 20, 20, sortKey: 10f, featureIndex: 0, allowOverlap: true),
+                Box(5, 5, 25, 25, sortKey: 20f, featureIndex: 1, allowOverlap: true),
+            };
+            CollectionAssert.AreEquivalent(new[] { 0, 1 }, Survivors(pair),
+                "text-allow-overlap skips the collision test — both overlapping labels are placed");
+        }
+
+        [Test]
+        public void IgnorePlacement_DoesNotBlockLaterSymbols()
+        {
+            var boxes = new List<SymbolBox>
+            {
+                Box(0, 0, 20, 20, sortKey: 10f, featureIndex: 0, ignorePlacement: true), // placed, non-blocking
+                Box(5, 5, 25, 25, sortKey: 20f, featureIndex: 1),                        // overlaps 0 but 0 doesn't block
+            };
+            CollectionAssert.AreEquivalent(new[] { 0, 1 }, Survivors(boxes),
+                "an ignore-placement label is placed but must not block a later overlapping label");
+        }
+
+        // Boxes are built through the REAL SymbolBox.Build math (anchor + bounds*scale +/- padding), so
+        // this is the padding PLUMBING under test, not a hand-inflated AABB. Typo in the name ("AColission")
+        // is pre-existing; kept verbatim.
+        [Test]
+        public void Padding_TurnsAdjacentPairIntoAColission()
+        {
+            var boundsMin = float2.zero;
+            var boundsMax = new float2(20f, 20f);
+            const float scaleSize = TextQuadLayout.OneEm; // textSizePx == OneEm -> scale 1
+
+            SymbolBox A(float padding) => SymbolBox.Build(
+                new float2(0f, 0f), boundsMin, boundsMax, scaleSize, padding,
+                sortKey: 10f, featureIndex: 0, tileKey: 0L, symbolIndex: 0,
+                allowOverlap: false, ignorePlacement: false);
+            SymbolBox B(float padding) => SymbolBox.Build(
+                new float2(21f, 0f), boundsMin, boundsMax, scaleSize, padding,
+                sortKey: 20f, featureIndex: 1, tileKey: 0L, symbolIndex: 1,
+                allowOverlap: false, ignorePlacement: false);
+
+            // No padding: A=[0,20], B=[21,41] -> 1px gap -> both survive.
+            CollectionAssert.AreEquivalent(new[] { 0, 1 },
+                Survivors(new List<SymbolBox> { A(0f), B(0f) }),
+                "with no padding the 1px-separated pair does not collide — both survive");
+
+            // Padding 1px each edge: A=[-1,21], B=[20,42] -> overlap -> only the lower-key A survives.
+            CollectionAssert.AreEquivalent(new[] { 0 },
+                Survivors(new List<SymbolBox> { A(1f), B(1f) }),
+                "1px padding closes the 1px gap — the pair now collides and only the better-key label survives");
+        }
+
+        [Test]
+        public void EqualSortKeys_ResolveByFeatureIndexTiebreak()
+        {
+            var boxes = new List<SymbolBox>
+            {
+                Box(0, 0, 20, 20, sortKey: 10f, featureIndex: 7), // equal key, higher feature index
+                Box(5, 5, 25, 25, sortKey: 10f, featureIndex: 3), // equal key, LOWER feature index -> wins
+            };
+            CollectionAssert.AreEquivalent(new[] { 3 }, Survivors(boxes),
+                "equal sort keys must resolve deterministically to the lower feature index (stable tiebreak)");
+        }
+
+        // ── Adversarial scenarios, re-created from the dissolved SymbolCollisionJobTests.cs. Parity ended —
+        //    these now drive NativeCollisionRunner.AssertGreedyContract, an independent verifier of the
+        //    greedy contract over the job's own output, never a second greedy pass. ──────────────────────
+
+        private static void RunAndVerify(SymbolCandidate[] cands, SymbolBox[] boxes, string what)
+        {
+            var flags = new bool[cands.Length];
+            NativeCollisionRunner.RunCollision(cands, cands.Length, boxes, boxes.Length, flags);
+            NativeCollisionRunner.AssertGreedyContract(cands, cands.Length, boxes, flags, what);
+        }
+
+        [Test]
+        public void Collision_SmallBoxes([Values(1, 2, 3, 50, 500)] int count, [Values(1, 7, 42, 999)] int seed)
+        {
+            var (cands, boxes) = NativeCollisionRunner.RandomScene(count, seed, 2000f, 1200f, 30f, 300f, 10f, 50f);
+            RunAndVerify(cands, boxes, $"small boxes count={count} seed={seed}");
+        }
+
+        // Wide boxes each spanning MANY 64px grid cells — the case where one box lands in a large cell block, so a
+        // node-storage under-count would drop inserts.
+        [Test]
+        public void Collision_WideBoxes([Values(20, 200)] int count, [Values(3, 88)] int seed)
+        {
+            var (cands, boxes) = NativeCollisionRunner.RandomScene(count, seed, 3000f, 2000f, 400f, 900f, 300f, 700f);
+            RunAndVerify(cands, boxes, $"wide boxes count={count} seed={seed}");
+        }
+
+        // A span far larger than MaxGridDim*TargetCellPx (512*64 = 32768 px) — forces the cell-enlargement path, a
+        // different grid dim / node distribution the sizing must still bound exactly.
+        [Test]
+        public void Collision_HugeSpan_ForcesCellEnlargement([Values(50, 400)] int count)
+        {
+            var (cands, boxes) = NativeCollisionRunner.RandomScene(count, 5, 200000f, 150000f, 50f, 400f, 20f, 80f);
+            RunAndVerify(cands, boxes, $"huge span count={count}");
+        }
+
+        // A DENSE cluster: many overlapping boxes packed into a tiny region (one grid cell), so most drop — stresses
+        // the greedy blocking + the single-cell node chain.
+        [Test]
+        public void Collision_DenseCluster()
+        {
+            var (cands, boxes) = NativeCollisionRunner.RandomScene(300, 17, 100f, 100f, 40f, 60f, 20f, 30f);
+            RunAndVerify(cands, boxes, "dense cluster (300 boxes in ~2 cells)");
+        }
+
+        // Multi-box (curved-like) candidates interleaved with point candidates — the all-or-nothing range logic.
+        // The scene is hand-built with known geometry, so this asserts the NAMED expected survivor set as well
+        // as the contract.
+        [Test]
+        public void Collision_MultiBoxCandidates()
+        {
+            // 2 curved (3 boxes each) + 3 points, overlapping in a shared region so collisions actually occur.
+            var boxes = new List<SymbolBox>();
+            var cands = new List<SymbolCandidate>();
+            void Add(int symbol, float sortKey, params (float, float, float, float)[] rects)
+            {
+                int start = boxes.Count;
+                foreach (var r in rects)
+                    boxes.Add(new SymbolBox { Min = new float2(r.Item1, r.Item2), Max = new float2(r.Item3, r.Item4),
+                        SortKey = sortKey, FeatureIndex = symbol, TileKey = 0, SymbolIndex = symbol });
+                cands.Add(new SymbolCandidate { BoxStart = start, BoxCount = rects.Length, SortKey = sortKey,
+                    FeatureIndex = symbol, TileKey = 0, SymbolIndex = symbol });
+            }
+            Add(0, 10f, (0, 0, 30, 12), (40, 0, 70, 12), (80, 0, 110, 12));   // curved (best key)
+            Add(1, 20f, (50, 2, 60, 10));                                     // point over curved-0 glyph 2
+            Add(2, 15f, (200, 0, 230, 12), (240, 0, 270, 12), (280, 0, 310, 12)); // curved, disjoint region
+            Add(3, 25f, (205, 2, 215, 10));                                   // point over curved-2 glyph 1
+            Add(4, 30f, (1000, 1000, 1020, 1012));                            // point, far away (always places)
+
+            var candArr = cands.ToArray();
+            var boxArr = boxes.ToArray();
+            var flags = new bool[candArr.Length];
+            NativeCollisionRunner.RunCollision(candArr, candArr.Length, boxArr, boxArr.Length, flags);
+            NativeCollisionRunner.AssertGreedyContract(candArr, candArr.Length, boxArr, flags, "multi-box + point candidates");
+
+            var survivors = new HashSet<int>();
+            for (int i = 0; i < candArr.Length; i++) if (flags[i]) survivors.Add(candArr[i].SymbolIndex);
+            // Derived by hand from the fixture: placement order (sort key asc) is 0(10), 2(15), 1(20), 3(25),
+            // 4(30). Symbol 0 places first (no blockers yet). Symbol 2 is disjoint from 0's region, so it
+            // places too. Symbol 1's single box overlaps symbol 0's SECOND glyph (40,0,70,12) -> dropped.
+            // Symbol 3's single box overlaps symbol 2's FIRST glyph (200,0,230,12) -> dropped. Symbol 4 is
+            // far away and always places.
+            CollectionAssert.AreEquivalent(new[] { 0, 2, 4 }, survivors,
+                "the two curved symbols place (disjoint regions); the two points overlapping their glyphs are dropped; the far point always places");
+        }
+
+        // ── C6 (stage C) ──────────────────────────────────────────────────────────────────────────────────
+        // Two-box PAIR candidates whose halves OVERLAP BY CONSTRUCTION (what a centred icon+text pair is),
+        // each carrying a random OptionalBoxMask, interleaved with ordinary single-box candidates in a
+        // congested region so most halves actually contend. AssertGreedyContract's exact DroppedBoxMask
+        // characterisation is what now guards this — a different bit, a different insert-skip, fails there.
+        // The overlapping halves are also the self-block tripwire: an implementation that inserted one half
+        // before testing the other would drop every pair, in one runner or both.
+        private static (SymbolCandidate[], SymbolBox[]) RandomMaskedPairScene(int pairCount, int singleCount, int seed)
+        {
+            var rng = new System.Random(seed);
+            var boxes = new List<SymbolBox>();
+            var cands = new List<SymbolCandidate>();
+            int symbol = 0;
+
+            // RED injection 5's target — a SUPPRESSED candidate, never placed, never a blocker. Its box
+            // exactly overlaps the box of the next-to-sort candidate (the -1f singleton below) so the
+            // "never a blocker" half is non-vacuous: a job that wrongly inserted a suppressed candidate's
+            // boxes would drop that singleton.
+            boxes.Add(new SymbolBox { Min = new float2(1035, 995), Max = new float2(1065, 1005),
+                SortKey = -2f, FeatureIndex = symbol, TileKey = 2, SymbolIndex = symbol });
+            cands.Add(new SymbolCandidate
+            {
+                BoxStart = boxes.Count - 1, BoxCount = 1, EmitStart = boxes.Count - 1, EmitCount = 1,
+                SortKey = -2f, FeatureIndex = symbol, TileKey = 2, SymbolIndex = symbol,
+                Suppressed = true,
+            });
+            symbol++;
+
+            // A DETERMINISTIC contended pair, off in its own region, so "at least one half is dropped" holds for
+            // every (count, seed) rather than depending on the random draw: a rider-optional pair whose rider box
+            // is covered by a higher-priority single, and whose owner box is free.
+            boxes.Add(new SymbolBox { Min = new float2(980, 980), Max = new float2(1020, 1020),
+                SortKey = 5f, FeatureIndex = symbol, TileKey = 2, SymbolIndex = symbol });
+            boxes.Add(new SymbolBox { Min = new float2(1030, 992), Max = new float2(1070, 1008),
+                SortKey = 5f, FeatureIndex = symbol, TileKey = 2, SymbolIndex = symbol });
+            cands.Add(new SymbolCandidate
+            {
+                BoxStart = boxes.Count - 2, BoxCount = 2, EmitStart = boxes.Count - 2, EmitCount = 2,
+                SortKey = 5f, FeatureIndex = symbol, TileKey = 2, SymbolIndex = symbol,
+                OptionalBoxMask = 0b10,
+            });
+            symbol++;
+            boxes.Add(new SymbolBox { Min = new float2(1035, 995), Max = new float2(1065, 1005),
+                SortKey = -1f, FeatureIndex = symbol, TileKey = 2, SymbolIndex = symbol });
+            cands.Add(new SymbolCandidate
+            {
+                BoxStart = boxes.Count - 1, BoxCount = 1, EmitStart = boxes.Count - 1, EmitCount = 1,
+                SortKey = -1f, FeatureIndex = symbol, TileKey = 2, SymbolIndex = symbol,
+            });
+            symbol++;
+
+            for (int i = 0; i < pairCount; i++)
+            {
+                float x = (float)(rng.NextDouble() * 260.0);
+                float y = (float)(rng.NextDouble() * 180.0);
+                float sortKey = rng.Next(0, 5);
+                int start = boxes.Count;
+                // Owner box and rider box share the anchor and overlap — the pair geometry that makes
+                // test-all-then-insert load-bearing. The world is deliberately small so these actually contend.
+                boxes.Add(new SymbolBox { Min = new float2(x - 20, y - 20), Max = new float2(x + 20, y + 20),
+                    SortKey = sortKey, FeatureIndex = symbol, TileKey = 0, SymbolIndex = symbol });
+                boxes.Add(new SymbolBox { Min = new float2(x - 12, y - 8), Max = new float2(x + 34, y + 8),
+                    SortKey = sortKey, FeatureIndex = symbol, TileKey = 0, SymbolIndex = symbol });
+                cands.Add(new SymbolCandidate
+                {
+                    BoxStart = start, BoxCount = 2, EmitStart = start, EmitCount = 2,
+                    SortKey = sortKey, FeatureIndex = symbol, TileKey = 0, SymbolIndex = symbol,
+                    OptionalBoxMask = (byte)rng.Next(0, 4), // 0 = today's all-or-nothing, 1/2 = one half, 3 = both
+                });
+                symbol++;
+            }
+            for (int i = 0; i < singleCount; i++)
+            {
+                float x = (float)(rng.NextDouble() * 260.0);
+                float y = (float)(rng.NextDouble() * 180.0);
+                float sortKey = rng.Next(0, 5);
+                boxes.Add(new SymbolBox { Min = new float2(x, y), Max = new float2(x + 30, y + 14),
+                    SortKey = sortKey, FeatureIndex = symbol, TileKey = 1, SymbolIndex = symbol });
+                cands.Add(new SymbolCandidate
+                {
+                    BoxStart = boxes.Count - 1, BoxCount = 1, EmitStart = boxes.Count - 1, EmitCount = 1,
+                    SortKey = sortKey, FeatureIndex = symbol, TileKey = 1, SymbolIndex = symbol,
+                });
+                symbol++;
+            }
+            return (cands.ToArray(), boxes.ToArray());
+        }
+
+        [Test]
+        public void Collision_OptionalMaskedPairs(
+            [Values(4, 30, 120)] int pairCount, [Values(11, 404)] int seed)
+        {
+            var (cands, boxes) = RandomMaskedPairScene(pairCount, pairCount, seed);
+            var flags = new bool[cands.Length];
+            NativeCollisionRunner.RunCollision(cands, cands.Length, boxes, boxes.Length, flags);
+            NativeCollisionRunner.AssertGreedyContract(cands, cands.Length, boxes, flags,
+                $"masked pairs pairs={pairCount} seed={seed}");
+
+            // A masked scene must actually EXERCISE the new branch — otherwise this tooth could pass on a
+            // no-op. At least one candidate has to place while dropping a half.
+            bool anyPartial = false;
+            for (int i = 0; i < cands.Length; i++)
+                if (flags[i] && cands[i].DroppedBoxMask != 0) { anyPartial = true; break; }
+            Assert.IsTrue(anyPartial,
+                "precondition: this scene must produce at least one partially-placed pair, or the check " +
+                "is only re-checking the mask-0 path");
+        }
+
+        // Mask 0 everywhere must be byte-identical to the pre-stage-C behaviour: an all-or-nothing pair scene
+        // records NO per-half verdict, and one blocked box still drops the whole candidate.
+        [Test]
+        public void UnmaskedPairs_StayAllOrNothing_AndRecordNoDroppedMask()
+        {
+            var (cands, boxes) = RandomMaskedPairScene(40, 40, 7);
+            for (int i = 0; i < cands.Length; i++) cands[i].OptionalBoxMask = 0;
+
+            var flags = new bool[cands.Length];
+            NativeCollisionRunner.RunCollision(cands, cands.Length, boxes, boxes.Length, flags);
+            NativeCollisionRunner.AssertGreedyContract(cands, cands.Length, boxes, flags,
+                "unmasked pairs (the pre-stage-C reference shape)");
+
+            int survivorCount = 0;
+            for (int i = 0; i < cands.Length; i++)
+            {
+                Assert.AreEqual(0, cands[i].DroppedBoxMask,
+                    "a candidate with no optional half must never record a DroppedBoxMask");
+                if (flags[i]) survivorCount++;
+            }
+            Assert.Greater(survivorCount, 0, "sanity: the scene is not degenerate — something placed");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // CrossTileIdentityStoreTests — SymbolTileStore's dedup, the store-level half of cross-tile identity
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// A-3: cross-tile point-symbol identity — <see cref="SymbolTileStore"/>'s dedup (the store-level half of
+    /// <c>CrossTileIdentityTests</c>, moved here at the reader cutover, 4.2 — see that file's header).
+    ///
+    /// <para><b>Stage 3:</b> the store dedup no longer takes a caller grid — it keys on the fixed
+    /// <see cref="CrossTileSymbolKey.CanonicalGridMeters"/> (4 m), so the cases below pass a gate <c>q</c> whose
+    /// MAGNITUDE the store ignores; their anchors are spaced to merge/split under the fixed 4 m grid: (3) a
+    /// symbol present in both a parent and child tile dedups to ONE, finest-zoom wins; (4) different text in the
+    /// same cell does NOT merge; (5) line symbols are not deduped.</para>
+    ///
+    /// <para><b>Retired (4.2), not converted:</b> the pre-cutover file also had a <c>Store_QuantizeDisabled_EmitsEverything</c>
+    /// case pinning "<c>quantizeMeters</c> ≤ 0 disables dedup, both copies emitted". The reader cutover's
+    /// <see cref="SymbolTileStore.CollectInto(List{int},List{int},List{byte},double,out int)"/> is the ONLY
+    /// surviving overload and it has no no-dedup branch left (the plan-aware shim already always ran the
+    /// reconciler before this stage) — "fixing" that case to assert 1 instead of 2 would assert the OPPOSITE of
+    /// its own name, so it is retired rather than repurposed.</para>
+    /// </summary>
+    [TestFixture]
+    public class CrossTileIdentityStoreTests
+    {
+        // A leaked SymbolTileBlock holds DebugLiveAllocCount elevated permanently — the counter is
+        // decremented only in Dispose, never by a finalizer, so this delta is deterministic rather than
+        // GC-timing-dependent. A test that bakes a block and never disposes it is caught here.
+        private long _liveBlocks;
+        [SetUp] public void BaselineBlocks() => _liveBlocks = SymbolTileBlock.DebugLiveAllocCount;
+        [TearDown] public void NoLeakedBlocks() => Assert.AreEqual(_liveBlocks, SymbolTileBlock.DebugLiveAllocCount,
+            "this test baked a block it never disposed — release the snapshot and Clear() the store");
+
+        // Appends one point symbol straight into `buffer` (the direct-buffer-builder idiom — see
+        // Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/TestSymbolTileBuffer.cs) and returns the resulting
+        // record, so a caller can both group it into its tile's buffer AND hold it for a later assertion.
+        private static ShapedSymbol AddPointSymbol(SymbolTileBuffer buffer, double3 anchor, int layer, string text, TileId tile)
+        {
+            TestSymbolTileBuffer.AddPoint(buffer, anchor, null, float2.zero, float2.zero,
+                text: text, materialIndex: layer, tileKey: SymbolTileKey.Pack(tile));
+            return buffer.Symbols[buffer.Symbols.Count - 1];
+        }
+
+        // Test-only: a baked block's source buffer, so Collect() can read back the SAME ShapedSymbols the
+        // pre-cutover managed-list CollectInto overload did (as records, not managed-object references).
+        private readonly Dictionary<SymbolTileBlock, SymbolTileBuffer> _blockSources = new();
+
+        private bool Commit(SymbolTileStore store, SymbolTileStore.Key key, int gen, SymbolTileBuffer buffer)
+        {
+            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero);
+            bool committed = store.CompleteBuild(key, gen, block);
+            _blockSources[block] = buffer;
+            return committed;
+        }
+
+        private List<ShapedSymbol> Collect(SymbolTileStore store, double q)
+        {
+            var blockId = new List<int>(); var localIndex = new List<int>(); var isDeparting = new List<byte>();
+            store.CollectInto(blockId, localIndex, isDeparting, q, out _);
+            var output = new List<ShapedSymbol>(blockId.Count);
+            for (int i = 0; i < blockId.Count; i++)
+                output.Add(_blockSources[store.OrderedBlocks[blockId[i]]].Symbols[localIndex[i]]);
+            return output;
+        }
+
+        // ── (3) THE seamless-swap dedup: the same symbol active in a parent + child tile collapses to ONE,
+        //    keeping the finest (child) zoom. ──
+        [Test]
+        public void Store_ParentAndChildSameSymbol_DedupToFinest()
+        {
+            const double q = 50.0; // Stage 3: the store IGNORES this magnitude — it grids on the fixed 4 m; q only gates dedup ON.
+            double3 anchor = new double3(5000.0, 0, 5000.0); // a CanonicalGridMeters=4 cell centre (5000 = 4·1250)
+            var parent = new TileId { Z = 10, X = 500, Y = 400 };
+            var child = new TileId { Z = 11, X = 1000, Y = 800 };
+
+            var parentBuffer = new SymbolTileBuffer();
+            AddPointSymbol(parentBuffer, anchor + new double3(1, 0, 1), 0, "Metropolis", parent); // 1 m — well inside the 4 m cell
+            var childBuffer = new SymbolTileBuffer();
+            AddPointSymbol(childBuffer, anchor, 0, "Metropolis", child);
+
+            var store = new SymbolTileStore(cacheCap: 8);
+            var kParent = new SymbolTileStore.Key("src", parent);
+            var kChild = new SymbolTileStore.Key("src", child);
+            Commit(store, kParent, store.BeginBuild(kParent), parentBuffer);
+            Commit(store, kChild, store.BeginBuild(kChild), childBuffer);
+
+            List<ShapedSymbol> output = Collect(store, q);
+            Assert.AreEqual(1, output.Count, "the duplicate parent+child symbol collapses to one");
+            // ShapedSymbol is a struct — no reference identity (the pre-migration Assert.AreSame here compared
+            // managed-object references). TileKey is the distinguishing field: it is the only one that
+            // differs between the parent and child copies (both carry the same text/layer/anchor cell).
+            Assert.AreEqual(SymbolTileKey.Pack(child), output[0].TileKey, "the finest (child) tile's label wins");
+            store.Clear();
+        }
+
+        // ── (4) two GENUINELY distinct nearby symbols (different cells) both survive. ──
+        [Test]
+        public void Store_DistinctSymbols_BothSurvive()
+        {
+            const double q = 50.0;
+            var tile = new TileId { Z = 12, X = 3, Y = 4 };
+
+            var buffer = new SymbolTileBuffer();
+            AddPointSymbol(buffer, new double3(q * 10.5, 0, q * 10.5), 0, "A", tile);
+            AddPointSymbol(buffer, new double3(q * 40.5, 0, q * 10.5), 0, "B", tile);
+
+            var store = new SymbolTileStore(cacheCap: 8);
+            var key = new SymbolTileStore.Key("src", tile);
+            Commit(store, key, store.BeginBuild(key), buffer);
+            Assert.AreEqual(2, Collect(store, q).Count, "distinct-cell symbols are not merged");
+            store.Clear();
+        }
+
+        // ── (5) line symbols are excluded from dedup in v1 (two coincident line symbols both pass through). ──
+        [Test]
+        public void Store_LineSymbols_AreNotDeduped()
+        {
+            const double q = 50.0;
+            var tile = new TileId { Z = 12, X = 3, Y = 4 };
+
+            var buffer = new SymbolTileBuffer();
+            TestSymbolTileBuffer.AddCurved(buffer, null, null, null,
+                placement: SymbolPlacement.Line, text: "Main St", materialIndex: 0, tileKey: SymbolTileKey.Pack(tile));
+            TestSymbolTileBuffer.AddCurved(buffer, null, null, null,
+                placement: SymbolPlacement.LineCenter, text: "Main St", materialIndex: 0, tileKey: SymbolTileKey.Pack(tile));
+
+            var store = new SymbolTileStore(cacheCap: 8);
+            var key = new SymbolTileStore.Key("src", tile);
+            Commit(store, key, store.BeginBuild(key), buffer);
+            Assert.AreEqual(2, Collect(store, q).Count, "line labels pass through undeduped (per-anchor identity is a follow-up)");
+            store.Clear();
+        }
+
+        // ── UMR-87: CrossTileSymbolKey.cs's own claim, observed directly (not just via the reconciler's
+        //    winner-selection parity above, which proves it only indirectly). CrossTileSymbolKey.For (string-
+        //    keyed) and DedupKey.For (int-keyed, UMR-87's PointFadeId/reconciler identity) MUST grid to the
+        //    IDENTICAL (GridX, GridZ, GridY) for the same anchor — both call the ONE shared
+        //    CrossTileSymbolKey.QuantizeAnchor. This is a STRUCTURAL guarantee today (one code path), but a
+        //    future edit could silently fork the two `For` implementations; this pins the field values so that
+        //    would fail loudly here instead of only surfacing as a mysterious dedup/fade-id mismatch elsewhere. ──
+        [Test]
+        public void QuantizeAnchor_GridsIdenticallyForStringAndIntKeyedIdentity()
+        {
+            double3 anchor = new double3(123_456.789, 0.0, -98_765.4321);
+            const int layerId = 3;
+            const double grid = CrossTileSymbolKey.CanonicalGridMeters;
+
+            var stringKey = CrossTileSymbolKey.For(anchor, layerId, "T", "icon", grid);
+            var intKey = DedupKey.For(anchor, layerId, 1, 2, grid); // textId=1, iconImageId=2 — arbitrary, irrelevant to grid math
+
+            Assert.AreEqual(stringKey.GridX, intKey.GridX, "GridX");
+            Assert.AreEqual(stringKey.GridZ, intKey.GridZ, "GridZ");
+            Assert.AreEqual(stringKey.GridY, intKey.GridY, "GridY");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // HorizonCullGatherTests — the globe far-side horizon cull as a gather fade trigger
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// S3: the globe far-side horizon cull as a <c>GatherSymbolPoints</c> fade trigger (peer of the tile/
+    /// distance/departing culls) — a two-sided EditMode proof over a REAL <see cref="SphericalProjection"/>
+    /// <see cref="MapCamera"/>. Teeth:
+    /// <list type="bullet">
+    ///   <item>(a) a FRESH (never-seen) far-side anchor is hard-skipped and produces no collision candidate
+    ///     — a simple antipode sanity check, heading-independent (see its own header for why);</item>
+    ///   <item>(b) a PREVIOUSLY-VISIBLE anchor that rotates behind the horizon EASES OUT (stays staged, fading,
+    ///     its fade id force-faded) — never pops;</item>
+    ///   <item>(c) the frame-consistency regression pin: a FIXED off-axis (oblique-bearing) anchor's horizon-cull
+    ///     firing over THREE headings must match the normal {1,1,0} pattern — an East↔North swap OR a px/pz
+    ///     sign flip between <c>ComputeRelativePose</c> and <c>TangentBasisAt</c> changes at least one entry
+    ///     (numeric coverage table in the method's header), as does the East/North-dropped degeneracy; an
+    ///     antipode can't move at all, so it can't stand in for this
+    ///     — <see cref="OffAxisAnchor_HorizonCullFiresPerHeading_PinsEastNorthAxes"/>;</item>
+    ///   <item>Mercator is byte-identical: <see cref="IProjection.TryGetHorizonOccluder"/> returns false, so
+    ///     <c>globeRadiusSq &lt; 0</c> makes the trigger an unconditional no-op (proven by every unmoved
+    ///     Mercator symbol snapshot elsewhere — nothing to re-prove here).</item>
+    /// </list>
+    ///
+    /// <para><b>Footgun avoided (Stage-U carry-over both reviewers flagged):</b> the harness builds its
+    /// <see cref="SceneFrame"/> via <see cref="MapView.BuildSceneFrame"/> — the REAL 3-arg path wired off the
+    /// live <see cref="MapCamera.CameraRelativePosition"/> — NOT the 2-arg ctor / <c>SceneFrame.Mercator</c>,
+    /// which defaults <c>CameraRelativePosition</c> to <c>(0,0,0)</c> (camera at the sphere centre) and would
+    /// silently misfire the cull.</para>
+    /// </summary>
+    [TestFixture]
+    public class HorizonCullGatherTests
+    {
+        private static GlyphAtlasTexture BuildTinyAtlasTexture()
+        {
+            var glyph = new SdfGlyph { Codepoint = 65, Width = 10, Height = 10, Left = 0, Top = 8, Advance = 12,
+                Bitmap = new byte[16 * 16] };
+            var atlas = new GlyphAtlas();
+            atlas.Append(glyph, 0);
+            var texture = new GlyphAtlasTexture();
+            texture.Upload(atlas);
+            return texture;
+        }
+
+        private static List<SymbolQuad> OneQuad() => new List<SymbolQuad>
+        {
+            new SymbolQuad
+            {
+                TopLeft = new float2(-6f, 18f), BottomRight = new float2(12f, 0f),
+                UvTopLeft = new float2(0.1f, 0.1f), UvBottomRight = new float2(0.4f, 0.4f), LineIndex = 0,
+            },
+        };
+
+        private static void AddPoint(SymbolTileBuffer buffer, double3 anchor, string text, int feature)
+            => TestSymbolTileBuffer.AddPoint(buffer, anchor, OneQuad(), float2.zero, new float2(18f, 18f),
+                paint: SymbolPaint.Default, textSizePx: 24f, paddingPx: 2f, sortKey: 0f, text: text,
+                featureIndex: feature, tileKey: 0L);
+
+        // Epic A / A1: point symbols draw through the WORLD path now — see SymbolFadeTests.MaxAlpha's identical
+        // header for the full rationale (fade opacity rides the world slot's stream-1 Opacity, not
+        // system.Mesh's vertex-colour alpha).
+        private static float MaxAlpha(SymbolPlacementSystem system, long tileKey = 0L)
+            => system.TryGetWorldSlotMesh(tileKey, 0, SymbolKind.Text, out Mesh mesh) ? WorldMeshReadback.MaxOpacity(mesh) : 0f;
+
+        /// <summary>Great-circle destination point from the equator/prime-meridian (0,0) — the fixed look-at
+        /// every test in this fixture uses — at compass <paramref name="bearingDeg"/> (CW from north) and
+        /// angular <paramref name="distanceDeg"/>. Standard destination-point formula specialized to lat0=0:
+        /// <c>lat = asin(sin(d)·cos(b))</c>, <c>lon = atan2(sin(b)·sin(d), cos(d))</c>.</summary>
+        private static GeoCoordinate Destination(double bearingDeg, double distanceDeg)
+        {
+            double bearing  = bearingDeg   * math.PI_DBL / 180.0;
+            double distance = distanceDeg  * math.PI_DBL / 180.0;
+            double lat = math.asin(math.sin(distance) * math.cos(bearing));
+            double lon = math.atan2(math.sin(bearing) * math.sin(distance), math.cos(distance));
+            return new GeoCoordinate { Latitude = lat * 180.0 / math.PI_DBL, Longitude = lon * 180.0 / math.PI_DBL };
+        }
+
+        private sealed class Harness : System.IDisposable
+        {
+            public readonly SymbolPlacementSystem System;
+            public readonly MapCamera Camera;
+            public readonly MapView View;
+            public readonly GlyphAtlasTexture Atlas;
+            private readonly GameObject _rootGo, _camGo;
+
+            public Harness(CameraProperties initial)
+            {
+                _rootGo = new GameObject("HorizonCull_TestMapView");
+                var component = _rootGo.AddComponent<MapViewComponent>();
+
+                _camGo = new GameObject("HorizonCull_TestCamera");
+                var uCam = _camGo.AddComponent<Camera>();
+                uCam.targetTexture = new RenderTexture(320, 240, 0);
+
+                Camera = new MapCamera(uCam, initial, projection: new SphericalProjection());
+                component.SetCamera(Camera);
+                View = component.View;
+
+                Atlas = BuildTinyAtlasTexture();
+                // Epic A / A1: point symbols now draw through the world path — the demo tick needs its own
+                // world base material for a live opacity read (see MaxAlpha's header).
+                System = new SymbolPlacementSystem(Camera, worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")));
+            }
+
+            /// <summary>The REAL 3-arg <see cref="MapView.BuildSceneFrame"/> path — see the class header's
+            /// "footgun avoided" note. Re-read every call: <see cref="SetProperties"/> changes it.</summary>
+            public SceneFrame Frame() => View.BuildSceneFrame(Camera.CurrentProperties);
+
+            /// <summary>Mirrors <c>MapView.LateUpdate</c>'s load-bearing order: <c>SyncToCamera</c> BEFORE
+            /// <c>BuildSceneFrame</c>, so <see cref="MapCamera.CameraRelativePosition"/> is fresh when
+            /// <see cref="Frame"/> is next called.</summary>
+            public void SetProperties(CameraProperties props)
+            {
+                Camera.SetProperties(props);
+                Camera.SyncToCamera();
+            }
+
+            public void Dispose()
+            {
+                System.Dispose();
+                Atlas.Dispose();
+                Object.DestroyImmediate(_rootGo);
+                Object.DestroyImmediate(_camGo);
+            }
+        }
+
+        /// <summary>Simple far-side sanity check — NOT a frame-consistency pin (see
+        /// <see cref="OffAxisAnchor_HorizonCullFiresPerHeading_PinsEastNorthAxes"/> for that). The
+        /// antipode of the look-at rebases to exactly <c>(0,−2R,0)</c> for ANY heading — its render-X and
+        /// render-Z land on zero identically, so <c>HorizonCull</c>'s <c>dot(pc,cc)</c> reduces to the Y term
+        /// alone (heading never enters it). It still proves the hard-skip mechanics (fresh far anchor ⇒ no
+        /// quad, no candidate, attributed to the horizon telemetry bucket), just not the East/North wiring.</summary>
+        [Test]
+        public void FreshFarSideAnchor_IsHardSkipped_AbsentFromCollision()
+        {
+            var lookAt = new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 };
+            var initial = new CameraProperties(lookAt, zoom: 2.0, heading: 45.0, tilt: 45.0);
+            using var h = new Harness(initial);
+
+            IProjection proj = h.Camera.Projection;
+            double3 farAnchor = proj.Project(new GeoCoordinate { Latitude = 0.0, Longitude = 180.0 }); // antipode
+
+            var buffer = new SymbolTileBuffer();
+            AddPoint(buffer, farAnchor, "F", 0);
+            SceneFrame frame = h.Frame();
+            h.System.TickSymbols(in frame, buffer, h.Atlas, h.Camera.Projection); // fresh — never seen, no live fade to ease out
+
+            Assert.AreEqual(0, h.System.LastQuadCount, "a fresh far-side anchor produces no geometry (hard-skip)");
+            Assert.AreEqual(0, h.System.LastCandidateCount, "…and never enters the collision pass");
+            Assert.AreEqual(1, h.System.LastHorizonCulledCount, "…attributed to the S3 horizon cull");
+            Assert.AreEqual(0, h.System.LastDistanceCulledCount, "the B-3 radius must not preempt the horizon trigger here");
+        }
+
+        /// <summary>
+        /// THE frame-consistency regression pin — a real one: it goes RED under an East↔North axis swap OR a
+        /// single-axis (px or pz) sign flip between <c>CameraPoseMath.ComputeRelativePose</c>'s pose and
+        /// <c>Ecef.TangentBasis</c>'s East/North columns, not just the gross "East/North dropped" degeneracy.
+        ///
+        /// <para><b>Why three headings, not the obvious two.</b> For a FIXED anchor (bearing β, arc-distance θ)
+        /// and camera at heading H / tilt T, <c>HorizonCull</c>'s dot reduces to
+        /// <c>dot(pc,cc) = R·[cosθ·cy − s·sinθ·cos(H−β)]</c> (<c>s = alt·sinT</c>, <c>cy = alt·cosT + R</c>), so
+        /// <b>hidden ⟺ cos(H−β) &gt; K</b>, <c>K = (cosθ·cy − R)/(s·sinθ)</c>. Each frame defect rewrites only the
+        /// phase/argument: an E↔N swap (either side) → <c>sin(H+β) &gt; K</c>; a px flip → <c>cos(H+β) &gt; K</c>;
+        /// a pz flip → <c>cos(H+β) &lt; −K</c>; East/North dropped → constant. Two headings 180° apart CANNOT
+        /// separate all of these (the swap and px flip survive that flip — that was an earlier, weaker version of
+        /// this test), and β=45° is degenerate (<c>sin(H+45)≡cos(H−45)</c>, so a swap is invisible). An oblique
+        /// β plus THREE headings does separate them.</para>
+        ///
+        /// <para><b>Config &amp; numeric coverage (simulated against the real production formulas; the normal row
+        /// also matches the live gate — see <see cref="FreshFarSideAnchor_IsHardSkipped_AbsentFromCollision"/>'s
+        /// β=35 datapoint).</b> β=20°, θ=50°, tilt=45°, zoom=2 ⇒ K≈−0.195, R²≈4.07×10¹³. Horizon-fires
+        /// (<c>LastHorizonCulledCount</c>) over headings {0°, 90°, 150°}:
+        /// <list type="table">
+        ///   <item><term>normal  </term><description>{1, 1, 0}  ← asserted; margins dot−R² = −1.6e13 / −7.5e12 / +6.3e12 (all ≥6e12, non-flaky)</description></item>
+        ///   <item><term>E↔N swap</term><description>{1, 1, 1}  differs at 150° → RED</description></item>
+        ///   <item><term>px flip </term><description>{1, 0, 0}  differs at 90°  → RED</description></item>
+        ///   <item><term>pz flip </term><description>{0, 1, 1}  differs at 0°   → RED</description></item>
+        ///   <item><term>E/N drop</term><description>{1, 1, 1}  differs at 150° → RED</description></item>
+        /// </list>
+        /// So every East/North wiring defect changes at least one of the three asserted outcomes.</para>
+        ///
+        /// <para>The signal is the horizon-cull decision (<c>LastHorizonCulledCount</c>), not a drawn quad: some
+        /// configs leave the anchor behind the tilted camera (a separate downstream cull) which would confound a
+        /// quad-count assertion. Frames are built through the REAL <see cref="MapView.BuildSceneFrame"/> path so
+        /// the live <c>ComputeRelativePose</c>→<c>TangentBasisAt</c> integration is what's under test.</para>
+        /// </summary>
+        [Test]
+        public void OffAxisAnchor_HorizonCullFiresPerHeading_PinsEastNorthAxes()
+        {
+            var lookAt = new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 };
+            const double bearingDeg = 20.0, distanceDeg = 50.0; // oblique β so a swap/px-flip is visible (β≠0,45,90)
+            GeoCoordinate anchorGeo = Destination(bearingDeg, distanceDeg);
+
+            // Normal-code horizon-fire pattern {1,1,0} over these headings; ANY East↔North swap or px/pz sign flip
+            // changes at least one entry (see the coverage table in the doc). tilt=45° so the camera leans and the
+            // fixed off-axis anchor's occlusion is genuinely heading-dependent through px/pz.
+            var cases = new (double headingDeg, int expectedHorizonCulled)[] { (0.0, 1), (90.0, 1), (150.0, 0) };
+            foreach (var (headingDeg, expected) in cases)
+            {
+                using var h = new Harness(new CameraProperties(lookAt, zoom: 2.0, heading: headingDeg, tilt: 45.0));
+                double3 anchor = h.Camera.Projection.Project(anchorGeo);
+                var buffer = new SymbolTileBuffer();
+                AddPoint(buffer, anchor, "A", 0);
+                SceneFrame frame = h.Frame();
+                h.System.TickSymbols(in frame, buffer, h.Atlas, h.Camera.Projection);
+
+                Assert.AreEqual(expected, h.System.LastHorizonCulledCount,
+                    $"heading {headingDeg}°: horizon-cull fire must match the normal {{1,1,0}} pattern — a swap or " +
+                    "px/pz sign flip in the ComputeRelativePose↔TangentBasis frame changes this (see coverage table)");
+            }
+        }
+
+        [Test]
+        public void PreviouslyVisibleAnchor_RotatedBehindHorizon_EasesOut_NotPops()
+        {
+            var origin = new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 };
+            var initial = new CameraProperties(origin, zoom: 2.0, heading: 0.0, tilt: 0.0);
+            using var h = new Harness(initial);
+
+            IProjection proj = h.Camera.Projection;
+            // The SAME geo anchor throughout — only the CAMERA orbits (LookAt moves to the antipode), so the
+            // fade id (hashed off this fixed render-space anchor) stays stable across the transition.
+            double3 anchor = proj.Project(new GeoCoordinate { Latitude = 0.0, Longitude = 0.0 });
+            var buffer = new SymbolTileBuffer();
+            AddPoint(buffer, anchor, "A", 0);
+
+            // 1) The camera looks straight at the anchor — visible, snaps to full opacity (default deltaTime).
+            // R3: duplicate — the collision verdict is harvested one Tick late (§2.6).
+            SceneFrame frame1 = h.Frame();
+            h.System.TickSymbols(in frame1, buffer, h.Atlas, h.Camera.Projection);
+            h.System.TickSymbols(in frame1, buffer, h.Atlas, h.Camera.Projection);
+            Assert.AreEqual(1, h.System.LastQuadCount, "the anchor places while the camera looks at it");
+            Assert.Greater(MaxAlpha(h.System), 0.99f, "…at full opacity");
+
+            // 2) The camera rotates to look at the ANCHOR'S ANTIPODE — the same anchor is now on the far side.
+            //    It must keep drawing while it fades, not vanish for a frame.
+            var rotated = new GeoCoordinate3D { Latitude = 0.0, Longitude = 180.0, Altitude = 0.0 };
+            h.SetProperties(new CameraProperties(rotated, zoom: 2.0, heading: 0.0, tilt: 0.0));
+            SceneFrame frame2 = h.Frame();
+            h.System.TickSymbols(in frame2, buffer, h.Atlas, h.Camera.Projection, deltaTime: 0.1f);
+            Assert.AreEqual(1, h.System.LastQuadCount, "a horizon-occluded-but-visible anchor keeps drawing (fading, not popping)");
+            float dim = MaxAlpha(h.System);
+            Assert.Less(dim, 0.99f, "…its opacity has started to ease down");
+            Assert.Greater(dim, 0f, "…but it is still visible mid-fade");
+
+            // 3) After enough steps it finishes fading and is finally dropped — attributed to horizon telemetry.
+            for (int i = 0; i < 10; i++)
+            {
+                SceneFrame frame3 = h.Frame();
+                h.System.TickSymbols(in frame3, buffer, h.Atlas, h.Camera.Projection, deltaTime: 0.1f);
+            }
+            Assert.AreEqual(0, h.System.LastQuadCount, "once faded out, the horizon-occluded anchor is fully skipped");
+            Assert.Greater(h.System.LastHorizonCulledCount, 0, "…and its skip is attributed to horizon telemetry");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // IconSkirtCarrierChainTests — the icon skirt's carrier chain end to end from a padded atlas
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The icon skirt's CARRIER CHAIN, driven end to end from a genuinely padded
+    /// <see cref="SpriteAtlasView"/>: <c>SymbolFeatureExtractor</c> (computes
+    /// <c>IconQuadLayout.SkirtPx</c>) → <c>SymbolFeature.IconSkirtPx</c> → <see cref="StyledSymbolTileBuilder"/>
+    /// → the point symbol's <c>Layout.Bounds*</c> and the along-line symbol's <c>CurvedGlyph.CellSkirt</c>.
+    ///
+    /// <para><b>Why this exists as its own tooth.</b> Every other skirt test calls the two ends directly —
+    /// <c>ToLayoutResult(quad, SkirtPx(...))</c> or <c>BuildRotatedGlyph(..., skirt: 3f)</c> — so all of them
+    /// stay green against an implementation that never computes the skirt during extraction, drops one of
+    /// the <c>IconSkirtPx</c> assignments, or emits <c>CellSkirt = 0</c>. The render snapshots cannot see it
+    /// either: they draw the PADDED quad, which is unchanged by a lost skirt. Only the collision footprint
+    /// moves, and only a test that starts at extraction can observe that.</para>
+    ///
+    /// <para>The atlas is built by running the real <c>SpriteSheetPadder</c> over a raw parsed index rather
+    /// than by hand-setting <c>Padding</c>, so the entries under test are the ones production would bind.</para>
+    /// </summary>
+    [TestFixture]
+    public class IconSkirtCarrierChainTests
+    {
+
+        /// <summary>IR C1 P3: a synthetic decoded tile owns <c>Allocator.Persistent</c> buffers now, so the
+        /// fixture releases every one it built. Leak detection is off in the batch gate — without this the
+        /// leak would be invisible, which is the failure class this epic exists to remove.</summary>
+        [TearDown]
+        public void ReleaseFixtureTiles() => TestDecodedTiles.DisposeAll();
+        private const int Padding = 1;
+        private const int SpriteExtent = 16;
+        private const float IconSize = 2f;
+        private static readonly int2 SourceSheetSize = new int2(64, 64);
+        private static readonly TileId TileId0 = new TileId { Z = 1, X = 0, Y = 0 };
+        private const uint Extent = 4096;
+
+        /// <summary>Two 16×16 abutting sprites — the real sheet's shape — run through the production planner.</summary>
+        private static SpritePadPlan PaddedPlan() => SpriteSheetPadder.Plan(
+            SpriteIndex.Parse(
+                "{\"marker\":{\"x\":0,\"y\":0,\"width\":16,\"height\":16,\"pixelRatio\":1}," +
+                "\"arrow\":{\"x\":16,\"y\":0,\"width\":16,\"height\":16,\"pixelRatio\":1}}"),
+            SourceSheetSize, Padding);
+
+        private static SpriteAtlasView PaddedAtlas(SpritePadPlan plan)
+            => new SpriteAtlasView { Index = plan.Index, Size = plan.Size };
+
+        /// <summary>The same sprite as it would be WITHOUT the repack — the reference the collision footprint
+        /// must still equal. Only Width/Height/PixelRatio reach the box (X/Y are UV-only), so this is the
+        /// content-rect entry, byte-identical to a raw parse.</summary>
+        private static readonly SpriteEntry BareEntry = new SpriteEntry
+        {
+            X = 0, Y = 0, Width = SpriteExtent, Height = SpriteExtent, PixelRatio = 1f,
+        };
+
+        // ── The point path: Layout.Bounds must be the UNPADDED content box ────────────────────────────
+
+        [Test]
+        public async Task PointIcon_ThroughRealExtraction_CollidesOnTheContentBox_NotThePaddedQuad()
+        {
+            SpritePadPlan plan = PaddedPlan();
+            SpriteAtlasView atlas = PaddedAtlas(plan);
+            Assert.IsTrue(atlas.Index.TryGetSprite("marker", out SpriteEntry padded));
+            Assert.AreEqual(Padding, padded.Padding,
+                "precondition: the planner must actually have padded this sprite, or the tooth is vacuous");
+
+            var buffer = new SymbolTileBuffer();
+            using (GlyphManager manager = IconOnlyGlyphManager())
+            {
+                var builder = new StyledSymbolTileBuilder(manager);
+                await builder.BuildAsync(
+                    OnePointTile(new double2(100, 200)), TileId0,
+                    new[] { PointIconLayer() }, 0.0, new WebMercatorProjection(), buffer,
+                    spriteAtlas: atlas);
+            }
+
+            Assert.AreEqual(1, buffer.Symbols.Count, "the icon-only feature must emit exactly one label");
+            ShapedSymbol icon = buffer.Symbols[0];
+            Assert.AreEqual(SymbolKind.Icon, icon.Kind);
+
+            // The reference: the very same layout with NO border at all. That box is what collision saw
+            // before the repack and must still see after it.
+            SymbolQuad bareQuad = IconQuadLayout.Layout(
+                BareEntry, atlas.Size, IconSize, TextAnchor.Center, float2.zero);
+
+            const float eps = 1e-5f;
+            Assert.AreEqual(math.min(bareQuad.TopLeft.x, bareQuad.BottomRight.x), icon.BoundsMin.x, eps, "BoundsMin.x");
+            Assert.AreEqual(math.min(bareQuad.TopLeft.y, bareQuad.BottomRight.y), icon.BoundsMin.y, eps, "BoundsMin.y");
+            Assert.AreEqual(math.max(bareQuad.TopLeft.x, bareQuad.BottomRight.x), icon.BoundsMax.x, eps, "BoundsMax.x");
+            Assert.AreEqual(math.max(bareQuad.TopLeft.y, bareQuad.BottomRight.y), icon.BoundsMax.y, eps, "BoundsMax.y");
+
+            // Non-vacuity: the DRAWN quad must be strictly bigger than the collision box, by exactly the
+            // skirt. Without this, an atlas that silently lost its padding would satisfy everything above.
+            float expectedSkirt = IconQuadLayout.SkirtPx(padded, IconSize);
+            Assert.AreEqual(Padding * IconSize, expectedSkirt, eps, "precondition: a 1-texel border at icon-size 2 is 2px");
+            SymbolQuad drawn = buffer.Quads[icon.QuadStart];
+            Assert.AreEqual(icon.BoundsMin.x - expectedSkirt, drawn.TopLeft.x, eps,
+                "the RENDER quad must keep the skirt the collision box removed — the two representations " +
+                "part company here, and only here.");
+            Assert.AreEqual(icon.BoundsMax.x + expectedSkirt, drawn.BottomRight.x, eps);
+        }
+
+        // ── The along-line path: CurvedGlyph.CellSkirt must reach the rotated collision box ────────────
+
+        [Test]
+        public async Task AlongLineIcon_ThroughRealExtraction_RotatedBoxEqualsTheUnpaddedCell()
+        {
+            SpritePadPlan plan = PaddedPlan();
+            SpriteAtlasView atlas = PaddedAtlas(plan);
+            Assert.IsTrue(atlas.Index.TryGetSprite("arrow", out SpriteEntry padded));
+            Assert.AreEqual(Padding, padded.Padding, "precondition: the planner must actually have padded this sprite");
+
+            var buffer = new SymbolTileBuffer();
+            using (GlyphManager manager = IconOnlyGlyphManager())
+            {
+                var builder = new StyledSymbolTileBuilder(manager);
+                await builder.BuildAsync(
+                    OneLineTile(new double2(500, 500), new double2(3500, 3500)), TileId0,
+                    new[] { AlongLineIconLayer() }, 0.0, new WebMercatorProjection(), buffer,
+                    spriteAtlas: atlas);
+            }
+
+            Assert.AreEqual(1, buffer.Symbols.Count, "the map-aligned line icon must emit exactly one curved label");
+            ShapedSymbol icon = buffer.Symbols[0];
+            Assert.AreEqual(SymbolKind.Icon, icon.Kind);
+            Assert.AreEqual(1, icon.GlyphCount, "an along-line icon is a ONE-glyph curved label");
+            CurvedGlyph glyph = buffer.Glyphs[icon.GlyphStart];
+
+            float expectedSkirt = IconQuadLayout.SkirtPx(padded, IconSize);
+            Assert.Greater(expectedSkirt, 0f, "precondition: a padded sprite has a non-zero skirt");
+            Assert.AreEqual(expectedSkirt, glyph.CellSkirt, 1e-5f,
+                "the extractor's skirt must reach CurvedGlyph.CellSkirt — an emit that hard-codes 0 leaves " +
+                "every along-line icon colliding on its transparent border.");
+
+            // The consequence, not just the carried number: the rotated collision box built from the padded
+            // cell + its skirt must equal the one built from the BARE cell with no skirt at all.
+            SymbolQuad bareCell = IconQuadLayout.Layout(
+                BareEntry, atlas.Size, IconSize, TextAnchor.Center, float2.zero);
+            var anchor = new float2(120f, -40f);
+            const float rotation = 0.7f;
+
+            SymbolBox actual = SymbolBox.BuildRotatedGlyph(
+                anchor, glyph.Cell, TextQuadLayout.OneEm, rotation, paddingPx: 0f, cellSkirt: glyph.CellSkirt);
+            SymbolBox expected = SymbolBox.BuildRotatedGlyph(
+                anchor, bareCell, TextQuadLayout.OneEm, rotation, paddingPx: 0f, cellSkirt: 0f);
+
+            const float eps = 1e-4f;
+            Assert.AreEqual(expected.Min.x, actual.Min.x, eps, "rotated Min.x");
+            Assert.AreEqual(expected.Min.y, actual.Min.y, eps, "rotated Min.y");
+            Assert.AreEqual(expected.Max.x, actual.Max.x, eps, "rotated Max.x");
+            Assert.AreEqual(expected.Max.y, actual.Max.y, eps, "rotated Max.y");
+
+            // Non-vacuity: the padded cell with skirt 0 must be a DIFFERENT box, or the comparison above
+            // could not discriminate a lost skirt.
+            SymbolBox unshrunk = SymbolBox.BuildRotatedGlyph(
+                anchor, glyph.Cell, TextQuadLayout.OneEm, rotation, paddingPx: 0f, cellSkirt: 0f);
+            Assert.Greater(math.abs(unshrunk.Min.x - expected.Min.x), 10f * eps,
+                "precondition: dropping the skirt must visibly change the box, or this tooth is vacuous");
+        }
+
+        // ── fixtures ──────────────────────────────────────────────────────────────────────────────────
+
+        /// <summary>A glyph manager whose source serves nothing. Legitimate here: an icon-only layer never
+        /// requests a range (pass 1 skips <c>SymbolKind.Icon</c>) and never builds a font-stack resolver, so
+        /// touching it at all would itself be the defect.</summary>
+        private static GlyphManager IconOnlyGlyphManager()
+            => new GlyphManager(TestGlyphSource.FromRanges(new Dictionary<(string, int), byte[]>()));
+
+        private static SymbolStyle.StyleLayer PointIconLayer()
+            => new SymbolStyle.StyleLayer
+            {
+                Id = "points",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "points",
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"icon-image\":\"marker\",\"icon-size\":2}"),
+            };
+
+        /// <summary>`symbol-placement: line` with `icon-rotation-alignment` unset ⇒ resolves `auto → map`,
+        /// which is the P-B one-glyph-curved-symbol emit shape.</summary>
+        private static SymbolStyle.StyleLayer AlongLineIconLayer()
+            => new SymbolStyle.StyleLayer
+            {
+                Id = "roads",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "roads",
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"icon-image\":\"arrow\",\"icon-size\":2,\"symbol-placement\":\"line\"}"),
+            };
+
+        private static uint ZigZagEncode(long n) => (uint)((n << 1) ^ (n >> 63));
+
+        private static IDecodedTile OnePointTile(double2 point)
+        {
+            var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Point, hasId: false, geometry: new[] { 1u | (1u << 3), ZigZagEncode((long)point.x), ZigZagEncode((long)point.y) });
+            return TestDecodedTiles.Of("points", TileId0, new List<IFeature> { feature }, Extent);
+        }
+
+        private static IDecodedTile OneLineTile(double2 from, double2 to)
+        {
+            var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.LineString, hasId: false, geometry: new[]
+                {
+                    1u | (1u << 3), ZigZagEncode((long)from.x), ZigZagEncode((long)from.y),
+                    2u | (1u << 3), ZigZagEncode((long)(to.x - from.x)), ZigZagEncode((long)(to.y - from.y)),
+                });
+            return TestDecodedTiles.Of("roads", TileId0, new List<IFeature> { feature }, Extent);
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // MapPitchedWorldArcStagingTests — curved world-arc staging under a pitched camera
+    // ───────────────────────────────────────────────────────────────────────────────────
+
     [TestFixture]
     public class MapPitchedWorldArcStagingTests
     {
@@ -1981,5 +3264,506 @@ namespace MapRenderer.Tests.Text.Placement
                 $"GA-T3: RIGHT edge expected {expectedMax.x:F4}, read {box.Max.x:F4}.");
         }
     }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // ShapedSymbolBlittabilityTests — ShapedSymbol must live in a NativeArray
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// UMR-87: <see cref="ShapedSymbol"/> must live in a <see cref="NativeArray{T}"/> — the whole point of
+    /// interning its <c>Text</c>/<c>IconImage</c> strings into <c>TextId</c>/<c>IconImageId</c> ints. Before
+    /// that change this struct held two managed <c>string</c> fields, so <c>NativeArray&lt;ShapedSymbol&gt;</c>
+    /// construction threw at runtime (Collections' safety checks reject a non-blittable T) — the failure this
+    /// tooth pins as fixed.
+    ///
+    /// <para><b>NOT <c>UnsafeUtility.IsBlittable&lt;T&gt;()</c>.</b> That API answers a STRICTER, CLR-marshaling
+    /// question — it returns <c>false</c> for any struct containing a <c>bool</c> field, which
+    /// <see cref="ShapedSymbol"/> has four of (<c>AllowOverlap</c>/<c>IgnorePlacement</c>/<c>KeepUpright</c>/
+    /// <c>PairOptional</c>) and always did, even before UMR-87. <see cref="IsBlittable_IsTheWrongPredicate_PointStageInputAlsoReadsFalse"/>
+    /// below RUNS that API against <c>PointStageInput</c> — already a <c>NativeArray</c> element in production,
+    /// also with <c>bool</c> fields — to prove it reads the SAME false there, so it is the wrong predicate for
+    /// "can this live in a NativeArray", not a regression this tooth should chase.</para>
+    /// </summary>
+    [TestFixture]
+    public class ShapedSymbolBlittabilityTests
+    {
+        [Test]
+        public void ShapedSymbol_LivesInANativeArray()
+        {
+            // Not `using var` — CS1654 forbids an indexed WRITE through a using-variable;
+            // Dispose explicitly instead.
+            var array = new NativeArray<ShapedSymbol>(1, Allocator.Temp);
+            try
+            {
+                array[0] = new ShapedSymbol { TextId = 7, IconImageId = 3, FeatureIndex = 1 };
+                Assert.AreEqual(7, array[0].TextId);
+                Assert.AreEqual(3, array[0].IconImageId);
+            }
+            finally { array.Dispose(); }
+        }
+
+        /// <summary>The control for the type doc's claim: <c>PointStageInput</c> is an EXISTING, already-shipped
+        /// <c>NativeArray</c> element (<c>SymbolTileBlock.Points</c>) with <c>bool</c> fields of its own, so if
+        /// <c>IsBlittable</c> also reads false for it, the API — not <see cref="ShapedSymbol"/> — is what
+        /// disagrees with reality.</summary>
+        [Test]
+        public void IsBlittable_IsTheWrongPredicate_PointStageInputAlsoReadsFalse()
+        {
+            Assert.IsFalse(UnsafeUtility.IsBlittable<PointStageInput>(),
+                "control: a bool-bearing struct ALREADY living in NativeArray<PointStageInput> in production " +
+                "still reads false here — confirms IsBlittable is not the right predicate for ShapedSymbol either");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // StyledSymbolTileBuilderTests — a parsed symbol layer produces the expected shaped symbols
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// S105 Slice 3 (A4) — THE decisive test: a parsed symbol layer + the real fixture tile, run through
+    /// <see cref="StyledSymbolTileBuilder"/> produces the expected set of
+    /// shaped <see cref="ShapedSymbol"/>s. Real style + real tile → correct symbols, no synthetic stand-in.
+    /// </summary>
+    [TestFixture]
+    public class StyledSymbolTileBuilderTests
+    {
+        private static byte[] LoadUp(params string[] relative)
+        {
+            string[] starts = { Directory.GetCurrentDirectory(), AppContext.BaseDirectory };
+            foreach (string start in starts)
+            {
+                var dir = new DirectoryInfo(start);
+                while (dir != null)
+                {
+                    string p = Path.Combine(dir.FullName, Path.Combine(relative));
+                    if (File.Exists(p)) return File.ReadAllBytes(p);
+                    dir = dir.Parent;
+                }
+            }
+            throw new FileNotFoundException("fixture not found: " + Path.Combine(relative));
+        }
+
+        private const string FontName = "LatinFont";
+        private static readonly TileId FixtureTile = new TileId { Z = 0, X = 0, Y = 0 };
+
+        // 4.4c: Shape/BuildAsync now write a SymbolTileBuffer instead of a per-symbol managed carrier list —
+        // this helper reads back one symbol's quad span (the buffer analogue of `symbol.Layout.Quads`).
+        private static List<SymbolQuad> QuadsOf(SymbolTileBuffer buffer, int i)
+        {
+            ShapedSymbol symbol = buffer.Symbols[i];
+            return buffer.Quads.GetRange(symbol.QuadStart, symbol.QuadCount);
+        }
+
+        private static GlyphManager BuildGlyphManager()
+        {
+            byte[] latin = LoadUp("Assets", "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes");
+            var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = latin };
+            return new GlyphManager(TestGlyphSource.FromRanges(ranges));
+        }
+
+        private static SymbolStyle.StyleLayer CentroidsLayer(string extraLayoutJson = "")
+            => new SymbolStyle.StyleLayer
+            {
+                Id = "labels",
+                LayerType = MapRenderer.Core.Style.StyleLayerType.Symbol,
+                SourceLayer = "centroids",
+                Paint = TestStyle.SymbolPaint(),
+                Layout = TestStyle.SymbolLayout("{\"text-field\":\"{NAME}\",\"text-size\":16,\"text-font\":[\"" + FontName + "\"]" + extraLayoutJson + "}"),
+            };
+
+        [Test]
+        public async Task Build_CentroidsLayer_ShapesRealSymbols_NoSyntheticSource()
+        {
+            using MvtTile tile = MvtDecoder.Decode(FixtureTile, LoadUp("Assets", "Fixtures", "sample-tile.bytes"));
+            var projection = new WebMercatorProjection();
+            SymbolStyle.StyleLayer layer = CentroidsLayer();
+
+            // Independent extractor pass (Slice 2) gives the ground-truth text/anchor/ordinal per symbol.
+            var extracted = new List<SymbolStyle.SymbolFeature>();
+            SymbolFeatureExtractor.Extract(layer, tile, FixtureTile, 0.0, projection, extracted);
+
+            using var manager = BuildGlyphManager();
+            var builder = new StyledSymbolTileBuilder(manager);
+            var buffer = new SymbolTileBuffer();
+            await builder.BuildAsync(tile, FixtureTile, new[] { layer }, 0.0, projection, buffer);
+
+            // (a) one ShapedSymbol per extracted symbol, in the same order (FeatureIndex tiebreak preserved).
+            Assert.AreEqual(extracted.Count, buffer.Symbols.Count, "one shaped symbol per extracted point label");
+            Assert.AreEqual(248, buffer.Symbols.Count, "fixture pin: 248 centroids resolve a non-empty NAME");
+            Assert.AreEqual(0, builder.SkippedSymbolCount, "a clean all-LTR build skips nothing (happy-path no-op)");
+
+            for (int i = 0; i < buffer.Symbols.Count; i++)
+            {
+                ShapedSymbol symbol = buffer.Symbols[i];
+                Assert.AreEqual(extracted[i].AnchorRender, symbol.AnchorRender, $"anchor preserved at {i}");
+                Assert.AreEqual(extracted[i].FeatureIndex, symbol.FeatureIndex, $"ordinal preserved at {i}");
+                Assert.AreEqual(extracted[i].TileKey, symbol.TileKey, $"tile key preserved at {i}");
+                Assert.AreEqual(16f, symbol.TextSizePx, 1e-6, $"text-size 16 at {i}");
+                Assert.AreEqual(2f, symbol.PaddingPx, 1e-6, $"text-padding default 2 at {i}");
+
+                // Every pure-ASCII, space-free name shapes to exactly one glyph quad per character (all
+                // present in the Latin fixture) — a strong tooth that shaping is REAL, not stubbed empty.
+                string t = extracted[i].Text;
+                if (IsAsciiNoSpace(t))
+                    Assert.AreEqual(t.Length, symbol.QuadCount,
+                        $"'{t}' must shape to {t.Length} glyph quads");
+            }
+
+            // (b) The specific named feature — Aruba — is the first, shaped to 5 glyphs, at its A3 anchor.
+            Assert.AreEqual("Aruba", extracted[0].Text, "feature[0] is Aruba");
+            Assert.AreEqual(5, buffer.Symbols[0].QuadCount, "Aruba → 5 glyph quads");
+
+            // (c) At least two OTHER named symbols match (so a single hard-coded symbol cannot pass).
+            AssertNamedSymbol(extracted, buffer, "Afghanistan", 11);
+            AssertNamedSymbol(extracted, buffer, "Angola", 6);
+        }
+
+        // ── Slice A: the layout-options wiring is LIVE through the builder (guards StyledSymbolTileBuilder's
+        //    TextLayoutOptions.Default -> s.LayoutOptions switch — NOT just the Extract/TextQuadLayout seams,
+        //    which the engine tests already cover and which stay green even if line 105 is reverted). ──
+
+        private static async Task<SymbolTileBuffer> BuildSymbols(SymbolStyle.StyleLayer layer, GlyphManager manager)
+        {
+            using MvtTile tile = MvtDecoder.Decode(FixtureTile, LoadUp("Assets", "Fixtures", "sample-tile.bytes"));
+            var builder = new StyledSymbolTileBuilder(manager);
+            var buffer = new SymbolTileBuffer();
+            await builder.BuildAsync(tile, FixtureTile, new[] { layer }, 0.0, new WebMercatorProjection(), buffer);
+            return buffer;
+        }
+
+        [Test]
+        public async Task Build_TextOffset_ShiftsEveryQuad_ByEmsTimes24_YDownFlippedToYUp()
+        {
+            using var manager = BuildGlyphManager();
+
+            SymbolTileBuffer baseline = await BuildSymbols(CentroidsLayer(), manager);
+            // text-offset [1,2] ems in MapLibre's y-DOWN convention.
+            SymbolTileBuffer shifted = await BuildSymbols(CentroidsLayer(",\"text-offset\":[1,2]"), manager);
+
+            Assert.AreEqual(baseline.Symbols.Count, shifted.Symbols.Count, "same label set");
+            Assert.Greater(baseline.Symbols.Count, 0, "sanity: fixture yields labels");
+
+            // Center anchor in both (default), so the anchor term cancels and the per-quad delta isolates the
+            // offset. ems -> baked px is x24; the y is NEGATED (y-down text-offset -> y-up layout). So every
+            // quad shifts by exactly (1*24, -2*24) = (24, -48). A revert of line 105 to Default makes the
+            // "shifted" build ignore text-offset -> delta 0 -> this fails. It also pins the y-flip sign.
+            var expected = new float2(24f, -48f);
+            List<SymbolQuad> baseQuads = QuadsOf(baseline, 0);   // Aruba
+            List<SymbolQuad> shiftQuads = QuadsOf(shifted, 0);
+            Assert.AreEqual(baseQuads.Count, shiftQuads.Count);
+            Assert.Greater(baseQuads.Count, 0, "Aruba must shape to >0 quads");
+            for (int i = 0; i < baseQuads.Count; i++)
+            {
+                Assert.AreEqual(expected.x, shiftQuads[i].TopLeft.x - baseQuads[i].TopLeft.x, 1e-3f, $"quad {i} TopLeft.x");
+                Assert.AreEqual(expected.y, shiftQuads[i].TopLeft.y - baseQuads[i].TopLeft.y, 1e-3f, $"quad {i} TopLeft.y");
+                Assert.AreEqual(expected.x, shiftQuads[i].BottomRight.x - baseQuads[i].BottomRight.x, 1e-3f, $"quad {i} BottomRight.x");
+                Assert.AreEqual(expected.y, shiftQuads[i].BottomRight.y - baseQuads[i].BottomRight.y, 1e-3f, $"quad {i} BottomRight.y");
+            }
+        }
+
+        [Test]
+        public async Task Build_TextAnchor_TranslatesBlock_ThroughTheBuilder()
+        {
+            using var manager = BuildGlyphManager();
+
+            // justify held constant (center) across both so the per-line justify term cancels and the delta
+            // isolates the pure anchor translation. Left anchor (hAlign=0) vs Center (hAlign=0.5) pushes the
+            // block +x by 0.5*blockWidth, with no vertical change (both vAlign=0.5).
+            SymbolTileBuffer center = await BuildSymbols(CentroidsLayer(",\"text-justify\":\"center\""), manager);
+            SymbolTileBuffer left = await BuildSymbols(CentroidsLayer(",\"text-anchor\":\"left\",\"text-justify\":\"center\""), manager);
+
+            List<SymbolQuad> centerQuads = QuadsOf(center, 0);   // Aruba, single line
+            List<SymbolQuad> leftQuads = QuadsOf(left, 0);
+            Assert.AreEqual(centerQuads.Count, leftQuads.Count);
+            Assert.Greater(centerQuads.Count, 0);
+
+            float dx0 = leftQuads[0].TopLeft.x - centerQuads[0].TopLeft.x;
+            Assert.Greater(dx0, 0f, "a Left anchor must push the block +x vs Center (anchor is threaded, not dropped)");
+            for (int i = 0; i < centerQuads.Count; i++)
+            {
+                // block-wide translation: same dx for every quad, and no vertical move.
+                Assert.AreEqual(dx0, leftQuads[i].TopLeft.x - centerQuads[i].TopLeft.x, 1e-3f, $"quad {i} dx constant");
+                Assert.AreEqual(0f, leftQuads[i].TopLeft.y - centerQuads[i].TopLeft.y, 1e-3f, $"quad {i} no vertical move");
+            }
+        }
+
+        // ── Per-symbol build isolation: one symbol whose build throws (e.g. S18's deferred mixed-direction
+        //    bidi NotSupportedException) must be SKIPPED, never abort the whole tile's symbols. ──
+
+        private static SymbolStyle.SymbolFeature PointSymbol(string text) => new SymbolStyle.SymbolFeature
+        {
+            Text = text,
+            Placement = SymbolPlacement.Point,
+            LayoutOptions = TextLayoutOptions.Default,
+            TextSizePx = 16f,
+        };
+
+        [Test]
+        public void Shape_MixedDirectionSymbol_IsSkipped_OtherSymbolsSurvive()
+        {
+            using var manager = BuildGlyphManager();
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            // Two plain-LTR symbols straddling one MIXED strong-direction symbol: Latin 'A' (U+0041, strong LTR)
+            // + Arabic beh (U+0628, strong RTL) — which CodepointTextShaper rejects (single-run bidi, decision 8).
+            // The Arabic range is absent from the Latin fixture ⇒ cached empty in Pass 1 (no throw); the throw
+            // lands in Pass 2's shaper exactly as in production.
+            var symbols = new List<SymbolStyle.SymbolFeature>
+            {
+                PointSymbol("Aruba"),
+                PointSymbol("Aب"),
+                PointSymbol("Angola"),
+            };
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(
+                0, new FontStack { Names = new[] { FontName } }, symbols);
+
+            var output = new SymbolTileBuffer();
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+
+            // The whole tile is NOT aborted: the two LTR symbols build; only the mixed one is skipped.
+            Assert.AreEqual(2, output.Symbols.Count, "the two LTR labels survive; the mixed label is skipped");
+            Assert.AreEqual(builder.StringTable.Intern("Aruba"), output.Symbols[0].TextId);
+            Assert.AreEqual(builder.StringTable.Intern("Angola"), output.Symbols[1].TextId);
+            Assert.AreEqual(1, builder.SkippedSymbolCount, "exactly one label skipped");
+            Assert.IsNotNull(builder.LastSkipReason, "skip reason recorded for the throttled diagnostic");
+            StringAssert.Contains("NotSupportedException", builder.LastSkipReason);
+        }
+
+        [Test]
+        public void EnsureGlyphRanges_Cancelled_PropagatesCancellation()
+        {
+            // A glyph source that OBSERVES the token (FromRanges discards it), so the ensure step's await
+            // surfaces the cancel. Pins that a cancelled ensure propagates an OperationCanceledException.
+            // (Shape never running as a consequence is pinned by T1/T5c, not here — this body never calls
+            // Shape, so an assertion about its output would be true under any implementation.)
+            var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
+            {
+                ct.ThrowIfCancellationRequested();
+                return UniTask.FromResult(GlyphRangeResponse.Absent());
+            });
+            using var manager = new GlyphManager(source);
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            var symbols = new List<SymbolStyle.SymbolFeature> { PointSymbol("Aruba") };
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(
+                0, new FontStack { Names = new[] { FontName } }, symbols);
+            var extractedLayers = new List<StyledSymbolTileBuilder.ExtractedLayer> { layer };
+
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            var ranges = new List<(string FontName, int RangeStart)>();
+            var seen = new HashSet<(string FontName, int RangeStart)>();
+            builder.CollectRequiredRanges(extractedLayers, ranges, seen);
+
+            // CatchAsync (not ThrowsAsync) so the assertion accepts any OperationCanceledException SUBTYPE: the
+            // Unity/Mono UniTask path surfaces cancellation as TaskCanceledException (an OCE subclass), the
+            // dotnet path as a plain OperationCanceledException. The production filter uses `ex is OCE`, so it
+            // correctly excludes both from the per-symbol skip — the test must be equally subtype-tolerant.
+            Assert.CatchAsync<OperationCanceledException>(async () =>
+                await builder.EnsureGlyphRangesAsync(ranges, cts.Token));
+        }
+
+        // ── I5a: icon symbols ride the same Shape loop as text, but must never touch the
+        //    shaper/resolver/glyph-fetch machinery (an icon-only layer may carry no text-font at all). ──
+
+        private static SymbolStyle.SymbolFeature Icon(in SymbolQuad iconQuad) => new SymbolStyle.SymbolFeature
+        {
+            Kind = SymbolKind.Icon,
+            IconQuad = iconQuad,
+            Placement = SymbolPlacement.Point,
+            AnchorRender = default,
+            PaddingPx = 3f,
+            SortKey = 0f,
+        };
+
+        private static readonly SymbolQuad SampleIconQuad = new SymbolQuad
+        {
+            TopLeft = new float2(-8, 8), BottomRight = new float2(8, -8),
+            UvTopLeft = new float2(0.1f, 0.2f), UvBottomRight = new float2(0.3f, 0.4f),
+        };
+
+        [Test]
+        public void Shape_IconOnlyLayer_YieldsOneIcon_NoGlyphFetch_NoShaping()
+        {
+            // A glyph source that THROWS if ever asked — an icon-only layer must never reach Pass 1's fetch.
+            var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
+                throw new InvalidOperationException("icon-only layer must never request a glyph range"));
+            using var manager = new GlyphManager(source);
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            var symbols = new List<SymbolStyle.SymbolFeature> { Icon(SampleIconQuad) };
+            // No text-font at all — FontStack.Names left default/empty, mirroring an icon-only style layer.
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(0, new FontStack(), symbols);
+
+            var output = new SymbolTileBuffer();
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+
+            Assert.AreEqual(1, output.Symbols.Count, "the icon label must still be emitted");
+            Assert.AreEqual(0, builder.SkippedSymbolCount, "an icon build must never be skipped");
+            ShapedSymbol symbol = output.Symbols[0];
+            Assert.AreEqual(SymbolKind.Icon, symbol.Kind);
+            Assert.AreEqual(1, symbol.QuadCount, "a sprite is exactly one quad");
+            Assert.AreEqual(TextQuadLayout.OneEm, symbol.TextSizePx, 1e-6, "icon scale must be 1 (OneEm/OneEm)");
+            Assert.AreEqual(0, symbol.TextId, "an icon label carries no text id");
+        }
+
+        [Test]
+        public void Shape_MixedTextAndIconLayer_YieldsBothKinds_InOriginalOrder()
+        {
+            using var manager = BuildGlyphManager();
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            var symbols = new List<SymbolStyle.SymbolFeature>
+            {
+                PointSymbol("Aruba"),
+                Icon(SampleIconQuad),
+                PointSymbol("Angola"),
+            };
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(
+                0, new FontStack { Names = new[] { FontName } }, symbols);
+
+            var output = new SymbolTileBuffer();
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+
+            Assert.AreEqual(3, output.Symbols.Count, "text + icon + text, all three survive");
+            Assert.AreEqual(0, builder.SkippedSymbolCount);
+            Assert.AreEqual(SymbolKind.Text, output.Symbols[0].Kind); Assert.AreEqual(builder.StringTable.Intern("Aruba"), output.Symbols[0].TextId);
+            Assert.AreEqual(SymbolKind.Icon, output.Symbols[1].Kind); Assert.AreEqual(0, output.Symbols[1].TextId);
+            Assert.AreEqual(SymbolKind.Text, output.Symbols[2].Kind); Assert.AreEqual(builder.StringTable.Intern("Angola"), output.Symbols[2].TextId);
+        }
+
+        // ── A3 (P-B): a MAP-aligned LINE icon must build as a ONE-GLYPH CURVED instance, not a point one.
+        //    The point-icon branch above stays byte-identical (its own tooth is the pair above). ──
+        [Test]
+        public void Shape_AlongLineIcon_BuildsOneGlyphCurvedInstance_NotAPointInstance()
+        {
+            var source = new TestGlyphSource((fontStack, rangeStart, ct) =>
+                throw new InvalidOperationException("an icon-only layer must never request a glyph range"));
+            using var manager = new GlyphManager(source);
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            var pathRender = new[] { new double3(0, 0, 0), new double3(100, 0, 0) };
+            var anchors = new[] { new LineAnchor(0, 0.5f) };
+            var alongLine = new SymbolStyle.SymbolFeature
+            {
+                Kind = SymbolKind.Icon,
+                Placement = SymbolPlacement.Line,
+                IconQuad = SampleIconQuad,
+                PathRender = pathRender,
+                LineAnchors = anchors,
+                IconImage = "arrow",
+                PaddingPx = 3f,
+                SortKey = 1.5f,
+                MaxAngleDeg = 45f,
+                KeepUpright = false,
+                IconRotateRadians = math.PI,
+                FeatureIndex = 7,
+                TileKey = 42L,
+            };
+            var layer = new StyledSymbolTileBuilder.ExtractedLayer(0, new FontStack(),
+                new List<SymbolStyle.SymbolFeature> { alongLine });
+
+            var output = new SymbolTileBuffer();
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer }, output);
+
+            Assert.AreEqual(1, output.Symbols.Count);
+            ShapedSymbol built = output.Symbols[0];
+            // A point-shaped build (the pre-P-B behaviour) would leave GlyphCount 0 and Placement Point.
+            Assert.AreEqual(SymbolPlacement.Line, built.Placement, "an along-line icon keeps LINE placement");
+            Assert.AreEqual(1, built.GlyphCount, "exactly ONE glyph — the icon quad IS the whole run");
+            Assert.AreEqual(0, built.QuadCount, "a curved instance carries no point quads");
+            Assert.AreEqual(SymbolKind.Icon, built.Kind, "still an icon (routes to the sprite atlas)");
+            CurvedGlyph glyph = output.Glyphs[built.GlyphStart];
+            Assert.AreEqual(0f, glyph.ArcCenter, 1e-6f, "a lone cell sits at arc 0");
+
+            // Field-for-field: the cell IS the extractor's icon quad, unmodified.
+            SymbolQuad cell = glyph.Cell;
+            Assert.AreEqual(SampleIconQuad.TopLeft, cell.TopLeft, "cell TopLeft == the icon quad's");
+            Assert.AreEqual(SampleIconQuad.BottomRight, cell.BottomRight, "cell BottomRight == the icon quad's");
+            Assert.AreEqual(SampleIconQuad.UvTopLeft, cell.UvTopLeft, "cell UvTopLeft == the icon quad's");
+            Assert.AreEqual(SampleIconQuad.UvBottomRight, cell.UvBottomRight, "cell UvBottomRight == the icon quad's");
+
+            Assert.AreEqual(TextQuadLayout.OneEm, built.TextSizePx, 1e-6f,
+                "scale 1 — IconQuadLayout already baked icon-size in (matches the point-icon branch)");
+            // 4.4c: AppendPath/AppendAnchors COPY into the buffer's own pools (never hold the caller's array
+            // reference), so "carried, not rebuilt" is now a VALUE check — still proves the values are copied
+            // verbatim, not recomputed from scratch by some other path.
+            CollectionAssert.AreEqual(pathRender, output.Path.GetRange(built.PathStart, built.PathCount),
+                "the projected path is carried, not rebuilt");
+            CollectionAssert.AreEqual(anchors, output.Anchors.GetRange(built.AnchorStart, built.AnchorCount),
+                "the build-time anchors are carried, not recomputed");
+            Assert.IsFalse(built.KeepUpright, "icon-keep-upright's spec default is false");
+            Assert.AreEqual(builder.StringTable.Intern("arrow"), built.IconImageId);
+            Assert.AreEqual(math.PI, built.IconRotateRadians, 1e-6f, "icon-rotate is carried onto the curved instance");
+            Assert.AreEqual(7, built.FeatureIndex);
+            Assert.AreEqual(42L, built.TileKey);
+        }
+
+        // ── 4.4c pairing-adjacency tooth: every layer processor of ONE build must write into the SAME
+        //    SymbolTileBuffer, or SymbolPairing's owner-at-i+1 resolution breaks.
+        //    TileSymbolLayerProcessor.CompleteOnMain calls Shape ONCE PER LAYER — this
+        //    reproduces that shape directly: two Shape calls sharing one buffer, an owner tailing the
+        //    FIRST call and its rider heading the SECOND. RED-verify: give the second call its OWN fresh
+        //    buffer instead (the violation) — Bake would then see the owner alone (PairRoles[0] dissolves
+        //    to None, its rider never in the same block) rather than a resolved pair. ──
+        [Test]
+        public void Shape_TwoCallsShareOneBuffer_OwnerLastOfFirstCall_RiderFirstOfSecondCall_ResolveAsPair()
+        {
+            using var manager = new GlyphManager(TestGlyphSource.FromRanges(new Dictionary<(string, int), byte[]>()));
+            var builder = new StyledSymbolTileBuilder(manager);
+
+            const int materialIndex = 3; // shared — SymbolPairing's ShapedSymbol overload also requires this to match
+            const long tileKey = 99L;
+            const int pairId = 7;
+
+            var ownerSymbol = new SymbolStyle.SymbolFeature
+            {
+                Kind = SymbolKind.Icon, IconQuad = SampleIconQuad, Placement = SymbolPlacement.Point,
+                AnchorRender = default, PaddingPx = 3f, SortKey = 0f, TileKey = tileKey,
+                PairRole = SymbolPairRole.Owner, PairId = pairId,
+            };
+            var riderSymbol = new SymbolStyle.SymbolFeature
+            {
+                Kind = SymbolKind.Icon, IconQuad = SampleIconQuad, Placement = SymbolPlacement.Point,
+                AnchorRender = default, PaddingPx = 3f, SortKey = 0f, TileKey = tileKey,
+                PairRole = SymbolPairRole.Rider, PairId = pairId,
+            };
+            var layer1 = new StyledSymbolTileBuilder.ExtractedLayer(
+                materialIndex, new FontStack(), new List<SymbolStyle.SymbolFeature> { ownerSymbol });
+            var layer2 = new StyledSymbolTileBuilder.ExtractedLayer(
+                materialIndex, new FontStack(), new List<SymbolStyle.SymbolFeature> { riderSymbol });
+
+            var buffer = new SymbolTileBuffer();
+            // "processor 1" and "processor 2" — mirrors TileSymbolLayerProcessor's one-Shape-call-per-layer
+            // shape, both fed the SAME shared buffer (the rule TileSymbolLayerProcessor/TryBeginBuild wire up).
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer1 }, buffer);
+            builder.Shape(new List<StyledSymbolTileBuilder.ExtractedLayer> { layer2 }, buffer);
+
+            Assert.AreEqual(2, buffer.Symbols.Count, "both calls must land in the SAME buffer");
+
+            SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero);
+            try
+            {
+                Assert.AreEqual(SymbolPairRole.Owner, block.PairRoles[0], "cross-call adjacency: owner resolves");
+                Assert.AreEqual(SymbolPairRole.Rider, block.PairRoles[1], "cross-call adjacency: rider resolves");
+            }
+            finally { block.Dispose(); }
+        }
+
+        private static void AssertNamedSymbol(List<SymbolStyle.SymbolFeature> extracted, SymbolTileBuffer buffer,
+            string name, int expectedQuads)
+        {
+            int idx = extracted.FindIndex(e => e.Text == name);
+            Assert.Greater(idx, -1, $"fixture must contain '{name}'");
+            Assert.AreEqual(expectedQuads, buffer.Symbols[idx].QuadCount, $"'{name}' → {expectedQuads} glyph quads");
+        }
+
+        private static bool IsAsciiNoSpace(string s)
+        {
+            foreach (char c in s)
+                if (c <= 32 || c > 126) return false;
+            return true;
+        }
+    }
 }
-#endif // UNITY_EDITOR

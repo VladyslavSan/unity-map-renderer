@@ -31,7 +31,7 @@ using Symbol = MapRenderer.Core.Style.Symbol;
 namespace MapRenderer.Tests.Text.Placement
 {
     [TestFixture]
-    public class SymbolIconWiringTests
+    public class SymbolIconWiringTests : BaseTestFixture
     {
         private const string StyleJson = @"{
             ""version"": 8,
@@ -153,9 +153,12 @@ namespace MapRenderer.Tests.Text.Placement
         public void AlongLineIconBatch_BuildsIntoTheIconWorldMesh_NotTheTextMesh_OneCandidatePerAnchor()
         {
             var (camGo, mapCamera, frame) = BuildScene();
+            Track(camGo);
             var atlasTexture = BuildTinyAtlasTexture();
-            var spriteTexture = BuildSpriteTexture();
-            var settings = BuildSettings();
+            var spriteTexture = Track(BuildSpriteTexture());
+            var settings = Track(BuildSettings());
+            Track(settings.SymbolTextWorld);
+            Track(settings.SymbolIconWorld);
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
@@ -209,11 +212,6 @@ namespace MapRenderer.Tests.Text.Placement
                 renderLayer.Dispose();
                 system.Dispose();
                 atlasTexture.Dispose();
-                Object.DestroyImmediate(spriteTexture);
-                Object.DestroyImmediate(settings.SymbolTextWorld);
-                Object.DestroyImmediate(settings.SymbolIconWorld);
-                Object.DestroyImmediate(settings);
-                Object.DestroyImmediate(camGo);
             }
         }
 
@@ -224,9 +222,12 @@ namespace MapRenderer.Tests.Text.Placement
         public void AlongLineIconRotate180_NegatesEveryCornerOffset_LeavingUvsUntouched()
         {
             var (camGo, mapCamera, frame) = BuildScene();
+            Track(camGo);
             var atlasTexture = BuildTinyAtlasTexture();
-            var spriteTexture = BuildSpriteTexture();
-            var settings = BuildSettings();
+            var spriteTexture = Track(BuildSpriteTexture());
+            var settings = Track(BuildSettings());
+            Track(settings.SymbolTextWorld);
+            Track(settings.SymbolIconWorld);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")),
                 new Material(Shader.Find("Map/Symbol/IconWorld")));
@@ -277,11 +278,6 @@ namespace MapRenderer.Tests.Text.Placement
             {
                 system.Dispose();
                 atlasTexture.Dispose();
-                Object.DestroyImmediate(spriteTexture);
-                Object.DestroyImmediate(settings.SymbolTextWorld);
-                Object.DestroyImmediate(settings.SymbolIconWorld);
-                Object.DestroyImmediate(settings);
-                Object.DestroyImmediate(camGo);
             }
         }
 
@@ -311,9 +307,12 @@ namespace MapRenderer.Tests.Text.Placement
         public void IconBatch_BuildsIconMesh_AndBindsSpriteTexture_TextBatchLeavesIconPresenterHidden()
         {
             var (camGo, mapCamera, frame) = BuildScene();
+            Track(camGo);
             var atlasTexture = BuildTinyAtlasTexture();
-            var spriteTexture = BuildSpriteTexture();
-            var settings = BuildSettings();
+            var spriteTexture = Track(BuildSpriteTexture());
+            var settings = Track(BuildSettings());
+            Track(settings.SymbolTextWorld);
+            Track(settings.SymbolIconWorld);
             var renderLayer = SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(StyleJson).Layers[0], settings, 5.0, drawIndex: 0);
 
             var system = new SymbolPlacementSystem(mapCamera, new Material(Shader.Find("Map/Symbol/TextWorld")));
@@ -362,11 +361,6 @@ namespace MapRenderer.Tests.Text.Placement
                 renderLayer.Dispose();
                 system.Dispose();
                 atlasTexture.Dispose();
-                Object.DestroyImmediate(spriteTexture);
-                Object.DestroyImmediate(settings.SymbolTextWorld);
-                Object.DestroyImmediate(settings.SymbolIconWorld);
-                Object.DestroyImmediate(settings);
-                Object.DestroyImmediate(camGo);
             }
         }
     }

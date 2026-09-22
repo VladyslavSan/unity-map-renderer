@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.DataSources
         {
             string root = FindRepoRoot();
             string path = Path.Combine(root, Path.Combine(relativeParts));
-            Assert.IsTrue(File.Exists(path), $"expected source file to exist at {path}");
+            FileAssert.Exists(path);
             return File.ReadAllText(path);
         }
 

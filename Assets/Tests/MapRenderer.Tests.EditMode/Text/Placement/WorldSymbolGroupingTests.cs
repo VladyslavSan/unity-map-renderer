@@ -34,7 +34,7 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     [TestFixture]
-    public class WorldSymbolGroupingTests
+    public class WorldSymbolGroupingTests : BaseTestFixture
     {
         private static GlyphAtlasTexture BuildTinyAtlasTexture()
         {
@@ -100,7 +100,7 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void TextAndIcon_SameTileAndSlot_AreSiblingsUnderOneLayerNode_UnderOneTileContainer_AndASecondTileGetsItsOwnContainer()
         {
-            var camGo = new GameObject("WorldSymbolGrouping_TestCamera");
+            var camGo = Track(new GameObject("WorldSymbolGrouping_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var lookAt = new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 };
@@ -118,14 +118,13 @@ namespace MapRenderer.Tests.Text.Placement
             long tileAKey = SymbolTileKey.Pack(tileA);
             long tileBKey = SymbolTileKey.Pack(tileB);
 
-            var atlasTexture = BuildTinyAtlasTexture();
-            var spriteTexture = BuildSpriteTexture();
+            using var atlasTexture = BuildTinyAtlasTexture();
+            var spriteTexture = Track(BuildSpriteTexture());
 
-            var system = new SymbolPlacementSystem(mapCamera,
+            using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")),
                 worldIconBase: new Material(Shader.Find("Map/Symbol/IconWorld")));
 
-            try
             {
                 // tileA: text + icon on the SAME slot (0, the demo/no-symbolLayers path). tileB: text only.
                 var buffer = new SymbolTileBuffer();
@@ -182,13 +181,6 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.That(containerB.position.x, Is.EqualTo(expectedB.x).Within(0.01f), "tileB's container must sit at its OWN tile origin, independently of tileA's.");
                 Assert.That(containerB.position.z, Is.EqualTo(expectedB.z).Within(0.01f));
             }
-            finally
-            {
-                system.Dispose();
-                atlasTexture.Dispose();
-                Object.DestroyImmediate(spriteTexture);
-                Object.DestroyImmediate(camGo);
-            }
         }
 
         // ── Idle-reclaim lifecycle: child destroy → layer-node refcount → tile ReleaseChildFrom ──────────
@@ -199,7 +191,7 @@ namespace MapRenderer.Tests.Text.Placement
         [Test]
         public void IdleReclaim_ReleasesChild_ThenLayerNode_ThenTileContainer_AndRecyclesThemOnReEmit()
         {
-            var camGo = new GameObject("WorldSymbolReclaim_TestCamera");
+            var camGo = Track(new GameObject("WorldSymbolReclaim_TestCamera"));
             var uCam = camGo.AddComponent<Camera>();
             uCam.targetTexture = new RenderTexture(320, 240, 0);
             var lookAt = new GeoCoordinate { Latitude = 10.0, Longitude = 10.0 };
@@ -214,14 +206,13 @@ namespace MapRenderer.Tests.Text.Placement
             var tileA = new TileId { Z = 12, X = 110, Y = 200 }; // arbitrary — unrelated to the camera's view
             long tileAKey = SymbolTileKey.Pack(tileA);
 
-            var atlasTexture = BuildTinyAtlasTexture();
-            var spriteTexture = BuildSpriteTexture();
+            using var atlasTexture = BuildTinyAtlasTexture();
+            var spriteTexture = Track(BuildSpriteTexture());
 
-            var system = new SymbolPlacementSystem(mapCamera,
+            using var system = new SymbolPlacementSystem(mapCamera,
                 worldTextBase: new Material(Shader.Find("Map/Symbol/TextWorld")),
                 worldIconBase: new Material(Shader.Find("Map/Symbol/IconWorld")));
 
-            try
             {
                 var textAndIcon = new SymbolTileBuffer();
                 AddText(textAndIcon, frame.SceneOriginRender, tileAKey, featureIndex: 0);
@@ -308,13 +299,6 @@ namespace MapRenderer.Tests.Text.Placement
                     "the recycled leaf's slot must hold a live mesh.");
                 Assert.AreSame(reusedMesh, textChild.GetComponent<MeshFilter>().sharedMesh,
                     "the MeshFilter must point at the slot's CURRENT mesh, not the destroyed one from its previous tenancy.");
-            }
-            finally
-            {
-                system.Dispose();
-                atlasTexture.Dispose();
-                Object.DestroyImmediate(spriteTexture);
-                Object.DestroyImmediate(camGo);
             }
         }
 

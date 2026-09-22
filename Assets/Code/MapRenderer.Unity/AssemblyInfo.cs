@@ -7,6 +7,7 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("MapRenderer.Tests.EditMode")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.Shared")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.PlayMode")]
+[assembly: InternalsVisibleTo("MapRenderer.Tests.Visual")]
 
 // The app/demo layer (MapRenderer.App — composition root, input, dev UI) is a first-party consumer that
 // reaches library internals (MapView.View/SymbolPlacementSystem, telemetry snapshots, the symbol-breakdown trigger). Same

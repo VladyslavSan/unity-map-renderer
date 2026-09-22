@@ -24,7 +24,7 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Tests.PlayMode.DataSources
 {
     [TestFixture]
-    public class A7TileFeatureSourceTests
+    public class A7TileFeatureSourceTests : BaseTestFixture
     {
         /// <summary>A <see cref="ITileFeatureSource"/> with NO IDataSource, no bytes, no fetch — every
         /// <see cref="GetTile"/> builds a tile and hands back a fresh <see cref="SharedDisposable{T}"/> over
@@ -84,14 +84,10 @@ namespace MapRenderer.Tests.PlayMode.DataSources
         public IEnumerator ByteLessSource_FlowsThroughTheUnchangedFanOut_ProducesTheFullExtentQuad()
         {
             // The fixture tile: one layer, one feature — the A2 full-extent-ring command stream, carried by
-            // the production InMemoryTileFeature. Built per GetTile call, OWNED BY THE LEASE that wraps it.
+            // DictionaryFeature. Built per GetTile call, OWNED BY THE LEASE that wraps it.
             IDecodedTile MakeFixtureTile()
             {
-                var feature = new InMemoryTileFeature
-                {
-                    GeometryType = TileGeometryType.Polygon,
-                    Geometry     = FullExtentRingCommandStream.Commands,
-                };
+                var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Polygon, hasId: false, geometry: FullExtentRingCommandStream.Commands);
                 var layer = new InMemoryTileLayer(
                     FixtureSourceLayerName, new TileId { Z = 0, X = 0, Y = 0 }, new IFeature[] { feature },
                     (uint)BackgroundQuad.Extent);
@@ -109,7 +105,7 @@ namespace MapRenderer.Tests.PlayMode.DataSources
                 ]
             }}");
 
-            var go   = new GameObject("A7ByteLessSource");
+            var go   = Track(new GameObject("A7ByteLessSource"));
             var view = go.AddComponent<MapView>();
             view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.WithTestMaterials();
@@ -139,7 +135,7 @@ namespace MapRenderer.Tests.PlayMode.DataSources
                     "produce the flat 4-vertex quad (Mercator, no subdivision) plus its 8-vertex boundary " +
                     "band — the same oracle A6NonMvtDecoderTests asserts one level down.");
             }
-            finally { view.Teardown(); Object.DestroyImmediate(go); }
+            finally { view.Teardown(); }
         }
     }
 }

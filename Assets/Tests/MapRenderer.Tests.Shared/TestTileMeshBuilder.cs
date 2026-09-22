@@ -297,7 +297,8 @@ namespace MapRenderer.Tests
         /// rebinds: <c>GlobeLineWindingTests.cs:54-55</c>, <c>RightHandedSphereProjectionWindingTests.cs:110-111</c>,
         /// <c>GlobeLineSnapshotTests.cs:44</c>. Harmless — both siblings drive the SAME graph
         /// (<c>LineMeshGraph.Schedule</c>'s switch dispatches to the identical <c>ScheduleTyped</c> call the
-        /// generic sibling makes directly), and <c>LineGraphParityTests.cs:50</c> keeps <c>Schedule</c>'s own
+        /// generic sibling makes directly), and <c>FillSharedBufferTests.cs:2874</c> (the merged home of the
+        /// former <c>LineGraphParityTests.cs</c>) keeps <c>Schedule</c>'s own
         /// switch under cover independently — but worth knowing before "why did this call route through the
         /// OTHER overload" surprises a future reader.</para></summary>
         public static Mesh BuildLineFromLayer(

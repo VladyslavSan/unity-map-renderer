@@ -14,10 +14,13 @@ lot). Re-measure before relying on a specific number; the file/folder/lane RULES
 
 ## 1. Topic — what a file is about
 
-- **A test file is named for the SUBJECT under test, never for a production type.**
-  - The name answers "what behaviour does this pin?", not "which class did I open?". `FillSortKey`, not
-    `StyledFillTileBuilder`. This is [`conventions-short.md` §"Names carry meaning"](conventions-short.md)
-    applied to file names.
+- **A test file is named for its TOPIC, never for a production type. Where a topic needs more than one
+  file (§4), each file is named for the sub-area that dominates it — not for a single subject and not for
+  the class under test.**
+  - The name still answers "what behaviour does this pin?", not "which class did I open?" — `FillSortKey`
+    is a legitimate sub-area name inside `meshing`; `StyledFillTileBuilder` is not, because it names the
+    production type instead of the behaviour. This is
+    [`conventions-short.md` §"Names carry meaning"](conventions-short.md) applied to file names.
   - Mirroring a type name is why a rename touches dozens of files that assert nothing about the rename.
 
 - **The topic is one word from the commit-scope vocabulary in
@@ -46,13 +49,15 @@ lot). Re-measure before relying on a specific number; the file/folder/lane RULES
 ## 2. Kind — the second axis
 
 - **Topic is not the only axis. A test also has a KIND, and two kinds do not merge with anything.**
-  - `Visual/` (55 files, 27,223 lines) and `Structure/` (21 files, 5,935 lines) are **kind** folders
-    sitting in **topic** positions. That is 76 of 427 files, 18% of the suite, filed by how they work
-    rather than by what they cover.
+  - `Visual/` and `Structure/` are **kind** folders sitting in **topic** positions, filed by how they
+    work rather than by what they cover. `Visual/` is its own assembly, `MapRenderer.Tests.Visual`, with
+    its own `.asmdef` referencing only `MapRenderer.Tests.Shared` — it runs and can be skipped as a unit,
+    separately from `Structure/`, which stays a folder inside `MapRenderer.Tests.EditMode`.
 
 - **Behavioural** — calls production code and asserts the result. The default. Files by topic, §1.
 
-- **Visual** — renders and reads pixels back, or needs a GPU context. Stays in `Visual/`.
+- **Visual** — renders and reads pixels back, or needs a GPU context. Stays in `Visual/`
+  (`MapRenderer.Tests.Visual`).
   - It carries a recorded cross-fixture hazard: `docs/lessons-learned.md` records
     `DevicePixelRatioSnapshotTests` reading a shader global left behind by an **earlier fixture in the same
     batch**. A shader global is process state, so these fixtures are not independent of each other.
@@ -128,24 +133,49 @@ Three lanes. Take the **first** one whose entry condition holds.
   - **Nothing in the repo detects this: both lanes report green.** A vacuous assertion still passes, so
     the hazard has no red signal of its own — see UMR-182, which tracks fixing the instance above.
 
-## 4. Size — split and merge
+## 4. Size — pack by topic and lane, not by subject
 
-- **A file is split when it passes 1,200 lines, along the SUBJECT axis.** Not before.
-  - The cap is the suite's own p99 (p50 is 234 lines, p90 is 599). Eight files reach it today, two of them
-    in `Visual/`. So it forces no churn on anything already written. It exists to stop a merged topic file
-    becoming unreadable.
-  - A 300-line file is not a reason to start a second one.
+- **Files are packed by TOPIC and LANE, filled up to 4,000 lines. SUBJECT is not a merge criterion.**
+  Whether two tests share a file is a size question, bounded by topic and lane — not a subject question.
+  - Two tests merge whenever they share (topic, lane) and the file they'd land in stays under the cap.
+    They do not need to share a subject: one topic file can hold several unrelated subjects at once.
+  - A file splits only when adding to it would cross 4,000 lines. Split however keeps both halves under
+    the cap — not along a subject boundary.
+  - Finding a specific test becomes a grep for its name rather than a walk to "the file that owns that
+    class". That trade was made on purpose — see WHY below.
 
-- **Two files merge when they share the same (topic, subject, lane). Small is not a reason to merge.**
-  - Identity decides the file; size only ever triggers a split. There is no "these are both short" rule.
-  - The median file holds **4** tests and 222 of 427 files hold 4 or fewer, because files are split per
-    test METHOD rather than per subject. `Tiles/` holds `FillMeshGraphParityTests`,
-    `FillMeshGraphSchedulingTests`, `FillMeshGraphGlobeParityTests`, `FillExtrusionGraphBuildTests` and
-    `FillExtrusionMeshGraphSchedulingTests` — one subject, one lane, five files.
+- **WHY a cap exists at all: not readability, a merge-conflict and load-time ceiling.** The maintainer
+  accepts a long file — size is no longer a readability rule, it is the point past which one file becomes
+  a merge-conflict magnet that everyone touching the topic collides on, and a slow thing to open and diff.
+  4,000 lines is where that starts to bite; it is not a claim that a 4,000-line file is pleasant to read.
+
+- **WHY 4,000 and not smaller: subject-pure grouping cannot reach a file count this suite can navigate.**
+  Three floors, same 138,892 EditMode lines, assuming perfect packing:
+
+    | Cap (lines) | Floor (files) |
+    |---:|---:|
+    | 1,200 (old, per-subject) | 115 |
+    | 2,500 | 55 |
+    | 4,000 | 34 |
+
+  These are floors, not forecasts — the lane fence and the §4 stay-alone list push the real count above
+  them. Topic+lane packing at 4,000 projects to roughly **63 EditMode files** before those protections
+  force some singles back out, against **432 EditMode files today**. Subject-pure packing never gets
+  close to any of these floors regardless of cap: its mean file is 321 lines, so it stalls around 373
+  files whatever the cap says. The maintainer chose fewer, larger, topic-scoped files over many small
+  subject-pure ones, accepting that a file holds unrelated subjects and that finding a test becomes a grep
+  rather than opening the obvious file.
+
+- **Worked example — the five `Fill*` files collapse to one.** `Tiles/` held `FillMeshGraphParityTests`,
+  `FillMeshGraphSchedulingTests`, `FillMeshGraphGlobeParityTests`, `FillExtrusionGraphBuildTests` and
+  `FillExtrusionMeshGraphSchedulingTests` — one topic, one lane, five files, 1,274 lines total. That was
+  already five subjects under the old per-subject cap. Under the 4,000-line topic cap they fit in one file
+  with room to spare — merge them.
   - A file too thin to hold a builder makes every test in it construct its fixtures inline. That is the
-    mechanism behind a 2-field struct rewriting 48 construction sites in 23 test files.
+    mechanism behind a 2-field struct rewriting 48 construction sites in 23 test files — packing files
+    fuller removes the incentive to skip the builder.
 
-- **Four things stay in their own file whatever their size.** A small isolated file is the right design
+- **Five things stay in their own file whatever their size.** A small isolated file is the right design
   here, and none of them is evidence against the rule above.
   - A GPU or visual snapshot fixture (§2).
   - A fixture that only measures correctly in a full run (§2).
@@ -153,6 +183,72 @@ Three lanes. Take the **first** one whose entry condition holds.
     schedule time, which is sensitive to what else the process has scheduled.
   - A regression pin written for one specific defect. Keep its class name and its XML doc — the file
     identity is what records that the pin exists because of that defect.
+  - A fixture whose `[SetUp]`/`[TearDown]` mutates PROCESS state — a shader global, `RenderSettings`,
+    `QualitySettings`, an `Application` handler, `EditorSceneManager`. Six exist today. Packed beside an
+    unrelated test, that test's pass would depend on run order — keep it alone regardless of topic or size.
+
+### Merging files into a packed file
+
+A packed file is reached by merging FILES, never CLASSES. Every fixture keeps its own class, so the set
+of test fullnames (`Namespace.Class.Method`) is unchanged by the merge — that is what makes a packing
+step verifiable rather than merely plausible, and it is why a merged file's namespace must not change
+even when the file moves folder.
+
+**Where two files cannot share a using set, they do not merge. Never edit a test to make a merge
+possible** — not to qualify a type, not to rename a local, not to drop an import. Splitting costs one
+file; the alternatives cost correctness, and a packed file is never so close to the cap that one more
+file matters.
+
+Four collisions arise in practice. The first three are loud; the fourth is silent, and is the reason the
+rule is absolute rather than a preference.
+
+| Union of usings | Ambiguous symbol |
+|---|---|
+| `System` + `UnityEngine` | `Object` — the widest, and the one with the most conditions. It needs all of: both imports, a genuinely bare `Object.X` use site (not `UnityEngine.Object.X`), AND no `using Object = UnityEngine.Object;` alias. That alias immunises a whole file and a dozen already do it. Testing imports alone over-splits badly |
+| `System` + `MapRenderer.Core.Expressions` | `ValueType` |
+| `MapRenderer.Core.Expressions` + `UnityEngine` | `Color` (Core declares its own `Color` struct) |
+| `MapRenderer.Core.Geo` + `UnityEngine.Rendering` | `CameraProperties` (both are real types) |
+| `UnityEngine` + `MapRenderer.Core.Text` | `TextAnchor` |
+
+**Every one of these is immunised by an explicit alias.** A file carrying
+`using Object = UnityEngine.Object;` or `using CameraProperties = MapRenderer.Core.Geo.CameraProperties;`
+cannot suffer that ambiguity, whatever else is merged into it — a dozen files in the suite already rely on
+this. So the test for a collision is three-part, not one: **both names imported, a genuinely bare use
+site, and no disambiguating alias.** Testing imports alone reports files that have been compiling green
+for months.
+
+A merge may INHERIT such an alias from one of its inputs through the using-union, and is then protected
+for free. Synthesising an alias no input had is a different act and is not safe: if one input's bare
+`Object` meant `UnityEngine.Object` and another's meant `System.Object`, the alias silently rebinds the
+second. Splitting stays the default.
+
+The list is not closed. Two of these were found by merging, not by inspection, after a plan had already
+been written on the assumption the earlier ones were complete. **When a merge surfaces a new collision,
+re-sweep the destinations already built** — they were assembled under a model now known to be incomplete.
+
+**Aliases.** `UnityEngine.TestTools.Constraints.Is` derives from `NUnit.Framework.Is` and adds a single
+member, `AllocatingGCMemory()`. It hides nothing, so a file that gains the alias behaves identically —
+every inherited constraint resolves to the same NUnit implementation. The hazard runs the other way and
+is loud: a file calling `Is.AllocatingGCMemory()` merged into a destination without the alias does not
+compile. Keep alias-carriers together for that reason, not because a union could weaken an assertion.
+
+**Dropping a using is the same hazard wearing a different hat.** A merge takes the UNION of its inputs'
+usings. Removing `using UnityEngine;` to stop a `Color` ambiguity does not fail — it rebinds every bare
+`Color` in the file to `MapRenderer.Core.Expressions.Color`, which can compile, run and pass while
+exercising a different type than the author wrote. Pruning is not a cheaper split.
+
+**A file whose fixture hooks touch process state stays alone.** Merging changes NUnit's execution order,
+so a `[TearDown]` that writes a shader global, resets a scene, or clears a static scheduler will reach
+fixtures it never reached before. This applies to all four hook attributes independently — a
+TearDown-only file is the case a `SetUp`-shaped search misses.
+
+**Tests that assert a delta against a process-wide counter are order-sensitive by construction.** A
+baseline subtracts leakage that already exists; it cannot subtract async work from another fixture that
+completes inside the window. Such a test failing after a merge is information about the suite, not a
+merge defect to be silenced — and it is never fixed by editing the test.
+
+**When a destination file is split off deliberately, its header records which symbol collided.** An
+undocumented split reads as an oversight and gets merged back by the next round.
 
 ## 5. Where a new test goes
 
@@ -162,8 +258,8 @@ Ordered. First match wins. Read down until one fires.
    reflection IS the assertion (§2)?** → a fence file in `Structure/`. `Structure/` is flat today (23
    files, no subfolders); grouping it by topic is UMR-176's move, not this one's — UMR-175 forbids moving
    files. Never inside a behavioural fixture.
-2. **Does it render and read pixels back, or need a GPU context?** → `Visual/`. Not merged with anything
-   outside `Visual/`.
+2. **Does it render and read pixels back, or need a GPU context?** → `Visual/`
+   (`MapRenderer.Tests.Visual`, its own assembly). Not merged with anything outside `Visual/`.
 3. **Does it need real frames to settle?** → `MapRenderer.Tests.PlayMode/<Topic>/`.
 4. **Is every type it names from `Core`, the BCL, NUnit or `Unity.Mathematics`?** →
    `MapRenderer.Tests.EditMode/<Topic>/`, **and add the `<Compile Include>` to
@@ -184,11 +280,13 @@ Ordered. First match wins. Read down until one fires.
   | `decode` | the format under test names it: `Mvt/`, `GeoJson/`, or `Json/` | — |
   | `render-layers` | `Rendering/` | material assembly/config → `Materials/` |
 
-- **Then pick the file inside that folder: the one whose (topic, subject, lane) your test shares.**
-  - If that file is over 1,200 lines, split it along the subject axis and take the half you belong in.
-  - **If no such file exists, create one** — named for the subject, not the production type. A new file is
-    correct when the subject is new. It is not correct when a file for your subject already exists and you
-    would rather not read it.
+- **Then pick the file inside that folder: the one for your (topic, lane) that still has room under the
+  4,000-line cap.** Subject does not decide the file — size does (§4).
+  - **If the file you'd add to is already at the cap, split it** — divide however keeps both halves under
+    4,000 lines, not along a subject boundary.
+  - **If no file for this (topic, lane) exists yet, create one** — named for the topic, or its dominant
+    sub-area (§1). A new file is correct when the topic is new here, or every existing file for it is
+    already full. It is not correct just because you would rather not read the file that has room.
   - Shared fixtures and harnesses used by more than one runner go in `MapRenderer.Tests.Shared`, not in a
     production class. See [`conventions-short.md`](conventions-short.md) §"Test code must not bloat the
     production codebase".
@@ -200,7 +298,8 @@ Ordered. First match wins. Read down until one fires.
   test then races the machine it runs on.
   - Two exceptions exist and both sleep a **worker** thread that is itself under test, not the test
     thread waiting for a result: a background release timer in
-    `Tiles/TileManagerBackgroundRegistrationTests.cs`, and a `ThreadState` rendezvous with no event to park
+    `Tiles/ThrottleTests.cs` (the merged home of the former `TileManagerBackgroundRegistrationTests.cs`),
+    and a `ThreadState` rendezvous with no event to park
     on in `Text/SymbolParkedRedecodeTests.cs`. Both carry their reason at the call site. If you need a
     third, write down which thread sleeps and why no event exists.
 

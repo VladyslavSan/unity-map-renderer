@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.Tiles
     /// <c>RenderTeardownRecord</c> disarms before it fires.</para>
     /// </summary>
     [TestFixture]
-    public class EagerDecodeOwnershipTests
+    public class EagerDecodeOwnershipTests : BaseTestFixture
     {
         private const string SourceId = "s";
 
@@ -265,6 +265,7 @@ namespace MapRenderer.Tests.Tiles
         {
             var fake = new ProbeFeatureSource(SampleTileFixture.Bytes()) { Gate = new UniTaskCompletionSource() };
             MapView view = NewViewWithSlowKicks("EagerDecodeOwnership_Evicted");
+            Track(view.gameObject);
             try
             {
                 LoadStyleWithSource(view, fake, Cam(0, 0, CoverZoom));
@@ -286,7 +287,7 @@ namespace MapRenderer.Tests.Tiles
 
                 AssertEveryTileFreedExactlyOnce(fake, "eviction (RenderTeardownRecord)");
             }
-            finally { fake.Gate?.TrySetResult(); view.Teardown(); Object.DestroyImmediate(view.gameObject); }
+            finally { fake.Gate?.TrySetResult(); view.Teardown(); }
         }
 
         // ── T-D2: a restyle ───────────────────────────────────────────────────────────────────────────
@@ -305,6 +306,7 @@ namespace MapRenderer.Tests.Tiles
         {
             var fake = new ProbeFeatureSource(SampleTileFixture.Bytes()) { Gate = new UniTaskCompletionSource() };
             MapView view = NewViewWithSlowKicks("EagerDecodeOwnership_Restyle");
+            Track(view.gameObject);
             try
             {
                 LoadStyleWithSource(view, fake, Cam(0, 0, CoverZoom));
@@ -324,7 +326,7 @@ namespace MapRenderer.Tests.Tiles
                 AssertEveryTileFreedExactlyOnce(fake, "restyle (SetSources → RenderTeardownRecord)");
                 Assert.AreEqual(0, inert.Probe.DecodeCount, "sanity: the replacement source really served nothing");
             }
-            finally { fake.Gate?.TrySetResult(); view.Teardown(); Object.DestroyImmediate(view.gameObject); }
+            finally { fake.Gate?.TrySetResult(); view.Teardown(); }
         }
 
         // ── T-D3: teardown ────────────────────────────────────────────────────────────────────────────
@@ -345,6 +347,7 @@ namespace MapRenderer.Tests.Tiles
         {
             var fake = new ProbeFeatureSource(SampleTileFixture.Bytes()) { Gate = new UniTaskCompletionSource() };
             MapView view = NewViewWithSlowKicks("EagerDecodeOwnership_Teardown");
+            Track(view.gameObject);
             bool tornDown = false;
             try
             {
@@ -360,7 +363,6 @@ namespace MapRenderer.Tests.Tiles
             {
                 fake.Gate?.TrySetResult();
                 if (!tornDown) view.Teardown();
-                Object.DestroyImmediate(view.gameObject);
             }
         }
 
@@ -380,6 +382,7 @@ namespace MapRenderer.Tests.Tiles
         {
             var fake = new ProbeFeatureSource(SampleTileFixture.Bytes()) { Gate = new UniTaskCompletionSource() };
             MapView view = NewViewWithSlowKicks("EagerDecodeOwnership_MidFlight");
+            Track(view.gameObject);
             try
             {
                 LoadStyleWithSource(view, fake, Cam(0, 0, CoverZoom));
@@ -446,7 +449,6 @@ namespace MapRenderer.Tests.Tiles
             {
                 fake.Gate?.TrySetResult();
                 view.Teardown();
-                Object.DestroyImmediate(view.gameObject);
             }
         }
     }

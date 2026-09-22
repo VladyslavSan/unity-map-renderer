@@ -341,8 +341,9 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   exceptions — `style` → `Style/` (expressions → `Expressions/`, filters → `Filters/`), `text` → `Text/`
   (placement/collision → `Text/Placement/`, sprite atlas → `Text/Sprites/`), `tile-pipeline` → `Tiles/`,
   `meshing` → `Meshing/`, `decode` → the format's own folder (`Mvt/`/`GeoJson/`/`Json/`), `render-layers` →
-  `Rendering/` — full table and reasoning in `test-conventions.md` §5. A file over 1,200 lines splits by
-  subject; two files never merge just for being small.
+  `Rendering/` — full table and reasoning in `test-conventions.md` §5. Files pack by topic and lane up to
+  a 4,000-line cap; subject is not a merge criterion, only size (bounded by topic and lane) is
+  (`test-conventions.md` §4).
 
 - **Test code must not bloat the production codebase.** A member that exists solely for a test does not belong
   on the production class.

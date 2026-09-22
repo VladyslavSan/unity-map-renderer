@@ -201,8 +201,9 @@ legitimately slow sprite endpoint — over-waiting only costs the already-broken
 not be lowered: under-waiting costs the normal-but-slightly-slow case, which is the exact bug D6 exists to
 fix.
 
-Pinned by tests in `Assets/Tests/MapRenderer.Tests.EditMode/Text/SymbolSpriteReadinessTests.cs` (`[Unity]` —
-`SymbolSubsystem` is engine-bound and hops to the main thread before constructing a `Texture2D`) and the
+Pinned by tests in `Assets/Tests/MapRenderer.Tests.EditMode/Text/SymbolReconcileAsyncTests.cs` (the merged
+home of the former `SymbolSpriteReadinessTests.cs`; `[Unity]` — `SymbolSubsystem` is engine-bound and hops
+to the main thread before constructing a `Texture2D`) and the
 `GatedSpriteSource` test double in `Assets/Tests/MapRenderer.Tests.EditMode/TestSupport/GatedSpriteSource.cs`.
 
 ---
@@ -212,8 +213,9 @@ Pinned by tests in `Assets/Tests/MapRenderer.Tests.EditMode/Text/SymbolSpriteRea
 Stage-1 behaviour (D1–D6) is pinned in
 `Assets/Tests/MapRenderer.Tests.EditMode/Style/SymbolShieldExtractionTests.cs` (placement-per-zoom, the
 icon+text pair shape, the two US-only shield layers selecting zero Berlin-fixture features) and in
-`Assets/Tests/MapRenderer.Tests.EditMode/Text/SymbolSpriteReadinessTests.cs` (the sprite-fetch gate,
-including the deadline fallback). Alignment resolution (D3) is pinned alongside
+`Assets/Tests/MapRenderer.Tests.EditMode/Text/SymbolReconcileAsyncTests.cs` (the merged home of the former
+`SymbolSpriteReadinessTests.cs`; the sprite-fetch gate, including the deadline fallback). Alignment
+resolution (D3) is pinned alongside
 `Core/Text/AlignmentResolution.cs`. Acceptance detail — exact assertions, counts and injected defects —
 lives with those tests, not here.
 
@@ -323,7 +325,7 @@ text queue. The composite draw order of a fill/line/background-only style is una
 change.
 
 Pinned by `LayerDrawOrderTests` (`Tools/core-tests` and both Unity runners) and the `[Unity]` render-queue
-assertions in `Assets/Tests/MapRenderer.Tests.EditMode/Visual/LayerOrderSnapshotTests.cs`, which asserts
+assertions in `Assets/Tests/MapRenderer.Tests.Visual/LayerOrderSnapshotTests.cs`, which asserts
 only relative order and is unaffected by the stride value.
 
 ---
@@ -438,8 +440,9 @@ icon-only label produces a byte-identical stage record and a candidate with `Box
 sort element, one fewer grid query set, one fewer fade lookup, one fewer fade ease. No new per-frame
 managed allocation, pass, buffer or job.
 
-Pinned by tests in `Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolPairingTests.cs` (the
-`SymbolPairing` resolver, compiled by `Tools/core-tests` too), `SymbolPairWiringTests.cs` (the `[Unity]`
+Pinned by tests in `Assets/Tests/MapRenderer.Tests.EditMode/Text/Placement/SymbolStagingMathTests.cs` (the
+merged home of the former `SymbolPairingTests.cs`; the `SymbolPairing` resolver, compiled by
+`Tools/core-tests` too), `SymbolPairWiringTests.cs` (the `[Unity]`
 Tick-level wiring check that a pair draws into both world meshes with one fewer candidate per pair — the
 tooth other comments in the tree cite as P10), and
 `Assets/Tests/MapRenderer.Tests.EditMode/Style/SymbolFeatureExtractorIconTests.cs` (the extractor's role
@@ -532,7 +535,8 @@ as a Centre-anchored point label's does — the two paths share one convention, 
 (`§10`) is unaffected in its placement verdict: the two boxes are still tested all-or-nothing on one
 candidate, so only the text half's screen rect shifts, never whether the pair places.
 
-Pinned by `Assets/Tests/MapRenderer.Tests.EditMode/Text/TextVerticalCentringTests.cs` (content-independence,
-line-height independence, the `Top`/`Bottom` goldens, and the constant re-derived from the fixture's own
-glyph metrics rather than restated) and `Assets/Tests/MapRenderer.Tests.EditMode/Text/CurvedTextCentringTests.cs`
-(icon and text ink centres coincide within half a baked pixel — the shield claim itself).
+Pinned by `Assets/Tests/MapRenderer.Tests.EditMode/Text/TextVerticalCentringTests.cs` — the merged home of
+both the `TextVerticalCentringTests` class (content-independence, line-height independence, the
+`Top`/`Bottom` goldens, and the constant re-derived from the fixture's own glyph metrics rather than
+restated) and the former `CurvedTextCentringTests.cs`'s `CurvedTextCentringTests` class (icon and text ink
+centres coincide within half a baked pixel — the shield claim itself).

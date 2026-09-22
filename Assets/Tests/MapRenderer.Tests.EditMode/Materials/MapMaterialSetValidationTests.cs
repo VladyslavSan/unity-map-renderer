@@ -2,6 +2,10 @@
 // fails LOUD when any base material is unassigned, making a null-material background/fill/line/symbol slot
 // (which would otherwise crash or leak at a backend's AddTileLayer — see BackendNullSlotTests' doc)
 // unrepresentable. RED-verifiable: a stubbed-empty Validate() must fail every "missing base throws" case here.
+//
+// Stays its own file (UMR-176): its `using System;` (for InvalidOperationException) would collide with
+// MaterialsTests.cs's bare `Object.DestroyImmediate` calls (System.Object vs UnityEngine.Object, CS0104) —
+// see docs/conventions-short.md's "Plain-import collisions" note.
 
 using System;
 using NUnit.Framework;
@@ -11,7 +15,7 @@ using MapRenderer.Unity.Rendering.Materials;
 namespace MapRenderer.Tests.Materials
 {
     [TestFixture]
-    public class MapMaterialSetValidationTests
+    public class MapMaterialSetValidationTests : BaseTestFixture
     {
         // A THROWAWAY MapMaterialSet per test — never the shared production asset (nulling a base here must
         // never mutate the committed asset other tests in the same batch also load via MapMaterialSetTestUtil).
@@ -31,9 +35,8 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void Validate_AllThreeBasesAssigned_DoesNotThrow()
         {
-            var set = NewSet(true, true, true);
-            try { Assert.DoesNotThrow(() => set.Validate()); }
-            finally { UnityEngine.Object.DestroyImmediate(set); }
+            var set = Track(NewSet(true, true, true));
+            Assert.DoesNotThrow(() => set.Validate());
         }
 
         // ── Epic A / A1 (Codex #2): SymbolTextWorld is REQUIRED; SymbolIconWorld stays optional-with-warn —
@@ -42,13 +45,9 @@ namespace MapRenderer.Tests.Materials
         [Test]
         public void Validate_UnassignedSymbolTextWorld_ThrowsNamingIt()
         {
-            var set = NewSet(true, true, symbolWorld: false);
-            try
-            {
-                var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
-                StringAssert.Contains("SymbolTextWorld", ex.Message);
-            }
-            finally { UnityEngine.Object.DestroyImmediate(set); }
+            var set = Track(NewSet(true, true, symbolWorld: false));
+            var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
+            StringAssert.Contains("SymbolTextWorld", ex.Message);
         }
 
         [Test]
@@ -56,41 +55,31 @@ namespace MapRenderer.Tests.Materials
         {
             // SymbolIconWorld is never assigned by NewSet, so all required bases assigned + SymbolIconWorld
             // left null must NOT throw.
-            var set = NewSet(true, true, true);
-            try { Assert.DoesNotThrow(() => set.Validate(), "SymbolIconWorld is optional-with-warn, not enforced."); }
-            finally { UnityEngine.Object.DestroyImmediate(set); }
+            var set = Track(NewSet(true, true, true));
+            Assert.DoesNotThrow(() => set.Validate(), "SymbolIconWorld is optional-with-warn, not enforced.");
         }
 
         [Test]
         public void Validate_UnassignedFillMaterial_ThrowsNamingIt()
         {
-            var set = NewSet(false, true, true);
-            try
-            {
-                var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
-                StringAssert.Contains("FillMaterial", ex.Message);
-            }
-            finally { UnityEngine.Object.DestroyImmediate(set); }
+            var set = Track(NewSet(false, true, true));
+            var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
+            StringAssert.Contains("FillMaterial", ex.Message);
         }
 
         [Test]
         public void Validate_UnassignedLineMaterial_ThrowsNamingIt()
         {
-            var set = NewSet(true, false, true);
-            try
-            {
-                var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
-                StringAssert.Contains("LineMaterial", ex.Message);
-            }
-            finally { UnityEngine.Object.DestroyImmediate(set); }
+            var set = Track(NewSet(true, false, true));
+            var ex = Assert.Throws<InvalidOperationException>(() => set.Validate());
+            StringAssert.Contains("LineMaterial", ex.Message);
         }
 
         [Test]
         public void Validate_AllThreeUnassigned_Throws()
         {
-            var set = NewSet(false, false, false);
-            try { Assert.Throws<InvalidOperationException>(() => set.Validate()); }
-            finally { UnityEngine.Object.DestroyImmediate(set); }
+            var set = Track(NewSet(false, false, false));
+            Assert.Throws<InvalidOperationException>(() => set.Validate());
         }
     }
 }

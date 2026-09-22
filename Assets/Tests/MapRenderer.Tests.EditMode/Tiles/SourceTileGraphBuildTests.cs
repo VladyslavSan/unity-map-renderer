@@ -1,40 +1,1684 @@
-// job-scheduling-design.md §8 stage 3 — SourceTileGraphBuildTests: the source tile's THREE-STEP polled
-// progression (Prologue → Measure → Write, not two) and the pen at every step + teardown.
+// Tiles/SourceTileGraphBuildTests.cs — cache/scheduler wiring, the source tile graph build, fill-extrusion graph build, and the background-quad projection teeth.
 //
-// Drive rules (lessons-learned.md): pump BEFORE testing AllTilesSettled(); assert a drive precondition
-// before any outcome; every process-wide counter as a DELTA; never Await/Drain while a delay job holds a
-// graph step — both Complete() on main, which does not hang (SpinUntilGateJob is bounded by
-// MaxIterations) but burns the whole bound (NIT 3).
+// Roughly pipeline order: the cache/scheduler/LOD wiring fixtures, then the two graph-build fixtures (source tile, fill-extrusion), then the background-quad projection fixture. EagerDecodeOwnershipTests, originally packed here, was pulled back out to stand alone: its nested ProbeFeatureSource owns a static IWorkScheduler (a live concurrency primitive), which the process-state stay-alone rule covers.
 //
-// Fixture: SampleTileFixture + a fill layer on `countries`. Most of this file's teeth use a z0
-// single-tile cover — one tile's own step transition is the claim. Two teeth (job-scheduling-design.md
-// §11 fork 2 — the deleted two-units-per-tile build-budget rule) instead use a z5 MULTI-tile cover: the
-// property under test is about admission across tiles competing for one Tick's budget, which a
-// single-tile fixture cannot exercise.
+// Contents:
+//   MeshBuildWorkSchedulerTests        — RecordingWorkScheduler lives in TestSupport/ (shared with SymbolSubsystemWorkSchedulerTests) rather than as a private nested class here, so the two suites share one spy instead of drifting into two subtly different copies.
+//   PreparedCacheSymbolCoverageTests   — EditMode, not PlayMode: the "EditMode settle is symbol-silent" rule is about DrainMeshBuilds (see TileSymbolKickTests' header).
+//   PreparedCacheTests                 — Uses interp-fill-style.json (a zoom-interpolate fill-color) as its style fixture.
+//   ProjectedAreaLodWiringTests        — T-AGGR-WIRED: MapView must build a ProjectedAreaLodStrategy carrying the Inspector's aggressiveness value, and rebuild the selector when that value changes.
+//   SourceTileGraphBuildTests          — Fixture: SampleTileFixture + a fill layer on countries.
+//   FillExtrusionGraphBuildTests       — Style: fill@0, fill-extrusion@1 (constant height — teeth (b)/(c) are about allocation/scheduling/disposal STRUCTURE, not the bake; tooth (a) already covers the data-driven bake byte-for-byte), line@2 (matches no LineString geometry on this polygon-only…
+//   TileBackgroundQuadProjectionTests  — Epic A / A2 acceptance — plan §F teeth 3 (globe curvature — the projection payoff, DECISION 3) and 8 (synthetic ring encoding).
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using NUnit.Framework;
 using UnityEngine;
-using Unity.Collections;
-using Unity.Jobs;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
-using MapRenderer.Unity.View.Camera;
-using MapRenderer.Jobs.Fill;
 using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Concurrency;
 using MapRenderer.Unity.Rendering.Map;
-using MapRenderer.Unity.Rendering.Meshing;
-using MapRenderer.Unity.Rendering.Style;
-using MapRenderer.Unity.Rendering.Tile;
 using MapRenderer.Unity.Rendering.Tile.Processing;
 using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using System.IO;
+using Cysharp.Threading.Tasks;
+using MapRenderer.Unity.View.Camera;
+using MapRenderer.Unity.Rendering.Tile;
+using MapRenderer.Unity.Text;
+using MapRenderer.Unity.Rendering.Materials;
+using Unity.Mathematics;
+using MapRenderer.Unity.View;
+using SelectorInputs = MapRenderer.Unity.Rendering.Map.MapView.SelectorInputs;
+using Unity.Collections;
+using Unity.Jobs;
+using MapRenderer.Jobs.Fill;
+using MapRenderer.Unity.Rendering.Meshing;
+using MapRenderer.Unity.Rendering.Style;
+using System.Linq;
+using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Geometry;
+using IFeature = MapRenderer.Core.Expressions.IFeature; // aliased: a plain using would make
+using Object = UnityEngine.Object;
+
 
 namespace MapRenderer.Tests.Tiles
 {
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // MeshBuildWorkSchedulerTests — shares one RecordingWorkScheduler spy with SymbolSubsystemWorkSchedulerTests
+    // ───────────────────────────────────────────────────────────────────────────────────
+
     [TestFixture]
-    public class SourceTileGraphBuildTests
+    public class MeshBuildWorkSchedulerTests : BaseTestFixture
+    {
+        /// <summary>Spy <see cref="ISymbolTileWorkerFactory"/> — issues a pass that records the thread its
+        /// <c>RunWorkerAndHandoff</c> ran on. Mirrors <c>TileSymbolKickTests</c>' spy shape; a separate,
+        /// smaller copy because that fixture's spy never needs thread identity.</summary>
+        private sealed class SpySymbolTileWorkerFactory : ISymbolTileWorkerFactory
+        {
+            public readonly List<SpySymbolTileWorkerPass> IssuedPasses = new();
+
+            public ISymbolTileWorkerPass TryBeginBuild(string sourceId, TileId tile)
+            {
+                var pass = new SpySymbolTileWorkerPass();
+                IssuedPasses.Add(pass);
+                return pass;
+            }
+
+            /// <summary>Not under test here: the spy commits no symbol blocks, so it answers "nothing
+            /// to lose" and leaves TileManager's prepared-cache probe exactly as it was.</summary>
+            public bool SymbolsCachedFor(string sourceId, TileId tile) => true;
+        }
+
+        private sealed class SpySymbolTileWorkerPass : ISymbolTileWorkerPass
+        {
+            // job-scheduling-design.md §8 stage 3 tooth (e): a bool can't tell one run from two — the exact
+            // defect this tooth exists to catch (the symbol pass moved earlier relative to the Burst chain,
+            // so the risk is now running it TWICE per tile, not zero times). A count can.
+            public int RunCount;
+            public bool Ran => RunCount > 0;
+            public int RunThreadId = -1;
+
+            public void RunWorkerAndHandoff(SharedDisposable<IDecodedTile> decode)
+            {
+                RunCount++;
+                RunThreadId = Environment.CurrentManagedThreadId;
+            }
+        }
+
+        private static CameraProperties Cam(double lon, double lat, double zoom)
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
+
+        /// <summary>Fill-only style over a real MVT fixture — same shape as the other tile-pipeline
+        /// fixtures (ThrottleTests), so the fetch is genuine UniTask I/O and the mesh-build kick is the only
+        /// thing under test.</summary>
+        private static StyleDocument FillStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": {
+                ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                {
+                    ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                    ""source-layer"": ""countries"",
+                    ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] }
+                }
+            ]
+        }");
+
+        private static string BackgroundOnlyStyle() => @"{
+            ""version"": 8,
+            ""layers"": [ { ""id"": ""bg"", ""type"": ""background"",
+                             ""paint"": { ""background-color"": ""#00ff00"" } } ]
+        }";
+
+        // ── T1: the byte-fetching kick (KickMeshBuild) ────────────────────────────────────────────────
+
+        /// <summary>The headline tooth: under an injected <see cref="InlineWorkScheduler"/>,
+        /// <c>KickMeshBuild</c> runs its body on the CALLING thread with zero dispatch — the WebGL-correct
+        /// behaviour, impossible under <see cref="ThreadPoolWorkScheduler"/>.
+        ///
+        /// <para><b>RED injection:</b> revert <c>KickMeshBuild</c>'s dispatch to
+        /// <c>UniTask.RunOnThreadPool(…, configureAwait:false).Preserve()</c> — the kick never reaches the
+        /// injected scheduler, so <c>ScheduleCount</c> stays 0 and clause 1 fails.</para></summary>
+        [Test]
+        public void InjectedScheduler_RunsTheMeshBuildKick_OnTheCallingThread()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go = Track(new GameObject("MeshBuildWorkScheduler_T1"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.Config.Backend               = RenderBackend.GameObject;
+            view.WithTestCamera();
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
+
+                int caller = Environment.CurrentManagedThreadId;
+                var spy    = new RecordingWorkScheduler(new InlineWorkScheduler());
+                view.TileManager.WorkScheduler = spy;
+
+                // The fetch is still real UniTask I/O and needs its wall-clock; under Inline the build
+                // handles are already terminal by the time AwaitInFlightMeshBuilds reaches them, so that
+                // park is a no-op short-circuit. Checked AFTER the pump (not as a loop guard): before the
+                // first LateUpdate the cover hasn't been requested yet, so LoadedTileCount() == 0 and
+                // AllTilesSettled() is vacuously true — a guard-first loop would never run the pump at all.
+                for (int f = 0; f < 3000; f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                    if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) break;
+                }
+
+                Assert.Greater(view.LoadedTileCount(), 0, "drive precondition: the cover must have loaded tiles.");
+                Assert.IsTrue(view.AllTilesSettled(), "drive precondition: the cover must fully settle.");
+                Assert.GreaterOrEqual(spy.ScheduleCount, 1,
+                    "the mesh-build kick must go THROUGH the injected scheduler.");
+                Assert.GreaterOrEqual(spy.BodyThreadIds.Count, 1,
+                    "the body must actually have run at least once — a tooth that iterates zero entries " +
+                    "would vacuously pass the per-thread-id check below.");
+                foreach (int tid in spy.BodyThreadIds)
+                    Assert.AreEqual(caller, tid,
+                        "the kick body must run on the CALLING thread under Inline, with zero dispatch — " +
+                        "the WebGL-correct behaviour.");
+
+                Assert.Greater(view.GameObjectRenderer().DrawItemCount(), 0,
+                    "positive control: at least one Mesh must have been produced, or a tooth that passes on " +
+                    "an empty cover proves nothing.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        // ── T2: the source-less kick (KickSourcelessBackground) ───────────────────────────────────────
+
+        // job-scheduling-design.md §8 stage 2 / E1 (resolved by reordering, option C): the background kick
+        // now schedules the FillMeshGraph directly and reaches no IWorkScheduler.Schedule<T> call on EITHER
+        // projection — the graph serves both arms. A tooth that only drove Mercator would leave the shipped
+        // globe scene's client untested, which is the hole option C was chosen to avoid.
+        private static readonly IProjection[] BackgroundProjectionCases = { null, new SphericalProjection() };
+
+        /// <summary>The sourceless-background sibling of T1 — retires
+        /// <c>InjectedScheduler_RunsTheSourcelessBackgroundKick_OnTheCallingThread</c> (which asserted
+        /// <c>spy.ScheduleCount &gt;= 1</c>), because leaving the seam is exactly what this stage does at
+        /// this site. Asserts BOTH ends — the suite's own rule: <c>ScheduleCount == 0</c> alone cannot tell
+        /// "absent" from "never kicked", so the settle + registered-mesh check must accompany it.
+        ///
+        /// <para><b>RED injection:</b> restore the seam call in <c>KickSourcelessBackground</c> (schedule the
+        /// graph inside <c>WorkScheduler.Schedule</c>) — <c>ScheduleCount</c> becomes 1.</para></summary>
+        [Test]
+        public void SourcelessBackgroundKick_ReachesNoWorkScheduler_AndStillRegistersItsMesh(
+            [ValueSource(nameof(BackgroundProjectionCases))] IProjection projection)
+        {
+            var go = Track(new GameObject("MeshBuildWorkScheduler_T2"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 3;
+            view.Config.TileSelection.MaxZoom = 3;
+            view.Config.Backend               = RenderBackend.GameObject;
+            view.WithTestCamera(projection: projection);
+            try
+            {
+                view.LoadTestStyle(null, Cam(0, 0, 3), StyleParser.Parse(BackgroundOnlyStyle()));
+
+                var spy = new RecordingWorkScheduler(new InlineWorkScheduler());
+                view.TileManager.WorkScheduler = spy;
+
+                // Checked AFTER the pump, not as a loop guard: before the first LateUpdate the cover hasn't
+                // been requested yet, so LoadedTileCount() == 0 and AllTilesSettled() is vacuously true.
+                int guard = 0;
+                while (guard++ < 10000)
+                {
+                    view.LateUpdate();
+                    if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) break;
+                }
+
+                Assert.Greater(view.LoadedTileCount(), 0, "drive precondition: the cover must have loaded tiles.");
+                Assert.IsTrue(view.AllTilesSettled(), "drive precondition: the cover must fully settle.");
+
+                Assert.AreEqual(0, spy.ScheduleCount,
+                    "the source-less kick must reach NO IWorkScheduler.Schedule<T> call — it schedules the " +
+                    "graph directly.");
+                Assert.Greater(view.GameObjectRenderer().DrawItemCount(), 0,
+                    "positive control: the tile must have settled WITH its mesh registered — 'absent' and " +
+                    "'never kicked' are indistinguishable without this.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        // ── T5: the MeshBuildGateForTest / WorkScheduler mutual-exclusion guard ───────────────────────
+
+        /// <summary>§3 of the migration plan: arming <see cref="TileManager.MeshBuildGateForTest"/> while
+        /// <see cref="TileManager.WorkScheduler"/> is an <see cref="InlineWorkScheduler"/> (or the symmetric
+        /// order) must throw at the SETTER, before any tile work exists — under Inline the kick body (and
+        /// its gate park) runs on the calling/main thread, and the only release
+        /// (<c>_lifetimeCts.Cancel()</c> in teardown) is itself main-thread work that could never run, so an
+        /// un-guarded combination is a guaranteed hang inside the batch gate.
+        ///
+        /// <para>No pump runs here at all, and the gate is constructed <c>initialState: true</c> — belt and
+        /// braces, so even a mis-scoped RED injection cannot park the main thread (the plan's mandatory
+        /// RED-verify safety note).</para>
+        ///
+        /// <para><b>RED injection:</b> remove either guard clause from the
+        /// <see cref="TileManager.WorkScheduler"/>/<see cref="TileManager.MeshBuildGateForTest"/> setters —
+        /// the corresponding <c>Assert.Throws</c> fails.</para></summary>
+        [Test]
+        public void MeshBuildGateForTest_AndTheInlineScheduler_AreMutuallyExclusive()
+        {
+            var go = Track(new GameObject("MeshBuildWorkScheduler_T5"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.WithTestCamera(); // constructs View (and with it TileManager) — no style, no pump.
+            try
+            {
+                var tm = view.TileManager;
+
+                tm.WorkScheduler = new InlineWorkScheduler();
+                Assert.Throws<InvalidOperationException>(
+                    () => tm.MeshBuildGateForTest = new ManualResetEventSlim(true),
+                    "arming the gate while WorkScheduler is Inline must throw at the setter.");
+
+                tm.WorkScheduler = WorkSchedulerFactory.ForCurrentPlatform(); // reset before the symmetric order
+                tm.MeshBuildGateForTest = new ManualResetEventSlim(true);
+                Assert.Throws<InvalidOperationException>(
+                    () => tm.WorkScheduler = new InlineWorkScheduler(),
+                    "selecting Inline while the gate is armed must throw at the setter (the symmetric order).");
+
+                // R1 review finding: the guard must read IWorkScheduler.RunsInline, not `is
+                // InlineWorkScheduler` — a decorator (RecordingWorkScheduler, T1/T2's own spy) wrapping an
+                // Inline scheduler is just as deadlock-prone, and a concrete-type check would silently miss
+                // it. The gate is still armed from the clause above.
+                Assert.Throws<InvalidOperationException>(
+                    () => tm.WorkScheduler = new RecordingWorkScheduler(new InlineWorkScheduler()),
+                    "selecting a WRAPPED Inline scheduler (RunsInline == true via forwarding) while the gate " +
+                    "is armed must throw at the setter just as the bare InlineWorkScheduler does — a " +
+                    "concrete-type check on the setter would miss this.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        // ── T6: a POPULATED symbol pass under Inline — T1/T2/T5 only ever drive symbolPass == null ────
+
+        /// <summary>The missing integration tooth: T1, T2 and T5 above all drive a style/view with no
+        /// <c>TileManager.SymbolWorkerFactory</c> set, so <c>symbolPass</c> inside <c>KickMeshBuild</c>'s
+        /// body is always <c>null</c> and <c>symbolPass?.RunWorkerAndHandoff(decode)</c> never actually
+        /// executes anything — the POPULATED
+        /// path was untested end to end under Inline. This wires a spy factory so <c>TryBeginBuild</c>
+        /// returns a real (non-null) pass and asserts its <c>RunWorkerAndHandoff</c> actually ran, on the
+        /// CALLING thread, inside the SAME Inline-dispatched kick as the mesh pass.
+        ///
+        /// <para><b>RED injection:</b> revert <c>KickMeshBuild</c>'s dispatch to
+        /// <c>UniTask.RunOnThreadPool(…).Preserve()</c> — the symbol pass never reaches the injected
+        /// scheduler at all (dead on WebGL), so <c>Ran</c> stays false.</para></summary>
+        [Test]
+        public void InjectedScheduler_RunsAPopulatedSymbolPass_OnTheCallingThread()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go = Track(new GameObject("MeshBuildWorkScheduler_T6"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.Config.Backend               = RenderBackend.GameObject;
+            view.WithTestCamera();
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillStyle());
+
+                int caller = Environment.CurrentManagedThreadId;
+                var symbolSpy = new SpySymbolTileWorkerFactory();
+                view.TileManager.SymbolWorkerFactory = symbolSpy;
+                view.TileManager.WorkScheduler = new InlineWorkScheduler();
+
+                for (int f = 0; f < 3000; f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                    if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) break;
+                }
+
+                Assert.Greater(view.LoadedTileCount(), 0, "drive precondition: the cover must have loaded tiles.");
+                Assert.IsTrue(view.AllTilesSettled(), "drive precondition: the cover must fully settle.");
+                Assert.Greater(symbolSpy.IssuedPasses.Count, 0,
+                    "drive precondition: TryBeginBuild must have been called at least once, issuing a " +
+                    "POPULATED (non-null) pass — every prior WorkScheduler tooth drives symbolPass == null " +
+                    "and cannot see this path at all.");
+
+                int ranCount = 0;
+                foreach (SpySymbolTileWorkerPass pass in symbolSpy.IssuedPasses)
+                {
+                    if (!pass.Ran) continue;
+                    ranCount++;
+                    Assert.AreEqual(caller, pass.RunThreadId,
+                        "a populated symbol pass's RunWorkerAndHandoff must run on the CALLING thread under " +
+                        "Inline — it rides inside the SAME dispatched body as the mesh pass " +
+                        "(symbolPass?.RunWorkerAndHandoff(decode), called from KickMeshBuild).");
+                    // job-scheduling-design.md §8 stage 3 tooth (e): the symbol pass moved earlier relative
+                    // to the Burst chain — it must still run EXACTLY ONCE per issued pass, not merely "at
+                    // least once" (§5(e)'s RED: a second invocation from the prologue-complete arm).
+                    Assert.AreEqual(1, pass.RunCount,
+                        "a populated symbol pass's RunWorkerAndHandoff must run EXACTLY ONCE — it rides " +
+                        "inside KickMeshBuild's one-shot worker pass, and a second call anywhere on the mesh " +
+                        "build path would double-run it.");
+                }
+                Assert.Greater(ranCount, 0,
+                    "at least one issued pass must actually have RUN — a tooth over zero ran passes would " +
+                    "vacuously pass the per-thread-id check above.");
+            }
+            finally { view.Teardown(); }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // PreparedCacheSymbolCoverageTests — EditMode settle is symbol-silent (see TileSymbolKickTests)
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class PreparedCacheSymbolCoverageTests : BaseTestFixture
+    {
+        private const string SourceId = "maplibre";
+        private const string FontName = "LatinFont";
+
+        // Same z=4 tile the rest of the prepared-cache teeth track — well inside a tile, no boundary edge case.
+        private static readonly TileId TrackedTile = new TileId { Z = 4, X = 8, Y = 7 };
+
+        private static readonly SymbolTileStore.Key TrackedKey =
+            new SymbolTileStore.Key(SourceId, TrackedTile);
+
+        /// <summary>Fill + symbol over the same source — the shape every real style has, and the one the
+        /// existing prepared-cache restyle teeth deliberately lack.</summary>
+        private static StyleDocument FillAndLabelStyleA() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""glyphs"": ""https://example.invalid/{fontstack}/{range}.pbf"",
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
+                { ""id"": ""labels"", ""type"": ""symbol"", ""source"": ""maplibre"", ""source-layer"": ""centroids"",
+                  ""layout"": { ""text-field"": ""{NAME}"", ""text-size"": 16, ""text-font"": [""LatinFont""] } }
+            ]
+        }");
+
+        /// <summary>A different style — different layer set, so the content token differs and the restyle
+        /// takes the full-rebuild arm (which is what Clears the symbol store).</summary>
+        private static StyleDocument OtherStyleB() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""glyphs"": ""https://example.invalid/{fontstack}/{range}.pbf"",
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 10, 10, 200, 1] } }
+            ]
+        }");
+
+        private static CameraProperties Cam(double lon, double lat, double zoom)
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
+
+        /// <summary>Blocking, main-thread-only wait for a <see cref="UniTask"/> (mirrors
+        /// <c>PreparedCacheTests.SpinToCompleted</c>).</summary>
+        private static void SpinToCompleted(UniTask task, int timeoutMs = 20000)
+        {
+            var t = task.Preserve();
+            t.WaitOffPlayerLoop(timeoutMs);
+            t.GetAwaiter().GetResult();
+        }
+
+        /// <summary>Settles the cover with <c>AwaitInFlightMeshBuilds</c>, not <c>DrainMeshBuilds</c>: the
+        /// symbol pass rides the mesh kick task, so only the awaiting form lets a label build land.</summary>
+        private static void PumpUntilSettled(MapView view, int maxTicks = 2000)
+        {
+            for (int f = 0; f < maxTicks; f++)
+            {
+                view.LateUpdate();
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled()) return;
+                view.AwaitInFlightMeshBuilds();
+            }
+        }
+
+        private static SymbolTileStore Store(MapView view) => view.View.SymbolSubsystem.Store();
+
+        /// <summary>Pumps until the tracked tile has a committed symbol block, and reports whether it got one.
+        /// Bounded — a fixture that never commits must fail loud, not spin.</summary>
+        private static bool PumpUntilLabelsCommitted(MapView view, int maxTicks = 600)
+        {
+            for (int f = 0; f < maxTicks; f++)
+            {
+                if (Store(view).DebugBlockFor(TrackedKey) != null) return true;
+                view.LateUpdate();
+                view.AwaitInFlightMeshBuilds();
+            }
+            return Store(view).DebugBlockFor(TrackedKey) != null;
+        }
+
+        /// <summary>A view on the real <c>MapView.SetStyle</c> path with a fixture glyph source, so the
+        /// symbol pipeline is LIVE (no network) and a label build can actually commit.</summary>
+        private static MapView NewLabelledRestyleView(byte[] bytes, out GameObject go)
+        {
+            go = new GameObject("MapView_UMR139_SymbolCoverage");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick   = int.MaxValue;
+            view.Config.MaxReleasesPerTick   = 0; // uncapped — synchronous whole-cover eviction+transfer
+            view.View.TileSourceFactoryOverride = _ => TestDataSource.FromBytes(bytes);
+
+            byte[] latinGlyphs = File.ReadAllBytes(
+                Path.Combine(Application.dataPath, "Fixtures", "glyphs", "NotoSansRegular", "0-255.pbf.bytes"));
+            var ranges = new Dictionary<(string, int), byte[]> { [(FontName, 0)] = latinGlyphs };
+            view.View.SymbolSubsystem.GlyphSourceFactoryOverride = _ => TestGlyphSource.FromRanges(ranges);
+
+            // Seed the camera BEFORE any SetStyle: SetStyle builds the render layers at the CURRENT zoom.
+            view.View.Camera.SetProperties(Cam(10, 10, 4.0));
+            view.View.Camera.SyncToCamera();
+            return view;
+        }
+
+        private static void PanOutOfCover(MapView view)
+            => view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+
+        private static void PanBackIntoCover(MapView view)
+            => view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+
+        /// <summary>UMR-139: a prepared-cache hit must never re-show a tile with its labels missing. A
+        /// full-rebuild restyle Clears the symbol store while the mesh cache keeps its entries, so the
+        /// pan-back tile came back as geometry only — and a hit is never pumped again, so the loss was
+        /// permanent.</summary>
+        [Test]
+        public void StyleRoundTrip_AfterPanOut_PanBackKeepsItsLabels()
+        {
+            var view = NewLabelledRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            try
+            {
+                SpinToCompleted(view.SetStyle(FillAndLabelStyleA(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: A must build on first visit.");
+                Assert.IsTrue(PumpUntilLabelsCommitted(view),
+                    "drive precondition: the fixture must actually commit labels under A — without this the " +
+                    "whole tooth is vacuous (it would 'pass' against a symbol pipeline that never runs).");
+
+                PanOutOfCover(view);
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must leave cover.");
+                PumpUntilSettled(view);
+                Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0,
+                    "drive precondition: the pan-out must have transferred entries into the cache.");
+
+                SpinToCompleted(view.SetStyle(OtherStyleB(), "B"));
+                PumpUntilSettled(view);
+                SpinToCompleted(view.SetStyle(FillAndLabelStyleA(), "A"));
+                Assert.IsNull(Store(view).DebugBlockFor(TrackedKey),
+                    "drive precondition: the restyle must have dropped the warm symbol block — that asymmetry " +
+                    "against the surviving mesh cache entry IS the trigger under test.");
+
+                PanBackIntoCover(view);
+                // Bounded, not one tick: a refused hit re-shows via fetch+build, which needs several.
+                for (int f = 0; f < 600 && !view.TryGetBuiltTile(TrackedTile); f++)
+                {
+                    view.LateUpdate();
+                    view.AwaitInFlightMeshBuilds();
+                }
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must re-show at all.");
+
+                Assert.IsTrue(PumpUntilLabelsCommitted(view),
+                    "DECISIVE: the re-shown tile must end with symbol coverage. Serving it from the prepared " +
+                    "mesh cache marks it Built+FetchCompleted, so PumpPending skips it forever and the symbol " +
+                    "kick never fires — geometry returns and every label is gone, permanently.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>The non-degeneracy companion: within ONE style the warm symbol store makes a pan-back a
+        /// FULL hit, so tightening the hit predicate must not cost it. Refusing every symbol-bearing hit
+        /// passes the tooth above and fails this one.</summary>
+        [Test]
+        public void PanBackWithinOneStyle_StillServesAFullCacheHit()
+        {
+            var view = NewLabelledRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            try
+            {
+                SpinToCompleted(view.SetStyle(FillAndLabelStyleA(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: A must build on first visit.");
+                Assert.IsTrue(PumpUntilLabelsCommitted(view), "drive precondition: labels must commit under A.");
+
+                PanOutOfCover(view);
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must leave cover.");
+                PumpUntilSettled(view);
+                Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0,
+                    "drive precondition: the pan-out must have transferred entries into the cache.");
+                Assert.IsNotNull(Store(view).DebugBlockFor(TrackedKey),
+                    "drive precondition: no restyle happened, so the symbol block must still be warm.");
+
+                int hitsBefore = view.PreparedCacheHits();
+                PanBackIntoCover(view);
+                view.LateUpdate();
+
+                Assert.Greater(view.PreparedCacheHits(), hitsBefore,
+                    "a within-style pan-back must still register a cache hit — the symbol store kept this " +
+                    "tile's block warm, so nothing is lost by serving it.");
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(), "a cache hit must not start a build.");
+                Assert.IsNotNull(Store(view).DebugBlockFor(TrackedKey),
+                    "the hit must restore the warm block, not drop it.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // PreparedCacheTests — over a zoom-interpolate fill-color style fixture
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class PreparedCacheTests : BaseTestFixture
+    {
+        // z=4 tile containing (lon=10, lat=10) — verified to sit comfortably inside a tile, away from any
+        // tile-boundary floating-point edge case.
+        private static readonly TileId TrackedTile = new TileId { Z = 4, X = 8, Y = 7 };
+
+        private static StyleDocument InterpFillStyle()
+        {
+            string path = Path.Combine(Application.dataPath, "Fixtures", "interp-fill-style.json");
+            FileAssert.Exists(path);
+            return StyleParser.Parse(File.ReadAllText(path));
+        }
+
+        private static CameraProperties Cam(double lon, double lat, double zoom)
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
+
+        /// <summary>Deterministically settles the cover without Thread.Sleep: each tick kicks builds, then
+        /// <c>DrainMeshBuilds</c> spins the kicked ThreadPool builds to completion, so the next tick consumes
+        /// them. No frame yielding — EditMode needs immediate Object.Destroy semantics for the lifetime teeth.</summary>
+        private static void PumpUntilSettled(MapView view, int maxTicks = 2000)
+        {
+            for (int f = 0; f < maxTicks; f++)
+            {
+                view.LateUpdate();
+                view.DrainMeshBuilds();
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
+                    return;
+            }
+        }
+
+        private static int CountMeshObjects() => Resources.FindObjectsOfTypeAll<Mesh>().Length;
+
+        // ── Cached meshes: live while held, destroyed exactly once ────────────────────────────
+
+        [Test]
+        public void CachedMeshes_LiveWhileHeld_DestroyedOnce()
+        {
+            byte[] bytes = SampleTileFixture.Bytes();
+            var style    = InterpFillStyle();
+            var src      = TestDataSource.FromBytes(bytes);
+            var go = Track(new GameObject("MapView_S82_LiveThenDestroyed"));
+            var view     = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — this cache test asserts synchronous whole-cover eviction+transfer
+
+            int meshBefore = CountMeshObjects();
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile));
+                Mesh trackedMesh = view.GetTileMeshes(TrackedTile)[0];
+                Assert.Greater(CountMeshObjects() - meshBefore, 0, "Real load must create Mesh objects (non-vacuous).");
+
+                // Evict — transfers to the cache (well within the default byte budget / count cap; nothing
+                // else competes for eviction here).
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
+                PumpUntilSettled(view);
+
+                // POSITIVE CONTROL: the cache holds the mesh — it must be STILL ALIVE, not destroyed by
+                // release. (Bounded/forced-LRU eviction destroying a mesh is covered deterministically at the
+                // cache-unit level — PreparedTileCacheTests.Bounded_EvictsLru_FreesMesh.)
+                Assert.IsTrue(trackedMesh != null,
+                    "POSITIVE CONTROL: an evicted-but-cached mesh must remain ALIVE (the cache holds it — " +
+                    "proving retention, not that release already destroyed it).");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+
+            // DECISIVE: Teardown (TileManager.Dispose -> _prepared.Dispose()) must destroy the still-cached
+            // mesh — exactly once (the POSITIVE CONTROL above already rules out an earlier premature destroy).
+            int meshAfterTeardown = CountMeshObjects();
+            Assert.LessOrEqual(meshAfterTeardown, meshBefore,
+                "After Teardown, mesh count must return to baseline — the PreparedTileCache's held mesh must " +
+                "be destroyed exactly once, not leaked and not double-freed.");
+        }
+
+        // ── Backend reuse on a hit, across all three backends ──────────────────────────────────
+        // Stays in EditMode: the BRG/GameObject backends do not settle a first-visit tile under the
+        // manual-drive PlayMode loop (verified — "TrackedTile must be built on first visit" fails alone in
+        // PlayMode for Brg), and this asserts on mesh aliveness. Kept as a parametrized [TestCase].
+
+        [TestCase(RenderBackend.Entities)]
+        [TestCase(RenderBackend.Brg)]
+        [TestCase(RenderBackend.GameObject)]
+        public void BackendReuse_OnHit_SnapshotStaysPopulated(RenderBackend backend)
+        {
+            byte[] bytes = SampleTileFixture.Bytes();
+            var style    = InterpFillStyle();
+            var src      = TestDataSource.FromBytes(bytes);
+            var go = Track(new GameObject($"MapView_S82_BackendReuse_{backend}"));
+            var view     = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.Config.Backend = backend;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — this cache test asserts synchronous whole-cover eviction+transfer
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), $"[{backend}] TrackedTile must be built on first visit.");
+
+                // Captured BEFORE eviction so the revisit can be proven to be the SAME instance, not a
+                // structurally-similar re-build — the counter-based checks below read 0 for a hit AND a miss
+                // whose kick is deferred a tick (see PreparedCacheHits assertion), so identity is the only
+                // discriminator that can't be satisfied by a disguised full re-fetch/re-decode/re-mesh.
+                Mesh[] originalMeshes = view.GetTileMeshes(TrackedTile);
+                Assert.IsNotNull(originalMeshes);
+                Assert.GreaterOrEqual(originalMeshes.Length, 1);
+                Mesh originalMesh = originalMeshes[0];
+                int hitsBefore = view.PreparedCacheHits();
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), $"[{backend}] TrackedTile must leave the cover.");
+                PumpUntilSettled(view);
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+                int kicks = view.TileBuildsStartedLastTick();
+                PumpUntilSettled(view);
+
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile),
+                    $"[{backend}] TrackedTile must be re-built (from cache) on revisit — falsifier: a backend " +
+                    "that assumed it owned/destroyed the mesh on RemoveItem would draw nothing here.");
+                Assert.AreEqual(0, kicks, $"[{backend}] the revisit must be a cache hit (no re-mesh build).");
+
+                Mesh[] meshes = view.GetTileMeshes(TrackedTile);
+                Assert.IsNotNull(meshes);
+                Assert.GreaterOrEqual(meshes.Length, 1);
+                Assert.IsTrue(meshes[0] != null, $"[{backend}] the re-added mesh must be alive.");
+
+                // DECISIVE: the counter above (kicks == 0) reads 0 for a genuine hit AND for a miss whose
+                // kick is structurally deferred to the NEXT tick — it cannot alone distinguish "reused the
+                // prepared mesh" from "quietly re-fetched/re-decoded/re-meshed and only the kick counter
+                // missed it". Mesh IDENTITY across the revisit, plus the cache's own hit counter, can.
+                Assert.AreSame(originalMesh, meshes[0],
+                    $"[{backend}] the revisit mesh must be the SAME instance as before eviction — a genuine " +
+                    "prepared-cache hit reuses the held Mesh, it never rebuilds an equivalent one.");
+                Assert.Greater(view.PreparedCacheHits(), hitsBefore,
+                    $"[{backend}] the revisit must register on the cache's own hit counter.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        // ── Enabled = false: exact pre-S82 revert (no probe, no transfer) ──────────────────────
+
+        /// <summary>
+        /// With <see cref="MapRenderer.Unity.Rendering.Map.PreparedTileCacheConfig.Enabled"/> = false, the
+        /// cache must be entirely bypassed: a revisit is ALWAYS a miss/re-prepare (never a hit), and a
+        /// released tile's meshes are DESTROYED immediately rather than transferred/kept alive — the exact
+        /// pre-S82 behaviour. Falsifier: a probe/transfer that ignores the toggle would register a hit
+        /// and/or leave the evicted mesh alive (as the ENABLED teeth prove it does when true).
+        /// </summary>
+        [Test]
+        public void CacheDisabled_Revisit_AlwaysReprepares_NoTransfer()
+        {
+            byte[] bytes = SampleTileFixture.Bytes();
+            var style    = InterpFillStyle();
+            var src      = TestDataSource.FromBytes(bytes);
+            var go = Track(new GameObject("MapView_S82_CacheDisabled"));
+            var view     = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            // Set BEFORE WithTestCamera() — that call constructs MapView/TileManager, which reads
+            // PreparedCache.Enabled once at construction.
+            view.Config.PreparedCache.Enabled = false;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick        = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick      = int.MaxValue;
+            view.Config.MaxReleasesPerTick        = 0; // stall #2: uncapped — this cache test asserts synchronous whole-cover eviction+transfer
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "TrackedTile must be built on first visit.");
+                Assert.Greater(view.PreparedCacheMisses(), 0,
+                    "The probe still counts a miss when disabled (it never finds anything cached).");
+                Assert.AreEqual(0, view.PreparedCacheHits(), "Disabled must never register a hit.");
+
+                Mesh originalMesh = view.GetTileMeshes(TrackedTile)[0];
+                Assert.IsNotNull(originalMesh);
+
+                // Evict: pan far away — the tile leaves the cover.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "TrackedTile must leave the cover.");
+
+                // DECISIVE (no transfer): disabled must destroy the released mesh immediately, exactly like
+                // pre-S82 DestroyTrackedMeshes — NOT keep it alive in the cache. (Immediate Object.Destroy is
+                // why this tooth is EditMode-only.)
+                Assert.IsTrue(originalMesh == null,
+                    "DECISIVE: with the cache disabled, a released tile's mesh must be destroyed immediately " +
+                    "(no transfer-to-cache) — a live mesh here would mean Enabled=false failed to gate the " +
+                    "transfer site in ReleaseTile.");
+
+                PumpUntilSettled(view);
+
+                // Revisit: pan back to the same tile.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+                PumpUntilSettled(view);
+
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "TrackedTile must be rebuilt on revisit.");
+                Mesh revisitMesh = view.GetTileMeshes(TrackedTile)[0];
+                Assert.IsNotNull(revisitMesh);
+                Assert.AreNotSame(originalMesh, revisitMesh,
+                    "A disabled cache can never hand back the original mesh (it was destroyed on release) — " +
+                    "the revisit must be a genuinely fresh prepare.");
+                Assert.AreEqual(0, view.PreparedCacheHits(), "Disabled must never register a hit, ever.");
+                Assert.Greater(view.PreparedCacheMisses(), 1,
+                    "The revisit must register a SECOND miss (re-prepared again), not a hit.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        // ── (g)'s revisit clause: a two-mesh tile, cache hit, no re-kick ────────────────────────
+
+        /// <summary>
+        /// job-scheduling-design.md §8 stage 3 tooth (f)/(g): a two-mesh (fill + line) tile — both produced
+        /// by the graph arm (§8 stage 5 Group B retired the seam arm) — evicted to the cache and revisited must be a PURE cache
+        /// hit: <see cref="TileManager.BuildTileFromCache"/> is synchronous admission-time work (no fetch,
+        /// no kick, no async pipeline), so <c>TileBuildsStartedLastTick()</c> must read 0 on the tick the
+        /// tile becomes built again — the falsifier that catches a shallow cache which silently RE-BUILT
+        /// instead of transferring (which the mesh-count/hit-count assertions alone would not catch, since
+        /// a re-build produces the same counts).
+        /// </summary>
+        [Test]
+        public void TwoMeshTile_RevisitAfterEviction_IsACacheHit_WithNoReKick()
+        {
+            byte[] bytes = SampleTileFixture.Bytes();
+            var src      = TestDataSource.FromBytes(bytes);
+            var style    = StyleParser.Parse(@"{
+                ""version"": 8,
+                ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
+                ""layers"": [
+                    { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                      ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
+                    { ""id"": ""geolines-stroke"", ""type"": ""line"", ""source"": ""maplibre"",
+                      ""source-layer"": ""geolines"",
+                      ""paint"": { ""line-color"": [""rgba"", 100, 200, 50, 1], ""line-width"": 10 } }
+                ]
+            }");
+            var go = Track(new GameObject("MapView_S89_TwoMeshRevisit"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick   = int.MaxValue;
+            view.Config.MaxReleasesPerTick   = 0; // uncapped — synchronous whole-cover eviction+transfer
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(10, 10, 4.0), style: style);
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must build on first visit.");
+                Assert.AreEqual(2, view.GetTileMeshes(TrackedTile)?.Length ?? 0,
+                    "drive precondition: both layers must produce a real mesh — the revisit clause needs a " +
+                    "genuinely two-mesh tile, not one with an empty line layer.");
+
+                // Evict — transfers both meshes to the cache.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "the tile must leave the cover.");
+                PumpUntilSettled(view);
+
+                int hitsBefore = view.PreparedCacheHits();
+
+                // Revisit — one deterministic tick: BuildTileFromCache runs synchronously on admission.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile),
+                    "a cache hit must build the tile SYNCHRONOUSLY on admission — no fetch, no kick, no " +
+                    "async pipeline (BuildTileFromCache's own contract).");
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(),
+                    "no re-kick on a hit — the falsifier: a shallow cache that silently RE-BUILT instead of " +
+                    "transferring would start a build on this exact tick.");
+                // Greater-than, not exactly +1: at this zoom the whole cover (not just TrackedTile) re-enters
+                // on one pan, so every previously-evicted tile in it registers its own hit on the same tick.
+                // TrackedTile's OWN hit is what the assertions above/below (built synchronously, 2 meshes)
+                // already pin; this just confirms the cache's hit counter moved at all.
+                Assert.Greater(view.PreparedCacheHits(), hitsBefore,
+                    "the revisit must register at least one cache hit — including TrackedTile's own.");
+                Assert.AreEqual(2, view.GetTileMeshes(TrackedTile)?.Length ?? 0,
+                    "the cache hit must restore BOTH meshes — a shallow cache that only remembered one " +
+                    "layer would show here.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        // ── UMR-95 stage 1: the prepared cache survives a restyle ──────────────────────────────
+        // These drive the REAL production entry point, MapView.SetStyle — LoadTestStyle never sets
+        // CurrentStyle, so the purge it fires is unconditionally unreachable from that helper.
+
+        private static StyleDocument TwoLayerStyleA() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } },
+                { ""id"": ""geolines-stroke"", ""type"": ""line"", ""source"": ""maplibre"",
+                  ""source-layer"": ""geolines"",
+                  ""paint"": { ""line-color"": [""rgba"", 100, 200, 50, 1], ""line-width"": 10 } }
+            ]
+        }");
+
+        /// <summary>A style entirely unrelated to A — the "B" arm of an A→B→A drive.</summary>
+        private static StyleDocument SingleLayerStyleB() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""other"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""other-fill"", ""type"": ""fill"", ""source"": ""other"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 5, 5, 5, 1] } }
+            ]
+        }");
+
+        /// <summary>A single FILL layer at id "shape-layer" — the closed-hole drive's first arm.</summary>
+        private static StyleDocument SingleFillLayerStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""shape-layer"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } }
+            ]
+        }");
+
+        /// <summary>The SAME id "shape-layer", now a LINE layer — same ordered layer id, a different TYPE at
+        /// the same index. The closed-hole drive's returning arm.</summary>
+        private static StyleDocument SingleLineLayerStyle_SameId() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""shape-layer"", ""type"": ""line"", ""source"": ""maplibre"",
+                  ""source-layer"": ""geolines"",
+                  ""paint"": { ""line-color"": [""rgba"", 100, 200, 50, 1], ""line-width"": 10 } }
+            ]
+        }");
+
+        /// <summary>Blocking, main-thread-only wait for a <see cref="UniTask"/> (mirrors
+        /// <c>GeoJsonSourceTests.SpinToCompleted</c>).</summary>
+        private static void SpinToCompleted(UniTask task, int timeoutMs = 20000)
+        {
+            var t = task.Preserve();
+            t.WaitOffPlayerLoop(timeoutMs);
+            t.GetAwaiter().GetResult();
+        }
+
+        /// <summary>Wires a view for the real <see cref="MapView.SetStyle"/> path (never LoadTestStyle) — a
+        /// tiles[]-only vector source needs no TileJSON fetch, so SetStyle never actually awaits network.</summary>
+        private static MapView NewRestyleView(byte[] bytes, out GameObject go)
+        {
+            go = new GameObject("MapView_UMR95_Restyle");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick   = int.MaxValue;
+            view.Config.MaxReleasesPerTick   = 0; // uncapped — synchronous whole-cover eviction+transfer
+            view.View.TileSourceFactoryOverride = _ => TestDataSource.FromBytes(bytes);
+            // Seed the camera BEFORE any SetStyle: SetStyle builds the render layers at the CURRENT zoom.
+            view.View.Camera.SetProperties(Cam(10, 10, 4.0));
+            view.View.Camera.SyncToCamera();
+            return view;
+        }
+
+        /// <summary>T1 — a style round-trip re-shows without a rebuild. RED against the unmodified tree
+        /// (DERIVED, not run — SetSources purged unconditionally): the pan-back would be a MISS.</summary>
+        [Test]
+        public void StyleRoundTrip_AfterPanOut_ReShowsWithoutRebuild()
+        {
+            var view = NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            try
+            {
+                SpinToCompleted(view.SetStyle(TwoLayerStyleA(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: A must build on first visit.");
+
+                // Pan out of cover — transfers A's meshes into the cache.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                Assert.IsFalse(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must leave cover.");
+                PumpUntilSettled(view);
+                Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0,
+                    "drive precondition: the pan-out must have transferred entries into the cache.");
+
+                SpinToCompleted(view.SetStyle(SingleLayerStyleB(), "B"));
+                PumpUntilSettled(view);
+
+                SpinToCompleted(view.SetStyle(TwoLayerStyleA(), "A"));
+                int hitsBefore = view.PreparedCacheHits();
+
+                // Pan back — one LateUpdate: a hit is synchronous admission-time work.
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "the returning style must re-show without a rebuild.");
+                Assert.AreEqual(0, view.TileBuildsStartedLastTick(), "a cache hit must not start a build.");
+                Assert.Greater(view.PreparedCacheHits(), hitsBefore, "the revisit must register a cache hit.");
+                Assert.AreEqual(2, view.GetTileMeshes(TrackedTile)?.Length ?? 0, "both layers' meshes must be restored.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>The hole a review found in the id-based design: with the cache token derived from
+        /// style CONTENT (not the caller-asserted <c>styleId</c>, a file path), a same-styleId return with a
+        /// layer-TYPE swap at the same index now mints a DIFFERENT token, so the probe misses instead of
+        /// serving a fill mesh under a line-typed layer. RED: derive the token from <c>StyleId</c> alone.</summary>
+        [Test]
+        public void SameIdReturn_WithLayerTypeSwapAtSameIndex_NeverServesTheStaleBake()
+        {
+            var view = NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            try
+            {
+                SpinToCompleted(view.SetStyle(SingleFillLayerStyle(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: A must build on first visit.");
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                PumpUntilSettled(view);
+                Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0,
+                    "drive precondition: the pan-out must have transferred the fill mesh into the cache.");
+
+                SpinToCompleted(view.SetStyle(SingleLayerStyleB(), "B"));
+                PumpUntilSettled(view);
+
+                // Same styleId "A" again — same one layer id ("shape-layer"), now a LINE layer. The content
+                // digest differs (the type changed), so this mints a fresh token, never seen before.
+                SpinToCompleted(view.SetStyle(SingleLineLayerStyle_SameId(), "A"));
+
+                int hitsBeforeRevisit   = view.PreparedCacheHits();
+                int missesBeforeRevisit = view.PreparedCacheMisses();
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+
+                Assert.AreEqual(hitsBeforeRevisit, view.PreparedCacheHits(),
+                    "a layer-type swap at the same index under a repeated styleId must never register a hit " +
+                    "— the fill mesh baked under the OLD content must not be handed to the new line layer.");
+                // Positive companion: the negative assertion above passes just as well if the pan-back admits
+                // NOTHING at all. Pin that it genuinely re-admits under a MISS (a real rebuild), not silence.
+                Assert.Greater(view.PreparedCacheMisses(), missesBeforeRevisit,
+                    "the revisit must register a miss — the line layer must actually rebuild, not merely fail to hit.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>A fill-extrusion layer BEFORE a fill layer, same source/source-layer. With
+        /// <c>MapMaterialSet.FillExtrusionMaterial</c> null, <c>RenderLayerSet.Build</c> skips the extrusion
+        /// layer, so the fill layer bakes at dense index 0 — see the field-mutation teeth below.</summary>
+        private static StyleDocument ExtrusionThenFillStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""extrusion-layer"", ""type"": ""fill-extrusion"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-extrusion-height"": 50 } },
+                { ""id"": ""shape-layer"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } }
+            ]
+        }");
+
+        /// <summary>The fix this stage lands: a MaterialSet FIELD mutated IN PLACE (a swap of REFERENCE is
+        /// out of scope — both committed sets configure every material, so the only reference swap this repo
+        /// can perform moves no layer) can still shift the dense layer numbering under UNCHANGED style
+        /// content and id. RED: fold only content into the token, not the built numbering.</summary>
+        [Test]
+        public void FillExtrusionMaterialAssignedInPlace_BetweenStyleLoads_NeverServesAStaleHit()
+        {
+            var litSet = MapMaterialSetTestUtil.Load();
+            var matSet = Track(ScriptableObject.CreateInstance<MapMaterialSet>());
+            matSet.FillMaterial    = litSet.FillMaterial;
+            matSet.LineMaterial    = litSet.LineMaterial;
+            matSet.SymbolTextWorld = litSet.SymbolTextWorld;
+            // FillExtrusionMaterial left null — the extrusion layer is skipped on the first load below.
+
+            var go = Track(new GameObject("MapView_UMR95_MaterialFieldMutation"));
+            var view = go.AddComponent<MapView>();
+            view.Config.MaterialSet = matSet;
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick   = int.MaxValue;
+            view.Config.MaxReleasesPerTick   = 0; // uncapped — synchronous whole-cover eviction+transfer
+            view.View.TileSourceFactoryOverride = _ => TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            view.View.Camera.SetProperties(Cam(10, 10, 4.0));
+            view.View.Camera.SyncToCamera();
+
+            try
+            {
+                SpinToCompleted(view.SetStyle(ExtrusionThenFillStyle(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile),
+                    "drive precondition: the fill layer (extrusion skipped) must build on first visit.");
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                PumpUntilSettled(view);
+                Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0,
+                    "drive precondition: the pan-out must have transferred the fill mesh into the cache.");
+
+                // Same reference, a field mutated IN PLACE — the pin does not fire, but the extrusion layer
+                // now builds too, shifting the fill layer from dense index 0 to dense index 1.
+                matSet.FillExtrusionMaterial = litSet.FillMaterial;
+                SpinToCompleted(view.SetStyle(ExtrusionThenFillStyle(), "A")); // SAME content, SAME id
+
+                int hitsBeforeRevisit = view.PreparedCacheHits();
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+
+                Assert.AreEqual(hitsBeforeRevisit, view.PreparedCacheHits(),
+                    "a MaterialSet field mutation that shifts the dense layer numbering, under unchanged " +
+                    "style content and id, must never register a hit — a shifted fill mesh would otherwise " +
+                    "be served under what is now the extrusion layer's slot.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>The DECREASE-direction counterpart to
+        /// <see cref="FillExtrusionMaterialAssignedInPlace_BetweenStyleLoads_NeverServesAStaleHit"/>: starts
+        /// with BOTH layers built (dense ids extrusion=0, fill=1), then NULLS
+        /// <c>FillExtrusionMaterial</c> so the extrusion layer drops out and the fill layer's dense id shifts
+        /// DOWN to 0. RED: drop <c>LayerNumbering(Layers)</c> from the digest fold (<c>MapView.cs</c>).</summary>
+        [Test]
+        public void FillExtrusionMaterialNulledInPlace_BetweenStyleLoads_NeverServesAStaleHit()
+        {
+            var litSet = MapMaterialSetTestUtil.Load();
+            var matSet = Track(ScriptableObject.CreateInstance<MapMaterialSet>());
+            matSet.FillMaterial          = litSet.FillMaterial;
+            matSet.LineMaterial          = litSet.LineMaterial;
+            matSet.SymbolTextWorld       = litSet.SymbolTextWorld;
+            matSet.FillExtrusionMaterial = litSet.FillMaterial; // assigned — both layers build on first load.
+
+            var go = Track(new GameObject("MapView_UMR95_MaterialFieldMutation_Decrease"));
+            var view = go.AddComponent<MapView>();
+            view.Config.MaterialSet = matSet;
+            view.Config.TileSelection.MinZoom = 4; view.Config.TileSelection.MaxZoom = 4;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick   = 64;
+            view.Config.MaxMeshBuildsPerTick = 64;
+            view.Config.MaxVerticesPerTick   = int.MaxValue;
+            view.Config.MaxReleasesPerTick   = 0; // uncapped — synchronous whole-cover eviction+transfer
+            view.View.TileSourceFactoryOverride = _ => TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            view.View.Camera.SetProperties(Cam(10, 10, 4.0));
+            view.View.Camera.SyncToCamera();
+
+            try
+            {
+                SpinToCompleted(view.SetStyle(ExtrusionThenFillStyle(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile),
+                    "drive precondition: both the extrusion and fill layers must build on first visit.");
+                Assert.AreEqual(2, view.Layers.Count,
+                    "drive precondition: extrusion+fill must both be present, at dense ids [0,1].");
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                PumpUntilSettled(view);
+                Assert.GreaterOrEqual(view.CaptureTelemetry().PreparedCacheEntryCount, 2,
+                    "drive precondition: the pan-out must have transferred BOTH dense ids' meshes " +
+                    "(extrusion=0, fill=1) into the cache.");
+
+                // Same reference, a field mutated IN PLACE — the pin does not fire, but the extrusion layer
+                // now drops out, shifting the fill layer from dense index 1 DOWN to dense index 0 — a PREFIX
+                // of the still-cached ids.
+                matSet.FillExtrusionMaterial = null;
+                SpinToCompleted(view.SetStyle(ExtrusionThenFillStyle(), "A")); // SAME content, SAME id
+                Assert.AreEqual(1, view.Layers.Count,
+                    "drive precondition: the extrusion layer must actually drop out after nulling its material.");
+
+                int hitsBeforeRevisit   = view.PreparedCacheHits();
+                int missesBeforeRevisit = view.PreparedCacheMisses();
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+
+                Assert.AreEqual(hitsBeforeRevisit, view.PreparedCacheHits(),
+                    "a MaterialSet field mutation that shifts the dense layer numbering DOWN, under " +
+                    "unchanged style content and id, must never register a hit — the surviving id is a " +
+                    "PREFIX of the still-cached ids, so the fill layer must not be served the extrusion " +
+                    "layer's stale mesh.");
+                Assert.Greater(view.PreparedCacheMisses(), missesBeforeRevisit,
+                    "the revisit must register a miss — the fill layer must actually rebuild, not merely " +
+                    "fail to hit.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>UMR-95 R1: <c>MapViewConfig.FillAntialiasing</c> bakes into VERTICES
+        /// (<c>StyledFillTileBuilder</c>'s boundary band), not a uniform — a toggle changes neither the
+        /// style's Root bytes nor the built layer numbering, so it must be folded into the token explicitly.
+        /// RED: drop the <c>|aa=</c> component from the digest fold.</summary>
+        [Test]
+        public void FillAntialiasingToggle_BetweenStyleLoads_NeverServesAStaleHit()
+        {
+            var view = NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            try
+            {
+                view.Config.FillAntialiasing = true;
+                SpinToCompleted(view.SetStyle(TwoLayerStyleA(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: A must build on first visit.");
+
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170.0, Latitude = -60.0 });
+                view.LateUpdate();
+                PumpUntilSettled(view);
+                Assert.Greater(view.CaptureTelemetry().PreparedCacheEntryCount, 0,
+                    "drive precondition: the pan-out must have transferred entries into the cache.");
+
+                // Same content, same id — only the config knob differs.
+                view.Config.FillAntialiasing = false;
+                SpinToCompleted(view.SetStyle(TwoLayerStyleA(), "A"));
+
+                int hitsBeforeRevisit = view.PreparedCacheHits();
+                view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 10.0, Latitude = 10.0 });
+                view.LateUpdate();
+
+                Assert.AreEqual(hitsBeforeRevisit, view.PreparedCacheHits(),
+                    "a FillAntialiasing toggle, under unchanged style content and id, must never register a " +
+                    "hit — the AA-banded mesh baked before the toggle must not be served after it.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        // ── Style-transitions epic, Stage 2: teeth 1 and 19 — the MapView-level teeth ────────────
+        // The only teeth of the 22 that need real loaded tiles and a real backend: everything else in
+        // the stage's plan is exercised at the RenderLayerSet level in Style/StyleTransitionBindingTests.cs
+        // and Style/RestyleSurvivorGateTests.cs, which is cheaper and does not need this fixture's tile
+        // pipeline. This is the harness the plan names for the two that genuinely do.
+
+        private static StyleDocument TwoLayerStyleARecolored() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 10, 10, 200, 1] } },
+                { ""id"": ""geolines-stroke"", ""type"": ""line"", ""source"": ""maplibre"",
+                  ""source-layer"": ""geolines"",
+                  ""paint"": { ""line-color"": [""rgba"", 10, 200, 10, 1], ""line-width"": 10 } }
+            ]
+        }");
+
+        /// <summary>Tooth 1 (A#1, crit. 7): a paint-only restyle keeps every layer's material, the drawn
+        /// tile meshes, and the backend instance — the in-place path never calls Layers.Build/SetSources.
+        /// Anti-vacuity: the drawn set is non-empty (both layers' meshes are present before AND after).</summary>
+        [Test]
+        public void PaintOnlyRestyle_KeepsMaterialsMeshesAndBackend()
+        {
+            var view = NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            try
+            {
+                SpinToCompleted(view.SetStyle(TwoLayerStyleA(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: A must build on first visit.");
+
+                int layerCount = view.Layers.Count;
+                Assert.AreEqual(2, layerCount, "drive precondition: both layers must have taken a slot.");
+                var materialsBefore = new Material[layerCount];
+                for (int i = 0; i < layerCount; i++) materialsBefore[i] = view.Layers[i].Material;
+
+                Mesh[] meshesBefore = view.GetTileMeshes(TrackedTile);
+                Assert.IsNotNull(meshesBefore, "drive precondition: the tracked tile must have drawn meshes.");
+                Assert.AreEqual(2, meshesBefore.Length, "drive precondition: dense layers x tiles = 2 x 1.");
+
+                // NewRestyleView never sets Config.Backend, so the default (RenderBackend.Entities) applies.
+                var backendBefore = view.EntitiesRenderer();
+                Assert.IsNotNull(backendBefore, "drive precondition: a backend must be active.");
+
+                SpinToCompleted(view.SetStyle(TwoLayerStyleARecolored(), "A")); // paint-only: same id, in place
+
+                for (int i = 0; i < layerCount; i++)
+                    Assert.AreSame(materialsBefore[i], view.Layers[i].Material,
+                        $"layer {i}'s material must survive a paint-only restyle.");
+
+                Mesh[] meshesAfter = view.GetTileMeshes(TrackedTile);
+                Assert.IsNotNull(meshesAfter, "the tracked tile must still have drawn meshes.");
+                Assert.AreEqual(meshesBefore.Length, meshesAfter.Length, "the drawn set must not shrink or grow.");
+                for (int i = 0; i < meshesBefore.Length; i++)
+                    Assert.AreSame(meshesBefore[i], meshesAfter[i], $"mesh {i} must be the SAME instance.");
+
+                Assert.AreSame(backendBefore, view.EntitiesRenderer(),
+                    "the backend instance must survive a paint-only restyle.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>Tooth 19: after an in-place restyle, GetTileMeshes returns the SAME objects (not merely
+        /// equal-content ones) and TileManager.CurrentStyle is unchanged — moving the token would invalidate
+        /// prepared-cache entries the gate has just proven are still exactly right.</summary>
+        [Test]
+        public void PaintOnlyRestyle_KeepsLoadedTileMeshes()
+        {
+            var view = NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            try
+            {
+                SpinToCompleted(view.SetStyle(TwoLayerStyleA(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: A must build on first visit.");
+
+                Mesh[] meshesBefore = view.GetTileMeshes(TrackedTile);
+                var tokenBefore = view.TileManager.CurrentStyle;
+
+                SpinToCompleted(view.SetStyle(TwoLayerStyleARecolored(), "A"));
+
+                Mesh[] meshesAfter = view.GetTileMeshes(TrackedTile);
+                Assert.IsNotNull(meshesAfter);
+                Assert.AreEqual(meshesBefore.Length, meshesAfter.Length);
+                for (int i = 0; i < meshesBefore.Length; i++)
+                    Assert.AreSame(meshesBefore[i], meshesAfter[i], $"mesh {i} must be the SAME instance.");
+                Assert.AreEqual(tokenBefore, view.TileManager.CurrentStyle,
+                    "CurrentStyle must not move on an in-place restyle — it partitions meshes by " +
+                    "mesh-affecting content, which the gate has just proven byte-identical.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        // UMR-151, the fence pair. Both need a BACKGROUND layer: without one, SourceRegistry's
+        // background-identity reuse has no observer, and a fresh SourcePipeline per call would still pass.
+
+        private static StyleDocument BackgroundAndFillStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": [""rgba"", 20, 20, 20, 1] } },
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } }
+            ]
+        }");
+
+        /// <summary>Same layers, background RECOLORED (still transitionable — an in-place restyle).</summary>
+        private static StyleDocument BackgroundRecoloredAndFillStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""bg"", ""type"": ""background"", ""paint"": { ""background-color"": [""rgba"", 90, 90, 90, 1] } },
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 10, 10, 200, 1] } }
+            ]
+        }");
+
+        /// <summary>Same fill layer, background REMOVED — a partial-survival restyle whose diff drops the
+        /// synthetic source-less pipeline (SourcesUnchanged's pre-diff "true" goes stale exactly here).</summary>
+        private static StyleDocument FillOnlyStyle_BackgroundRemoved() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                  ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 10, 10, 200, 1] } }
+            ]
+        }");
+
+        /// <summary>T4. A restyle whose SOURCES are unchanged (paint-only, background included) must keep
+        /// every loaded record — both the fill layer's AND the background's own per-tile quad — by Mesh
+        /// IDENTITY. Anti-vacuity: the drawn set is non-empty both before and after (A's T1 tooth 1's own
+        /// guard).</summary>
+        [Test]
+        public void UnchangedSources_KeepEveryRecord()
+        {
+            var view = NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            try
+            {
+                SpinToCompleted(view.SetStyle(BackgroundAndFillStyle(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must build on first visit.");
+
+                Mesh[] meshesBefore = view.GetTileMeshes(TrackedTile);
+                Assert.IsNotNull(meshesBefore, "drive precondition: the tracked tile must have drawn meshes.");
+                Assert.AreEqual(2, meshesBefore.Length, "drive precondition: background + fill = 2 dense layers.");
+                var backendBefore = view.EntitiesRenderer();
+
+                SpinToCompleted(view.SetStyle(BackgroundRecoloredAndFillStyle(), "A"));
+
+                Mesh[] meshesAfter = view.GetTileMeshes(TrackedTile);
+                Assert.IsNotNull(meshesAfter, "the tracked tile must still have drawn meshes — not blanked.");
+                Assert.AreEqual(meshesBefore.Length, meshesAfter.Length, "the drawn set must not shrink or grow.");
+                for (int i = 0; i < meshesBefore.Length; i++)
+                    Assert.AreSame(meshesBefore[i], meshesAfter[i], $"mesh {i} (incl. the background's) must be the SAME instance.");
+                Assert.AreSame(backendBefore, view.EntitiesRenderer(), "the backend instance must survive too.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>T5. Removing the BACKGROUND layer (sources otherwise untouched) departs the synthetic
+        /// source-less pipeline — its record must be torn down, while the surviving fill layer's own record
+        /// keeps its Mesh identity. This is the pairing point with T4: an implementation that keeps every
+        /// record unconditionally (ignoring the departed-pipeline case) passes T4 but fails here.</summary>
+        [Test]
+        public void BackgroundRemovedRestyle_TearsDownOnlyTheBackgroundRecord()
+        {
+            var view = NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            try
+            {
+                SpinToCompleted(view.SetStyle(BackgroundAndFillStyle(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must build on first visit.");
+
+                // Background is declared FIRST, so it takes slot 0 and the fill slot 1 — but GetTileMeshes
+                // returns CONSUME order, so find each mesh by material index, never by position.
+                Mesh[] meshesBefore = view.GetTileMeshes(TrackedTile);
+                int[]  indicesBefore = view.GetTileMaterialIndices(TrackedTile);
+                Assert.AreEqual(2, meshesBefore.Length, "drive precondition: background + fill = 2 dense layers.");
+                int fillSlotIndexBefore = System.Array.IndexOf(indicesBefore, 1);
+                int bgSlotIndexBefore   = System.Array.IndexOf(indicesBefore, 0);
+                Assert.GreaterOrEqual(fillSlotIndexBefore, 0, "drive precondition: slot 1 (the fill layer) must have a mesh.");
+                Assert.GreaterOrEqual(bgSlotIndexBefore, 0, "drive precondition: slot 0 (the background) must have a mesh.");
+                Mesh fillMeshBefore = meshesBefore[fillSlotIndexBefore];
+                Mesh bgMeshBefore   = meshesBefore[bgSlotIndexBefore];
+
+                SpinToCompleted(view.SetStyle(FillOnlyStyle_BackgroundRemoved(), "A"));
+
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "the fill layer must still be drawn — not evicted wholesale.");
+                Mesh[] meshesAfter = view.GetTileMeshes(TrackedTile);
+                int[]  indicesAfter = view.GetTileMaterialIndices(TrackedTile);
+                Assert.AreEqual(1, meshesAfter.Length,
+                    "GetTileMeshes must show only the surviving fill layer — NOTE this alone would also read " +
+                    "'1' if the background's record were merely orphaned (its OLD pipeline slot number falls " +
+                    "outside the NEW, shrunk _sources.Count either way), so it is not decisive by itself.");
+                Assert.AreEqual(1, indicesAfter[0], "the surviving mesh must still be at slot 1 — the fill layer's slot never moved.");
+                Assert.AreSame(fillMeshBefore, meshesAfter[0],
+                    "the surviving fill layer's Mesh must be the SAME instance — its pipeline never departed.");
+                Assert.IsTrue(bgMeshBefore == null, // Unity fake-null: decisive where the count above is not —
+                    "the background's Mesh must be ACTUALLY DESTROYED, not merely orphaned in _loaded and " +
+                    "hidden from GetTileMeshes by its old pipeline slot falling outside the new source count.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        // ── UMR-151: T3 — the BRG re-stamp is mandatory (§3's deviation is void without it) ────────
+
+        private static StyleDocument ThreeFillLayersAbc() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""a"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 0, 0, 1] } },
+                { ""id"": ""b"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 0, 200, 0, 1] } },
+                { ""id"": ""c"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 0, 0, 200, 1] } }
+            ]
+        }");
+
+        private static StyleDocument ThreeFillLayersReorderedCab() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""c"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 0, 0, 200, 1] } },
+                { ""id"": ""a"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 0, 0, 1] } },
+                { ""id"": ""b"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 0, 200, 0, 1] } }
+            ]
+        }");
+
+        /// <summary>T3 — MANDATORY (§3's per-frame-cost deviation is void without it): under
+        /// <c>RenderBackend.Brg</c>, a reorder restyle must move the emitted draw order too, not just the
+        /// Material.renderQueue values — BRG caches its own copy (<c>DrawItem.LayerRenderQueue</c>) and only
+        /// <c>SetLayerMaterials</c>'s explicit re-stamp updates it. Slots never move on a reorder (a=0, b=1,
+        /// c=2 throughout); only which slot draws FIRST changes, to match the NEW declared order (c,a,b).</summary>
+        [Test]
+        public void ReorderRestyle_BrgEmitOrder_MatchesTheNewDeclaredOrder()
+        {
+            var view = NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            view.Config.Backend = RenderBackend.Brg;
+            try
+            {
+                SpinToCompleted(view.SetStyle(ThreeFillLayersAbc(), "A"));
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.TryGetBuiltTile(TrackedTile), "drive precondition: the tile must build on first visit.");
+                Assert.AreEqual(3, view.Layers.Count, "drive precondition: all three fill layers must have taken a slot.");
+                int itemsBefore = view.TileManager.BrgRenderer.DrawItemCount();
+                Assert.Greater(itemsBefore, 0, "drive precondition: the settled cover must have registered draw items.");
+
+                SpinToCompleted(view.SetStyle(ThreeFillLayersReorderedCab(), "A"));
+                view.LateUpdate(); // drives Rebuild, which re-sorts _sortedItems from the (re-stamped) queues
+
+                var brg = view.TileManager.BrgRenderer;
+                Assert.IsNotNull(brg, "drive precondition: the BRG backend must be active.");
+                Assert.AreEqual(itemsBefore, brg.DrawItemCount(),
+                    "a reorder must tear NOTHING down — every draw item registered before it must still be registered.");
+
+                // Rebuild sorts by renderQueue ALONE and a layer's draw items all share its queue, so each
+                // layer is one contiguous RUN at ANY cover size — read run order, not the first 3 positions.
+                var runOrder = new List<int>(3);
+                for (int i = 0; i < brg.DrawItemCount(); i++)
+                {
+                    int materialIndex = brg.MaterialIndexAtSorted(i);
+                    if (runOrder.Count == 0 || runOrder[runOrder.Count - 1] != materialIndex)
+                        runOrder.Add(materialIndex);
+                }
+                CollectionAssert.AreEqual(new[] { 2, 0, 1 }, runOrder,
+                    "the emitted runs must be (c, a, b) — the NEW declared order — one contiguous run per layer.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>Same three fill layers, "b" REMOVED — a partial-survival restyle that tombstones slot 1
+        /// while leaving slots 0 and 2 alive.</summary>
+        private static StyleDocument ThreeFillLayersAcRemovedB() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""a"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 0, 0, 1] } },
+                { ""id"": ""c"", ""type"": ""fill"", ""source"": ""maplibre"", ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 0, 0, 200, 1] } }
+            ]
+        }");
+
+        /// <summary>UMR-151: a mesh build KICKED before a removal restyle must not register its payload at
+        /// the slot the restyle retired. Tombstoning preserves slot WIDTH, so the consume guard's count check
+        /// cannot see the retirement. Drives the build to "complete but unconsumed" (MaxConsumesPerTick=0 +
+        /// AwaitInFlightMeshBuilds, never PumpUntilSettled), restyles, and only then consumes.</summary>
+        /// <remarks>Runs on the DEFAULT (Entities) backend on purpose. BRG dereferences the retired slot's
+        /// null material and throws inside <c>AddTileLayer</c>, which would abort this test BEFORE its own
+        /// assertion — a crash detector, not a detector of the property named. Entities registers silently
+        /// from a <c>default</c> material id (its <c>_layerNames</c> is not refreshed by
+        /// <c>SetLayerMaterials</c>, so the <c>mat.name</c> fallback that would NRE is unreachable), so the
+        /// bad state is observable and the assertion below is what fires.</remarks>
+        [Test]
+        public void MidFlightBuild_ConsumedAfterARemovalRestyle_NeverRegistersTheRetiredSlot()
+        {
+            var view = NewRestyleView(SampleTileFixture.Bytes(), out var go);
+            Track(go);
+            view.Config.MaxConsumesPerTick = 0; // hold every built payload UNCONSUMED across the restyle
+            try
+            {
+                SpinToCompleted(view.SetStyle(ThreeFillLayersAbc(), "A"));
+                for (int f = 0; f < 3000; f++)
+                {
+                    view.LateUpdate();
+                    view.AwaitInFlightMeshBuilds(); // neither kicks nor consumes — the backlog survives it
+                    if (view.LoadedTileCount() > 0 &&
+                        view.CaptureTelemetry().ConsumeBacklog >= view.LoadedTileCount()) break;
+                }
+                Assert.GreaterOrEqual(view.CaptureTelemetry().ConsumeBacklog, view.LoadedTileCount(),
+                    "drive precondition: every cover tile must be BUILT but UNCONSUMED — that mid-flight " +
+                    "state is the whole tooth; a settled cover cannot express it.");
+                Assert.AreEqual(3, view.Layers.Count, "drive precondition: all three fill layers must have taken a slot.");
+
+                SpinToCompleted(view.SetStyle(ThreeFillLayersAcRemovedB(), "A"));
+                Assert.AreEqual(3, view.Layers.Count, "the slot WIDTH must not shrink — that is why a count check cannot catch this.");
+                Assert.IsNull(view.Layers[1].StyleLayer, "drive precondition: slot 1 must hold a tombstone (in-place retirement, not a rebuild).");
+
+                view.Config.MaxConsumesPerTick = 64;
+                PumpUntilSettled(view);
+
+                int[] indices = view.GetTileMaterialIndices(TrackedTile);
+                Assert.IsNotNull(indices, "the tracked tile must still register its SURVIVING layers — non-vacuity.");
+                CollectionAssert.Contains(indices, 0, "slot 0 (\"a\") survived the restyle and must still register.");
+                CollectionAssert.Contains(indices, 2, "slot 2 (\"c\") survived the restyle and must still register.");
+                Assert.IsNotNull(view.EntitiesRenderer(), "drive precondition: the Entities backend must be active.");
+                CollectionAssert.DoesNotContain(indices, 1,
+                    "a payload built for the RETIRED slot 1 must be freed without registering — registering it " +
+                    "points a live draw item at an unregistered material id (and NREs outright on BRG).");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // ProjectedAreaLodWiringTests — MapView rebuilds the LOD selector when aggressiveness changes
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// T-AGGR-WIRED: <see cref="MapView"/> must build a <see cref="ProjectedAreaLodStrategy"/> carrying the
+    /// Inspector's aggressiveness value, and rebuild the selector when that value changes.
+    /// </summary>
+    public class ProjectedAreaLodWiringTests : BaseTestFixture
+    {
+        // Same fixture pose as TiltCoverGrowthTests/ProjectedAreaLodTests (globe z13 1600x900 tilt 60) —
+        // aggressiveness 2.0 there measures 22, aggressiveness 1.0 measures 39.
+        private static readonly double2 Viewport = new double2(1600.0, 900.0);
+
+        private static CameraProperties FixtureCam()
+            => new CameraProperties(
+                new GeoCoordinate3D { Longitude = 13.405, Latitude = 52.52, Altitude = 0.0 }, 13.0, 0.0, 60.0);
+
+        /// <summary>
+        /// T-AGGR-WIRED. Config selects <see cref="TileLodMode.ProjectedArea"/> at aggressiveness 2.0; the
+        /// selector <see cref="MapView"/> built must read back the 2.0 cover (22), not the ctor default's 39.
+        /// RED recipe: drop the aggressiveness argument at the <c>MapView</c> call site so the ctor default
+        /// applies — the cover reads 39 instead. Also covers the <c>_selectorInputs</c> rebuild key: if the
+        /// knob is missing from it, a second selection at a changed value returns the stale cover.
+        /// </summary>
+        [Test]
+        public void ProjectedAreaAggressiveness_ReachesTheSelector_ThroughMapView()
+        {
+            var go = Track(new GameObject("MapView_UMR125_AggrWired"));
+            var view = go.AddComponent<MapView>();
+            try
+            {
+                view.WithTestCamera(projection: new SphericalProjection());
+                view.Config.TileSelection.LodMode                     = TileLodMode.ProjectedArea;
+                view.Config.TileSelection.GlobeFarPlaneCap            = 8.0;
+                view.Config.TileSelection.ProjectedAreaAggressiveness = 2.0;
+
+                view.LateUpdate(); // EnsureSelector() must build ProjectedAreaLodStrategy(2.0)
+
+                var probe = new ViewContext
+                {
+                    Camera     = FixtureCam(),
+                    ViewportPx = Viewport,
+                    Projection = new SphericalProjection(),
+                };
+                var cover = new List<TileId>();
+                view.View.TileManager.Selector.SelectVisibleTiles(in probe, cover);
+
+                Assert.AreEqual(22, cover.Count,
+                    "aggressiveness 2.0 must reach the strategy through MapView's wiring (measured cover 22); "
+                  + "39 means the ctor default (1.0) silently applied instead.");
+
+                // Changing the knob alone (nothing else) must rebuild the selector — the _selectorInputs key.
+                view.Config.TileSelection.ProjectedAreaAggressiveness = 1.0;
+                view.LateUpdate();
+                view.View.TileManager.Selector.SelectVisibleTiles(in probe, cover);
+                Assert.AreEqual(39, cover.Count,
+                    "changing ProjectedAreaAggressiveness alone must rebuild the selector; a stale cover here "
+                  + "means the knob is missing from the _selectorInputs rebuild key.");
+            }
+            finally { view.Teardown(); }
+        }
+
+        /// <summary>
+        /// UMR-125: <see cref="SelectorInputs.Equals(SelectorInputs)"/> is hand-written field-by-field (not
+        /// a tuple — see its summary for why), which means a NINTH field added later can be silently left
+        /// out of the comparison. Changing each field ALONE from a baseline must flip <c>Equals</c> to
+        /// false — a field missing from the comparison passes vacuously here instead.
+        /// </summary>
+        [Test]
+        public void SelectorInputsEquals_DistinguishesEveryField()
+        {
+            var baseline = new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0, maxZoom: 14,
+                onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0);
+            Assert.IsTrue(baseline.Equals(baseline), "sanity: an instance must equal itself");
+
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: true, lod: TileLodMode.Flat, minZoom: 0,
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "Globe");
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.ScreenSpaceLod,
+                minZoom: 0, maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "Lod");
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 1,
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "MinZoom");
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
+                maxZoom: 15, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "MaxZoom");
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
+                maxZoom: 14, onScreenPx: 256, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "OnScreenPx");
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 5.0, globeFarCap: 8.0, areaAggressiveness: 1.0)), "MercFarCap");
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 9.0, areaAggressiveness: 1.0)), "GlobeFarCap");
+            Assert.IsFalse(baseline.Equals(new SelectorInputs(globe: false, lod: TileLodMode.Flat, minZoom: 0,
+                maxZoom: 14, onScreenPx: 512, mercFarCap: 4.0, globeFarCap: 8.0, areaAggressiveness: 2.0)), "AreaAggressiveness");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SourceTileGraphBuildTests — SampleTileFixture + a fill layer on countries
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class SourceTileGraphBuildTests : BaseTestFixture
     {
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
@@ -74,7 +1718,7 @@ namespace MapRenderer.Tests.Tiles
         public void SourceTile_ProgressesThroughPrologueThenMeasureThenWrite_BeforeSettling()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_A");
+            var go = Track(new GameObject("SourceTileGraphBuild_A"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0;
             view.Config.TileSelection.MaxZoom = 0; // z0: exactly one covered tile
@@ -168,7 +1812,6 @@ namespace MapRenderer.Tests.Tiles
                 gate[0] = 1;
                 delayHandle.Complete();
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
                 meshGate.Dispose();
                 gate.Dispose();
                 started.Dispose();
@@ -200,7 +1843,7 @@ namespace MapRenderer.Tests.Tiles
         public void SourceTile_BurstWorkNotInsideThePrologueBody_AndFillsAllocateNothingAtKick()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_B");
+            var go = Track(new GameObject("SourceTileGraphBuild_B"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0;
             view.Config.TileSelection.MaxZoom = 0;
@@ -286,7 +1929,6 @@ namespace MapRenderer.Tests.Tiles
                 gate[0] = 1;
                 delayHandle.Complete();
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
                 gate.Dispose();
                 started.Dispose();
                 outVals.Dispose();
@@ -311,7 +1953,7 @@ namespace MapRenderer.Tests.Tiles
         public void ReleasedMidFlight_Prologue_StashesInThePen_ThenDrainsOnceTheWorkerCompletes()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_D_Prologue");
+            var go = Track(new GameObject("SourceTileGraphBuild_D_Prologue"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5; // NOT z0 — a z0 cover does not change under this pan, so
@@ -401,7 +2043,6 @@ namespace MapRenderer.Tests.Tiles
             {
                 meshGate.Set();
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
                 meshGate.Dispose();
             }
         }
@@ -433,7 +2074,7 @@ namespace MapRenderer.Tests.Tiles
         public void ReleasedMidFlight_Measure_StashesInThePen_ThenDrainsOnceTheDelayJobCompletes()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_D_Measure");
+            var go = Track(new GameObject("SourceTileGraphBuild_D_Measure"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5; // NOT z0 — see the Prologue case's own comment.
@@ -500,7 +2141,6 @@ namespace MapRenderer.Tests.Tiles
                 gate[0] = 1;
                 delayHandle.Complete();
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
                 gate.Dispose();
                 started.Dispose();
                 outVals.Dispose();
@@ -528,7 +2168,7 @@ namespace MapRenderer.Tests.Tiles
         public void ReleasedCompleteButUnconsumed_Write_StashesInThePen_ThenDrains()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_D_Write");
+            var go = Track(new GameObject("SourceTileGraphBuild_D_Write"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5; // NOT z0 — see the Prologue case's own comment.
@@ -586,7 +2226,6 @@ namespace MapRenderer.Tests.Tiles
             finally
             {
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
             }
         }
 
@@ -609,7 +2248,7 @@ namespace MapRenderer.Tests.Tiles
         public void ParkedGraph_AlreadyComplete_DrainsWithoutAnyOtherJobScheduled()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_ParkedGraphDrain");
+            var go = Track(new GameObject("SourceTileGraphBuild_ParkedGraphDrain"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5;
@@ -656,7 +2295,6 @@ namespace MapRenderer.Tests.Tiles
             finally
             {
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
             }
         }
 
@@ -771,7 +2409,7 @@ namespace MapRenderer.Tests.Tiles
         public void MixedTile_FillAndEmptyLine_EmptyLineLayer_StillTakesASlot()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_G_EmptyLine");
+            var go = Track(new GameObject("SourceTileGraphBuild_G_EmptyLine"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0;
             view.Config.TileSelection.MaxZoom = 0;
@@ -821,7 +2459,6 @@ namespace MapRenderer.Tests.Tiles
             finally
             {
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
             }
         }
 
@@ -858,7 +2495,7 @@ namespace MapRenderer.Tests.Tiles
             }");
 
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_G_RealJoin");
+            var go = Track(new GameObject("SourceTileGraphBuild_G_RealJoin"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 0;
             view.Config.TileSelection.MaxZoom = 0;
@@ -893,7 +2530,6 @@ namespace MapRenderer.Tests.Tiles
             finally
             {
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
             }
         }
 
@@ -919,7 +2555,7 @@ namespace MapRenderer.Tests.Tiles
         public void WriteTransitionTick_CanAlsoAdmitAFreshTile_UnderCapOne()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_BudgetAdmitsWhileWriting");
+            var go = Track(new GameObject("SourceTileGraphBuild_BudgetAdmitsWhileWriting"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5; // known >= 9-tile cover
             view.Config.Backend               = RenderBackend.GameObject;
@@ -978,7 +2614,6 @@ namespace MapRenderer.Tests.Tiles
             finally
             {
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
             }
         }
 
@@ -1004,7 +2639,7 @@ namespace MapRenderer.Tests.Tiles
         public void OneTick_CanCompleteTwoWriteTransitions_UnderCapOne()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("SourceTileGraphBuild_BudgetTwoWritesOneTick");
+            var go = Track(new GameObject("SourceTileGraphBuild_BudgetTwoWritesOneTick"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5;
             view.Config.Backend               = RenderBackend.GameObject;
@@ -1068,11 +2703,583 @@ namespace MapRenderer.Tests.Tiles
                 gate[0] = 1;
                 delayHandle.Complete();
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
                 gate.Dispose();
                 started.Dispose();
                 outVals.Dispose();
             }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // FillExtrusionGraphBuildTests — fill/fill-extrusion/line layers over one polygon-only style
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class FillExtrusionGraphBuildTests : BaseTestFixture
+    {
+        private static CameraProperties Cam(double lon, double lat, double zoom)
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
+
+        private static StyleDocument MixedStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": {
+                ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                {
+                    ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
+                    ""source-layer"": ""countries"",
+                    ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] }
+                },
+                {
+                    ""id"": ""countries-extrusion"", ""type"": ""fill-extrusion"", ""source"": ""maplibre"",
+                    ""source-layer"": ""countries"",
+                    ""paint"": { ""fill-extrusion-height"": 50 }
+                },
+                {
+                    ""id"": ""countries-line"", ""type"": ""line"", ""source"": ""maplibre"",
+                    ""source-layer"": ""countries"",
+                    ""paint"": { ""line-color"": ""#000000"" }
+                }
+            ]
+        }");
+
+        /// <summary>
+        /// (b) The extrusion layer takes the graph arm in production: NO kick-time <c>MeshDataArray</c> at
+        /// all — fill, fill-extrusion AND line (job-scheduling-design.md §8 stage 5) are all graph-arm now,
+        /// so nothing allocates until a write step runs. The measure step genuinely builds
+        /// wall geometry (<see cref="StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated"/>
+        /// advances — job-scheduling-design.md §8 stage 5, the wall-job-graph stage moved this out of the
+        /// prologue into <c>FillExtrusionMeshGraph.Schedule</c>), the measure graph is genuinely scheduled,
+        /// and the write step allocates exactly TWO arrays (fill + extrusion) — settling to two real meshes;
+        /// the empty line layer's graph produces zero vertices and gets no write step, counted nowhere.
+        ///
+        /// <para><b>RED 1 (retired, job-scheduling-design.md §8 stage 5 Group B):</b> used to remove
+        /// <c>IGraphInputRenderLayer</c> from <c>FillExtrusionRenderLayer</c> to fall the layer back to the
+        /// seam arm, reading a kick-time allocation delta of 1 instead of 0. Group B deleted both the
+        /// interface (merged into <c>ITileMeshRenderLayer</c>, D1) and the seam arm itself — there is no
+        /// longer a second arm to fall back to, so this injection point no longer exists. The property it
+        /// guarded — no kick-time allocation for ANY layer — is what tooth (f)'s sibling in
+        /// <c>LineGraphKickTests</c> and this test's own assertion below still pin.</para>
+        /// <para><b>RED 2 (review B2):</b> in <c>FillExtrusionLayerBuild.TryScheduleWrite</c> route the
+        /// extrusion build through <c>StyledFillTileBuilder.ScheduleWrite</c> instead of its own — the
+        /// mesh/material-slot counts above do NOT move (fill's write is not self-guarding, so it still
+        /// allocates, still draws), so only the TexCoord4 assertion below reds: fill's descriptor set never
+        /// declares TexCoord3/4, so a mis-routed extrusion mesh ends up with neither.</para>
+        /// </summary>
+        [Test]
+        public void ExtrusionLayer_OneMeshPerLayer_WriteAllocatesExactlyTwo()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go = Track(new GameObject("FillExtrusionGraphBuild_B"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 0; // z0: exactly one covered tile
+            view.Config.Backend               = RenderBackend.GameObject;
+            view.WithTestCamera();
+
+            var gate    = new NativeArray<int>(1, Allocator.Persistent);
+            var started = new NativeArray<int>(1, Allocator.Persistent);
+            var outVals = new NativeArray<int>(2, Allocator.Persistent);
+            JobHandle delayHandle = default;
+
+            try
+            {
+                delayHandle = new SpinUntilGateJob
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                JobHandle.ScheduleBatchedJobs();
+                view.TileManager.GraphDepsForTest = delayHandle;
+
+                long payloadBaseline = MeshDataPayload.DebugLiveAllocCount;
+                long wallsBaseline   = StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated;
+
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: MixedStyle());
+
+                int kickTick = -1, tick = 0;
+                for (; tick < 3000 && kickTick < 0; tick++)
+                {
+                    view.LateUpdate();
+                    if (view.TileBuildsStartedLastTick() > 0) kickTick = tick;
+                }
+                Assert.GreaterOrEqual(kickTick, 0, "drive precondition: the tile's build must have been started.");
+
+                Assert.AreEqual(payloadBaseline, MeshDataPayload.DebugLiveAllocCount,
+                    "NO MeshDataArray at kick — fill, fill-extrusion and line are all graph-arm now " +
+                    "(job-scheduling-design.md §8 stage 5); nothing allocates until a write step runs.");
+
+                // "Kicked" only means the prologue task was DISPATCHED, not that it ran — no WorkScheduler
+                // override here (unlike SourceTileGraphBuildTests' tooth (b), which forces InlineWorkScheduler
+                // to make the body synchronous), so the prologue genuinely runs off-thread. Await it before
+                // the next tick schedules the measure graph.
+                view.AwaitInFlightMeshBuilds();
+
+                // Next tick: prologue-complete hands off to the measure graph, held open by the still-gated
+                // delay. job-scheduling-design.md §8 stage 5 (the wall-job-graph stage): WallColumns.Allocate()
+                // moved from BuildLayerInput (the prologue, awaited above) into FillExtrusionMeshGraph.Schedule
+                // (the measure step, scheduled by THIS LateUpdate) — so the wall-columns witness reads after
+                // this call now, not after the prologue await; it no longer observes anything BuildLayerInput
+                // itself does.
+                view.LateUpdate();
+                Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,
+                    "a real measure graph must be scheduled and held in flight by the delay job.");
+                Assert.Greater(StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated, wallsBaseline,
+                    "the measure step must have scheduled FillExtrusionMeshGraph for the extrusion layer — " +
+                    "real wall columns exist.");
+
+                gate[0] = 1; // release — measure completes, write is scheduled
+                int writeTick = -1;
+                for (; tick < 3000 && writeTick < 0; tick++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                    if (view.MeshDataArraysAllocatedLastKick() > 0) writeTick = tick;
+                }
+                Assert.GreaterOrEqual(writeTick, 0, "the write step must eventually allocate.");
+                Assert.AreEqual(2, view.MeshDataArraysAllocatedLastKick(),
+                    "exactly two MeshDataArrays on the write-kick tick — fill and fill-extrusion (non-empty " +
+                    "graph layers only; the empty line slot is pass-through and counts nowhere).");
+
+                for (; tick < 3000 && !view.AllTilesSettled(); tick++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                }
+                Assert.IsTrue(view.AllTilesSettled(), "the tile must eventually settle.");
+
+                var id = new MapRenderer.Core.Geo.TileId { Z = 0, X = 0, Y = 0 };
+                Mesh[] meshes = view.GetTileMeshes(id);
+                Assert.AreEqual(2, meshes?.Length ?? 0,
+                    "two real meshes settle: fill's roof and the extrusion's roof+walls — the empty line " +
+                    "layer contributes none.");
+                // Pins that the graph selected the EXTRUSION writer, not just that two meshes exist (review
+                // B2): only StyledFillExtrusionTileBuilder's descriptor set declares TexCoord3/4
+                // (ExtrudeAndBake); fill's does not. A count-only check cannot see a mis-route — routing
+                // FillExtrusion through StyledFillTileBuilder.ScheduleWrite still allocates two arrays, two
+                // material slots, and draws something, so this is the only assertion here that a mis-route
+                // actually moves.
+                Assert.IsTrue(meshes.Any(m => m.HasVertexAttribute(UnityEngine.Rendering.VertexAttribute.TexCoord4)),
+                    "one of the two meshes must carry the extrusion-only TexCoord4 stream (BakedBaseHeight) " +
+                    "— proves the write dispatch actually reached StyledFillExtrusionTileBuilder.ScheduleWrite, " +
+                    "not just that some mesh with the right material count exists.");
+                int[] materialIndices = view.GetTileMaterialIndices(id);
+                Assert.AreEqual(2, materialIndices.Length);
+                Assert.AreNotEqual(materialIndices[0], materialIndices[1],
+                    "the two meshes must draw at two DISTINCT material slots — fill and extrusion never share one.");
+                Assert.Greater(view.GameObjectRenderer().DrawItemCount(), 0,
+                    "the both-ends rule: a progression that never produces a mesh is indistinguishable from a " +
+                    "build that never happened.");
+            }
+            finally
+            {
+                gate[0] = 1;
+                delayHandle.Complete();
+                view.Teardown();
+                gate.Dispose();
+                started.Dispose();
+                outVals.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// (c) The extrusion columns are freed on a normal build-then-teardown cycle — every
+        /// <see cref="StyledFillExtrusionTileBuilder.WallColumns"/> the measure step allocated
+        /// (<see cref="StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated"/> advancing is the
+        /// non-vacuity witness: a "back to zero" live count on a counter that never moved proves nothing) is
+        /// disposed by teardown, alongside the request and graph counters fill already pins.
+        ///
+        /// <para><b>RED (re-pointed again, the per-layer build-object stage — <c>Walls</c> is now owned
+        /// whole, as part of <c>FillExtrusionGraphOutput</c>, by <c>FillExtrusionLayerBuild</c>, so the
+        /// previous recipe's target, <c>TileBuildGraph.Dispose()</c>'s own teardown loop, no longer touches
+        /// any kind's fields at all):</b> drop <c>_ext.Dispose();</c> from
+        /// <c>FillExtrusionLayerBuild.Dispose()</c> → <c>WallColumns.DebugLiveCount</c> stays elevated above
+        /// baseline after teardown.</para>
+        ///
+        /// <para><b>Arm-agnostic (historical — job-scheduling-design.md §8 stage 5 Group B retired the
+        /// seam arm):</b> before Group B this test passed under EITHER arm — the seam-arm
+        /// <c>WriteInto</c>/<c>WriteMeshData</c> path reached <c>WallColumns.Allocate()</c> through the same
+        /// shared <c>BuildLayerInput</c> the graph arm uses, so both built and freed columns identically.
+        /// There is only the graph arm left now, so this tooth pins DISPOSAL on the sole remaining path —
+        /// tooth (b) is what pins that it is the graph arm reached in production.</para>
+        /// </summary>
+        [Test]
+        public void ExtrusionColumns_AreFreed_OnNormalBuildThenTeardown()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go   = new GameObject("FillExtrusionGraphBuild_C");
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 0;
+            view.Config.Backend               = RenderBackend.GameObject;
+            view.WithTestCamera();
+
+            try
+            {
+                long wallsLiveBaseline  = StyledFillExtrusionTileBuilder.WallColumns.DebugLiveCount;
+                long wallsTotalBaseline = StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated;
+                long requestsBaseline   = LayerMeshBuildCounters.DebugLiveBuilds;
+                long payloadBaseline    = MeshDataPayload.DebugLiveAllocCount;
+                long graphBaseline      = TileBuildGraph.DebugLiveCount;
+
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: MixedStyle());
+
+                // LoadedTileCount() > 0 is load-bearing, not decoration (ThrottleTests.cs:613's own idiom):
+                // the bare !AllTilesSettled() predicate is evaluated BEFORE the first LateUpdate(), and with
+                // an empty cover "all tiles settled" is vacuously true — the loop would run zero iterations
+                // and never actually pump a build. Caught by this tooth's own witness reading a flat 0.
+                for (int f = 0; f < 3000 && !(view.LoadedTileCount() > 0 && view.AllTilesSettled()); f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                }
+                Assert.IsTrue(view.LoadedTileCount() > 0 && view.AllTilesSettled(),
+                    "drive precondition: the tile must settle before teardown — LoadedTileCount() > 0 rules " +
+                    "out a vacuous settle (nothing ever loaded) satisfying AllTilesSettled() on its own.");
+                Assert.Greater(StyledFillExtrusionTileBuilder.WallColumns.DebugTotalCreated, wallsTotalBaseline,
+                    "non-vacuity witness: real wall columns must have been allocated during this build, or " +
+                    "the 'back to zero' reading below proves nothing.");
+
+                view.Teardown();
+                UnityEngine.Object.DestroyImmediate(go);
+                go = null;
+
+                Assert.AreEqual(wallsLiveBaseline, StyledFillExtrusionTileBuilder.WallColumns.DebugLiveCount,
+                    "every WallColumns this build allocated must be freed by teardown — back to baseline.");
+                Assert.AreEqual(requestsBaseline, LayerMeshBuildCounters.DebugLiveBuilds,
+                    "every build's own request columns must be freed by teardown — back to baseline.");
+                Assert.AreEqual(payloadBaseline, MeshDataPayload.DebugLiveAllocCount,
+                    "every MeshDataArray must be freed by teardown — back to baseline.");
+                Assert.AreEqual(graphBaseline, TileBuildGraph.DebugLiveCount,
+                    "every TileBuildGraph must be freed by teardown — back to baseline.");
+            }
+            finally
+            {
+                if (go != null)
+                {
+                    view.Teardown();
+                    UnityEngine.Object.DestroyImmediate(go);
+                }
+            }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // TileBackgroundQuadProjectionTests — globe curvature and synthetic ring encoding (plan §F teeth 3, 8)
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class TileBackgroundQuadProjectionTests : BaseTestFixture
+    {
+        // z3/4/3: a COARSE tile (45° span — well above the 3° subdivision threshold, so the globe path must
+        // subdivide) that stays comfortably within GlobeFillSubdivideDispatch's DefaultMaxDepth (5) — UNLIKE
+        // z0 (~170° span: the WHOLE tile-extent quad, not a small clipped feature), whose worst-case edges
+        // hit the recursion-depth cap before reaching the 3° angular threshold (verified: measured ~7.4° at
+        // z0, not <=3°). A real MVT feature can be z0-sized because it's usually much smaller than the full
+        // tile; this quad IS the full tile, so it needs a less extreme zoom to fit the depth budget.
+        private static readonly TileId CoarseTile = new TileId { Z = 3, X = 4, Y = 3 };
+
+        /// <summary>Drives the real graph-arm path — <see cref="BackgroundQuad"/> +
+        /// <see cref="TileBuildGraph"/>, exactly as <c>TileManager.KickSourcelessBackground</c> does since
+        /// job-scheduling-design.md §8 stage 3 — and returns the uploaded mesh (caller destroys it) plus the
+        /// origin used to bake it (positions are ORIGIN-RELATIVE — MED 5 — so a caller reconstructing
+        /// absolute positions must add this back).</summary>
+        private static (Mesh mesh, double3 origin) BuildViaProcessor(IProjection projection)
+        {
+            double3 origin = TileRenderOrigin.Project(CoarseTile, projection);
+            var context = new TileLayerProcessContext
+            {
+                Tile = CoarseTile, Zoom = CoarseTile.Z, TileOriginRender = origin, Projection = projection,
+                // NIT 7: mirrors production's actual default (MapView.cs sets BufferClip from
+                // MapViewConfig.FillTileBufferClip, whose default 0.0 decodes to KeepTileUnits(0.0) — an
+                // ENABLED clip with zero margin) rather than bare `default` (Disabled), which would drive
+                // RingSelectJob instead of the RingClipJob production actually takes.
+                BufferClip = TileBufferClip.KeepTileUnits(0.0),
+            };
+
+            TileGeometryBuffers quad = BackgroundQuad.MintFullExtentGeometry(CoarseTile);
+            FillMeshPipeline.LayerInput input = BackgroundQuad.BuildLayerInput(
+                in context, in quad, out NativeArray<int> visitOrder, out NativeArray<Vector4> featureColors);
+            // BuildLayerInput's out visitOrder is folded into input.RingVisitOrder already — mirrors
+            // KickSourcelessBackground's own use of this method.
+
+            var build = FillLayerBuild.Rent(input, featureColors, materialIndex: 0, payloadName: "bg");
+            TileBuildGraph graph = TileBuildGraph.ScheduleMeasure(new ILayerMeshBuild[] { build }, quad);
+            graph.Complete();
+            graph.CompleteMeasureAndScheduleWrite(out _);
+            MeshDataPayload[] payloads = graph.CompleteWriteAndTakePayloads();
+            Mesh mesh = payloads[0].Upload();
+            payloads[0].Dispose(); // no-op after Upload — belt-and-braces, mirrors production consume
+            graph.Dispose();
+            return (mesh, origin);
+        }
+
+        /// <summary>
+        /// B5 T3 — the background quad is the SAME geometry after the corners stopped being a hand-authored
+        /// MVT command stream. A <b>differential against the retired encoding</b>: materialize
+        /// <see cref="FullExtentRingCommandStream"/> (the frozen record of what production used to hold)
+        /// through the MVT producer, materialize the live processor's corners through the path producer, and
+        /// compare the two <c>TileGeometryBuffers</c> element-wise.
+        ///
+        /// <para>Why this shape and not "assert four corners": a corner-value assertion cannot see ring
+        /// COUNT, ring OFFSETS, the trailing SENTINEL or the kind COLUMN — the four things a hand-written
+        /// flatten gets wrong. And an oracle written from the new implementation could only restate it; this
+        /// one is the thing being retired, so it cannot be satisfied by transcribing the replacement.</para>
+        /// </summary>
+        [Test]
+        public void SyntheticRing_MaterializesIdenticallyToTheRetiredCommandStream()
+        {
+            double extent = BackgroundQuad.Extent;
+            Assert.AreEqual(FullExtentRingCommandStream.Extent, extent,
+                "precondition: the retired stream was authored at the extent the processor still uses");
+
+            // The legacy arm: the exact bytes production hand-authored before B5.
+            var legacyFeature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Polygon, hasId: false, geometry: FullExtentRingCommandStream.Commands);
+            TileGeometryBuffers legacy = MvtGeometryMaterializerTestFactory.Materialize(
+                CoarseTile, extent,
+                new[] { legacyFeature.GeometryType },
+                new[] { legacyFeature.Geometry });
+
+            // The live arm: PRODUCTION's own corner data and kind column, through production's own path
+            // producer — the same relationship the retired version of this test had to the command stream
+            // it decoded. A test-owned copy of the corners would compare the fixture with itself.
+            TileGeometryBuffers current = new PathGeometryMaterializer(
+                CoarseTile, extent,
+                BackgroundQuad.FullExtentRingKinds,
+                BackgroundQuad.FullExtentRingPaths).Materialize();
+
+            try
+            {
+                // Non-vacuity: both arms really produced a ring, so an all-default comparison cannot pass.
+                Assert.IsTrue(legacy.IsCreated, "precondition: the legacy command stream materialized");
+                Assert.IsTrue(current.IsCreated, "precondition: the live background geometry materialized");
+                Assert.AreEqual(1, legacy.RingCount, "precondition: the legacy stream is exactly one ring");
+                Assert.AreEqual(4, legacy.VertexCount, "precondition: …of exactly four vertices");
+
+                Assert.AreEqual(legacy.RingCount, current.RingCount,
+                    "ring COUNT must match — a flatten that emitted two rings, or none, shows only here");
+                Assert.AreEqual(legacy.VertexCount, current.VertexCount, "vertex COUNT must match");
+                Assert.AreEqual(legacy.FeatureCount, current.FeatureCount, "feature COUNT must match");
+                Assert.AreEqual(legacy.Extent, current.Extent, "both must describe the same extent");
+
+                for (int f = 0; f < legacy.FeatureCount; f++)
+                    Assert.AreEqual(legacy.FeatureGeometryType[f], current.FeatureGeometryType[f],
+                        $"FeatureGeometryType[{f}] — the kind column drives every consumer's ring gate");
+
+                // RingCount + 1 offsets: the trailing SENTINEL is included deliberately. Nothing else in this
+                // fixture would notice its absence, and every downstream span read depends on it.
+                for (int r = 0; r <= legacy.RingCount; r++)
+                    Assert.AreEqual(legacy.RingOffsets[r], current.RingOffsets[r],
+                        $"RingOffsets[{r}] (index {legacy.RingCount} is the trailing sentinel)");
+
+                for (int r = 0; r < legacy.RingCount; r++)
+                    Assert.AreEqual(legacy.RingFeatureIdx[r], current.RingFeatureIdx[r],
+                        $"RingFeatureIdx[{r}] — the join a consumer colours through");
+
+                for (int v = 0; v < legacy.VertexCount; v++)
+                {
+                    Assert.AreEqual(legacy.Vertices[v].x, current.Vertices[v].x, 1e-12,
+                        $"Vertices[{v}].x — corner ORDER is load-bearing, not just membership");
+                    Assert.AreEqual(legacy.Vertices[v].y, current.Vertices[v].y, 1e-12,
+                        $"Vertices[{v}].y");
+                }
+            }
+            finally
+            {
+                legacy.Dispose();
+                current.Dispose();
+            }
+        }
+
+
+        [Test]
+        public void BackgroundQuad_FlatOnMercator_NoSubdivision()
+        {
+            var (mesh, origin) = BuildViaProcessor(new WebMercatorProjection());
+            Track(mesh);
+            {
+                Assert.IsNotNull(mesh, "Mercator background must produce geometry.");
+                var verts = new List<Vector3>();
+                mesh.GetVertices(verts);
+
+                Assert.AreEqual(4, verts.Count,
+                    "Mercator (MaxRefineAngleRad == +∞) must write the flat 4-corner quad — no subdivision.");
+                foreach (var v in verts)
+                    Assert.AreEqual(0f, v.y, 1e-3f, "Mercator stored positions must be coplanar y≈0 (origin-relative).");
+
+                // B5 T4 colour clause: every background vertex is exactly opaque white. Before B5 this came
+                // from evaluating a constant {"fill-color":"#ffffff"} paint through the fill builder; B5
+                // passes the literal that expression produced. Nothing else watched that value, so a wrong
+                // literal (or a stray alpha) would have rendered a tinted/translucent background silently.
+                var colors = new List<Color>();
+                mesh.GetColors(colors);
+                Assert.AreEqual(verts.Count, colors.Count,
+                    "every background vertex must carry a colour — the fill stream is not optional here");
+                foreach (Color c in colors)
+                    Assert.AreEqual(new Color(1f, 1f, 1f, 1f), c,
+                        "background vertex colour must be exactly opaque white (linear == sRGB for white); " +
+                        "the material uniform supplies the actual background colour.");
+
+                AssertBoundsMatchesVertexEnvelope(mesh, verts);
+                // RTC contract: stored (origin-relative) positions stay bounded to roughly the TILE's own
+                // extent — never require ≈ R (the globe radius) or ≈ the world's total circumference. A tile
+                // at low zoom is itself physically large (this z3 tile spans ~5000 km), so the bound is
+                // relative to the tile's own size, not an absolute small constant.
+                double tileSizeWorld = WebMercator.WorldExtent * 2.0 / math.pow(2.0, CoarseTile.Z);
+                foreach (var v in verts)
+                    Assert.Less(((Vector3)v).magnitude, (float)(tileSizeWorld * 2.0),
+                        "Mercator stored positions must be origin-relative (bounded to ~the tile's own extent), " +
+                        "not world/circumference-scale (a missing origin subtraction would show ~40,075,017 m).");
+            }
+        }
+
+        /// <summary>DECISION 3 (round-3 fix for HIGH d): reads the uploaded INDEX buffer and proves rendered
+        /// subdivision TOPOLOGY, not just vertex existence — (a) every emitted vertex is triangle-referenced
+        /// (no dangling verts from an "append midpoints without reindexing" bug), (b) all 4 projected tile
+        /// corners are present (defeats a wrong TileId), (c) every indexed triangle edge subtends ≤ the
+        /// subdivision angular threshold on the sphere (defeats a hardcoded-flat/unsplit-quad impl whose
+        /// chord edges exceed it) — plus the <see cref="Mesh.bounds"/> envelope check.</summary>
+        [Test]
+        public void BackgroundQuad_CurvesOnSphere_SubdividedTopology()
+        {
+            var projection = new SphericalProjection();
+            var (mesh, origin) = BuildViaProcessor(projection);
+            Track(mesh);
+            {
+                Assert.IsNotNull(mesh, "globe background must produce geometry.");
+                var verts = new List<Vector3>();
+                mesh.GetVertices(verts);
+                var tris = new List<int>();
+                mesh.GetTriangles(tris, 0);
+
+                Assert.Greater(verts.Count, 4,
+                    "the globe patch must subdivide beyond the flat 4-corner quad (GlobeFillSubdivideJob emits " +
+                    "fresh verts per source triangle).");
+                Assert.Greater(tris.Count, 0, "the uploaded mesh must carry a non-empty index buffer.");
+                Assert.AreEqual(0, tris.Count % 3, "index buffer must be a whole number of triangles.");
+
+                // (a) every emitted vertex is referenced by SOME triangle — defeats "append midpoints
+                // without rewiring indices" (dangling verts that inflate the count but aren't rendered).
+                var referenced = new bool[verts.Count];
+                foreach (int idx in tris) referenced[idx] = true;
+                Assert.IsTrue(referenced.All(r => r),
+                    "every uploaded vertex must be referenced by the index buffer — a dangling (unreferenced) " +
+                    "vertex means it was appended without rewiring triangle indices.");
+
+                // Absolute (world/ECEF) positions — MED 5: stored positions are ORIGIN-RELATIVE, so
+                // reconstruct absolute BEFORE any sphere-space (radius/angle) test.
+                var absolute = verts.Select(v => new double3(v.x, v.y, v.z) + origin).ToArray();
+                foreach (var a in absolute)
+                    Assert.That(math.length(a), Is.EqualTo(SphericalProjection.Radius).Within(SphericalProjection.Radius * 1e-6),
+                        "every absolute vertex must lie ON the sphere of SphericalProjection.Radius.");
+
+                // (b) all 4 projected tile corners for CoarseTile are present among the vertices.
+                double2[] cornersTileLocal =
+                {
+                    new double2(0, 0), new double2(BackgroundQuad.Extent, 0),
+                    new double2(BackgroundQuad.Extent, BackgroundQuad.Extent),
+                    new double2(0, BackgroundQuad.Extent),
+                };
+                foreach (double2 tc in cornersTileLocal)
+                {
+                    double2 lonLat = CoarseTile.ToLonLat(tc.x, tc.y, BackgroundQuad.Extent);
+                    double3 expectedAbs = projection.Project(new GeoCoordinate { Latitude = lonLat.y, Longitude = lonLat.x });
+                    bool found = absolute.Any(a => math.distance(a, expectedAbs) < SphericalProjection.Radius * 1e-4);
+                    Assert.IsTrue(found, $"projected tile corner {tc} (lon/lat {lonLat}) must be present among the " +
+                                          "uploaded vertices — a wrong TileId would project different corners.");
+                }
+
+                // (c) every indexed triangle edge subtends ≤ the subdivision angular threshold on the sphere
+                // (the real proof of subdivision — a mere vertex-count>4 doesn't prove split FACES; a
+                // hardcoded-flat or unsplit-quad impl's chord edges would exceed this).
+                double maxAllowedRad = GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad * 1.10; // 10% float slack
+                int edgesChecked = 0;
+                for (int t = 0; t + 2 < tris.Count; t += 3)
+                {
+                    int i0 = tris[t], i1 = tris[t + 1], i2 = tris[t + 2];
+                    AssertEdgeWithinThreshold(absolute[i0], absolute[i1], maxAllowedRad, ref edgesChecked);
+                    AssertEdgeWithinThreshold(absolute[i1], absolute[i2], maxAllowedRad, ref edgesChecked);
+                    AssertEdgeWithinThreshold(absolute[i2], absolute[i0], maxAllowedRad, ref edgesChecked);
+                }
+                Assert.Greater(edgesChecked, 0, "must have checked at least one triangle edge.");
+
+                AssertBoundsMatchesVertexEnvelope(mesh, verts);
+            }
+        }
+
+        private static void AssertEdgeWithinThreshold(double3 a, double3 b, double maxAllowedRad, ref int edgesChecked)
+        {
+            double cosAngle = math.dot(a, b) / (math.length(a) * math.length(b));
+            cosAngle = math.clamp(cosAngle, -1.0, 1.0);
+            double angle = math.acos(cosAngle);
+            Assert.LessOrEqual(angle, maxAllowedRad,
+                "every indexed triangle edge must subtend <= the subdivision angular threshold on the sphere " +
+                "— the faces must hug the sphere, not chord straight through it.");
+            edgesChecked++;
+        }
+
+        /// <summary>Both projections: the uploaded <see cref="Mesh.bounds"/> equals the origin-relative
+        /// vertex envelope and encapsulates every stored vertex.</summary>
+        private static void AssertBoundsMatchesVertexEnvelope(Mesh mesh, List<Vector3> verts)
+        {
+            Vector3 min = verts[0], max = verts[0];
+            foreach (var v in verts) { min = Vector3.Min(min, v); max = Vector3.Max(max, v); }
+            Vector3 expectedCenter = (min + max) * 0.5f;
+            Vector3 expectedSize   = max - min;
+
+            Assert.That(mesh.bounds.center.x, Is.EqualTo(expectedCenter.x).Within(1e-2f));
+            Assert.That(mesh.bounds.center.y, Is.EqualTo(expectedCenter.y).Within(1e-2f));
+            Assert.That(mesh.bounds.center.z, Is.EqualTo(expectedCenter.z).Within(1e-2f));
+            Assert.That(mesh.bounds.size.x, Is.EqualTo(expectedSize.x).Within(1e-2f));
+            Assert.That(mesh.bounds.size.y, Is.EqualTo(expectedSize.y).Within(1e-2f));
+            Assert.That(mesh.bounds.size.z, Is.EqualTo(expectedSize.z).Within(1e-2f));
+
+            Bounds expanded = mesh.bounds;
+            expanded.Expand(1e-2f);
+            foreach (var v in verts)
+                Assert.IsTrue(expanded.Contains(v), $"mesh.bounds must encapsulate every stored vertex ({v}).");
+        }
+
+        /// <summary>
+        /// The kind column and the path list are two independent lists joined BY POSITION, so a length
+        /// mismatch would mis-classify every ring rather than fail. <c>PathGeometryMaterializer</c> validates
+        /// that <b>before</b> it allocates — which is what makes the throw safe: after <c>Allocate</c> four
+        /// <c>Allocator.Persistent</c> arrays exist and a throw would strand them on the one exit path no
+        /// caller can dispose.
+        /// <para>Structural rather than behavioural on purpose: production always passes matched lists, so
+        /// this path is unreachable in production and no behavioural test can reach it. That is precisely why
+        /// it needs a tooth — the sibling <c>MvtGeometryMaterializer</c> holds its own unreachable throw path
+        /// to the same standard, "by reading the code, not by arguing reachability".</para>
+        /// </summary>
+        [Test]
+        public void PathMaterializer_KindColumnShorterThanPaths_ThrowsBeforeAllocating()
+        {
+            var paths = new List<IReadOnlyList<IReadOnlyList<double2>>>
+            {
+                new[] { new[] { new double2(0, 0), new double2(1, 0), new double2(1, 1) } },
+                new[] { new[] { new double2(2, 2), new double2(3, 2), new double2(3, 3) } },
+            };
+            // One kind for two features — the desync.
+            var kinds = new List<TileGeometryType> { TileGeometryType.Polygon };
+
+            // Non-vacuity: the matched pair really does materialize, so the throw below is attributable to the
+            // mismatch and not to some other defect in the fixture.
+            var matchedKinds = new List<TileGeometryType>
+                { TileGeometryType.Polygon, TileGeometryType.Polygon };
+            TileGeometryBuffers ok = new PathGeometryMaterializer(
+                CoarseTile, 4096.0, matchedKinds, paths).Materialize();
+            try
+            {
+                Assert.IsTrue(ok.IsCreated, "precondition: matched kinds/paths must materialize");
+                Assert.AreEqual(2, ok.RingCount, "precondition: both features' rings are present");
+            }
+            finally { ok.Dispose(); }
+
+            // Fully qualified: `using System;` would make `Object` ambiguous with UnityEngine.Object at this
+            // file's existing call sites.
+            var ex = Assert.Throws<System.ArgumentException>(
+                () => new PathGeometryMaterializer(CoarseTile, 4096.0, kinds, paths).Materialize(),
+                "a kind column shorter than the path list must be rejected, not silently mis-joined");
+            Assert.That(ex.Message, Does.Contain("one entry per feature"),
+                "the message must name the contract that was violated, so a wiring error is diagnosable");
         }
     }
 }

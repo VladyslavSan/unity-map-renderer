@@ -1,5 +1,14 @@
-// job-scheduling-design.md §8 stage 2 teeth (b) and (f) — TileBuildGraph's own allocation and
-// read-before-complete contracts, exercised directly (below the full TileManager stack).
+// Tiles/TileBuildGraphTests.cs — TileBuildGraph's own allocation/read-before-complete contracts, the layer-processor runner, decode validation, line-graph kick, source-registry restyle, and the non-MVT decoder seam.
+//
+// TileBuildGraph and its layer-processor-runner client first, then the three independent decode/kick/restyle fixtures, then the non-MVT decoder acceptance fixture.
+//
+// Contents:
+//   TileBuildGraphTests               — job-scheduling-design.md §8 stage 2 teeth (b) and (f) — TileBuildGraph's own allocation and read-before-complete contracts, exercised directly (below the full TileManager stack).
+//   TileLayerProcessorRunnerTests     — Epic A / A1 acceptance tooth #2: proves RunWorkerPass decodes the fetched bytes exactly once and shares that same IDecodedTile reference across every processor in dense order, and that the pre-A1 fault policy (abort-on-first-fault, settle-every-processor)…
+//   DecodeTests                       — Headless validation of the Batch-1 decode + coordinate path against the real fixture tile.
+//   LineGraphKickTests                — Style: geolines-stroke@0 only, on the geolines source-layer (LineString geometry — the SAME fixture/ layer StyledLineBufferParityTests and ThrottleTests.FillAndLineStyle already use), so a mixed style's fill layer cannot satisfy either tooth's assertions…
+//   SourceRegistrySlotInvariantTests  — Unity EditMode only — drives the real MapView/TileManager restyle path (UMR-112 §4.3/§6.1).
+//   A6NonMvtDecoderTests              — Epic A / A6 acceptance — plan §F-3 (load-bearing): proves a NON-MvtDecoder ITileDecoder flows through the unchanged fill fan-out (RunWorkerPass -> TileMeshLayerProcessor -> StyledFillTileBuilder.WriteMeshData) and produces real geometry.
 
 using System;
 using System.Collections.Generic;
@@ -18,9 +27,29 @@ using MapRenderer.Jobs.Tiles;
 using MapRenderer.Unity.Rendering.Meshing;
 using MapRenderer.Unity.Rendering.Style;
 using MapRenderer.Unity.Rendering.Tile.Processing;
+using System.IO;
+using System.Text.RegularExpressions;
+using UnityEngine.TestTools;
+using MapRenderer.Core.Rendering;
+using MapRenderer.Core.Style;
+using MapRenderer.Jobs.Mvt;
+using MapRenderer.Tests.TestSupport;
+using System.Threading;
+using MapRenderer.Jobs.Lines;
+using MapRenderer.Unity.Concurrency;
+using MapRenderer.Unity.Rendering.Map;
+using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
+using MapRenderer.Unity.Rendering.Tile;
+using Fill = MapRenderer.Core.Style.Fill;
+using Object = UnityEngine.Object;
+
 
 namespace MapRenderer.Tests.Tiles
 {
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // TileBuildGraphTests — own allocation and read-before-complete contracts
+    // ───────────────────────────────────────────────────────────────────────────────────
+
     [TestFixture]
     public class TileBuildGraphTests
     {
@@ -988,6 +1017,1131 @@ namespace MapRenderer.Tests.Tiles
                 started.Dispose();
                 outVals.Dispose();
             }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // TileLayerProcessorRunnerTests — decodes fetched bytes once; the pre-A1 fault policy is now inert
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Epic A / A1 acceptance tooth #2: proves
+    /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/> decodes the fetched bytes exactly once and
+    /// shares that same <see cref="IDecodedTile"/> reference across every processor in dense order, and that
+    /// the pre-A1 fault policy (abort-on-first-fault, settle-every-processor) survives the move unchanged.
+    /// A6: the decoder is injected, not hardcoded. D1: the decode happens BEFORE the lease exists (at the
+    /// source's <c>GetTile</c>), so these fixtures mint one the same way production does — decode, then wrap
+    /// — and release in a <c>finally</c>, mirroring the kick lambda.
+    /// </summary>
+    [TestFixture]
+    public class TileLayerProcessorRunnerTests
+    {
+        /// <summary>IR C1 P3: the ONE address these teeth use — the decode's id and the context's tile are
+        /// the same thing now, so a fixture that let them drift would be building the mispairing C1 removes.</summary>
+        private static readonly TileId ContextTile = new TileId { Z = 0, X = 0, Y = 0 };
+
+        private static TileLayerProcessContext MakeContext() => new TileLayerProcessContext
+        {
+            Tile             = ContextTile,
+            Zoom             = 0.0,
+            TileOriginRender = double3.zero,
+            Projection       = new WebMercatorProjection(),
+        };
+
+        // ── Test doubles (kept in the test assembly per convention — no production observability added) ──
+
+        /// <summary>Records ProcessOnWorker invocations (order + the observed decoded-tile reference) into a
+        /// SHARED log so a test can assert cross-processor invocation order/identity, and counts
+        /// Release() calls so a test can assert exactly-once settlement.
+        ///
+        /// <para>job-scheduling-design.md §8 stage 5 Group B (§3.1): <see cref="TryTakeGraphRequest"/> hands
+        /// back <see cref="Build"/>, a stub <see cref="ILayerMeshBuild"/> that owns nothing — R1 (the
+        /// per-layer build-object stage): the interface's four members drop <c>MaterialIndex</c>, so the
+        /// dense-slot contract the runner's settle loop actually produces (job-scheduling-design.md §3.1) is
+        /// now observed as reference IDENTITY (<c>Assert.AreSame(processor.Build, output.Layers[i])</c>),
+        /// not a carried field. This fake owns no native columns and is never rented from
+        /// <c>LayerMeshBuildPool</c>, so it must never be <c>Dispose</c>d as though it did — unlike every
+        /// other <see cref="ILayerMeshBuild"/> in the tree.</para></summary>
+        private sealed class RecordingProcessor : ITileMeshLayerProcessor
+        {
+            /// <summary>A stub <see cref="ILayerMeshBuild"/> owning nothing — see this outer type's own doc.</summary>
+            private sealed class StubBuild : ILayerMeshBuild
+            {
+                public JobHandle ScheduleMeasure(JobHandle deps) => default;
+                public bool TryScheduleWrite(out JobHandle writeHandle) { writeHandle = default; return false; }
+                public MeshDataPayload TakePayload() => null;
+                public void Dispose() { }
+            }
+
+            private readonly int _order;
+            private readonly List<(int order, IDecodedTile tile)> _log;
+            private readonly bool _throwOnProcess;
+
+            public int ReleaseCallCount { get; private set; }
+
+            public LayerPhase Phase { get; }
+
+            /// <summary>The stub <see cref="TryTakeGraphRequest"/> hands back — captured so a test can assert
+            /// dense-slot IDENTITY against <c>output.Layers[i]</c> directly, by reference.</summary>
+            public ILayerMeshBuild Build { get; } = new StubBuild();
+
+            public RecordingProcessor(int order, List<(int order, IDecodedTile tile)> log,
+                LayerPhase phase = LayerPhase.WorkerOnly, bool throwOnProcess = false)
+            {
+                _order          = order;
+                _log            = log;
+                Phase           = phase;
+                _throwOnProcess = throwOnProcess;
+            }
+
+            public void ProcessOnWorker(IDecodedTile tile, in TileLayerProcessContext context)
+            {
+                if (_throwOnProcess)
+                    throw new InvalidOperationException("RecordingProcessor deliberate fault (test)");
+                _log.Add((_order, tile));
+            }
+
+            public bool TryTakeGraphRequest(out ILayerMeshBuild build)
+            {
+                build = Build;
+                return true;
+            }
+
+            public void Release() => ReleaseCallCount++;
+        }
+
+        /// <summary>A tile layer that counts how many times its <c>Features</c> list is read, and — like a
+        /// decoded layer since IR C1 P3 — OWNS its geometry, materialized once at construction. The counter
+        /// is how "the geometry read costs no Features walk" becomes observable without putting a test-only
+        /// member on a production class.</summary>
+        private sealed class CountingTileLayer : ITileLayer, IDisposable
+        {
+            private readonly IReadOnlyList<IFeature> _features;
+            public int FeaturesReadCount { get; private set; }
+
+            public CountingTileLayer(string name, IReadOnlyList<IFeature> features, TileId tile)
+            {
+                Name = name;
+                _features = features;
+                var kinds    = new List<TileGeometryType>();
+                var commands = new List<uint[]>();
+                for (int i = 0; i < features.Count; i++)
+                {
+                    kinds.Add(features[i].GeometryType);
+                    commands.Add((features[i] as ITileCommandStreamFeature)?.Geometry);
+                }
+                // Deliberately NOT counted as a Features read: the buffer is built here, once, exactly as the
+                // decoder builds a real layer's — so any read the runner performs is the runner's own.
+                Geometry = MvtGeometryMaterializerTestFactory.Materialize(tile, Extent, kinds, commands);
+            }
+
+            public string Name   { get; }
+            public uint   Extent => 4096;
+            public TileGeometryBuffers Geometry { get; private set; }
+
+            public IReadOnlyList<IFeature> Features
+            {
+                get { FeaturesReadCount++; return _features; }
+            }
+
+            public void Dispose() { TileGeometryBuffers g = Geometry; g.Dispose(); Geometry = default; }
+        }
+
+        private sealed class OneLayerDecodedTile : IDecodedTile
+        {
+            private readonly ITileLayer _layer;
+            public OneLayerDecodedTile(ITileLayer layer) => _layer = layer;
+            public ITileLayer GetLayer(string name) => name == _layer.Name ? _layer : null;
+            public void Dispose() => (_layer as IDisposable)?.Dispose();
+        }
+
+        /// <summary>A render layer that records that it was reached and builds no graph request — the store
+        /// call in <see cref="TileMeshLayerProcessor.ProcessOnWorker"/> happens BEFORE this, so a no-op body
+        /// still exercises the memo. §3.5: <c>WriteIntoCallCount</c> is now <see cref="BuildGraphRequestCallCount"/>,
+        /// returning <c>default</c> (<c>HasWork == false</c>, nothing to dispose).</summary>
+        private sealed class NoGeometryTileMeshRenderLayer : ITileMeshRenderLayer
+        {
+            public int BuildGraphRequestCallCount { get; private set; }
+
+            public NoGeometryTileMeshRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;
+
+            public StyleLayer       StyleLayer      { get; }
+            public RenderLayerBuild Build           => RenderLayerBuild.TileMesh;
+            public DrawPersistence  Persistence     => DrawPersistence.Persistent;
+            public int              DrawIndex       => 0;
+            public LayerSubSlot     MaterialSubSlot => LayerSubSlot.Base;
+            public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
+            public Material         Material        => null;
+            public void ApplyZoom(in StyleFrameInputs inputs) { }
+            public int TransitioningCount => 0;
+            public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
+            public void SetDrawOrder(int declaredOrder) { }
+            public void Dispose() { }
+
+            public ILayerMeshBuild BuildGraphRequest(
+                IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                in TileLayerProcessContext context, int materialIndex, string payloadName)
+            {
+                BuildGraphRequestCallCount++;
+                Assert.IsTrue(geometry.IsCreated, "the processor must hand BuildGraphRequest a live shared buffer");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// IR B7a T4a — one source-layer is materialized <b>once per worker pass</b>, however many style
+        /// layers name it. This is the tooth that would have caught the shape B7 exists to fix: three fill
+        /// layers over one source-layer used to decode its geometry three times.
+        ///
+        /// <para><b>How to read the number — INVERTED in IR C1 P3.</b> Under B7 the store contributed one
+        /// extra <c>Features</c> read on its memo miss, so N = 3 gave 3 + 1 = 4 and a dead memo gave 6. P3
+        /// removed the store: the layer already holds its buffer, so obtaining geometry reads
+        /// <c>Features</c> <b>zero</b> times and the count is exactly N. The assertion is therefore
+        /// "<b>exactly</b> the layer count, not one more" — and it is still discriminating in the same
+        /// direction: any consumer that re-derived geometry from the feature list (a re-materializing
+        /// property, a resurrected per-pass store) would push it above N.</para>
+        /// </summary>
+        [Test]
+        public void RunWorkerPass_ObtainsGeometryWithoutReReadingTheFeatureList()
+        {
+            const string SourceLayerName = "shared-source";
+            const int    LayerCount      = 3;
+
+            // One 300-unit square, well inside the tile: real rings, so the store really materializes.
+            var feature = new DictionaryFeature(
+                properties: null,
+                geometryType: TileGeometryType.Polygon,
+                hasId: false,
+                geometry: new uint[]
+                {
+                    (1u << 3) | 1u, 200u, 200u,       // MoveTo (100, 100)
+                    (3u << 3) | 2u, 600u, 0u,         // LineTo +300, 0
+                                    0u,   600u,       // LineTo 0, +300
+                                    599u, 0u,         // LineTo -300, 0
+                    (1u << 3) | 7u,                   // ClosePath
+                });
+            var sourceLayer = new CountingTileLayer(SourceLayerName, new IFeature[] { feature }, ContextTile);
+            // Was a FixedDecodeHandle test double — "a handle over an ALREADY-BUILT tile". That is what a
+            // lease now is, so the double is gone and this uses the production type.
+            var handle      = new SharedDisposable<IDecodedTile>(new OneLayerDecodedTile(sourceLayer));
+
+            var renderLayers = new NoGeometryTileMeshRenderLayer[LayerCount];
+            var processors   = new ITileMeshLayerProcessor[LayerCount];
+            for (int i = 0; i < LayerCount; i++)
+            {
+                renderLayers[i] = new NoGeometryTileMeshRenderLayer(new StyleLayer
+                {
+                    Id = $"fill-{i}", Source = "src", SourceLayer = SourceLayerName,
+                });
+                processors[i] = TileMeshLayerProcessor.AllocateForKick(renderLayers[i], materialIndex: i);
+            }
+
+            var context = MakeContext();
+            TilePrologueOutput output = TileLayerProcessorRunner.RunWorkerPass(handle, in context, processors);
+
+            try
+            {
+                // Non-vacuity: all three layers really ran and really received geometry. Without this, a pass
+                // that faulted on the first processor would report a low count and pass.
+                for (int i = 0; i < LayerCount; i++)
+                    Assert.AreEqual(1, renderLayers[i].BuildGraphRequestCallCount,
+                        $"precondition: layer {i} must have been reached with a live buffer");
+
+                Assert.AreEqual(LayerCount, sourceLayer.FeaturesReadCount,
+                    $"the source layer's Features must be read exactly {LayerCount} times — once per style " +
+                    "layer by FeatureSelector (each has its own filter) and NOT AT ALL to obtain geometry, " +
+                    "which the layer already owns (IR C1 P3). A consumer that re-derived the buffer from the " +
+                    $"feature list would read it {LayerCount * 2} times and decode the same geometry once per " +
+                    "layer — the 108-materializations-per-tile shape this epic exists to remove.");
+            }
+            finally
+            {
+                for (int i = 0; i < output.Layers.Length; i++) output.Layers[i]?.Dispose();
+                // The LEASE owns the decoded tile, and the decoded tile owns this source layer — so the one
+                // release below is what disposes it. Disposing `sourceLayer` here directly and leaving the
+                // lease live was a borrower freeing its lender's buffers and then a live owner sitting
+                // around an already-disposed tile: two ownership violations for one missing line.
+                handle.Release();
+            }
+        }
+
+        // ── Primary semantic tooth ────────────────────────────────────────────────────────────────────
+
+        /// <summary>§3.1: the slot-join half that used to read <c>payloads[i].MaterialIndex</c> off a
+        /// <c>FakePayload</c> the runner wrapped, then <c>output.Layers[i].MaterialIndex</c> directly, is now
+        /// observed as reference IDENTITY (<c>output.Layers[i]</c> IS the processor's own build) — the
+        /// four-member <see cref="ILayerMeshBuild"/> interface (R1) drops <c>MaterialIndex</c> entirely, so
+        /// this is the dense-slot contract job-scheduling-design.md §3.1 actually specifies, observed on the
+        /// array production uses.</summary>
+        [Test]
+        public void RunWorkerPass_InvokesEveryProcessorOnceInDenseOrder_WithTheSameDecodedTile()
+        {
+            var log = new List<(int order, IDecodedTile tile)>();
+            var p0 = new RecordingProcessor(0, log);
+            var p1 = new RecordingProcessor(1, log);
+            var p2 = new RecordingProcessor(2, log);
+            var processors = new ITileMeshLayerProcessor[] { p0, p1, p2 };
+            var context = MakeContext();
+
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
+            TilePrologueOutput output;
+            try { output = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
+            finally { decode.Release(); }
+
+            Assert.AreEqual(3, log.Count, "every processor must be invoked exactly once");
+            Assert.AreEqual(0, log[0].order, "dense order 0 first");
+            Assert.AreEqual(1, log[1].order, "dense order 1 second");
+            Assert.AreEqual(2, log[2].order, "dense order 2 third");
+
+            Assert.IsNotNull(log[0].tile, "the decoded tile must be non-null");
+            Assert.AreSame(log[0].tile, log[1].tile, "every processor must observe the SAME decoded tile reference");
+            Assert.AreSame(log[0].tile, log[2].tile, "every processor must observe the SAME decoded tile reference");
+
+            Assert.AreEqual(3, output.Layers.Length, "one request slot per input slot");
+            Assert.AreSame(p0.Build, output.Layers[0], "dense-slot identity (job-scheduling-design.md §3.1)");
+            Assert.AreSame(p1.Build, output.Layers[1], "dense-slot identity (job-scheduling-design.md §3.1)");
+            Assert.AreSame(p2.Build, output.Layers[2], "dense-slot identity (job-scheduling-design.md §3.1)");
+        }
+
+        // ── Fault-parity: the fan-out read faults ─────────────────────────────────────────────────────
+        //
+        // R2 (decode-refcount plan §1/§5): RunWorkerPass_WhenTheDecodedTileReadFaults_InvokesNoProcessors_
+        // ButCompletesEveryPayload is RETIRED here, not "made to pass" — a genuine deviation from the R2
+        // plan (§5's throw-guard audit did not surface this sibling of DecodedTileLeaseTests; recorded in
+        // the dev report). It drove the "a fault AT THE FAN-OUT READ invokes no processors" half of A1's
+        // fault policy through DecodedTileLease's release-then-read ObjectDisposedException — thrown from
+        // `decode.Tile` BEFORE the processor loop even starts. SharedDisposable<T> is undefended by design
+        // (no throw after the last Release()), so `decode.Value` after release just hands back the
+        // (disposed) instance and the loop proceeds to RecordingProcessor — a fake that never reads native
+        // memory — which then runs to completion instead of faulting: the anti-vacuity assertion this tooth
+        // opened with can no longer be satisfied, and the read-fault site it existed to drive is gone.
+
+        // ── Fault-parity: a processor throws ──────────────────────────────────────────────────────────
+
+        /// <summary>§3.2: mechanically preserved (<c>ReleaseCallCount</c>/<c>output.Layers.Length</c>), but
+        /// its STATED REASON is rewritten — the old text said "no stranded array"; after B.3 no array is
+        /// allocated at kick, so nothing can be stranded. What is actually at stake now is that every
+        /// processor is returned to <see cref="TileMeshLayerProcessorPool"/> exactly once and no graph
+        /// request is left un-taken.</summary>
+        [Test]
+        public void RunWorkerPass_WhenAProcessorThrows_StopsLaterProcessors_ButReleasesEveryProcessor()
+        {
+            var log = new List<(int order, IDecodedTile tile)>();
+            var p0 = new RecordingProcessor(0, log);
+            var p1 = new RecordingProcessor(1, log, throwOnProcess: true);
+            var p2 = new RecordingProcessor(2, log);
+            var processors = new ITileMeshLayerProcessor[] { p0, p1, p2 };
+            var context = MakeContext();
+
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
+            TilePrologueOutput output;
+            try { output = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
+            finally { decode.Release(); }
+
+            Assert.AreEqual(1, log.Count, "only the processor BEFORE the fault runs");
+            Assert.AreEqual(0, log[0].order);
+
+            Assert.AreEqual(1, p0.ReleaseCallCount, "p0 (ran normally) still settles exactly once");
+            Assert.AreEqual(1, p1.ReleaseCallCount, "p1 (threw) still settles exactly once");
+            Assert.AreEqual(1, p2.ReleaseCallCount, "p2 (never invoked) still settles exactly once — every processor returns to its pool");
+
+            Assert.AreEqual(3, output.Layers.Length);
+        }
+
+        // ── The fault is VISIBLE, not just survivable (IR C1 fix stage, B1) ───────────────────────────
+        //
+        // RunWorkerPass' catch settles every processor as zero-vertex and carries on — correct, and
+        // deliberately unchanged. What it must not do is stay SILENT: unrelated faults land in that one
+        // catch and produce the identical invisible outcome, and one of them is the ObjectDisposedException
+        // the lease raises when its tile is read after the last reference went — which the lease chose
+        // precisely so a use-after-free would be loud. The symbol cadence already logs; these pin that the
+        // mesh cadence, with 100+ layers behind it, does too — and that the log NAMES THE TILE, which is
+        // the only thing that makes the warning actionable when many tiles are in flight.
+
+        /// <summary>A distinctive address, so "the warning names the tile" cannot be satisfied by a zero
+        /// that could have come from anywhere. Decode id and context tile stay the same value (this file's
+        /// convention — IR C1 removed the second address copy).</summary>
+        private static readonly TileId NamedTile = new TileId { Z = 9, X = 274, Y = 168 };
+
+        private static TileLayerProcessContext MakeNamedContext() => new TileLayerProcessContext
+        {
+            Tile             = NamedTile,
+            Zoom             = 9.0,
+            TileOriginRender = double3.zero,
+            Projection       = new WebMercatorProjection(),
+        };
+
+        [Test]
+        public void RunWorkerPass_WhenAProcessorThrows_LogsAWarningNamingTheTile()
+        {
+            LogAssert.Expect(LogType.Warning, new Regex(@"9/274/168"));
+
+            var log = new List<(int order, IDecodedTile tile)>();
+            var p0 = new RecordingProcessor(0, log, throwOnProcess: true);
+            var processors = new ITileMeshLayerProcessor[] { p0 };
+            var context = MakeNamedContext();
+
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(NamedTile, SampleTileFixture.Bytes()));
+            TilePrologueOutput output;
+            try { output = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
+            finally { decode.Release(); }
+
+            // Settle-everything behaviour is UNCHANGED by the log — asserted here so a future "simplify the
+            // catch" cannot trade the fault policy for the diagnostic.
+            Assert.AreEqual(1, p0.ReleaseCallCount, "the faulting processor still settles exactly once");
+            Assert.AreEqual(1, output.Layers.Length);
+            Assert.AreSame(p0.Build, output.Layers[0], "the faulting processor's slot still carries its own build");
+        }
+
+        // R2 (decode-refcount plan §1/§5): RunWorkerPass_ReadingAReleasedLease_LogsAWarningNamingTheTile is
+        // RETIRED alongside its sibling above, for the identical reason — it drove the SAME
+        // release-then-read fault, over a NAMED tile, to pin that the runner's warning names the tile even
+        // on this fault (not just a processor throw). With the read no longer able to fault, there is
+        // nothing left for that log-message assertion to observe; RunWorkerPass_WhenAProcessorThrows_
+        // LogsAWarningNamingTheTile (above) still pins the "log names the tile" property on the fault that
+        // DOES still reach this runner.
+
+        // ── A1 does not choreograph WorkerThenMain ────────────────────────────────────────────────────
+
+        [Test]
+        public void RunWorkerPass_WorkerThenMainProcessor_IsNotInvoked_AndStillSettles()
+        {
+            var log = new List<(int order, IDecodedTile tile)>();
+            var p0 = new RecordingProcessor(0, log, phase: LayerPhase.WorkerThenMain);
+            var processors = new ITileMeshLayerProcessor[] { p0 };
+            var context = MakeContext();
+
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
+            TilePrologueOutput output;
+            try { output = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
+            finally { decode.Release(); }
+
+            Assert.AreEqual(0, log.Count, "A1 must never run a WorkerThenMain processor's worker step");
+            Assert.AreEqual(1, p0.ReleaseCallCount, "the reserved-phase processor must still settle (no stranded array)");
+            Assert.AreEqual(1, output.Layers.Length);
+            Assert.AreSame(p0.Build, output.Layers[0]);
+        }
+
+        // ── TileMeshLayerProcessor settlement (real adapter, not a recording fake) ────────────────────
+
+        /// <summary>A minimal graph-arm layer whose <see cref="BuildGraphRequest"/> rents a REAL
+        /// <see cref="FillLayerBuild"/> (<c>FillLayerBuild.Rent</c> — increments
+        /// <see cref="LayerMeshBuildCounters.DebugLiveBuilds"/>) — the non-vacuity witness §3.4 requires: a build
+        /// that can actually make the counter rise, so "returns to baseline" is a real property rather than
+        /// trivially true on an empty ledger.</summary>
+        private sealed class CountedGraphInputRenderLayer : ITileMeshRenderLayer
+        {
+            public StyleLayer StyleLayer { get; }
+            public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
+            public DrawPersistence Persistence => DrawPersistence.Persistent;
+            public int DrawIndex => 0;
+            public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
+            public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
+            public Material Material => null;
+            public void ApplyZoom(in StyleFrameInputs inputs) { }
+            public int TransitioningCount => 0;
+            public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
+            public void SetDrawOrder(int declaredOrder) { }
+            public void Dispose() { }
+
+            public CountedGraphInputRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;
+
+            public ILayerMeshBuild BuildGraphRequest(
+                IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                in TileLayerProcessContext context, int materialIndex, string payloadName)
+                => FillLayerBuild.Rent(
+                    new FillMeshPipeline.LayerInput
+                    {
+                        Geometry     = geometry,
+                        RingVisitOrder = new NativeArray<int>(1, Allocator.Persistent),
+                        OriginRender = context.TileOriginRender,
+                        Projection   = context.Projection,
+                    },
+                    new NativeArray<Vector4>(1, Allocator.Persistent), materialIndex, payloadName);
+        }
+
+        /// <summary>A minimal graph-arm layer whose <see cref="BuildGraphRequest"/> always throws — proves
+        /// <see cref="TileMeshLayerProcessor"/>'s settlement path on a real (not recording-fake) processor,
+        /// on the graph-arm fault site that replaces the retired seam-arm <c>WriteInto</c> fault (§3.4).</summary>
+        private sealed class ThrowingGraphInputRenderLayer : ITileMeshRenderLayer
+        {
+            public StyleLayer StyleLayer { get; }
+            public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
+            public DrawPersistence Persistence => DrawPersistence.Persistent;
+            public int DrawIndex => 0;
+            public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base;
+            public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
+            public Material Material => null;
+            public void ApplyZoom(in StyleFrameInputs inputs) { }
+            public int TransitioningCount => 0;
+            public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
+            public void SetDrawOrder(int declaredOrder) { }
+            public void Dispose() { }
+
+            public ThrowingGraphInputRenderLayer(StyleLayer styleLayer) => StyleLayer = styleLayer;
+
+            public ILayerMeshBuild BuildGraphRequest(
+                IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                in TileLayerProcessContext context, int materialIndex, string payloadName)
+                => throw new InvalidOperationException("ThrowingGraphInputRenderLayer deliberate fault (test)");
+        }
+
+        /// <summary>§3.4: replaces
+        /// <c>TileMeshLayerProcessor_FaultingWrite_ReturnsEmptyPayload_AndReleasesTrackedMeshData</c>. Its
+        /// (a)-(d) assertions (a tracked <c>MeshDataArray</c>, a zero-vertex settle, the material index
+        /// surviving the fault, no native leak on that array) lose their subject after B.3 deletes the
+        /// kick-time allocation — a legitimate retirement, but the HAZARD CLASS this test guarded does not
+        /// cease to exist, it RELOCATES: a fault inside a per-layer body now strands the graph build's own
+        /// <c>Allocator.Persistent</c> columns instead, parked in <c>TileMeshLayerProcessor._build</c> —
+        /// a field whose own doc calls its <c>Reset</c> dispose a "never-fired backstop". This test observes
+        /// THAT relocated hazard directly via <see cref="Meshing.LayerMeshBuildCounters.DebugLiveBuilds"/>, the real
+        /// native-leak guard now.
+        ///
+        /// <para>Two layers, the thrower SECOND, the first a real request-producing graph layer (required
+        /// shape, §3.4) — otherwise "returns to baseline" would be trivially true on an empty ledger. The
+        /// non-vacuity witness (<c>DebugLiveBuilds &gt; baseline</c>, asserted below before disposal) proves
+        /// the counted layer's request really was counted before this test's own cleanup frees it.</para>
+        ///
+        /// <para><b>RED:</b> plan §3.4's own mandated injection — a no-op <c>Reset</c> backstop
+        /// (<c>if (_build != null) _build.Dispose();</c> in <c>TileMeshLayerProcessor.Reset</c>) — CANNOT fire
+        /// against this fixture: <see cref="ThrowingGraphInputRenderLayer.BuildGraphRequest"/> throws BEFORE
+        /// building a request, so <c>_build</c> is never set and that backstop never
+        /// runs for either processor. Working RED: drop the <c>LayerMeshBuildCounters.RecordDisposed()</c> call in
+        /// <c>FillLayerBuild.Dispose()</c> (the disposal this test's own cleanup loop drives) —
+        /// reds this test's own <c>Assert.AreEqual(baseline, LayerMeshBuildCounters.DebugLiveBuilds, …)</c> with
+        /// <c>Expected: 0, But was: 1</c>. Executed and reverted.</para>
+        /// </summary>
+        [Test]
+        public void FaultingGraphRequest_StillReturnsItsProcessor_AndLeaksNoRequest()
+        {
+            var countedLayer  = new CountedGraphInputRenderLayer(new StyleLayer { Id = "counted-test-layer", SourceLayer = "countries" });
+            var throwingLayer = new ThrowingGraphInputRenderLayer(new StyleLayer { Id = "throwing-test-layer", SourceLayer = "countries" });
+
+            var p0 = TileMeshLayerProcessor.AllocateForKick(countedLayer, materialIndex: 11);
+            var p1 = TileMeshLayerProcessor.AllocateForKick(throwingLayer, materialIndex: 12);
+            var processors = new ITileMeshLayerProcessor[] { p0, p1 };
+
+            long baseline         = LayerMeshBuildCounters.DebugLiveBuilds;
+            long negativeBaseline = TileBuildGraph.DebugNegativeObservations;
+
+            var context = MakeContext();
+            var decode = new SharedDisposable<IDecodedTile>(new MvtTileDecoder().Decode(ContextTile, SampleTileFixture.Bytes()));
+            TilePrologueOutput output;
+            try { output = TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors); }
+            finally { decode.Release(); }
+
+            Assert.AreEqual(2, output.Layers.Length);
+
+            // Non-vacuity witness (§3.4's own warning against a trivially-passing empty ledger): the counted
+            // layer's factory-built request really is live before this test disposes it below.
+            Assert.Greater(LayerMeshBuildCounters.DebugLiveBuilds, baseline,
+                "the layer BEFORE the fault must have produced a real, counted graph build");
+
+            try
+            {
+                Assert.IsTrue(ProbePoolContainsAndRestore(TileMeshLayerProcessorPool.Rent, TileMeshLayerProcessorPool.Return, p0),
+                    "the layer BEFORE the fault must still be returned to TileMeshLayerProcessorPool by Release()");
+                Assert.IsTrue(ProbePoolContainsAndRestore(TileMeshLayerProcessorPool.Rent, TileMeshLayerProcessorPool.Return, p1),
+                    "the FAULTING layer's own processor must still be returned to TileMeshLayerProcessorPool by Release()");
+            }
+            finally
+            {
+                for (int i = 0; i < output.Layers.Length; i++) output.Layers[i]?.Dispose();
+            }
+
+            Assert.AreEqual(baseline, LayerMeshBuildCounters.DebugLiveBuilds,
+                "every counted build must be freed once disposed — no native leak on the fault path");
+            Assert.AreEqual(negativeBaseline, TileBuildGraph.DebugNegativeObservations,
+                "no TileBuildGraph was ever double-disposed — this test never touches one, so the counter " +
+                "must stay exactly where it started");
+        }
+
+        /// <summary>Rents up to <paramref name="maxProbe"/> times looking for <paramref name="target"/> by
+        /// reference identity, then hands every rented instance back (restoring pool state) before
+        /// returning whether it was found. A bounded, order-agnostic way to observe "was this instance
+        /// returned to its pool" against a process-global <c>ConcurrentBag</c> pool shared with every other
+        /// test in the run — <c>Rent</c>/<c>Return</c> give no ordering guarantee, so asserting identity on
+        /// the very next <c>Rent()</c> alone would be flaky.</summary>
+        private static bool ProbePoolContainsAndRestore<T>(Func<T> rent, Action<T> giveBack, T target, int maxProbe = 32)
+            where T : class
+        {
+            var pulled = new List<T>();
+            bool found = false;
+            for (int i = 0; i < maxProbe; i++)
+            {
+                T candidate = rent();
+                pulled.Add(candidate);
+                if (ReferenceEquals(candidate, target)) { found = true; break; }
+            }
+            foreach (T item in pulled) giveBack(item);
+            return found;
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // DecodeTests — Batch-1 decode + coordinate path against the real fixture tile
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Headless validation of the Batch-1 decode + coordinate path against the real fixture tile.
+    /// No rendering / GUI required: Window → General → Test Runner → EditMode → Run All.
+    /// </summary>
+    public class DecodeTests
+    {
+        /// <summary>The address the committed fixture is decoded at. IR C1 P3: the decode stamps it into
+        /// every layer's buffer, so it must be the same one the projection assertions use below.</summary>
+        private static readonly TileId FixtureTile = new TileId { Z = 0, X = 0, Y = 0 };
+
+        private static byte[] LoadFixture()
+        {
+            string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
+            FileAssert.Exists(path);
+            return File.ReadAllBytes(path);
+        }
+
+        [Test]
+        public void Decodes_expected_layers_and_counts()
+        {
+            using var tile = MvtDecoder.Decode(FixtureTile, LoadFixture());
+
+            Assert.IsNotNull(tile.GetLayer("countries"), "countries layer present");
+            Assert.IsNotNull(tile.GetLayer("geolines"), "geolines layer present");
+            Assert.IsNotNull(tile.GetLayer("centroids"), "centroids layer present");
+
+            Assert.AreEqual(239, tile.GetLayer("countries").Features.Count, "country feature count");
+            Assert.AreEqual(6, tile.GetLayer("geolines").Features.Count, "geoline feature count");
+            Assert.AreEqual(4096u, tile.GetLayer("countries").Extent, "default extent");
+        }
+
+        /// <summary>IR C1 P3: a decoded feature no longer carries a command stream — geometry belongs to the
+        /// LAYER. The "every country is a polygon WITH geometry" claim is therefore split across the two
+        /// things that now hold the halves: the feature's declared kind, and the layer's own buffer.</summary>
+        [Test]
+        public void Country_features_are_polygons_and_the_layer_carries_their_geometry()
+        {
+            using var tile = MvtDecoder.Decode(FixtureTile, LoadFixture());
+            var layer = tile.GetLayer("countries");
+            foreach (var f in layer.Features)
+                Assert.AreEqual(TileGeometryType.Polygon, f.GeometryType);
+
+            Assert.IsTrue(layer.Geometry.IsCreated, "the layer must own a materialized buffer");
+            Assert.AreEqual(layer.Features.Count, layer.Geometry.FeatureCount,
+                "the buffer's per-feature kind column must span EVERY feature of the layer — a buffer sized " +
+                "to some subset is the mis-bucketing hazard the ordinal join depends on not having");
+            Assert.Greater(layer.Geometry.RingCount, 0, "…and it must actually hold rings");
+        }
+
+        [Test]
+        public void Geometry_decodes_into_nonempty_rings()
+        {
+            // Arm A: the independent fixture reader + the managed reference decoder (IR C1 P3 — the decoded
+            // feature has no stream to read, and reading the layer's buffer would make this self-referential).
+            var layer = MvtFixtureStreams.ReadLayer(LoadFixture(), "countries");
+            int totalRings = 0;
+            for (int fi = 0; fi < layer.Commands.Count; fi++)
+            {
+                var rings = MvtGeometry.Decode(layer.Commands[fi]);
+                foreach (var ring in rings)
+                    Assert.GreaterOrEqual(ring.Count, 3, "a polygon ring needs >= 3 points");
+                totalRings += rings.Count;
+            }
+            Assert.Greater(totalRings, 0, "expected at least one decoded ring");
+        }
+
+        [Test]
+        public void Projected_vertices_fall_within_tile_world_bounds()
+        {
+            // Catches gross scale/parse bugs (e.g. forgetting tile→Mercator, leaving raw 0..4096 coords).
+            // NOTE: at z0 the tile bbox is symmetric about the origin, so this does NOT catch a Y-flip;
+            // a non-z0 fixture would. Y-orientation is validated visually in Batch 2.
+            var layer = MvtFixtureStreams.ReadLayer(LoadFixture(), "countries");
+            var t = FixtureTile;
+            var (min, max) = t.MercatorBounds();
+
+            double marginX = (max.x - min.x) * 0.05;
+            double marginY = (max.y - min.y) * 0.05;
+            int checkd = 0;
+
+            foreach (uint[] commands in layer.Commands)
+            foreach (var ring in MvtGeometry.Decode(commands))
+            foreach (var p in ring)
+            {
+                double2 m = t.ToMercator(p.x, p.y, layer.Extent);
+                Assert.That(m.x, Is.GreaterThanOrEqualTo(min.x - marginX).And.LessThanOrEqualTo(max.x + marginX));
+                Assert.That(m.y, Is.GreaterThanOrEqualTo(min.y - marginY).And.LessThanOrEqualTo(max.y + marginY));
+                checkd++;
+            }
+            Assert.Greater(checkd, 0);
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // LineGraphKickTests — the full TileManager/MapView pump over a LineString-only style
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class LineGraphKickTests : BaseTestFixture
+    {
+        private static CameraProperties Cam(double lon, double lat, double zoom)
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
+
+        private static StyleDocument LineOnlyStyle() => StyleParser.Parse(@"{
+            ""version"": 8,
+            ""sources"": {
+                ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                {
+                    ""id"": ""geolines-stroke"", ""type"": ""line"", ""source"": ""maplibre"",
+                    ""source-layer"": ""geolines"",
+                    ""paint"": { ""line-color"": [""rgba"", 100, 200, 50, 1], ""line-width"": 10 }
+                }
+            ]
+        }");
+
+        // ── Tooth (c): the graph is scheduled by the pump, not executed inside the prologue ─────────
+
+        /// <summary>
+        /// (c) With <see cref="InlineWorkScheduler"/> injected on a LINE-ONLY style, the prologue's
+        /// <c>WorkHandle</c> completes with the request's native columns and NO ribbon geometry, and the
+        /// tile is at <c>BuildStep == Measure</c> after the kick Tick. Two assertions — the timing one
+        /// alone does not back the title: (1) <see cref="MapViewTestExtensions.CaptureTelemetry"/>'s
+        /// <c>GraphMeasureInFlight</c> moves only AFTER the hand-off tick, held open by
+        /// <see cref="TileManager.GraphDepsForTest"/>; (2) <see cref="LineGraphOutput.DebugBuffersAllocated"/>
+        /// — a MONOTONIC counter, never walked back — has NOT advanced at the moment the prologue hands
+        /// over, so a prologue that scheduled-AND-completed the graph inline (returning a merely-BALANCED
+        /// live count) cannot pass this by accident.
+        /// </summary>
+        [Test]
+        public void LineLayer_GraphScheduledByThePump_NotExecutedInsideThePrologueBody()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go   = Track(new GameObject("LineGraphKick_C"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 0; // z0: exactly one covered tile
+            view.Config.Backend               = RenderBackend.GameObject;
+            view.WithTestCamera();
+
+            var gate    = new NativeArray<int>(1, Allocator.Persistent);
+            var started = new NativeArray<int>(1, Allocator.Persistent);
+            var outVals = new NativeArray<int>(2, Allocator.Persistent);
+            JobHandle delayHandle = default;
+
+            try
+            {
+                delayHandle = new SpinUntilGateJob
+                    { Gate = gate, Started = started, Out = outVals, MaxIterations = 2_000_000_000 }.Schedule();
+                JobHandle.ScheduleBatchedJobs();
+                view.TileManager.GraphDepsForTest = delayHandle;
+
+                long buffersBaseline = LineGraphOutput.DebugBuffersAllocated;
+
+                int caller = System.Environment.CurrentManagedThreadId;
+                var spy = new RecordingWorkScheduler(new InlineWorkScheduler());
+                view.TileManager.WorkScheduler = spy;
+
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: LineOnlyStyle());
+
+                int kickTick = -1, tick = 0;
+                for (; tick < 3000 && kickTick < 0; tick++)
+                {
+                    view.LateUpdate();
+                    if (view.TileBuildsStartedLastTick() > 0) kickTick = tick;
+                }
+                Assert.GreaterOrEqual(kickTick, 0, "drive precondition: the tile's build must have been started " +
+                    "(kickTick starts at -1, so this is load-bearing, not trivially true — it is what stops a " +
+                    "never-kicked run from passing the assertions below).");
+                Assert.GreaterOrEqual(spy.ScheduleCount, 1, "the prologue kick must go THROUGH the injected scheduler.");
+                Assert.GreaterOrEqual(spy.BodyThreadIds.Count, 1, "the body must actually have run at least once.");
+                foreach (int tid in spy.BodyThreadIds)
+                    Assert.AreEqual(caller, tid, "under Inline the prologue body runs on the CALLING thread.");
+
+                Assert.AreEqual(buffersBaseline, LineGraphOutput.DebugBuffersAllocated,
+                    "the prologue body itself must not have scheduled the line measure graph — it only " +
+                    "builds the request (BuildGraphRequest); LineMeshGraph.Schedule is the PUMP's job, next tick.");
+
+                // Next tick: prologue-complete hands off to ScheduleMeasureFromDecode — the line graph is
+                // genuinely scheduled now, held open by the still-gated delay job.
+                view.LateUpdate();
+                Assert.Greater(LineGraphOutput.DebugBuffersAllocated, buffersBaseline,
+                    "a real line measure graph must have been scheduled by now — the geometry left the prologue body.");
+                Assert.GreaterOrEqual(view.CaptureTelemetry().GraphMeasureInFlight, 1,
+                    "the tile must be observed in its MEASURE step — deterministic under the still-held delay job.");
+                Assert.IsFalse(view.AllTilesSettled(),
+                    "the tile must not read settled while its measure step is genuinely held incomplete.");
+            }
+            finally
+            {
+                gate[0] = 1;
+                delayHandle.Complete();
+                view.Teardown();
+                gate.Dispose();
+                started.Dispose();
+                outVals.Dispose();
+            }
+        }
+
+        // ── Tooth (f): a line layer allocates no Mesh.MeshDataArray at kick ──────────────────────────
+
+        /// <summary>
+        /// (f) On a LINE-ONLY style, <see cref="MapViewTestExtensions.MeshDataArraysAllocatedLastKick"/> is
+        /// 0 at the kick Tick and non-zero once the write step runs, and the tile still produces a mesh with
+        /// real vertices. Complement of tooth (c): (c) observes inline execution on the GRAPH path; this one
+        /// observes the ABSENCE of any kick-time allocation — job-scheduling-design.md §8 stage 5 Group B
+        /// retired the seam arm entirely, so there is no second, synchronous-mesh-write path left for a line
+        /// layer to fall back onto; this pins that the graph-arm path it actually takes allocates nothing at
+        /// kick either.
+        /// </summary>
+        [Test]
+        public void LineLayer_AllocatesNoMeshDataArrayAtKick_OnlyAtWrite()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go   = Track(new GameObject("LineGraphKick_F"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 0;
+            view.Config.TileSelection.MaxZoom = 0;
+            view.Config.Backend               = RenderBackend.GameObject;
+            view.WithTestCamera();
+
+            try
+            {
+                long payloadBaseline = MeshDataPayload.DebugLiveAllocCount;
+
+                view.LoadTestStyle(src, Cam(0, 0, 0.0), style: LineOnlyStyle());
+
+                int kickTick = -1, tick = 0;
+                for (; tick < 3000 && kickTick < 0; tick++)
+                {
+                    view.LateUpdate();
+                    if (view.TileBuildsStartedLastTick() > 0) kickTick = tick;
+                }
+                Assert.GreaterOrEqual(kickTick, 0, "drive precondition: the tile's build must have been started " +
+                    "(kickTick starts at -1, so this is load-bearing, not trivially true — it is what stops a " +
+                    "never-kicked run from passing the assertions below).");
+                Assert.AreEqual(payloadBaseline, MeshDataPayload.DebugLiveAllocCount,
+                    "NO MeshDataArray at kick for a line-only style — line is graph-arm now, exactly like fill.");
+                Assert.AreEqual(0, view.MeshDataArraysAllocatedLastKick(),
+                    "the kick Tick itself allocates nothing — only a later write-kick does.");
+
+                int writeTick = -1;
+                for (; tick < 3000 && writeTick < 0; tick++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                    if (view.MeshDataArraysAllocatedLastKick() > 0) writeTick = tick;
+                }
+                Assert.GreaterOrEqual(writeTick, 0, "the write step must eventually allocate.");
+                Assert.AreEqual(1, view.MeshDataArraysAllocatedLastKick(),
+                    "exactly one MeshDataArray on the write-kick tick — the one non-empty line layer.");
+
+                for (; tick < 3000 && !view.AllTilesSettled(); tick++)
+                {
+                    view.AwaitInFlightMeshBuilds();
+                    view.LateUpdate();
+                }
+                Assert.IsTrue(view.AllTilesSettled(), "the tile must eventually settle.");
+                Assert.Greater(view.GameObjectRenderer().DrawItemCount(), 0,
+                    "the both-ends rule: a progression that never produces a mesh is indistinguishable from a " +
+                    "build that never happened.");
+            }
+            finally
+            {
+                // Unconditional — an assertion failure above must not leak the view or leave its process-wide
+                // counters (MeshDataPayload.DebugLiveAllocCount et al.) elevated for whatever test runs next.
+                view.Teardown();
+            }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SourceRegistrySlotInvariantTests — drives the real MapView/TileManager restyle path
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class SourceRegistrySlotInvariantTests : BaseTestFixture
+    {
+        private static CameraProperties Cam(double lon, double lat, double zoom)
+            => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 },
+                zoom, 0.0, 0.0);
+
+        /// <summary>Deterministic settle (mirrors <c>Tiles/PreparedCacheTests.PumpUntilSettled</c>):
+        /// <c>DrainMeshBuilds</c> spins each tick's kicked builds to completion so the next tick consumes
+        /// them. The <c>LoadedTileCount() &gt; 0</c> guard is load-bearing — <c>AllTilesSettled()</c> is
+        /// vacuously true on an empty cover, before anything has ever been admitted.</summary>
+        private static void PumpUntilSettled(MapView view, int maxTicks = 200)
+        {
+            for (int f = 0; f < maxTicks; f++)
+            {
+                view.LateUpdate();
+                view.DrainMeshBuilds();
+                if (view.LoadedTileCount() > 0 && view.AllTilesSettled())
+                    return;
+            }
+        }
+
+        private static StyleDocument ThreeSourceStyle() => StyleParser.Parse(@"{
+            ""version"": 8, ""name"": ""T7ThreeSources"",
+            ""sources"": {
+                ""a"": { ""type"": ""vector"", ""tiles"": [""https://example.com/a/{z}/{x}/{y}.pbf""] },
+                ""b"": { ""type"": ""vector"", ""tiles"": [""https://example.com/b/{z}/{x}/{y}.pbf""] },
+                ""c"": { ""type"": ""vector"", ""tiles"": [""https://example.com/c/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                { ""id"": ""a-fill"", ""type"": ""fill"", ""source"": ""a"", ""source-layer"": ""x"", ""paint"": {""fill-color"": [""rgba"",200,50,50,1]} },
+                { ""id"": ""b-fill"", ""type"": ""fill"", ""source"": ""b"", ""source-layer"": ""x"", ""paint"": {""fill-color"": [""rgba"",50,200,50,1]} },
+                { ""id"": ""c-fill"", ""type"": ""fill"", ""source"": ""c"", ""source-layer"": ""x"", ""paint"": {""fill-color"": [""rgba"",50,50,200,1]} }
+            ]
+        }");
+
+        // Removes "b" — the MIDDLE slot — so "c" shifts from slot 2 to slot 1.
+        private static StyleDocument TwoSourceStyle_BRemoved() => StyleParser.Parse(@"{
+            ""version"": 8, ""name"": ""T7TwoSources"",
+            ""sources"": {
+                ""a"": { ""type"": ""vector"", ""tiles"": [""https://example.com/a/{z}/{x}/{y}.pbf""] },
+                ""c"": { ""type"": ""vector"", ""tiles"": [""https://example.com/c/{z}/{x}/{y}.pbf""] }
+            },
+            ""layers"": [
+                { ""id"": ""a-fill"", ""type"": ""fill"", ""source"": ""a"", ""source-layer"": ""x"", ""paint"": {""fill-color"": [""rgba"",200,50,50,1]} },
+                { ""id"": ""c-fill"", ""type"": ""fill"", ""source"": ""c"", ""source-layer"": ""x"", ""paint"": {""fill-color"": [""rgba"",50,50,200,1]} }
+            ]
+        }");
+
+        /// <summary>UMR-112 §6.1: restyling away a source must not leave its tiles behind. Removing the
+        /// MIDDLE source (b, slot 1) reassigns the survivor (c) from slot 2 to slot 1 — a stale entry keyed
+        /// to the OLD slot would resolve against the wrong (or an out-of-range) pipeline. Pins that
+        /// <c>_loaded</c> empties immediately on restyle and that the restyled cover settles with no tile
+        /// reporting the removed source. The ORDER this depends on is pinned by
+        /// <see cref="Rebuild_CallerFactoryObservesLoadedClearedFirst"/> instead — that test reaches the
+        /// window directly through <c>Rebuild</c>'s own caller-supplied-code hook, so it, not this
+        /// end-to-end settle, is the one that RED-verifies an ordering inversion.</summary>
+        [Test]
+        public void RemovedSource_TilesDoNotSurviveARestyle()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go   = Track(new GameObject("T7_SlotInvariant"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick     = 64;
+            view.Config.MaxMeshBuildsPerTick   = 64;
+            view.Config.MaxVerticesPerTick     = int.MaxValue;
+            view.Config.MaxConcurrentTileLoads = 64;
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: ThreeSourceStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
+                Assert.AreEqual(3, view.WiredFeatureSourceCount(), "precondition: three real sources wired.");
+
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.AllTilesSettled(), "precondition: the initial three-source cover must settle.");
+                Assert.Greater(view.LoadedTileCount(), 0, "sanity: something must actually be loaded.");
+
+                // Restyle, removing the MIDDLE source.
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: TwoSourceStyle_BRemoved(),
+                    decodeScheduler: new InlineWorkScheduler());
+
+                Assert.AreEqual(2, view.WiredFeatureSourceCount(), "the registry must now hold exactly the two surviving sources.");
+                Assert.AreEqual(0, view.LoadedTileCount(), "SetSources step 1 must clear _loaded immediately — before any tick.");
+
+                // Drive several ticks against the NEW registry — an ordering bug throws (out-of-range slot)
+                // or silently aliases a stale entry to the wrong pipeline.
+                PumpUntilSettled(view);
+                Assert.IsTrue(view.LoadedTileCount() > 0 && view.AllTilesSettled(),
+                    "the restyled two-source cover must settle without throwing.");
+
+                var loaded = new List<LoadedTileKey>();
+                view.TileManager.CollectLoadedTileKeys(loaded);
+                Assert.Greater(loaded.Count, 0, "sanity: the restyled cover must have loaded something.");
+                foreach (var key in loaded)
+                    Assert.AreNotEqual("b", key.SourceId,
+                        "no loaded record may report the REMOVED source 'b' — a stale slot-keyed entry " +
+                        "would alias the wrong pipeline after the restyle re-slotted the survivors.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+
+        /// <summary>UMR-112 §6.1: <c>SourceRegistry.Rebuild</c> is not a black box mid-call — it invokes a
+        /// caller-supplied <c>SourceSpec.CreateSource</c> factory for every new pipeline while the registry
+        /// is still rebuilding. Wires a factory that reads the loaded-tile count from inside that call and
+        /// pins <c>TileManager.SetSources</c>' load-bearing order: it clears <c>_loaded</c> before calling
+        /// <c>Rebuild</c>, so the factory observes zero, never the pre-restyle count.</summary>
+        [Test]
+        public void Rebuild_CallerFactoryObservesLoadedClearedFirst()
+        {
+            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            var go   = Track(new GameObject("T7_RebuildReentrancy"));
+            var view = go.AddComponent<MapView>().WithTestMaterials();
+            view.Config.TileSelection.MinZoom = 5;
+            view.Config.TileSelection.MaxZoom = 5;
+            view.WithTestCamera();
+            view.Config.MaxConsumesPerTick     = 64;
+            view.Config.MaxMeshBuildsPerTick   = 64;
+            view.Config.MaxVerticesPerTick     = int.MaxValue;
+            view.Config.MaxConcurrentTileLoads = 64;
+
+            try
+            {
+                view.LoadTestStyle(src, Cam(0, 0, 5.0), style: ThreeSourceStyle(),
+                    decodeScheduler: new InlineWorkScheduler());
+                PumpUntilSettled(view);
+                Assert.Greater(view.LoadedTileCount(), 0, "precondition: something must be loaded before the restyle.");
+
+                int observedDuringRebuild = -1;
+                var specs = new List<TileManager.SourceSpec>
+                {
+                    new TileManager.SourceSpec("only-new", default, 0, int.MaxValue, () =>
+                    {
+                        observedDuringRebuild = view.LoadedTileCount();
+                        return new MvtTileFeatureSource(src, new InlineWorkScheduler());
+                    }),
+                };
+
+                view.TileManager.SetSources(specs, view.Config.Backend);
+
+                Assert.AreEqual(0, observedDuringRebuild,
+                    "a CreateSource factory invoked from mid-Rebuild must see _loaded already cleared — " +
+                    "SetSources must clear slot-keyed state BEFORE rebuilding the registry.");
+            }
+            finally
+            {
+                view.Teardown();
+            }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // A6NonMvtDecoderTests — a non-MvtDecoder ITileDecoder flows through the unchanged fill fan-out
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class A6NonMvtDecoderTests : BaseTestFixture
+    {
+        // Deliberately malformed as MVT (a truncated length-delimited TileLayers field — MvtDecoder.Decode
+        // throws decoding it — same fixture used by SharedTileDecodeTests/TileLayerProcessorRunnerTests).
+        // The falsifier: if RunWorkerPass ignored the injected ITileDecoder and called MvtDecoder.Decode on
+        // these bytes directly, the pass would fault instead of producing the expected quad below.
+        private static readonly byte[] MalformedMvtBytes = { 0x1A, 0x64 };
+
+        private const string FixtureSourceLayerName = "non-mvt-fixture-layer";
+
+        /// <summary>Ignores the bytes entirely and returns the fixed fixture tile — the injection point
+        /// F-3 proves is actually consumed (not bypassed in favour of a hardcoded MVT decode).</summary>
+        private sealed class FakeTileDecoder : ITileDecoder
+        {
+            private readonly IDecodedTile _tile;
+            public FakeTileDecoder(IDecodedTile tile) => _tile = tile;
+            public IDecodedTile Decode(TileId id, byte[] bytes) => _tile;
+        }
+
+        /// <summary>Mirrors <see cref="FillRenderLayer.BuildGraphRequest"/>'s forward without needing a real
+        /// Unity <see cref="Material"/> (this test drives the fan-out into the job graph, not material
+        /// binding).</summary>
+        private sealed class FakeFillTileMeshRenderLayer : ITileMeshRenderLayer
+        {
+            private readonly Fill.PaintProperties _paint;
+            public StyleLayer StyleLayer { get; }
+            public RenderLayerBuild Build => RenderLayerBuild.TileMesh;
+            public DrawPersistence Persistence => DrawPersistence.Persistent;
+            public int DrawIndex => 0;
+            public LayerSubSlot MaterialSubSlot => LayerSubSlot.Base; // mirrors FillRenderLayer (G7/D7)
+            public UnityEngine.Rendering.ShadowCastingMode CastShadows => UnityEngine.Rendering.ShadowCastingMode.Off;
+            public Material Material => null;
+
+            public FakeFillTileMeshRenderLayer(StyleLayer styleLayer, Fill.PaintProperties paint)
+            {
+                StyleLayer = styleLayer;
+                _paint = paint;
+            }
+
+            public void ApplyZoom(in StyleFrameInputs inputs) { }
+            public int TransitioningCount => 0;
+            public void Restyle(StyleLayer layer, in StyleTransition transition, double nowSeconds) { }
+            public void SetDrawOrder(int declaredOrder) { }
+            public void Dispose() { }
+
+            public ILayerMeshBuild BuildGraphRequest(
+                IReadOnlyList<SelectedTileFeature> selected, TileGeometryBuffers geometry,
+                in TileLayerProcessContext context, int materialIndex, string payloadName)
+            {
+                FillMeshPipeline.LayerInput input = StyledFillTileBuilder.BuildLayerInput(
+                    selected, geometry, _paint, context.Zoom, context.TileOriginRender, out var colors,
+                    context.Projection, layout: null, context.BufferClip, context.Buffers);
+                if (!input.RingVisitOrder.IsCreated) return null;
+                return FillLayerBuild.Rent(input, colors, materialIndex, payloadName);
+            }
+        }
+
+        [Test]
+        public void NonMvtDecoder_FlowsThroughTheUnchangedFanOut_ProducesTheFullExtentQuad()
+        {
+            // The fixture tile: one layer (named to match the style layer's source-layer), one feature —
+            // the A2 full-extent-ring command stream (the SAME oracle TileBackgroundQuadProjectionTests
+            // asserts decodes to the tile's 4 corners), carried by DictionaryFeature.
+            var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Polygon, hasId: false, geometry: FullExtentRingCommandStream.Commands);
+            var tileId = new TileId { Z = 0, X = 0, Y = 0 };
+            // IR C1 P3: a decoded layer OWNS its geometry, so the fixture layer materializes at construction
+            // exactly as MvtDecoder does — the shared InMemoryTileLayer/InMemoryDecodedTile pair.
+            var layer = new InMemoryTileLayer(
+                FixtureSourceLayerName, tileId, new IFeature[] { feature },
+                (uint)BackgroundQuad.Extent);
+            using var fixtureTile = new InMemoryDecodedTile(layer);
+            var fakeDecoder = new FakeTileDecoder(fixtureTile);
+
+            var styleLayer = new StyleLayer { Id = "fixture-fill", SourceLayer = FixtureSourceLayerName };
+            var paint = TestStyle.FillPaint("{\"fill-color\":\"#ffffff\"}");
+            var fillLayer = new FakeFillTileMeshRenderLayer(styleLayer, paint);
+
+            var projection = new WebMercatorProjection();
+            var context = new TileLayerProcessContext
+            {
+                Tile = tileId, Zoom = 0.0,
+                TileOriginRender = TileRenderOrigin.Project(tileId, projection),
+                Projection = projection,
+            };
+
+            var processor = TileMeshLayerProcessor.AllocateForKick(fillLayer, materialIndex: 0);
+            var decode = new SharedDisposable<IDecodedTile>(fakeDecoder.Decode(tileId, MalformedMvtBytes));
+
+            TilePrologueOutput output = TileLayerProcessorRunner.RunWorkerPass(
+                decode, in context, new ITileMeshLayerProcessor[] { processor });
+            Assert.AreEqual(1, output.Layers.Length);
+
+            // job-scheduling-design.md §8 stage 5 Group B: the graph is the only mesher now — drive it
+            // synchronously, the way TileManager.KickMeshBuild's pump does. ScheduleMeasureFromDecode takes
+            // ownership of `decode` from here — released exactly once, by graph.Dispose() below. The
+            // payload must be read/uploaded BEFORE graph.Dispose() runs: Dispose() sweeps whatever
+            // CompleteWriteAndTakePayloads handed out that the caller never consumed (TileBuildGraph's own
+            // doc), so disposing first would silently zero-vertex the very payload this test asserts on.
+            TileBuildGraph graph = TileBuildGraph.ScheduleMeasureFromDecode(output.Layers, decode);
+            Mesh mesh;
+            try
+            {
+                graph.CompleteMeasureAndScheduleWrite(out _);
+                MeshDataPayload[] payloads = graph.CompleteWriteAndTakePayloads();
+
+                Assert.AreEqual(1, payloads.Length);
+                Assert.IsNotNull(payloads[0], "the worker pass must settle a payload even under the fake decoder.");
+                // 4 interior + 8 band. Unlike BackgroundQuad's synthesized full-tile quad, this is a real
+                // fill layer, so it carries the outward boundary band: two vertices per ring vertex appended
+                // after the interior quad.
+                Assert.AreEqual(12, payloads[0].VertexCount,
+                    "the injected non-MvtDecoder decoder's feature must flow through StyledFillTileBuilder " +
+                    "unchanged and produce the flat 4-vertex quad (Mercator, no subdivision) plus its " +
+                    "8-vertex boundary band. Zero or a fault here means the fan-out ignored the injected " +
+                    "decoder.");
+
+                mesh = Track(payloads[0].Upload());
+            }
+            finally { graph.Dispose(); }
+
+            Assert.IsNotNull(mesh, "a non-zero-vertex payload must upload a real mesh.");
+            Assert.AreEqual(12, mesh.vertexCount);
         }
     }
 }

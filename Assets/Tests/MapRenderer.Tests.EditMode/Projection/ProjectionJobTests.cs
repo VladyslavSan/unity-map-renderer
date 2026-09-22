@@ -154,7 +154,7 @@ namespace MapRenderer.Tests.Projection
         public void CountryVertices_ProjectWithinMercatorBounds()
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
+            FileAssert.Exists(path);
 
             // IR C1 P3: the ring coordinates for this projection sweep come from the independent fixture
             // reader plus the managed reference decoder, not from a decoded feature (which carries none).

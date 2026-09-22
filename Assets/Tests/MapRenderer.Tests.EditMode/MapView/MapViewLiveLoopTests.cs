@@ -36,7 +36,7 @@ namespace MapRenderer.Tests.MapViews
     ///       reused buffers must not allocate in the pan / static-frame / bearing-only cases).
     /// </summary>
     [TestFixture]
-    public class MapViewLiveLoopTests
+    public class MapViewLiveLoopTests : BaseTestFixture
     {
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
@@ -91,7 +91,7 @@ namespace MapRenderer.Tests.MapViews
         public void MapView_SteadyStateTick_DoesNotAllocateGCMemory()
         {
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go    = new GameObject("MapView");
+            var go    = Track(new GameObject("MapView"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc path under test
@@ -153,7 +153,6 @@ namespace MapRenderer.Tests.MapViews
             finally
             {
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
             }
         }
 
@@ -168,7 +167,7 @@ namespace MapRenderer.Tests.MapViews
         public void MapView_SteadyStateTick_Entities_AllocationVerdict()
         {
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go    = new GameObject("MapView");
+            var go    = Track(new GameObject("MapView"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.Backend = RenderBackend.Entities; // the default backend under measurement
@@ -218,7 +217,6 @@ namespace MapRenderer.Tests.MapViews
             finally
             {
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
             }
         }
     }

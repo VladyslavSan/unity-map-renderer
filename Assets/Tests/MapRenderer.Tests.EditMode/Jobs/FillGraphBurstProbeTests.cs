@@ -37,7 +37,7 @@ namespace MapRenderer.Tests.Jobs
         private static byte[] LoadFixture(string name)
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", name);
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
+            FileAssert.Exists(path);
             return File.ReadAllBytes(path);
         }
 

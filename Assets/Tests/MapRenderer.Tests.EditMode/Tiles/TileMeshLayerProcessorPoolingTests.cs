@@ -184,11 +184,7 @@ namespace MapRenderer.Tests.Tiles
             // one directly: allocate a tracked writable MeshDataArray, write real geometry into it with the
             // still-kept (E2 ruling) StyledFillTileBuilder.WriteMeshData, then wrap it exactly the way the
             // (retired) seam-arm settlement used to — MeshDataPayloadPool.Rent() + Reset(...).
-            var feature = new InMemoryTileFeature
-            {
-                GeometryType = TileGeometryType.Polygon,
-                Geometry     = FullExtentRingCommandStream.Commands,
-            };
+            var feature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Polygon, hasId: false, geometry: FullExtentRingCommandStream.Commands);
             var tileId = new TileId { Z = 0, X = 0, Y = 0 };
             const string sourceLayerName = "isolation-fixture-layer";
             var layer = new InMemoryTileLayer(

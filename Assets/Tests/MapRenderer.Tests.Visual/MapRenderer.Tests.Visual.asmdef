@@ -1,0 +1,36 @@
+{
+    "name": "MapRenderer.Tests.Visual",
+    "rootNamespace": "MapRenderer.Tests",
+    "references": [
+        "MapRenderer.Core",
+        "MapRenderer.Jobs",
+        "MapRenderer.Unity",
+        "MapRenderer.Tests.Shared",
+        "Unity.Mathematics",
+        "Unity.Collections",
+        "Unity.Burst",
+        "Unity.Jobs",
+        "Unity.Entities",
+        "Unity.Entities.Graphics",
+        "Unity.Transforms",
+        "Unity.Mathematics.Extensions",
+        "Unity.Profiling.Core",
+        "UnityEngine.TestRunner",
+        "UniTask"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": true,
+    "precompiledReferences": [
+        "nunit.framework.dll"
+    ],
+    "autoReferenced": false,
+    "defineConstraints": [
+        "UNITY_INCLUDE_TESTS"
+    ],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

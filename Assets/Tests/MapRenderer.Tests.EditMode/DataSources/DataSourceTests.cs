@@ -1,24 +1,444 @@
-// EditMode-only — NOT compiled by Tools/core-tests. This file uses MvtDecoder/MvtTile
-// (MapRenderer.Jobs.Mvt), which the fast dotnet test project does not compile (the MVT decode
-// nativization moved that surface out of its reach). Scheduler-ordering teeth that need both
-// runners live in the engine-free sibling, TileSchedulerOrderingTests.cs.
+// DataSources/DataSourceTests.cs — A7 tile-feature source, render-path, HTTP and scheduler teeth (EditMode).
 //
-// S51: migrated from Task/TaskCompletionSource to UniTask/UniTaskCompletionSource.
-// HttpDataSource tests removed (HttpDataSource deleted from Core; HTTP moved to Unity layer
-// as UnityWebRequestDataSource). Scheduler tests converted to async Task + await.
+// TileSchedulerOrderingTests.cs stays its own file (fast lane, csproj-registered). No using/alias
+// collision found across the four EditMode files merged here.
+//
+// Contents:
+//   A7TileFeatureSourceTests        — the raised ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile> interface, EditMode async-Task unit teeth.
+//   UnityWebRequestDataSourceTests  — UnityWebRequestDataSource against a loopback HttpListener, including the 404 -> Absent mapping.
+//   DataSourceRenderPathTests       — FileDataSource through the render pipeline.
+//   DataSourceTests                 — FileDataSource/UnityWebRequestDataSource/MvtTileFeatureSource, migrated onto UniTask/UniTaskCompletionSource.
 
-using System;
-using System.IO;
-using System.Threading;
 using System.Threading.Tasks;
 using Cysharp.Threading.Tasks;
 using NUnit.Framework;
+using UnityEngine;
 using MapRenderer.Core.Geo;
+using MapRenderer.Core.Lifetime;
+using MapRenderer.Core.Tiles;
+using MapRenderer.Jobs.Tiles;
+using MapRenderer.Unity.Concurrency;
+using MapRenderer.Unity.Rendering.Tile;
+using MapRenderer.Unity.Rendering.Tile.Processing;
+using System;
+using System.Collections;
+using System.Net;
+using System.Threading;
+using UnityEngine.TestTools;
 using MapRenderer.Core.Data;
+using MapRenderer.Unity.Rendering.Source;
+using System.Collections.Generic;
+using System.IO;
+using System.Security.Cryptography;
+using Unity.Mathematics;
+using Unity.Collections;
+using Unity.Jobs;
+using MapRenderer.Tests.TestSupport;
+using MapRenderer.Jobs.Projection;
 using MapRenderer.Jobs.Mvt;
+
 
 namespace MapRenderer.Tests.DataSources
 {
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // A7TileFeatureSourceTests — ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile>, EditMode async-Task teeth
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    [TestFixture]
+    public class A7TileFeatureSourceTests
+    {
+        // Off-main, matching production's desktop policy — these teeth exercise GetTile's own contract, not
+        // the scheduler choice.
+        private static readonly IWorkScheduler Scheduler = new ThreadPoolWorkScheduler();
+
+        // ── F-4: GetTile decodes EAGERLY — the inversion of the retired lazy tooth ────────────────────────
+
+        // Deliberately malformed as MVT (a truncated length-delimited TileLayers field — MvtDecoder.Decode
+        // throws decoding it — same fixture shape used by A6NonMvtDecoderTests).
+        private static readonly byte[] MalformedMvtBytes = { 0x1A, 0x64 };
+
+        /// <summary>
+        /// <b>T-E2 — the decisive falsifier, inverted.</b> This tooth used to assert that <c>GetTile</c>
+        /// completed cleanly over malformed bytes and only faulted at the first <c>GetOrDecode()</c>: the
+        /// proof the handle was LAZY. Under the eager decode the parse happens inside the task, so the task
+        /// itself faults and <b>no handle is ever minted</b>. The same input, the same seam, the opposite
+        /// answer — and the same decisiveness: a lazy implementation would complete this call and hand back
+        /// a handle.
+        /// </summary>
+        [Test]
+        public async Task GetTile_MalformedBytes_FaultsTheTask_AndMintsNoHandle()
+        {
+            var byteSource = TestDataSource.FromBytes(MalformedMvtBytes);
+            using var source = new MvtTileFeatureSource(byteSource, Scheduler);
+
+            System.Exception thrown = null;
+            SharedDisposable<IDecodedTile> handle = null;
+            try { handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 }); }
+            catch (System.Exception ex) { thrown = ex; }
+
+            Assert.IsNull(handle,
+                "F-4 DECISIVE (inverted): an EAGER GetTile decodes at fetch completion, so malformed bytes " +
+                "must fault the TASK and produce no handle. A handle here would mean the source deferred the " +
+                "decode — the lazy contract this stage deleted, and with it the drop paths that free nothing.");
+            Assert.IsInstanceOf<TileDecodeException>(thrown,
+                "…and the fault must be a TileDecodeException, not the raw decoder throw: it shares a channel " +
+                "with fetch errors now, and only the type distinguishes 'the bytes are bad' from 'the network " +
+                "failed'. Collapsing them would let a broken tile hide inside another failure's log throttle.");
+            Assert.IsInstanceOf<System.InvalidOperationException>(thrown.InnerException,
+                "…with the decoder's own exception preserved underneath, so wrapping costs no diagnosis");
+        }
+
+        /// <summary>
+        /// <b>T-E1 — the happy path of the same inversion.</b> The awaited task hands back a handle whose
+        /// tile is ALREADY built: reading it does no work, cannot fault, and yields the same instance every
+        /// time. Paired with the malformed case above (which proves the decode ran inside the task), this
+        /// pins that a read is a plain field access rather than a deferred parse.
+        /// </summary>
+        [Test]
+        public async Task GetTile_HandsBackAnAlreadyDecodedTile_ThatTheCallerOwns()
+        {
+            byte[] fixtureBytes = System.IO.File.ReadAllBytes(
+                System.IO.Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes"));
+            var byteSource = TestDataSource.FromBytes(fixtureBytes);
+            using var source = new MvtTileFeatureSource(byteSource, Scheduler);
+
+            SharedDisposable<IDecodedTile> handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
+            Assert.IsNotNull(handle, "sanity: present bytes must mint a handle");
+
+            IDecodedTile first = handle.Value;
+            Assert.IsNotNull(first, "the tile is already decoded — reading it must never return null");
+            Assert.AreSame(first, handle.Value,
+                "…and a second read must hand back the SAME instance. A lazy handle that decoded per read " +
+                "would produce a distinct tile here, and two sets of Allocator.Persistent buffers with one " +
+                "owner between them.");
+
+            // The caller owns the one reference GetTile handed over; releasing it is what frees the buffers.
+            handle.Release();
+        }
+
+        [Test]
+        public async Task GetTile_AbsentTile_ReturnsNullHandle()
+        {
+            // Byte-equivalent to today's TileResponse.HasData == false branch (§G risk 4).
+            var byteSource = TestDataSource.Absent();
+            using var source = new MvtTileFeatureSource(byteSource, Scheduler);
+
+            SharedDisposable<IDecodedTile> handle = await source.GetTile(new TileId { Z = 0, X = 0, Y = 0 });
+
+            Assert.IsNull(handle, "an absent tile (HasData == false) must map to a null handle — the " +
+                "coordinator's null-for-absent contract (Epic A / A7 §G-4).");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // UnityWebRequestDataSourceTests — UnityWebRequestDataSource against a loopback HttpListener
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// S51 review fix — acceptance tests for <see cref="UnityWebRequestDataSource"/>.
+    ///
+    /// Closes the coverage gap: previously no test exercised the 404→Absent mapping, which
+    /// was unreachable dead code (the vendored ToUniTask throws for ProtocolError before
+    /// reaching the responseCode check). The fix wraps the await in a narrow
+    /// catch(UnityWebRequestException when 404/204) that returns TileResponse.Absent.
+    /// These tests prove that fix is load-bearing.
+    /// </summary>
+    [TestFixture]
+    public class UnityWebRequestDataSourceTests
+    {
+        // ── Loopback server helpers ────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Finds a free loopback port by binding a listener on port 0, recording the assigned port,
+        /// then stopping it before returning. Avoids the classic race by using a short-lived listener
+        /// to claim the OS port number.
+        /// </summary>
+        private static int FindFreePort()
+        {
+            var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
+            listener.Start();
+            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
+            listener.Stop();
+            return port;
+        }
+
+        /// <summary>
+        /// Starts an HttpListener on a loopback address and serves one response asynchronously.
+        /// The listener is stopped and closed after serving the single request.
+        /// </summary>
+        private static HttpListener StartLoopbackServer(string prefix, int statusCode, byte[] body = null)
+        {
+            var hl = new HttpListener();
+            hl.Prefixes.Add(prefix);
+            hl.Start();
+
+            // Serve one request on a ThreadPool thread so the test coroutine can yield.
+            ThreadPool.QueueUserWorkItem(_ =>
+            {
+                try
+                {
+                    HttpListenerContext ctx = hl.GetContext();
+                    ctx.Response.StatusCode = statusCode;
+                    if (body != null && body.Length > 0)
+                    {
+                        ctx.Response.ContentLength64 = body.Length;
+                        ctx.Response.OutputStream.Write(body, 0, body.Length);
+                    }
+                    ctx.Response.OutputStream.Close();
+                    ctx.Response.Close();
+                }
+                catch (HttpListenerException) { /* listener was stopped before a request arrived */ }
+                catch (ObjectDisposedException) { }
+                finally
+                {
+                    try { hl.Stop(); } catch { }
+                }
+            });
+
+            return hl;
+        }
+
+        // ── Tests ─────────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// A 404 response from the tile server must yield <c>HasData == false</c> (TileResponse.Absent)
+        /// instead of throwing. This is the primary regression test for the S51 dead-code fix:
+        /// the previous code had the responseCode check AFTER the await, but ToUniTask throws
+        /// UnityWebRequestException for ProtocolError (any non-2xx), so the check was never reached.
+        ///
+        /// The fix: catch UnityWebRequestException with a when-filter on 404/204 and return Absent.
+        /// This test is load-bearing — it would fail on the old code (exception propagates → fail).
+        /// </summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_404Response_ReturnsAbsent_HasDataFalse()
+        {
+            int port   = FindFreePort();
+            string url = $"http://127.0.0.1:{port}/tiles/{{z}}/{{x}}/{{y}}.pbf";
+            // Serve a 404 for any request to this prefix.
+            var listener = StartLoopbackServer($"http://127.0.0.1:{port}/", 404);
+
+            TileResponse response = default;
+            Exception    caught   = null;
+
+            try
+            {
+                using var source = new UnityWebRequestDataSource(url);
+                // Run FetchAsync as a coroutine so UnityWebRequest's PlayerLoop hook pumps.
+                // Use void-returning Action<T> to force ContinueWith<T>(Action<T>) overload
+                // (avoids the Func<T,TR> overload that would return UniTask<T> and confuse ToCoroutine).
+                yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
+                    .ContinueWith((Action<TileResponse>)(r => { response = r; }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally
+            {
+                try { listener.Stop(); } catch { }
+            }
+
+            Assert.IsNull(caught,
+                "A 404 response must NOT throw — it must be caught and mapped to TileResponse.Absent. " +
+                $"Exception: {caught?.Message}");
+            Assert.IsFalse(response.HasData,
+                "HTTP 404 must produce HasData == false (TileResponse.Absent). " +
+                "If HasData is true or an exception was thrown, the dead-code fix did not take effect.");
+        }
+
+        /// <summary>
+        /// A 200 OK response with tile bytes must yield <c>HasData == true</c> with the correct bytes.
+        /// This is the positive control: confirms the fix did not break the success path.
+        /// </summary>
+        [UnityTest]
+        public IEnumerator FetchAsync_200Response_ReturnsData_HasDataTrue()
+        {
+            int port   = FindFreePort();
+            string url = $"http://127.0.0.1:{port}/tiles/{{z}}/{{x}}/{{y}}.pbf";
+            byte[] expected = new byte[] { 0x1A, 0x2B, 0x3C };
+            var listener = StartLoopbackServer($"http://127.0.0.1:{port}/", 200, expected);
+
+            TileResponse response = default;
+            Exception    caught   = null;
+
+            try
+            {
+                using var source = new UnityWebRequestDataSource(url);
+                yield return source.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 })
+                    .ContinueWith((Action<TileResponse>)(r => { response = r; }))
+                    .ToCoroutine(ex => { caught = ex; });
+            }
+            finally
+            {
+                try { listener.Stop(); } catch { }
+            }
+
+            Assert.IsNull(caught,
+                $"A 200 OK response must NOT throw. Exception: {caught?.Message}");
+            Assert.IsTrue(response.HasData,
+                "HTTP 200 with body bytes must produce HasData == true.");
+            Assert.IsNotNull(response.Bytes,
+                "HTTP 200 response Bytes must not be null.");
+            Assert.AreEqual(expected.Length, response.Bytes.Length,
+                "Response byte count must match the served body.");
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // DataSourceRenderPathTests — FileDataSource through the render pipeline
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Proves that <see cref="FileDataSource"/> feeds the render path correctly: bytes round-trip
+    /// through the source and produce an identical vertex CONTENT HASH (not just count) from the
+    /// decode→assemble→project pipeline.
+    ///
+    /// This is an A-vs-A comparison — the same bytes through two sources must produce identical render
+    /// input — so triangulation contributes nothing to what it proves (A0: dropped; the hash covers
+    /// the assembled ring vertices, outer then holes, projected through the existing
+    /// TileToGeoJob → ProjectPointsJob chain, which is the projection coverage this test actually
+    /// carries). A count-only comparison would be blind to divergent vertex positions; content hash
+    /// guards against any regression in decode / assembly / projection across sources.
+    ///
+    /// S51: HttpDataSource deleted from Core; HTTP is now UnityWebRequestDataSource (Unity layer).
+    /// </summary>
+    [TestFixture]
+    public class DataSourceRenderPathTests
+    {
+        [Test]
+        public void FileSource_FeedsRenderPath_VertexAndIndexContentHashMatchesBaseline()
+        {
+            string fixturePath = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
+            FileAssert.Exists(fixturePath);
+            byte[] fixtureBytes = File.ReadAllBytes(fixturePath);
+
+            // 1. Feed bytes via FileDataSource.
+            string tempRoot = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+            string tilePath = Path.Combine(tempRoot, "0", "0", "0.mvt");
+            Directory.CreateDirectory(Path.GetDirectoryName(tilePath));
+            File.WriteAllBytes(tilePath, fixtureBytes);
+
+            byte[] fileBytes;
+            try
+            {
+                using var fileSource = new FileDataSource(tempRoot);
+                // S51: FetchAsync is async (SwitchToThreadPool pattern). It does NOT complete
+                // synchronously, so calling .GetAwaiter().GetResult() immediately throws
+                // "Not yet completed". Parks until the ThreadPool fetch completes.
+                var fetchTask = fileSource.FetchAsync(new TileId { Z = 0, X = 0, Y = 0 });
+                fetchTask.WaitOffPlayerLoop(10000);
+                Assert.IsTrue(fetchTask.Status.IsCompleted(),
+                    "FileDataSource.FetchAsync must complete within 10 seconds.");
+                var fileResp = fetchTask.GetAwaiter().GetResult();
+                Assert.IsTrue(fileResp.HasData, "FileDataSource must return HasData=true");
+                fileBytes = fileResp.Bytes;
+            }
+            finally
+            {
+                if (Directory.Exists(tempRoot))
+                    Directory.Delete(tempRoot, recursive: true);
+            }
+
+            // 2. Run the same decode→assemble→project pipeline on each source's bytes; compare the
+            // CONTENT HASH (an A-vs-A comparison — the triangulator contributes nothing to it, see
+            // class doc).
+            string baselineHash = BuildContentHash(fixtureBytes);
+            string fileHash     = BuildContentHash(fileBytes);
+
+            Assert.AreEqual(baselineHash, fileHash,
+                "FileDataSource render path content hash must match the direct baseline. " +
+                "A mismatch means the file source returns different bytes or the decode path is non-deterministic.");
+
+            Debug.Log($"[DataSourceRenderPathTests] FileDataSource produces an identical content hash: {baselineHash[..16]}...");
+        }
+
+        // ── Helpers ───────────────────────────────────────────────────────────────────────────
+
+        /// <summary>
+        /// Decodes and assembles MVT bytes and returns a SHA-256 hash of the flat, projected ring-vertex
+        /// array — outer then holes, in assembly order, across all polygons (world positions via
+        /// TileToGeoJob → ProjectPointsJob). No triangulation: this test is an A-vs-A comparison of two
+        /// sources' bytes, so the triangulator is not part of the property it proves.
+        /// </summary>
+        private static string BuildContentHash(byte[] mvtBytes)
+        {
+            var layer = MvtFixtureStreams.ReadLayer(mvtBytes, "countries");
+            Assert.IsNotNull(layer, "countries layer must be present");
+
+            double extent = layer.Extent;
+            var tileId    = new TileId { Z = 0, X = 0, Y = 0 };
+            var (bMin, _) = tileId.MercatorBounds();
+            double originX = bMin.x;
+            double originY = bMin.y;
+
+            using var sha256 = SHA256.Create();
+            var vertBytes = new List<byte>();
+
+            for (int fi = 0; fi < layer.Kinds.Count; fi++)
+            {
+                if (layer.Kinds[fi] != TileGeometryType.Polygon) continue;
+
+                List<List<double2>> rings = MvtGeometry.Decode(layer.Commands[fi]);
+                if (rings == null || rings.Count == 0) continue;
+
+                List<Polygon> polygons = PolygonAssembler.Assemble(rings);
+
+                foreach (var polygon in polygons)
+                {
+                    var flatVerts = new List<double2>(polygon.Outer);
+                    if (polygon.Holes != null)
+                        foreach (var hole in polygon.Holes) flatVerts.AddRange(hole);
+                    int vCount = flatVerts.Count;
+                    if (vCount == 0) continue;
+
+                    // Not using 'using var' — CS1654 makes using-var NativeArrays read-only in C# 8+.
+                    var tileCoords = new NativeArray<double2>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                    var geo        = new NativeArray<GeoCoordinate>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                    var worldPos   = new NativeArray<double3>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+                    var vertUp     = new NativeArray<double3>(vCount, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
+
+                    for (int i = 0; i < vCount; i++)
+                        tileCoords[i] = flatVerts[i];
+
+                    try
+                    {
+                        new TileToGeoJob
+                        {
+                            Tile = new TileId { Z = 0, X = 0, Y = 0 }, Extent = extent,
+                            TileCoords = tileCoords, OutGeo = geo,
+                        }.Schedule(vCount, 64).Complete();
+
+                        new ProjectPointsJob<WebMercatorProjection>
+                        {
+                            Projection     = new WebMercatorProjection(),
+                            OriginWorld    = new double3(originX, 0.0, originY),
+                            Points         = geo,
+                            WorldPositions = worldPos,
+                            Normals        = vertUp,
+                        }.Schedule(vCount, 64).Complete();
+
+                        for (int i = 0; i < vCount; i++)
+                        {
+                            vertBytes.AddRange(BitConverter.GetBytes(worldPos[i].x));
+                            vertBytes.AddRange(BitConverter.GetBytes(worldPos[i].y));
+                            vertBytes.AddRange(BitConverter.GetBytes(worldPos[i].z));
+                        }
+                    }
+                    finally
+                    {
+                        tileCoords.Dispose();
+                        geo.Dispose();
+                        worldPos.Dispose();
+                        vertUp.Dispose();
+                    }
+                }
+            }
+
+            return Convert.ToBase64String(sha256.ComputeHash(vertBytes.ToArray()));
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // DataSourceTests — FileDataSource/UnityWebRequestDataSource/MvtTileFeatureSource over UniTask
+    // ───────────────────────────────────────────────────────────────────────────────────
+
     /// <summary>
     /// S03 acceptance tests: BYO data-source interface, LRU cache, scheduler deduplication,
     /// byte-identity (FileDataSource only — HttpDataSource moved to Unity layer in S51),

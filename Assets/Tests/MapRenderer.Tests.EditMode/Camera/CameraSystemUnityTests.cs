@@ -19,7 +19,7 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Cameras
 {
     [TestFixture]
-    public class CameraSystemUnityTests
+    public class CameraSystemUnityTests : BaseTestFixture
     {
         private const float TestViewportHeight = 1080f;
         private const float TestFovDeg         = 60f;
@@ -45,12 +45,6 @@ namespace MapRenderer.Tests.Cameras
             return (view, mapCam, cam, rootGo, camGo);
         }
 
-        private static void TearDown(GameObject rootGo, GameObject camGo)
-        {
-            UnityEngine.Object.DestroyImmediate(rootGo);
-            UnityEngine.Object.DestroyImmediate(camGo);
-        }
-
         // ── MapView.Camera.CurrentProperties reflects the camera state ──────────────────────────────
 
         /// <summary>
@@ -64,14 +58,12 @@ namespace MapRenderer.Tests.Cameras
                 new GeoCoordinate3D { Longitude = 0.0, Latitude = 0.0, Altitude = 0 }, zoom: 5.0, heading: 0, tilt: 0);
 
             var (view, mapCam, _, rootGo, camGo) = CreateCameraRig(initial);
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 mapCam.Apply(new CameraPropertiesUpdate { Zoom = 8.0 });
 
                 Assert.AreEqual(8.0, view.Camera.CurrentProperties.Zoom, 1e-6,
                     "MapView.Camera.CurrentProperties must reflect the camera state after Apply.");
-            }
-            finally { TearDown(rootGo, camGo); }
         }
 
         // ── Instant Apply path allocates zero GC ────────────────────────────────────────────────────
@@ -85,16 +77,14 @@ namespace MapRenderer.Tests.Cameras
         {
             var initial = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, zoom: 5.0, heading: 0, tilt: 0);
             var (_, mapCam, _, rootGo, camGo) = CreateCameraRig(initial);
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 // Warm the path once (JIT, first-call setup) outside the measured region.
                 mapCam.Apply(new CameraPropertiesUpdate { Zoom = 6.0 });
 
                 Assert.That(() => mapCam.Apply(new CameraPropertiesUpdate { Zoom = 7.0, Heading = 10.0 }),
                     Is.Not.AllocatingGCMemory(),
                     "Apply must not allocate (struct patch over readonly-struct state; native transform writes).");
-            }
-            finally { TearDown(rootGo, camGo); }
         }
 
         // ── Pose — D6 fixes ─────────────────────────────────────────────────────────────────────────
@@ -107,8 +97,8 @@ namespace MapRenderer.Tests.Cameras
                 new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, zoom: 8.0, heading: 0.0, tilt: 0.0);
 
             var (_, mapCam, cam, rootGo, camGo) = CreateCameraRig(initial);
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 mapCam.SetProperties(initial);
                 mapCam.SyncToCamera();
 
@@ -118,8 +108,6 @@ namespace MapRenderer.Tests.Cameras
                 float dot = Vector3.Dot(cam.transform.forward, Vector3.down);
                 Assert.Greater(dot, 0.99f,
                     $"Camera must look straight down at tilt=0. Dot(forward,down)={dot:F4}.");
-            }
-            finally { TearDown(rootGo, camGo); }
         }
 
         /// <summary>
@@ -131,8 +119,8 @@ namespace MapRenderer.Tests.Cameras
         {
             var (_, mapCam, cam, rootGo, camGo) = CreateCameraRig(
                 new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 0.0));
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 mapCam.SetProperties(new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 0.0));
                 mapCam.SyncToCamera();
                 Vector3 upNorth = cam.transform.up;
@@ -152,8 +140,6 @@ namespace MapRenderer.Tests.Cameras
                 Assert.Greater(upDiff, 0.5f,
                     $"Camera up-vectors must differ between heading=0 and heading=90 at pitch=0. " +
                     $"Difference magnitude = {upDiff:F3} (expected > 0.5). upNorth={upNorth}, upEast={upEast}.");
-            }
-            finally { TearDown(rootGo, camGo); }
         }
 
         /// <summary>Pitch &gt; 0 tilts camera toward horizon (fwd.Y in (-1, 0)); camera stays above origin.</summary>
@@ -162,8 +148,8 @@ namespace MapRenderer.Tests.Cameras
         {
             var (_, mapCam, cam, rootGo, camGo) = CreateCameraRig(
                 new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 45.0));
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 mapCam.SetProperties(
                     new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 45.0));
                 mapCam.SyncToCamera();
@@ -173,8 +159,6 @@ namespace MapRenderer.Tests.Cameras
                 float dot = Vector3.Dot(cam.transform.forward, Vector3.down);
                 Assert.Greater(dot, 0f,     "Forward must have downward component at tilt=45.");
                 Assert.Less(dot,    0.99f,  "Forward must not be straight down at tilt=45.");
-            }
-            finally { TearDown(rootGo, camGo); }
         }
 
         // ── Clip planes ───────────────────────────────────────────────────────────────────────────
@@ -184,14 +168,12 @@ namespace MapRenderer.Tests.Cameras
         {
             var (_, mapCam, cam, rootGo, camGo) = CreateCameraRig(
                 new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 2.0, 0, 0));
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 float altitude = cam.transform.position.y;
                 Assert.Greater(cam.farClipPlane,  altitude, "farClipPlane must exceed altitude at low zoom.");
                 Assert.Greater(cam.nearClipPlane, 0f,       "nearClipPlane must be positive.");
                 Assert.Less(cam.nearClipPlane, cam.farClipPlane, "near must be less than far.");
-            }
-            finally { TearDown(rootGo, camGo); }
         }
 
         // ── Bearing orbits at pitch > 0 ───────────────────────────────────────────────────────────
@@ -201,8 +183,8 @@ namespace MapRenderer.Tests.Cameras
         {
             var (_, mapCam, cam, rootGo, camGo) = CreateCameraRig(
                 new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 45.0));
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 mapCam.SetProperties(new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0.0, 45.0));
                 mapCam.SyncToCamera();
                 Vector3 posN = cam.transform.position;
@@ -217,8 +199,6 @@ namespace MapRenderer.Tests.Cameras
                 float lateralDiff = Mathf.Abs(posE.x - posN.x) + Mathf.Abs(posE.z - posN.z);
                 Assert.Greater(lateralDiff, posN.y * 0.1f,
                     $"Bearing 0→90 at pitch=45 must move camera laterally. Δ(x+z)={lateralDiff:F2}.");
-            }
-            finally { TearDown(rootGo, camGo); }
         }
 
         // ── Stage U: floating-origin single owner ────────────────────────────────────────────────
@@ -243,8 +223,8 @@ namespace MapRenderer.Tests.Cameras
                 zoom: 9.0, heading: 40.0, tilt: 25.0);
 
             var (view, mapCam, cam, rootGo, camGo) = CreateCameraRig(initial);
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 mapCam.SetProperties(initial);
                 mapCam.SyncToCamera();
 
@@ -265,8 +245,6 @@ namespace MapRenderer.Tests.Cameras
                 var frame = view.View.BuildSceneFrame(mapCam.CurrentProperties);
                 Assert.AreEqual(mapCam.CameraRelativePosition, frame.CameraRelativePosition,
                     "SceneFrame.CameraRelativePosition must be the same value MapCamera stored — single owner.");
-            }
-            finally { TearDown(rootGo, camGo); }
         }
 
         // ── Camera set to perspective ─────────────────────────────────────────────────────────────
@@ -276,8 +254,8 @@ namespace MapRenderer.Tests.Cameras
         {
             var (_, mapCam, cam, rootGo, camGo) = CreateCameraRig(
                 new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0, 0));
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 cam.orthographic = true;
                 mapCam.SetProperties(new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, 0, 0));
                 mapCam.SyncToCamera();
@@ -285,8 +263,6 @@ namespace MapRenderer.Tests.Cameras
                 Assert.IsFalse(cam.orthographic, "Camera must be set to perspective (orthographic=false).");
                 Assert.AreEqual(TestFovDeg, cam.fieldOfView, 0.001f,
                     "Camera.fieldOfView must equal VerticalFovDeg.");
-            }
-            finally { TearDown(rootGo, camGo); }
         }
     }
 }

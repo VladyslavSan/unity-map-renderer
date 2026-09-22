@@ -1,17 +1,107 @@
-// Unity-only, NOT in core-tests.csproj — this test touches UnityEngine.Texture2D, which the fast
-// dotnet-test loop (Tools/core-tests) cannot compile/run. Complements SpriteIndexTests (engine-free JSON
-// parsing, covered by both runners) by exercising the REAL Texture2D decode + row-flip path (SpriteSheet).
+// Text/Sprites/SpriteSheetTests.cs — the sprite-fetch gate, sheet decode/repack, and sprite-source fixture/factory teeth.
+//
+// Fetch gating, then sheet decode, then source.
+//
+// Contents:
+//   SpriteFetchGatingTests  — P2 regression — the sprite sheet must be fetched for a style that has no symbol layers.
+//   SpriteSheetTests        — I4 acceptance: SpriteSheet decodes the fixture sprite PNG, repacks it with a one-texel transparent border per sprite, and flips its rows so a top-left-origin sprite-JSON coord (x,y) — of the repacked index — reads back at Texture2D.GetPixel(x,y).
+//   SpriteSourceTests       — I4 acceptance: FixtureSpriteSource serves the committed fixture sheet (mirrors FixtureGlyphSource's role for glyphs), and SpriteSourceFactory's missing-URL resilience seam (a style with no sprite URL returns null rather than throwing — icons are optional,…
 
+using System.Collections;
+using NUnit.Framework;
+using UnityEngine;
+using UnityEngine.TestTools;
+using MapRenderer.Core.Geo;
+using MapRenderer.Core.Style;
+using MapRenderer.Unity.Rendering.Map;
+using MapRenderer.Unity.Text;
+using SymbolStyle = MapRenderer.Core.Style.Symbol;
 using System;
 using System.IO;
-using NUnit.Framework;
 using Unity.Mathematics;
-using UnityEngine;
 using MapRenderer.Core.Text.Sprites;
-using MapRenderer.Unity.Text;
+using System.Text.RegularExpressions;
+using MapRenderer.Unity.Text.Placement;
+using MapRenderer.Unity.Rendering.Source;
+using Object = UnityEngine.Object;
+
 
 namespace MapRenderer.Tests.Text.Sprites
 {
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SpriteFetchGatingTests — the sprite sheet is fetched even for a style with no symbol layers
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// P2 regression — the sprite sheet must be fetched for a style that has <b>no symbol layers</b>.
+    ///
+    /// <para>The sheet used to be an icons-only resource, so <c>SymbolSubsystem.SetStyle</c> returned
+    /// early ("no symbol layers — stay idle") <i>before</i> kicking off the fetch. Once <c>fill-pattern</c>
+    /// began resolving against the same sheet that early return became a silent feature-killer: a style with
+    /// pattern fills and no symbol layers would never fetch a sheet, so every pattern layer would stay
+    /// unresolved and clip forever — no error, no warning, just missing fills.</para>
+    ///
+    /// <para>Liberty hides this (it has symbol layers), which is exactly why it needs its own tooth.</para>
+    /// </summary>
+    [TestFixture]
+    public class SpriteFetchGatingTests : BaseTestFixture
+    {
+        private const string SymbolFreePatternStyle = @"{
+            ""version"": 8,
+            ""sprite"": ""https://example.invalid/sprite"",
+            ""sources"": { ""src"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
+            ""layers"": [
+                { ""id"": ""plazas"", ""type"": ""fill"", ""source"": ""src"", ""source-layer"": ""transportation"",
+                  ""paint"": { ""fill-pattern"": ""marker"" } }
+            ]
+        }";
+
+        [UnityTest]
+        public IEnumerator StyleWithNoSymbolLayers_StillFetchesTheSpriteSheet()
+        {
+            var go  = Track(new GameObject("SpriteFetchGatingHost"));
+            var cam = go.AddComponent<Camera>();
+            var mapCamera = new MapCamera(cam, new CameraProperties(
+                new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
+                zoom: 5.0, heading: 0.0, tilt: 0.0));
+            using var subsystem = new SymbolSubsystem(mapCamera);
+            {
+                int fetches = 0;
+                subsystem.SpriteSourceFactoryOverride = _ =>
+                {
+                    fetches++;
+                    return new FixtureSpriteSource();
+                };
+
+                // No symbol layers at all — the case the early return used to swallow.
+                var style = StyleParser.Parse(SymbolFreePatternStyle);
+                subsystem.SetStyle(style, System.Array.Empty<SymbolStyle.StyleLayer>());
+
+                Assert.IsFalse(subsystem.HasSymbolLayers,
+                    "precondition: this style must genuinely have no symbol layers, or the test proves nothing");
+                Assert.AreEqual(1, fetches,
+                    "the sprite sheet must be fetched even with zero symbol layers — fill-pattern layers " +
+                    "resolve against the same sheet. A 0 here means the no-symbol-layers early return has " +
+                    "moved back above the fetch and pattern fills will silently never paint.");
+
+                // The fixture source completes synchronously, but the decode hops to the main thread — pump a
+                // few frames so the sheet actually lands rather than asserting on the in-flight state.
+                for (int i = 0; i < 8 && subsystem.SpriteAtlas == null; i++) yield return null;
+
+                Assert.IsNotNull(subsystem.SpriteAtlas,
+                    "the fetched sheet must reach SpriteAtlas — that is what RenderLayerSet.SetSprites pushes " +
+                    "to the fill layers.");
+                Assert.IsTrue(
+                    MapRenderer.Core.Style.Fill.FillPattern.TryResolve("marker", subsystem.SpriteAtlas, out _),
+                    "the fixture sheet's 'marker' sprite must resolve through the delivered atlas");
+            }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SpriteSheetTests — decode, repack with a one-texel border, and flip rows
+    // ───────────────────────────────────────────────────────────────────────────────────
+
     /// <summary>
     /// I4 acceptance: <see cref="SpriteSheet"/> decodes the fixture sprite PNG, repacks it with a one-texel
     /// transparent border per sprite, and flips its rows so a top-left-origin sprite-JSON coord
@@ -180,6 +270,98 @@ namespace MapRenderer.Tests.Text.Sprites
             {
                 sheet.Dispose();
             }
+        }
+    }
+
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // SpriteSourceTests — the fixture source and the missing-URL resilience seam
+    // ───────────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// I4 acceptance: <see cref="FixtureSpriteSource"/> serves the committed fixture sheet (mirrors
+    /// <c>FixtureGlyphSource</c>'s role for glyphs), and <see cref="SpriteSourceFactory"/>'s
+    /// missing-URL resilience seam (a style with no <c>sprite</c> URL returns <c>null</c> rather than
+    /// throwing — icons are optional, unlike glyphs).
+    /// </summary>
+    [TestFixture]
+    public class SpriteSourceTests : BaseTestFixture
+    {
+        [Test]
+        public void FixtureSpriteSource_FetchAsync_ReturnsIndexAndPngBytes()
+        {
+            using var source = new FixtureSpriteSource();
+
+            // FixtureSpriteSource resolves via UniTask.FromResult -- already completed, so
+            // GetAwaiter().GetResult() does not block (mirrors the synchronous-fixture-source pattern;
+            // contrast the SwitchToThreadPool sources, which need a spin-wait).
+            SpriteResponse response = source.FetchAsync().GetAwaiter().GetResult();
+
+            Assert.IsTrue(response.HasData, "the committed fixture sheet must be found");
+            Assert.IsNotNull(response.Png);
+            Assert.Greater(response.Png.Length, 0, "fixture PNG bytes must be non-empty");
+
+            SpriteIndex index = SpriteIndex.Parse(response.Json);
+            Assert.AreEqual(3, index.Count, "fixture sprite.json declares 3 sprites (marker/star/dot)");
+            Assert.IsTrue(index.TryGetSprite("marker", out _));
+            Assert.IsTrue(index.TryGetSprite("star", out _));
+            Assert.IsTrue(index.TryGetSprite("dot", out _));
+
+            // The SOURCE dimensions, asserted directly off a decode. Not derivable from the bound sheet:
+            // the repack packs the three indexed cells into a 64x26 output whatever the source height was,
+            // because source height is not a packing lower bound (ShelfRectPacker's only lower bound is
+            // width). A 64x128 fixture would therefore satisfy the repacked-size comparison below while
+            // silently breaking every sheet coordinate the other icon tests hand-derive — so the height
+            // tooth has to be taken here, on the decode itself.
+            var decoded = Track(new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, mipChain: false));
+            {
+                // The static form of the `LoadImage` EXTENSION method — this file deliberately carries no
+                // top-level `using UnityEngine;` (it qualifies its few engine references instead), and an
+                // extension method cannot be reached through a qualified type name.
+                Assert.IsTrue(UnityEngine.ImageConversion.LoadImage(decoded, response.Png),
+                    "the fetched bytes must decode as a PNG");
+                Assert.AreEqual(new int2(64, 64), new int2(decoded.width, decoded.height),
+                    "the committed fixture sheet is 64x64 — the source the repack is planned over");
+            }
+
+            // Round-trip into a real SpriteSheet: what the sheet BINDS is the padded repack of that decode,
+            // so the size to compare against is the planner's over the 64x64 source just proven above.
+            var sheet = new SpriteSheet(response.Png, index);
+            try
+            {
+                SpritePadPlan plan = SpriteSheetPadder.Plan(index, new int2(64, 64), padding: 1);
+                Assert.AreEqual(plan.Size, sheet.View.Size,
+                    "the bound sheet must be the padded repack of the 64x64 fixture decode");
+            }
+            finally
+            {
+                sheet.Dispose();
+            }
+        }
+
+        [Test]
+        public void SpriteSourceFactory_NullSpriteUrl_ReturnsNullAndWarnsOnce()
+        {
+            // The "warn once" latch is process-wide, and as of P2 the sprite fetch runs for far more styles
+            // (it is no longer gated on a style having symbol layers — fill-pattern resolves against the same
+            // sheet). Any earlier test that applies a sprite-less style consumes the one warning, so clear
+            // the latch here rather than let this assertion depend on test order.
+            SpriteSourceFactory.WarnedMissingUrl = false;
+
+            LogAssert.Expect(UnityEngine.LogType.Warning, new Regex("SpriteSourceFactory"));
+
+            ISpriteSource source = SpriteSourceFactory.Create(new StyleDocument { Sprite = null });
+
+            Assert.IsNull(source, "a style with no sprite URL must yield a null source, not throw");
+        }
+
+        [Test]
+        public void SpriteSourceFactory_WithSpriteUrl_ReturnsNonNullSource()
+        {
+            using ISpriteSource source =
+                SpriteSourceFactory.Create(new StyleDocument { Sprite = "https://example.invalid/sprite" });
+
+            Assert.IsNotNull(source, "a style with a sprite URL must yield a real source");
+            Assert.IsInstanceOf<UnityWebRequestSpriteSource>(source);
         }
     }
 }

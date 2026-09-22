@@ -35,7 +35,7 @@ using Fill = MapRenderer.Core.Style.Fill;
 namespace MapRenderer.Tests.Style
 {
     [TestFixture]
-    public class DevicePixelRatioBindingTests
+    public class DevicePixelRatioBindingTests : BaseTestFixture
     {
         private const double Zoom = 8.0;
 
@@ -87,9 +87,8 @@ namespace MapRenderer.Tests.Style
         public void LinePxUniforms_DoubleAtDpr2_AndAreStyledLogicalValuesAtDpr1()
         {
             var paint = FirstLayer<Line.StyleLayer>(LinePaintStyleJson).Paint;
-            Material mat = MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load());
+            Material mat = Track(MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load()));
             Assert.IsNotNull(mat, "Map/Line base material must be configured.");
-            try
             {
                 var applier = new ZoomStyleApplier(mat);
                 MaterialFactory.BindLinePaintToApplier(paint, applier, mat);
@@ -123,7 +122,6 @@ namespace MapRenderer.Tests.Style
                         $"{name} must return to {styled} when the ratio returns to 1 (a window dragged back " +
                         "off a high-DPI panel).");
             }
-            finally { Object.DestroyImmediate(mat); }
         }
 
         /// <summary>
@@ -144,8 +142,7 @@ namespace MapRenderer.Tests.Style
                 "precondition: line-width must parse as data-driven, or this row silently tests the " +
                 "constant branch that the previous test already covers.");
 
-            Material mat = MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load());
-            try
+            Material mat = Track(MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load()));
             {
                 var applier = new ZoomStyleApplier(mat);
                 MaterialFactory.BindLinePaintToApplier(paint, applier, mat);
@@ -162,7 +159,6 @@ namespace MapRenderer.Tests.Style
                     "Reading 1 here means the data-driven branch was left out of the conversion and every " +
                     "feature-styled road stays at its literal screen width.");
             }
-            finally { Object.DestroyImmediate(mat); }
         }
 
         // ── The two translates ───────────────────────────────────────────────────────────────────
@@ -176,9 +172,8 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void TranslateUniforms_ScaleBothComponentsWithDpr()
         {
-            Material lineMat = MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load());
-            Material fillMat = MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load());
-            try
+            Material lineMat = Track(MaterialFactory.CreateLineMaterial(MapMaterialSetTestUtil.Load()));
+            Material fillMat = Track(MaterialFactory.CreateFillMaterial(MapMaterialSetTestUtil.Load()));
             {
                 var lineApplier = new ZoomStyleApplier(lineMat);
                 MaterialFactory.BindLinePaintToApplier(
@@ -211,11 +206,6 @@ namespace MapRenderer.Tests.Style
                 AssertTranslate(lineMat, lineId, "line-translate", 10f, -14f, 2.0);
                 AssertTranslate(fillMat, fillId, "fill-translate", 18f, -22f, 2.0);
             }
-            finally
-            {
-                Object.DestroyImmediate(lineMat);
-                Object.DestroyImmediate(fillMat);
-            }
         }
 
         // ── The halo pair: moved out ──────────────────────────────────────────────────────────────
@@ -247,7 +237,7 @@ namespace MapRenderer.Tests.Style
         public void BrgPackedWidth_InheritsTheDeviceConversion()
         {
             var style = StyleParser.Parse(LinePaintStyleJson);
-            var set   = new RenderLayerSet();
+            using var set   = new RenderLayerSet();
             set.Build(style, Zoom, MapMaterialSetTestUtil.Load());
             Assert.That(set.Count, Is.EqualTo(1), "line-only style must build exactly one render layer.");
 
@@ -260,9 +250,8 @@ namespace MapRenderer.Tests.Style
                 "precondition: the layer material's _Width must already be the dpr-2 value (6 × 2). " +
                 "Without this the backend assertion below would pass for the wrong reason.");
 
-            var brg  = new BrgTileRenderer(new[] { mat });
-            var mesh = new Mesh();
-            try
+            using var brg  = new BrgTileRenderer(new[] { mat });
+            var mesh = Track(new Mesh());
             {
                 int handle = brg.AddTileLayer(mesh, double3.zero, 0, new TileId { Z = 0, X = 0, Y = 0 });
                 brg.Rebuild(SceneFrame.Mercator(double2.zero));
@@ -274,12 +263,6 @@ namespace MapRenderer.Tests.Style
                     $"BRG packed _Width ({packedWidth}) must equal the material's ({matWidth}). The backends " +
                     "read the material, so a conversion done at the material level is inherited by all three — " +
                     "this pins that, rather than leaving it as an argument.");
-            }
-            finally
-            {
-                brg.Dispose();
-                Object.DestroyImmediate(mesh);
-                set.Dispose();
             }
         }
 
@@ -311,7 +294,7 @@ namespace MapRenderer.Tests.Style
             {
                 string path = Path.Combine(
                     Directory.GetParent(Application.dataPath)!.FullName, relativePath);
-                Assert.IsTrue(File.Exists(path), $"the padding path's source must exist at {relativePath}.");
+                FileAssert.Exists(path, $"the padding path's source must exist at {relativePath}.");
                 string source = File.ReadAllText(path);
 
                 Assert.That(source, Does.Not.Contain("LogicalToDevicePx"),

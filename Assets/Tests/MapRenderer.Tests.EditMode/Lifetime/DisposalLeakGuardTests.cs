@@ -56,7 +56,7 @@ namespace MapRenderer.Tests.Lifetime
     ///       tile-owned Meshes).
     /// </summary>
     [TestFixture]
-    public class DisposalLeakGuardTests
+    public class DisposalLeakGuardTests : BaseTestFixture
     {
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
@@ -568,7 +568,7 @@ namespace MapRenderer.Tests.Lifetime
             long baseline = MeshDataPayload.DebugLiveAllocCount;
 
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go    = new GameObject("MapView_PoolRaceRegression");
+            var go    = Track(new GameObject("MapView_PoolRaceRegression"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = TwoFillLayerStyle();
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0;
@@ -667,7 +667,6 @@ namespace MapRenderer.Tests.Lifetime
             finally
             {
                 view.Teardown();
-                Object.DestroyImmediate(go);
             }
         }
 

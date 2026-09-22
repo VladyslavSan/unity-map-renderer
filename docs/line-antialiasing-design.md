@@ -616,8 +616,8 @@ vertex at the sign this fan requires", not "duplicate every vertex per sign".)*
 3. **Worst-case sizing.** `RibbonJob.MaxVertexCount` (`:74-85`): `startCap` `rs + 3 → rs + 4`,
    `endCap` `rs + 1 → rs + 2`. `MaxIndexCount` is **unchanged** (no new triangles). Three callers depend on
    these (`StyledLineTileBuilder.cs:251-252`, `FlatRibbon.Build` call sites,
-   `BurstJobRunOffMainSpikeTests.cs:131-132`). The (since-retired) managed tessellator was `List`-based and
-   had no formula to update.
+   `GraphDeterminismTests.cs:153`, the merged home of the former `BurstJobRunOffMainSpikeTests.cs`). The
+   (since-retired) managed tessellator was `List`-based and had no formula to update.
 4. **A new tooth, T3c** (§7) — neither T1 nor T3a catches this: T1 cuts perpendicular to a diagonal line,
    never a cap flank, and T3a asserts no interior *dip*, whereas this is a **missing fade on part of the
    outer silhouette**. Without T3c it would pass the entire headless gate.

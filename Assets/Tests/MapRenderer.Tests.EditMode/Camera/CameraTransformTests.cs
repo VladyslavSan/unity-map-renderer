@@ -17,7 +17,7 @@ using MapCamera = MapRenderer.Unity.Rendering.Map.MapCamera;
 namespace MapRenderer.Tests.Cameras
 {
     [TestFixture]
-    public class CameraTransformTests
+    public class CameraTransformTests : BaseTestFixture
     {
         // Shared deterministic viewport height so formula results are reproducible across machines.
         private const float TestViewportHeight = 1080f;
@@ -64,10 +64,9 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void MapCamera_DevicePixelRatio_HalvesAltitudeAt2x_IdenticalAt1x()
         {
-            var camGo = new GameObject("Camera_DprTest");
+            var camGo = Track(new GameObject("Camera_DprTest"));
             var cam   = camGo.AddComponent<Camera>();
             cam.targetTexture = new RenderTexture((int)TestViewportHeight, (int)TestViewportHeight, 0);
-            try
             {
                 var view = Cam(0.0, 0.0, 8.0);
                 double expected1 = CameraPoseMath.AltitudeForZoom(view.Zoom, cam.pixelHeight,       view.VerticalFovDeg);
@@ -82,10 +81,6 @@ namespace MapRenderer.Tests.Cameras
                 Assert.AreEqual(expected1, y1, expected1 * 1e-5, "DPR=1 altitude == raw AltitudeForZoom(vp)");
                 Assert.AreEqual(expected2, y2, expected2 * 1e-5, "DPR=2 altitude == AltitudeForZoom(vp/2)");
                 Assert.AreEqual(y1 / 2.0, y2, y1 * 1e-4, "DPR=2 altitude is HALF the DPR=1 altitude");
-            }
-            finally
-            {
-                Object.DestroyImmediate(camGo);
             }
         }
 
@@ -106,10 +101,9 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void MapCamera_ViewportLogicalPx_IsFiniteAtNonPositiveDevicePixelRatio()
         {
-            var camGo = new GameObject("Camera_DprGuardTest");
+            var camGo = Track(new GameObject("Camera_DprGuardTest"));
             var cam   = camGo.AddComponent<Camera>();
             cam.targetTexture = new RenderTexture((int)TestViewportHeight, (int)TestViewportHeight, 0);
-            try
             {
                 var view = Cam(0.0, 0.0, 8.0);
                 foreach (double ratio in new[] { 0.0, -2.0 })
@@ -132,10 +126,6 @@ namespace MapRenderer.Tests.Cameras
                 Assert.AreEqual(dpr2.ViewportPx.y / 2.0, dpr2.ViewportLogicalPx.y, 0.0,
                     "a usable ratio still divides — exactly, not via a reciprocal.");
             }
-            finally
-            {
-                Object.DestroyImmediate(camGo);
-            }
         }
 
         // ── Tooth 1 (DECISIVE) — overhead at pitch 0 ─────────────────────────────────────────────
@@ -151,8 +141,8 @@ namespace MapRenderer.Tests.Cameras
         public void PitchZero_CameraOverhead_LooksDown()
         {
             var (ctrl, cam, rootGo, camGo) = CreatePair();
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 var view = Cam(0.0, 0.0, 8.0, heading: 0.0, tilt: 0.0);
                 ctrl.ApplyCameraTransform(view);
 
@@ -162,12 +152,6 @@ namespace MapRenderer.Tests.Cameras
                 float dot = Vector3.Dot(cam.transform.forward, Vector3.down);
                 Assert.Greater(dot, 0.99f,
                     $"Camera must look straight down at pitch=0. Dot(forward, down) = {dot:F4}, expected > 0.99.");
-            }
-            finally
-            {
-                Object.DestroyImmediate(rootGo);
-                Object.DestroyImmediate(camGo);
-            }
         }
 
         // ── Tooth 2 — zoom → altitude monotonic and magnitude-pinned ─────────────────────────────
@@ -181,8 +165,8 @@ namespace MapRenderer.Tests.Cameras
         public void HigherZoom_LowerAltitude_Monotonic_AndPinnedAgainstFormula()
         {
             var (ctrl, cam, rootGo, camGo) = CreatePair();
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 var viewLow  = Cam(0.0, 0.0, 2.0);
                 var viewHigh = Cam(0.0, 0.0, 16.0);
 
@@ -214,12 +198,6 @@ namespace MapRenderer.Tests.Cameras
                     $"z2 altitude {yLow:E4} must match AltitudeForZoom result {expectedLow:E4} (0.1% tol).");
                 Assert.AreEqual(expectedHigh, yHigh, tolHigh,
                     $"z16 altitude {yHigh:E4} must match AltitudeForZoom result {expectedHigh:E4} (0.1% tol).");
-            }
-            finally
-            {
-                Object.DestroyImmediate(rootGo);
-                Object.DestroyImmediate(camGo);
-            }
         }
 
         /// <summary>
@@ -265,8 +243,8 @@ namespace MapRenderer.Tests.Cameras
         public void LowZoom_FarClipContainsView()
         {
             var (ctrl, cam, rootGo, camGo) = CreatePair();
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 var view = Cam(0.0, 0.0, 2.0);
                 ctrl.ApplyCameraTransform(view);
 
@@ -280,12 +258,6 @@ namespace MapRenderer.Tests.Cameras
 
                 Assert.Less(cam.nearClipPlane, cam.farClipPlane,
                     "nearClipPlane must be less than farClipPlane.");
-            }
-            finally
-            {
-                Object.DestroyImmediate(rootGo);
-                Object.DestroyImmediate(camGo);
-            }
         }
 
         // ── D1 sign guard — pitch tilts toward horizon, bearing rotates about +Y ─────────────────
@@ -299,8 +271,8 @@ namespace MapRenderer.Tests.Cameras
         public void PitchNonZero_TiltsTowardHorizon_CameraStillAbove()
         {
             var (ctrl, cam, rootGo, camGo) = CreatePair();
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 var view = Cam(0.0, 0.0, 8.0, heading: 0.0, tilt: 45.0);
                 ctrl.ApplyCameraTransform(view);
 
@@ -312,12 +284,6 @@ namespace MapRenderer.Tests.Cameras
                     $"Camera forward must have a downward component at pitch=45. Dot={dot:F4}.");
                 Assert.Less(dot, 0.99f,
                     $"Camera must NOT be straight down at pitch=45 (should be tilted). Dot={dot:F4}.");
-            }
-            finally
-            {
-                Object.DestroyImmediate(rootGo);
-                Object.DestroyImmediate(camGo);
-            }
         }
 
         /// <summary>
@@ -332,8 +298,8 @@ namespace MapRenderer.Tests.Cameras
         public void BearingWithPitch_CameraOrbitsLaterally_YStaysPositive()
         {
             var (ctrl, cam, rootGo, camGo) = CreatePair();
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 // Reference: bearing=0, pitch=45 → camera is above+in-front of origin
                 var viewNorth = Cam(0.0, 0.0, 8.0, heading:  0.0, tilt: 45.0);
                 ctrl.ApplyCameraTransform(viewNorth);
@@ -357,12 +323,6 @@ namespace MapRenderer.Tests.Cameras
                 Assert.Greater(posDiff, yNorth * 0.1f,
                     $"Bearing change from 0→90 at pitch=45 must move the camera laterally. " +
                     $"Δ(x+z) = {posDiff:F2}, threshold = {yNorth * 0.1f:F2}.");
-            }
-            finally
-            {
-                Object.DestroyImmediate(rootGo);
-                Object.DestroyImmediate(camGo);
-            }
         }
 
         // ── Camera is set to perspective ──────────────────────────────────────────────────────────
@@ -375,8 +335,8 @@ namespace MapRenderer.Tests.Cameras
         public void ApplyCameraTransform_SetsCameraToPerspective()
         {
             var (ctrl, cam, rootGo, camGo) = CreatePair();
-            try
-            {
+            Track(rootGo);
+            Track(camGo);
                 cam.orthographic = true; // simulate scene-asset default
                 var view = Cam(0.0, 0.0, 8.0);
                 ctrl.ApplyCameraTransform(view);
@@ -385,12 +345,6 @@ namespace MapRenderer.Tests.Cameras
                     "ApplyCameraTransform must set Camera.orthographic = false.");
                 Assert.AreEqual(TestFovDeg, cam.fieldOfView, 0.001f,
                     "Camera.fieldOfView must match VerticalFovDeg.");
-            }
-            finally
-            {
-                Object.DestroyImmediate(rootGo);
-                Object.DestroyImmediate(camGo);
-            }
         }
     }
 }

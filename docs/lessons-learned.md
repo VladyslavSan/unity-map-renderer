@@ -959,6 +959,24 @@ batch mode" explanation is ruled out, and reaching for it will send you the wron
 The precise missing precondition has not been isolated; what is established is the discriminator above
 (full run green, filtered run red, stock-URP rung among the casualties).
 
+**This is not confined to `ShadowReceiveBisectTests`.** The same artefact appeared on
+`Visual.DataDrivenFillSnapshotTests.DataDriven_ConstantControl_ProducesSingleCluster` — a lit FILL test
+with a directional light, no shadows involved — so the common factor looks like lit content rather than
+the shadow path. Treat a filtered run as an invalid instrument for any lit visual fixture, not just this
+one.
+
+The cheap experiment that tells "I broke it" apart from "I measured wrong", and it costs one minute:
+`git stash push -u` to the last commit, confirm `git status` is clean, run the single test filtered, and
+see whether it still fails. It did — on code neither the change nor its author had touched:
+
+```
+pristine committed code + FULL run      → PASS
+pristine committed code + FILTERED run  → FAIL   (deterministic, repeated)
+```
+
+A failure that reproduces on a pristine tree is never your change. Do this before debugging a
+filtered-run red, not after.
+
 - **An intermittent multi-second tile-load stall in the Editor that clears for the rest of the session, with
   framerate unaffected, is a Burst SYNCHRONOUS compile on a background worker, not the network.**
   `[BurstCompile(CompileSynchronously = true)]` blocks the calling thread until Burst finishes compiling that
@@ -970,6 +988,63 @@ The precise missing precondition has not been isolated; what is established is t
   `Library/BurstCache` (or touching a file in the jobs assembly) and re-entering play: the stall returns
   once, then disappears for the rest of the session. Editor-only — a player build is AOT-compiled, so none
   of this ships.
+
+- **A `private` `[SetUp]`/`[TearDown]`/`[OneTimeSetUp]` method declared on a base test-fixture class
+  silently never runs.** NUnit discovers these by reflection and does not see a private one on a base
+  class — no error, no warning, the hook is simply never invoked. A fixture that looks like it saves and
+  restores global state then restores nothing. `protected` is the minimum visibility that works; keep the
+  method non-virtual if the point is that a subclass cannot shadow or skip it — visibility was never what
+  bought that. Measured a 3-level hierarchy, two tests per fixture: `private [SetUp]` on the base ran **0**
+  times, `protected [SetUp]` ran **2** times (once per test) — in both standalone NUnit 3.14 and the NUnit
+  3.5.0.0 Unity vendors through `com.unity.ext.nunit`. NUnit runs the attributed hooks at every level of the
+  hierarchy, base-first on setup. Guard against a silent regression with a test that asserts the base
+  hook's effect is visible from inside a test body (`VisualTestFixtureDiscoveryTests`, UMR-176).
+
+- **An unrestored `QualitySettings`/`RenderSettings` write in a batch-mode test escapes the process into
+  `ProjectSettings/*.asset`, a TRACKED file.** Unity serializes `QualitySettings.SetQualityLevel(...)` to
+  `ProjectSettings/QualitySettings.asset` even in batch mode, so a visual test that forces the quality
+  level (or the ambient recipe) and does not restore it does more than leak into the next test — it
+  modifies the repository, and every later run reads the changed value as the project default. This is why
+  the restore in a render-state fixture is load-bearing, not tidy, and it is invisible from reading the
+  test body alone. Canary: after running the visual suite, `git status` shows nothing outside `Assets/`
+  (UMR-176 — a RED run with the restore deliberately disabled left `m_CurrentQuality: 1` at `0` in
+  `ProjectSettings/QualitySettings.asset`).
+
+- **`[UnitySetUp]`/`[UnityTearDown]` on a derived fixture run OUTSIDE a `[SetUp]`/`[TearDown]` pair on its
+  base, not nested inside it — inverting NUnit's usual base-first rule.** Measured ordering, sync hooks on
+  the base class and coroutine hooks on the derived fixture:
+  ```
+  [UnitySetUp]    derived
+  [SetUp]         base
+  test body
+  [TearDown]      base
+  [UnityTearDown] derived
+  ```
+  The two DO coexist — a coroutine fixture can derive from a synchronous base — but the derived coroutine
+  setup cannot rely on the base having applied anything yet (it runs first), and the derived coroutine
+  teardown cannot rely on that state still being applied (the base already restored it). A `[UnitySetUp]`
+  that pumps frames to settle a scene settles it BEFORE the base's render state is applied; a
+  `[UnityTearDown]` that samples a final frame sees already-restored state. Where a coroutine fixture needs
+  base state applied around it, put that state's own hook on a `[UnitySetUp]`/`[UnityTearDown]` too, or make
+  the coroutine fixture a sibling base rather than a subclass (measured once, UMR-176, but the mechanism —
+  Unity's coroutine hooks wrapping the sync chain rather than nesting in it — is deterministic).
+
+- **A statement that provably never executes can still be required for the build.** C# definite-return
+  analysis does not know that `Assert.Inconclusive` (or any other always-throwing call) throws, so a
+  `return <expr>;` sitting after one is unreachable at runtime AND may be the only thing making its method
+  satisfy CS0161. Deleting it on the reachability argument alone compiles by luck of the corpus, not by
+  construction.
+
+  Surfaced while removing 104 unreachable returns after `Assert.Inconclusive` (UMR-176): a scanner matched
+  `return <expr>;` as well as bare `return;`, justified correctly on runtime grounds, with no check that the
+  enclosing method retained a terminal return. Exactly one site in the tree had that shape
+  (`LayerOcclusionTests.GpuContextInconclusive`), and it was safe only because its `return false;` sits
+  outside the `try`/`finally` and was untouched.
+
+  A deletion argued from "this never runs" needs a SECOND argument about control flow. A brace-balance check
+  does not catch this — the braces stay balanced either way. And when removing a guard would leave a method
+  with no exit value, that is a signal the guard was load-bearing for something other than the condition
+  being removed — surface it, do not add a replacement return to make it compile.
 
 ## Verification and test design
 
@@ -1222,3 +1297,70 @@ on `LinePaintProperties`, with only one holding a production caller, are eight f
 "cleaned up" into an inconsistent family. Look at the declaring type before acting on a flagged member: keep
 it if it is one of several uniform siblings, or if a shader or other non-C#-call-site consumer reaches it by
 name.
+
+### Before deleting a skip-guard: the degenerate-substitution test
+
+A visual test often opens with a guard — "nothing rendered, skip" — and it is tempting to delete the guard
+on the grounds that the assertion below will catch the same thing. **Often it will not, and the failure is
+silent: the test still runs, still passes, and now checks nothing.**
+
+Compute **D**, what each quantity the test measures reads when the subject does not render. D is usually 0,
+but compute it per path, never assume: for a two-region comparison it is *the same value in both*; for a
+helper with a sentinel it is whatever the sentinel makes downstream code return (`row = -1` →
+`IsCenterPixelBackground` returns `true`).
+
+Substitute D into **every assertion that would then run — including in the callers, when the guard sits in a
+helper.** Three outcomes:
+
+1. **D is excluded by an absolute threshold** — `> tol`, `>= floor`, an `InRange` band not containing D, or a
+   threshold on the far side of zero like `< -5`. Safe to delete.
+2. **D satisfies the assertion** — `|a - b| <= tol`, `variance < max`, `count <= N`, an `IsFalse` whose flag
+   stays false on the degenerate path. **The guard is the only teeth. Convert it to `Assert.Fail`, never
+   delete.**
+3. **D fails only by strictness** — `a > b` where both sides collapse to D, so it fails solely because
+   `0 > 0` is false. Fragile: safe against an exactly-zero blank, a coin flip against a near-zero one. Treat
+   as case 2 unless the reading is provably exactly zero.
+
+**The direction of the operator is not the discriminator.** `Assert.Less(rowShift, -5f)` looks like a "small"
+assertion and is case 1, because the threshold sits on the far side of zero. Two `Assert.IsFalse` calls in
+this suite have opposite verdicts: `IsFalse(solidCenterIsBg)` is safe because the sentinel makes the helper
+return `true`, while `IsFalse(touchesBorder)` is case 2 because `TryCentroid` returns early with the flag
+still `false`. Nothing about the form separates them — only what the degenerate path produces.
+
+**This is a screen, not a verdict.** It is conservative and will flag a site that a separate argument clears:
+a branch that is provably unreachable by control flow is safe for a reason the test cannot see.
+
+**Companion rule.** An absolute threshold whose adequacy rests on fixture content is only as safe as the
+thinnest fixture, and must be *measured*, not reasoned about — then **record the measured margin beside the
+threshold**. `MaxDifferingFraction = 0.002` tells the next reader nothing; *"0.002 — the thinnest golden,
+`gv1-label`, is 0.271% inked, a 1.36x margin"* tells them at once that one re-bake with a shorter label eats
+it.
+
+*Why this is written down:* a review of 28 such deletions found four wrong, one of which —
+`Assert.LessOrEqual(|rim / interior - 1.0|, 0.02)` over a plain column mean with no background subtraction —
+passes *perfectly* when nothing renders, because both readings become the identical clear colour and the
+ratio is exactly 1.
+
+### The leak instruments are `Mesh`-only and self-baselined, so a leaked `Material` is invisible
+
+Every leak check in the suite counts `Resources.FindObjectsOfTypeAll<Mesh>()` — `RestyleHarness.cs`,
+`SourceTileGraphBuildTests.cs`, `DisposalLeakGuardTests.cs`, `SymbolWorldRenderTests.cs`. Nothing counts
+`Material`, and each one compares against a baseline taken *inside its own test*, so an object leaked by a
+different test sits in both readings and subtracts out.
+
+**A test that constructs a `UnityEngine.Object` and never destroys it goes green.** When converting cleanup
+in bulk, the only guard is reading the code: every constructed object must reach a destroy, and no grep of
+the results will tell you otherwise.
+
+### `using` needs `IDisposable`, or a `ref struct`. A `Dispose()` method is not enough
+
+Pattern-based `using` — the form that needs no interface — applies **only to `ref struct` types**. A plain
+class with a `Dispose()` method does not qualify: `CS1674`. `UnityEngine.Object` and its family
+(`GameObject`, `Material`, `Mesh`) implement nothing of the sort, so `using var go = new GameObject(...)`
+does not compile either.
+
+The mirror-image error compiles cleanly and fails at runtime: **a `using` on a local that the method
+RETURNS.** The object is disposed at the end of the factory, before the caller ever touches it —
+`using var set = new RenderLayerSet(); set.Build(...); return set;` handed every caller an emptied set. The
+rule that covers both: **`using` belongs where the object is constructed and consumed in the same method; a
+factory that returns the object owns nothing, and the caller tracks the return.**

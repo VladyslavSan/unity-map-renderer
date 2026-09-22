@@ -6,3 +6,4 @@ using System.Runtime.CompilerServices;
 [assembly: InternalsVisibleTo("MapRenderer.Tests.EditMode")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.Shared")]
 [assembly: InternalsVisibleTo("MapRenderer.Tests.PlayMode")]
+[assembly: InternalsVisibleTo("MapRenderer.Tests.Visual")]

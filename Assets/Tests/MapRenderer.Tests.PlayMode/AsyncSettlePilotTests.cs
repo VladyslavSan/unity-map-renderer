@@ -17,7 +17,7 @@ namespace MapRenderer.Tests.Async
     /// it. This asymmetry is the whole reason the async settle tests belong here, not in EditMode.
     /// </summary>
     [TestFixture]
-    public class AsyncSettlePilotTests
+    public class AsyncSettlePilotTests : BaseTestFixture
     {
         private static CameraProperties Cam(double lon, double lat, double zoom)
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
@@ -39,7 +39,7 @@ namespace MapRenderer.Tests.Async
         public IEnumerator RealFillBuild_SettlesUnderYieldFramePump()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = new GameObject("AsyncSettlePilotView");
+            var go   = Track(new GameObject("AsyncSettlePilotView"));
             var view = go.AddComponent<MapView>();
             view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.WithTestMaterials().WithTestCamera();
@@ -63,7 +63,7 @@ namespace MapRenderer.Tests.Async
                 Assert.IsTrue(view.AllTilesSettled(),
                     "the ThreadPool mesh build must settle under a real-frame yield pump (the PlayMode premise).");
             }
-            finally { view.Teardown(); Object.DestroyImmediate(go); }
+            finally { view.Teardown(); }
         }
     }
 }

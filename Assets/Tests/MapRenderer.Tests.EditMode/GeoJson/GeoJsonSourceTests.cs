@@ -32,7 +32,7 @@ namespace MapRenderer.Tests.GeoJsons
     /// native buffers are freed by the lease's last release).
     /// </summary>
     [TestFixture]
-    public class GeoJsonSourceTests
+    public class GeoJsonSourceTests : BaseTestFixture
     {
         private static readonly TileId WorldTile = new TileId { Z = 0, X = 0, Y = 0 };
 
@@ -179,6 +179,7 @@ namespace MapRenderer.Tests.GeoJsons
         public void T1_AnInlineGeoJsonSource_RendersItsAuthoredPolygon()
         {
             var view = NewView(out var go);
+            Track(go);
             int docFetches = 0, factoryCalls = 0;
             view.View.DocumentLoaderOverride    = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(""); };
             view.View.TileSourceFactoryOverride = template => { Interlocked.Increment(ref factoryCalls); return TestDataSource.Absent(); };
@@ -324,7 +325,7 @@ namespace MapRenderer.Tests.GeoJsons
                     "collapsed-mesh failure the positional arms above are deliberately not asked to catch; " +
                     "twice it would be a doubled or self-overlapping fan.");
             }
-            finally { view.Teardown(); Object.DestroyImmediate(go); }
+            finally { view.Teardown(); }
         }
 
         /// <summary>
@@ -344,6 +345,7 @@ namespace MapRenderer.Tests.GeoJsons
         public void T1_AnEmptyInlineDataset_RendersNothing()
         {
             var view = NewView(out var go);
+            Track(go);
             try
             {
                 SpinToCompleted(view.SetStyle(StyleParser.Parse(StyleWithInlineData(
@@ -360,7 +362,7 @@ namespace MapRenderer.Tests.GeoJsons
                     "an empty FeatureCollection must produce ZERO vertices. If it produces any, the sibling " +
                     "tooth is not observing the dataset — it is observing that the pipeline draws something.");
             }
-            finally { view.Teardown(); Object.DestroyImmediate(go); }
+            finally { view.Teardown(); }
         }
 
         /// <summary>A geojson source whose <c>data</c> is a URL string (not supported in v1) or malformed must
@@ -383,6 +385,7 @@ namespace MapRenderer.Tests.GeoJsons
         public void UnsupportedOrMalformedData_IsSkipped_NotThrown()
         {
             var view = NewView(out var go);
+            Track(go);
             int docFetches = 0, factoryCalls = 0;
             view.View.DocumentLoaderOverride    = (uri, ct) => { Interlocked.Increment(ref docFetches); return UniTask.FromResult(""); };
             view.View.TileSourceFactoryOverride = template => { Interlocked.Increment(ref factoryCalls); return TestDataSource.Absent(); };
@@ -400,7 +403,7 @@ namespace MapRenderer.Tests.GeoJsons
                     "the whole style down");
                 AssertNothingWasWired(view, () => docFetches, () => factoryCalls, "a malformed inline dataset");
             }
-            finally { view.Teardown(); Object.DestroyImmediate(go); }
+            finally { view.Teardown(); }
         }
 
         /// <summary>The skip contract, positively: no source is wired, nothing was fetched, nothing was
@@ -577,6 +580,7 @@ namespace MapRenderer.Tests.GeoJsons
         public void T3C_TheRestyleDiff_RebuildsWhenOnlyTheSourceTypeChanged()
         {
             var view = NewView(out var go);
+            Track(go);
             try
             {
                 var style = StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax)));
@@ -614,7 +618,7 @@ namespace MapRenderer.Tests.GeoJsons
                     "Keeping the old one is silent wrong-source rendering: the style declares one payload " +
                     "and the map keeps serving the other.");
             }
-            finally { view.Teardown(); Object.DestroyImmediate(go); }
+            finally { view.Teardown(); }
         }
 
         /// <summary>
@@ -627,6 +631,7 @@ namespace MapRenderer.Tests.GeoJsons
         public void T3_TheRestyleDiff_KeepsThePipelineForEqualData_AndRebuildsItForDifferent()
         {
             var view = NewView(out var go);
+            Track(go);
             try
             {
                 var style = StyleParser.Parse(StyleWithInlineData(RectangleAt(RectMin, RectMax)));
@@ -664,7 +669,7 @@ namespace MapRenderer.Tests.GeoJsons
                     "a restyle to DIFFERENT inline data must REBUILD the pipeline. Keeping it is the recorded " +
                     "bug: the second style's tiles would be served from the first dataset.");
             }
-            finally { view.Teardown(); Object.DestroyImmediate(go); }
+            finally { view.Teardown(); }
         }
 
         /// <summary>
@@ -676,6 +681,7 @@ namespace MapRenderer.Tests.GeoJsons
         public void T3A_ARestyleBetweenTwoDatasets_RendersTheSecondOne()
         {
             var view = NewView(out var go);
+            Track(go);
             try
             {
                 SpinToCompleted(view.SetStyle(
@@ -707,7 +713,7 @@ namespace MapRenderer.Tests.GeoJsons
                     "is the recorded SourceKey bug — the pipeline was kept because the two inline sources " +
                     "compared equal on every field the key had.");
             }
-            finally { view.Teardown(); Object.DestroyImmediate(go); }
+            finally { view.Teardown(); }
         }
 
         // ── T5 · the lease: the handle is LAZY and the buffers are FREED ──────────────────────────────

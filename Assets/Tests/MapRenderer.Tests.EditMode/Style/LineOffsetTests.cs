@@ -1,5 +1,10 @@
 // Engine-free: compiled verbatim by both the Unity EditMode runner and Tools/core-tests.
 // Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+//
+// Stays its own file (UMR-176): its `using MapRenderer.Core.Style.Line;` (a namespace import, for
+// LineOffset) brings `MapRenderer.Core.Style.Line.StyleLayer` into scope, colliding with the bare
+// `StyleLayer` (MapRenderer.Core.Style.StyleLayer) used elsewhere in StyleTests.cs (CS0104) — see
+// docs/conventions-short.md's "Plain-import collisions" note.
 
 using System;
 using System.Collections.Generic;

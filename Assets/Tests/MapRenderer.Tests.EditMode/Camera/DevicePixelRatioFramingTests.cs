@@ -26,7 +26,7 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.Cameras
 {
     [TestFixture]
-    public class DevicePixelRatioFramingTests
+    public class DevicePixelRatioFramingTests : BaseTestFixture
     {
         // A deterministic, EVEN square viewport: the exact-equality legs below compare against vp/2, so the
         // framebuffer size is pinned here rather than inherited from the helper's default.
@@ -51,9 +51,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void FramingViewport_IsTheCameraLogicalViewport_AtDpr2()
         {
-            var go   = new GameObject("MapView_S108_Framing");
+            var go   = Track(new GameObject("MapView_S108_Framing"));
             var view = go.AddComponent<MapView>();
-            try
             {
                 view.WithTestCamera(TestViewportPx);
                 view.Config.DevicePixelRatio = 2.0;
@@ -76,10 +75,6 @@ namespace MapRenderer.Tests.Cameras
                 Assert.AreEqual(TestViewportPx / 2.0, framing.y, 0.0,
                     "at dpr 2 the framing viewport is exactly half the physical one.");
             }
-            finally
-            {
-                Object.DestroyImmediate(go);
-            }
         }
 
         // ── T3-3 (MapView leg) — the ONE named behaviour change ─────────────────────────────────
@@ -100,9 +95,8 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void FramingViewport_IsFinite_AtNonPositiveDevicePixelRatio()
         {
-            var go   = new GameObject("MapView_S108_FramingGuard");
+            var go   = Track(new GameObject("MapView_S108_FramingGuard"));
             var view = go.AddComponent<MapView>();
-            try
             {
                 view.WithTestCamera(TestViewportPx);
 
@@ -125,10 +119,6 @@ namespace MapRenderer.Tests.Cameras
                     Assert.AreEqual((double)TestViewportPx, framing.y, 0.0,
                         $"a ratio of {ratio} frames from the physical viewport unchanged.");
                 }
-            }
-            finally
-            {
-                Object.DestroyImmediate(go);
             }
         }
 

@@ -16,7 +16,7 @@ namespace MapRenderer.Tests
         public static byte[] Bytes()
         {
             string path = Path.Combine(Application.dataPath, "Fixtures", "sample-tile.bytes");
-            Assert.IsTrue(File.Exists(path), $"Fixture missing: {path}");
+            FileAssert.Exists(path);
             return File.ReadAllBytes(path);
         }
     }

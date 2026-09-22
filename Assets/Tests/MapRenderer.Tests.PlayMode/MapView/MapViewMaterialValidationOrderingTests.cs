@@ -20,7 +20,7 @@ using static MapRenderer.Tests.SetStyleAtomicity; // shared scaffold: styles, Ga
 namespace MapRenderer.Tests.PlayMode.MapViews
 {
     [TestFixture]
-    public class MapViewMaterialValidationOrderingTests
+    public class MapViewMaterialValidationOrderingTests : BaseTestFixture
     {
         /// <summary>A THROWAWAY MapMaterialSet (never the shared production asset — nulling a base field
         /// here must never mutate the committed asset other tests in the same batch also load).</summary>
@@ -65,8 +65,9 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         [UnityTest]
         public IEnumerator DelayedRestyle_NullingFillMaterialMidResolution_ThrowsAtCommit_BeforeMutation()
         {
-            var materialSet = NewThrowawaySet();
+            var materialSet = Track(NewThrowawaySet());
             var view = NewView(out var go, materialSet);
+            Track(go);
             try
             {
                 // Style A commits normally (all three bases assigned).
@@ -106,8 +107,6 @@ namespace MapRenderer.Tests.PlayMode.MapViews
             finally
             {
                 view.Teardown();
-                UnityEngine.Object.DestroyImmediate(go);
-                UnityEngine.Object.DestroyImmediate(materialSet);
             }
         }
     }

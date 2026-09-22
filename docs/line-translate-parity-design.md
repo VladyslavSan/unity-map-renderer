@@ -269,7 +269,7 @@ Two notes on constructing this, both of which nearly produced a fake pass:
 
 ### Hazard carried forward from the fill epic
 
-`SnapshotRenderer.RawPixels` is **bottom-left** origin. That exact trap made a *correct* southward
+`SnapshotRenderer.Pixels` is **bottom-left** origin. That exact trap made a *correct* southward
 `fill-translate` read as a shader bug for a full debugging cycle during P5. The same sign judgment is about
 to be made for the line — check the origin convention before concluding a direction is wrong.
 

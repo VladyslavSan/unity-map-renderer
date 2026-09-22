@@ -1,14 +1,29 @@
-// Engine-free: this file is compiled verbatim by both the Unity EditMode runner
-// (Assets/Tests/MapRenderer.Tests.EditMode/) and the fast dotnet test project (Tools/core-tests/).
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+// Filters/FilterCompilationTests.cs — legacy-vs-expression filter dialect routing, legacy/expression
+// selection equivalence, and per-operator legacy-filter selection. Engine-free: compiled verbatim by both
+// the Unity EditMode runner (Assets/Tests/MapRenderer.Tests.EditMode/) and the fast dotnet test project
+// (Tools/core-tests/). Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
+//
+// Contents:
+//   FilterDialectTests      — IsExpressionFilter's dialect routing, especially the ambiguous overlapping
+//                             operators (==, !=, <, <=, >, >=, in, has, all, any) where routing depends on
+//                             operand form.
+//   FilterEquivalenceTests  — for each legacy filter and its hand-written expression equivalent, the two
+//                             select IDENTICAL subsets over the same feature set.
+//   LegacyFilterTests       — per-operator concrete subset selection over a fixed DictionaryFeature set,
+//                             asserting exact matching indices, including missing-property cases.
 
+using System.Collections.Generic;
+using MapRenderer.Core.Filters;
+using MapRenderer.Core.Json;
+using NUnit.Framework;
+using MapRenderer.Core.Expressions;
+using MapRenderer.Core.Tiles;
 
 namespace MapRenderer.Tests.Filters
 {
-    using System.Collections.Generic;
-    using MapRenderer.Core.Filters;
-    using MapRenderer.Core.Json;
-    using NUnit.Framework;
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // FilterDialectTests — legacy-vs-expression dialect routing
+    // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Pins each dialect-routing case — especially the ambiguous overlapping operators
@@ -160,21 +175,10 @@ namespace MapRenderer.Tests.Filters
             Assert.IsTrue(IsExpr("[\"all\"]"));
         }
     }
-}
 
-// Engine-free: this file is compiled verbatim by both the Unity EditMode runner
-// (Assets/Tests/MapRenderer.Tests.EditMode/) and the fast dotnet test project (Tools/core-tests/).
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
-
-
-namespace MapRenderer.Tests.Filters
-{
-    using System.Collections.Generic;
-    using MapRenderer.Core.Expressions;
-    using MapRenderer.Core.Filters;
-    using MapRenderer.Core.Json;
-    using MapRenderer.Core.Tiles;
-    using NUnit.Framework;
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // FilterEquivalenceTests — legacy and expression forms select identical subsets
+    // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Load-bearing equivalence acceptance tooth: for each legacy filter and its hand-written
@@ -399,20 +403,10 @@ namespace MapRenderer.Tests.Filters
             Assert.That(legacyResult, Is.EqualTo(exprResult));
         }
     }
-}
 
-// Engine-free: this file is compiled verbatim by both the Unity EditMode runner
-// (Assets/Tests/MapRenderer.Tests.EditMode/) and the fast dotnet test project (Tools/core-tests/).
-// Do NOT add any UnityEngine, MeshBuilder, NativeArray, or MonoBehaviour references.
-
-
-namespace MapRenderer.Tests.Filters
-{
-    using System.Collections.Generic;
-    using MapRenderer.Core.Expressions;
-    using MapRenderer.Core.Filters;
-    using MapRenderer.Core.Tiles;
-    using NUnit.Framework;
+    // ───────────────────────────────────────────────────────────────────────────────────
+    // LegacyFilterTests — per-operator exact subset selection
+    // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Per-operator concrete subset selection tests over a fixed set of DictionaryFeature instances.

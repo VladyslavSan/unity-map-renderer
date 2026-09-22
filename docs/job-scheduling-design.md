@@ -1051,7 +1051,8 @@ implemented.
   `:714`; `PipelineHandle = default` at `:582`; the seven defaulted fields at `:585–590`.
 - `Assets/Code/MapRenderer.Jobs/EarcutJob.cs:57` — fields are whole `NativeArray`s with `OutIndexOffset` the
   only offset; `new EarcutJob` at `FillMeshPipeline.cs:435` and
-  `Tests.EditMode/Jobs/BurstJobRunOffMainSpikeTests.cs:189` (the two callers stage 1 leaves valid).
+  `Tests.EditMode/Jobs/GraphDeterminismTests.cs:211` (the merged home of the former
+  `BurstJobRunOffMainSpikeTests.cs`; the two callers stage 1 leaves valid).
 - `Assets/Code/MapRenderer.Jobs/TileMeshBuffers.cs:82` `PipelineHandle` and its doc contract.
 - `Assets/Code/MapRenderer.Jobs/ProjectionDispatch.cs:26–47` (closed switch, `private static RunTyped<TProj>`),
   `GlobeFillSubdivider.cs:200–234` — the twin; `Assets/Code/MapRenderer.Jobs/InternalsVisibleTo.cs` (the
@@ -1080,8 +1081,9 @@ implemented.
   (`:1713`) — the cross-frame exemplar; `:1022` the `.Run()` argument; the five per-frame `.Run()`s at
   `:971, :1002, :1036, :1336, :1566`.
 - `Assets/Code/MapRenderer.Unity/Text/SymbolSubsystem.cs:700, :977` — the two symbol seam sites.
-- Tests reused as oracles: `Tiles/JobifiedPipelineTests.cs` (content-hash parity),
-  `Tiles/MeshBuildWorkSchedulerTests.cs` (+ the gate mutual-exclusion tooth at `:217`, retired with the gate)
+- Tests reused as oracles: `Tiles/FullPipelineTests.cs` (content-hash parity, the merged home of the former
+  `JobifiedPipelineTests.cs`), `Tiles/SourceTileGraphBuildTests.cs` (+ the gate mutual-exclusion tooth at
+  `:238`, retired with the gate — the merged home of the former `MeshBuildWorkSchedulerTests.cs`)
   + `TestSupport/RecordingWorkScheduler.cs` (thread placement), `Lifetime/DisposalLeakGuardTests.cs`,
   `Lifetime/TeardownCancelInflightBuildsTests.cs`, `Globe/RightHandedSphereProjectionWindingTests.cs`,
   `Filters/FeatureSelectorNativeFilterTests.cs`, the `Visual/*SnapshotTests.cs` suites.
