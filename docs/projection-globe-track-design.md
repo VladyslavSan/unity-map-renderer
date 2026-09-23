@@ -1,75 +1,54 @@
-# Projection / globe track — design SKETCH (Track B)
+# Projection / globe track — design
 
-**Status: SKETCH, not scheduled.** Companion to the render-layer + tile-pipeline work
-(`docs/meshing-design.md` §4, `docs/per-layer-tile-processing-design.md`). Captures the flat-earth /
-Mercator couplings that keep the map from being correct under the **spherical projection**, and which of them
-are Track B's own vs. which fall out of Epic A.
+The flat-earth / Mercator couplings that would keep the map from being correct under the **spherical
+projection**, and how each is resolved. Companion to `docs/meshing-design.md` ("Render-layer model") and
+`docs/per-layer-tile-processing-design.md`; the math is `docs/coordinates-and-projections.md`.
 
-Related principles (already in the codebase): projection-agnostic camera, "shaders must not assume flat
-ground — per-vertex frame is projection-supplied", "unify/reuse the one 3D projection, don't propagate the
-flat-earth smell".
+Governing principles: the camera is projection-agnostic; shaders do not assume flat ground — the per-vertex
+frame is projection-supplied; reuse the one 3D projection rather than propagating a flat-earth special case.
 
-## What Epic A already fixes for free (NOT Track B work)
+## Tile geometry curves because every tile layer projects
 
-Epic A (tile-pipeline unification) makes every per-tile prepare project through the same `IProjection` as
-fill/line. So **background and all tile geometry become curved on the sphere automatically** — no flat `y=0`
-quad, and E3's Mercator-only background gate is deleted. That geometry-projection correctness is a *byproduct*
-of Epic A; Track B does not own it.
+Every per-tile layer — fill, line, fill-extrusion and the source-less background — projects through the active
+`IProjection`. Tile geometry and the background are therefore curved on `SphericalProjection` and flat on
+`WebMercatorProjection`, with no Mercator-only gate anywhere. This falls out of the per-layer tile model
+(`docs/per-layer-tile-processing-design.md`); it is not globe-specific code.
 
-**A2 landed this (2026-07-13), confirming the above.** `TileBackgroundLayerProcessor` projects the
-background quad through the same `IProjection` fill/line use (curved on `SphericalProjection`, flat on
-`WebMercatorProjection`); `MapView.SetStyle`'s Mercator-only `BackgroundRenderLayer.SetVisible` gate is
-DELETED. See `docs/per-layer-tile-processing-design.md`.
+## Open: the polar caps have no surface
 
-### B3 — Full-sphere / polar-cap background surface (new, filed by A2)
-A2 makes the *covered* band (the Mercator tile pyramid, ±85.051°) curve correctly, but coverage is still the
-tile cover — a synthetic background quad lives in the Web-Mercator domain like every other tile, so the
-**85.05°–90° polar caps get no surface** (camera-clear near a pole on the globe). This is **not
-background-specific**: fill and line have the identical gap already, because the tile cover *is* the
-Mercator pyramid at every zoom (z0 included). Full-sphere polar coverage needs geometry **outside** the tile
-pyramid (a projected polar-cap surface / a dedicated globe-only background), which belongs here, not in a
-per-layer-tile-processing stage. Not scheduled.
+Coverage is the tile cover, and the tile cover *is* the Web-Mercator pyramid (±85.051°) at every zoom, z0
+included. A background quad lives in that domain like every other tile, so the **85.05°–90° polar caps get no
+surface** on the globe — the camera clear shows through near a pole. The gap is not background-specific: fill
+and line have it too. Full-sphere coverage needs geometry **outside** the tile pyramid — a projected polar-cap
+surface or a dedicated globe-only background. Not built.
 
-## What Track B owns (does NOT fall out of Epic A)
+## Symbols: far-side occlusion is a gather-time horizon cull
 
-### B1 — Symbol far-side occlusion (the big one)
-On a sphere, a label whose anchor is on the **far hemisphere** is *in front of the camera* (not behind it) but
-occluded **by the globe itself**. Today's behind-camera cull (W<0) does not catch it, and the billboards use
-`ZTest Always` → far-side labels **leak onto the front** of the globe. Need a **visible-hemisphere / horizon
-test** on the anchor before placement.
+On a sphere, a symbol whose anchor is on the **far hemisphere** is in front of the camera (the behind-camera
+cull does not catch it) but hidden **by the globe itself**, and symbol billboards draw with `ZTest Always`, so
+without a cull they leak onto the front of the globe.
 
-- **Current state is better than "no globe support":** anchor world positions come from
-  `projection.ProjectPoint(GeoCoordinate)` (`SymbolFeatureExtractor.cs:791`) — projection-agnostic by
-  construction, since `IProjection` resolves the anchor for whichever projection is active. The per-frame
-  projection culls behind-camera anchors (`SymbolPlacementSystem.cs`), and there is a B-3
-  horizon/distance cull for the tilted-view pile-up. So placement is projection-aware; **the specific gap is
-  far-side occlusion.**
-- **Likely fix:** reuse the projection's existing horizon predicate — `IProjection.TryGetHorizonOccluder`
-  (already used by E3's background Mercator gate) — as a pre-collision reject on each anchor, OR a per-anchor
-  `dot(anchorNormal, viewDir)` visibility test. Pre-collision placement (with the B-3 cull) is the cheap spot:
-  far-side labels then never consume collision budget.
+- **The test reuses the projection's own horizon predicate.** `HorizonCull.IsHiddenBeyondHorizon` takes the
+  occluding sphere from `IProjection.TryGetHorizonOccluder` and hides an anchor when
+  `dot(P − centre, cam − centre) < radius²` — a polar-plane test, exact for on-surface points, the `rad = 0`
+  case of `FrustumTileSelector`'s tile occlusion algebra. A planar projection has no occluder, and the cull is
+  then a no-op.
+- **It runs at gather time, before collision.** `CullJob` evaluates it per record in the gather's verdict
+  chain, so a far-side symbol never consumes collision budget.
+- **It fades, never pops.** The horizon is a fade-out trigger (`GatherTrigger.Horizon`), a peer of the tile,
+  distance and departing culls — never a hard drop inside the projection job — so a symbol crossing the
+  horizon under globe rotation fades out.
+- **Anchors are projection-agnostic.** Anchor world positions come from `IProjection`, so placement already
+  resolves the anchor for whichever projection is active.
 
-### B2 — `WebMercator.GroundResolution` coupling — RESOLVED
-The cross-tile **collected set** (symbol dedup identity across a parent+child tile during a zoom) no longer
-quantizes by `WebMercator.GroundResolution(zoom)`. `CrossTileSymbolKey.CanonicalGridMeters` replaced it — a
-fixed 4.0 m grid over the render-space (pre-RTC) anchor, with no `WebMercator`-specific term, so no
-flat-Mercator quantum. See `labels-async-reconcile-design.md` §3.1.
+**Open: line-following labels behind the sphere.** The cull tests one representative anchor per symbol
+(`SymbolBatch.RepAnchor`), so a long line-following label that straddles the horizon is kept or faded as a
+unit. Per-glyph horizon handling is open; it mirrors the "line-following labels behind buildings" question in
+`docs/meshing-design.md` ("Render-layer model → Non-goals / open questions").
 
-## Relationship to Epic A / sequencing
+## Symbols: no flat-Mercator quantum in cross-tile identity
 
-- B1/B2 are **symbol-only** and touch the label pipeline, not the tile-mesh seam — so they are **largely
-  independent of Epic A** and could ship first if globe *labels* are the priority.
-- But the *whole* globe story only lands once Epic A also makes background/tiles curved. So the natural order
-  is Epic A → Track B, or Track B in parallel if labels-on-globe is urgent.
-
-## Open questions
-
-- **Which horizon test** — reuse `IProjection.TryGetHorizonOccluder` (consistency with the background gate) vs.
-  a per-anchor dot product? Lean: reuse the projection predicate.
-- **Where** — far-side reject in the projection/placement pass (pre-collision, cheapest) vs. draw time. Lean:
-  pre-collision, alongside the B-3 cull.
-- **Horizon-crossing fade** — a label crossing the horizon under globe rotation should **fade, not pop**. Does
-  it hook the existing A-4 fade state machine, or is that a separate polish item?
-- **Line-following (curved) labels behind the sphere** — point labels are the first cut; curved text on the
-  far side is a later concern (mirrors `meshing-design.md` §4's "line-following labels behind buildings" note
-  for fill-extrusion).
+The cross-tile collected set (symbol dedup identity across tiles) quantizes the render-space (pre-RTC) anchor
+to a fixed 4 m grid (`CrossTileSymbolKey.CanonicalGridMeters`), with no `WebMercator.GroundResolution` term, so
+it carries no flat-Mercator quantum (`docs/labels-async-reconcile-design.md` § "Invalidation events — what
+dirties the state (must be EXHAUSTIVE)").

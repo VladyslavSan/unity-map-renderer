@@ -1,42 +1,41 @@
 # Labels — async, event-driven reconcile (design)
 
-**Status:** designed, not started. This supersedes the Phase-2 options (A–E) in
-[`symbol-label-perf-design.md`](symbol-label-perf-design.md) — see its **§9 OUTCOME** for the profiling that
-falsified the old premise. Companion: [`labels-and-symbols-design.md`](labels-and-symbols-design.md) (the
-pipeline). Proprietary / all rights reserved.
+The cross-tile dedup — which copy of a point symbol wins when several loaded tiles carry it — is **state**
+that changes only on a tile event. It is recomputed off the main thread when a tile event occurs, not every
+frame. Companions: [`labels-and-symbols-design.md`](labels-and-symbols-design.md) (the pipeline) and
+[`symbol-label-perf-design.md`](symbol-label-perf-design.md), which owns the per-frame label cost downstream
+of this reconcile. Proprietary / all rights reserved.
 
 ---
 
-## 1. The premise (proven, not assumed)
+## 1. The premise
 
-Live z14-15 profile, moving camera: `MapRenderer.Symbol.BatchBuild.Collect.Dedup` ≈ **10.8 ms** — the whole
-per-frame label CPU cost. `Collect.Classify` ≈ 0.7 ms, `SoA` ≈ 0.7 ms. So the bottleneck is the **per-frame
-cross-tile dedup** (`SymbolTileStore.CollectInto`): for every on-screen point label, every frame, hash a
-`CrossTileSymbolKey` (which contains the label's **text string**) into a dictionary to pick the finest-zoom
-winner.
+For every point symbol, the dedup hashes a `DedupKey` (the all-integer form of `CrossTileSymbolKey`) into a
+dictionary to pick one winner per identity. Two facts make a per-frame recompute of it the wrong shape:
 
-Two facts make this the wrong shape:
+1. **The dedup answer is a pure function of the loaded tile set.** The same tiles give bit-identical winners.
+   Camera pan, rotate, and tilt do not change it.
+2. **Parent/child tile overlap does not happen.** The active cover is a quadtree cut: it can mix zooms (the
+   default screen-space LOD does), but no active tile has an active ancestor or descendant.
+   Coarse-under-fine display is future work. So the only real duplication is edge/buffer duplication
+   between neighbouring tiles plus cross-source duplication. Both are **static per tile set**, independent
+   of camera pose and of fractional zoom.
 
-1. **The dedup answer is a pure function of the loaded tile set.** Same tiles → bit-identical winners. Camera
-   pan / rotate / tilt do not change it. It is recomputed from scratch every frame for nothing.
-2. **Parent/child tile *overlap* does not currently happen** (coarse-under-fine display is future work — a
-   tile set is one zoom band at a time). So the *only* real duplication today is **same-zoom edge/buffer +
-   cross-source** — which is **static per tile-set**, independent of camera pose *and* fractional zoom. The
-   fuzzy pixel-scaled grid + finest-zoom-wins machinery is future-proofing we pay 11 ms/frame to carry.
+A per-frame dedup would therefore recompute a constant every frame, and on a moving camera that constant
+would be the largest single label cost.
 
-**Why not "just make the per-frame dedup incremental" (the reverted D2):** D2 maintained the winner set with a
-persistent incremental index that *cold-reseeds on every zoom-quantize change*. A moving camera zooms
-constantly, so it rebuilt the whole index (a fresh contender/winner record per label) every frame — **~2× worse**
-than the plain dict dedup. Right target, wrong mechanism; reverted (`e3a9208e`). Do **not** revive an
-incremental winner index.
+**Rejected: an incrementally-maintained winner index.** An index that patches the winner set per tile event,
+and cold-reseeds whenever its zoom-quantize key changes, costs more than the dictionary dedup it replaces: a
+moving camera changes that key almost every frame, so the index rebuilds a contender/winner record per label
+every frame. Do not revive an incremental winner index, a native tombstone/compaction mirror of it, or any
+other "maintain the set incrementally" machinery.
 
 ---
 
 ## 2. The model — a tile-event-driven state machine
 
-Stop treating the label batch as a per-frame rebuild. The **deduped visible-label set is STATE**; it changes
-only on a discrete tile event, and that recomputation is **scheduled off the main thread** and *picked up*
-later.
+The label batch is not a per-frame rebuild. The **deduped visible-label set is STATE**; it changes only on a
+discrete tile event, and that recomputation is **scheduled off the main thread** and *picked up* later.
 
 ```
    tile add/remove/rebuild/restyle          (main thread, cheap: just mark dirty + snapshot)
@@ -51,174 +50,120 @@ later.
 ```
 
 - **Between event and pickup, render the slightly-stale A.** For labels this is fine — a new tile's labels
-  appear a frame or two late; a removed tile's linger and fade. This is the repo's existing "stable-FPS is the
-  North Star, momentary staleness OK" stance (responsive-consume / white-tiles-OK).
-- **Per-frame work is only the genuinely camera/time-dependent pass:** coverage cull (`ClassifyActive`, ~0.7 ms),
+  appear a frame or two late; a removed tile's linger and fade. Stable frame rate outranks momentary
+  staleness here, as it does for tiles.
+- **Per-frame work is only the camera- and time-dependent pass:** coverage cull (`ClassifyActive`),
   projection, collision/placement, the fade state machine, world-quad build. That stays on the main thread (it
-  reads the camera and must be current). The ~11 ms dedup leaves the per-frame path entirely.
+  reads the camera and must be current). The dedup is not on the per-frame path at all.
 
-**This is NOT the rejected "batch cache."** That one was keyed on *camera stillness* (smooth static, janky the
-instant you move — inconsistent). This is keyed on *tile events* — a discrete, real input change — and is
-consistent under all camera motion. It memoizes a provably-static value; it does not gamble on the camera
+**This is NOT the rejected static-frame skip** (B-1, `symbol-label-perf-design.md` § "Constraints"). That
+one is keyed on *camera stillness* (smooth static, janky the instant you move — inconsistent). This is keyed
+on *tile events* — a discrete, real input change — and is consistent under all camera motion. It memoizes a provably-static value; it does not gamble on the camera
 holding still.
 
 ---
 
 ## 3. The four make-or-break contracts
 
-The concept is easy; these four are where the correctness (and the race-condition bugs) live. Nail them on
-paper before any code.
+These four contracts carry the correctness of the reconcile, and the race conditions live in them.
 
 ### 3.1 Invalidation events — what dirties the state (must be EXHAUSTIVE)
 
-A missed trigger = stale labels on screen. Every `SymbolTileStore` mutation that changes the active/
-departing membership OR a tile's label content dirties the set. The reverted D2 already mapped these 13
-lifecycle points — reuse the **map**, not the code (mark dirty instead of incrementally indexing each tile add):
+A missed trigger means stale labels on screen. Every `SymbolTileStore` mutation that changes the active/
+departing membership OR a tile's label content dirties the set:
 
 - `BeginBuild` (a rebuild starts — stale labels stay until commit), `CompleteBuild` (new labels land / replace),
 - `Release` (→ cached / true-evict), `Restore` (cache hit re-enters), the `ReconcileActiveSet` departing stamp,
-- `EnqueueCached` FIFO evict, `PurgeExpiredDeparting`, `Clear` / `SetStyle` (restyle — full rebuild),
-- **NO zoom trigger at all.** *(LANDED — Stages 3/3b, `08e7fbf3`/`3f6aa95d`.)* The dedup grid was decoupled from
-  `MetersPerPixel` — but NOT onto integer tile zoom as originally sketched here. It is now a **fixed render-space
-  grid** (`CrossTileSymbolKey.CanonicalGridMeters = 4.0`), so the dedup answer is a pure function of the tile set with
-  **zero** zoom dependence (neither fractional nor a zoom *step* dirties it). The fixed grid is correct because
-  parent/child overlap doesn't happen today; merging distinct-but-close features is the collision pass's job. This
-  is stronger than the integer-zoom plan (which would still swap grids per band, breaking the seamless same-cell
-  hold across a step). It also PRESERVES that hold. **A zoom step still swaps the tile *set*, so it dirties via the
-  tile add/remove events below — not via a dedicated zoom trigger.** (Future: when parent/child overlap lands
-  (§6), the grid goes back to zoom-scaled — coarser band wins — a one-const change.)
+- `EnqueueCached` FIFO evict, `PurgeExpiredDeparting`, `Clear` (called by `SymbolSubsystem.SetStyle` on a
+  restyle — full rebuild).
 
-Each fires "mark dirty (bump generation)". Coalesce: many events between two pickups collapse to one reconcile.
+**There is no zoom trigger.** The dedup grid is a **fixed render-space grid**
+(`CrossTileSymbolKey.CanonicalGridMeters`, 4 m), so the dedup answer is a pure function of the tile set with
+zero zoom dependence: neither fractional zoom nor a zoom step dirties it. The fixed grid is correct because
+parent/child overlap does not happen; merging distinct-but-close features is the collision pass's job.
+**Rejected: keying the grid on integer tile zoom.** That still swaps grids per zoom band, which breaks the
+seamless same-cell hold across a zoom step; the fixed grid keeps that hold. A zoom step still swaps the tile
+*set*, so it dirties the state through the tile add/remove events above. When parent/child overlap arrives,
+the grid goes back to zoom-scaled (see "Open questions").
+
+Each event marks the state dirty (bumps the generation). Many events between two pickups coalesce into one
+reconcile.
 
 ### 3.2 Input snapshot + native-block lifetime — THE sharp edge
 
 The worker reads tiles' label lists while the main thread may **release/dispose a tile and its baked
-`SymbolTileBlock`**. Reading a disposed block off-thread is a use-after-free. This is the same hazard
-D3's B2 atomicity fought and the one flagged for moving symbol decode off-thread (the shared glyph atlas).
+`SymbolTileBlock`**. Reading a disposed block off-thread is a use-after-free.
 
-Contract options considered:
-- Snapshot managed refs (a managed symbol list) at schedule time — cheap and safe only if that list is
-  immutable post-build.
-- **Native blocks need a borrow guard:** a refcount, or a "not-disposed-while-a-reconcile-borrows-it" rule, so
-  the store cannot free a block the in-flight worker is reading.
+**The contract is a borrow guard.** `SymbolSnapshot` (built by `SymbolTileStore.CaptureSnapshot`) holds each
+collected tile's baked block behind a `SharedDisposable` pin acquired on the main thread. The pin lets the
+worker read the block's native columns without disposing them, and releases on the snapshot's `Clear()`.
+A snapshot of managed refs alone is not enough: it is safe only while the referenced list is immutable after
+build, and it does not protect the native columns. *Rejected:* resolving native data on the main thread at
+pickup instead of pinning — that puts the cost back on the main thread.
 
-**Resolved: the former (refcount/borrow-guard).** `SymbolSnapshot` (built by `SymbolTileStore.CaptureSnapshot`)
-holds each collected tile's baked block behind a `SharedDisposable` pin acquired on the main thread; the pin
-lets the worker read the block's native columns safely without disposing them, and releases on the snapshot's
-`Clear()`.
+### 3.3 Generation / coalescing — one in-flight, apply-stale
 
-### 3.3 Generation / coalescing — one in-flight, apply-stale (LOCKED — implemented Stage 4b)
-
-One in-flight reconcile at a time, keyed on the store's monotonic collect generation. Events during a run bump
-the generation but **do NOT start a second worker** (coalesced). When the worker returns, its result is
-**applied even if the store generation has advanced since it was scheduled** — the completed set is at most a few
-frames stale, and serving a slightly-stale label set for 1–4 frames is exactly the accepted appearance latency
-(§2). A completed result is **never discarded**. If the store generation moved during the run, a **reschedule**
-is issued so the displayed set catches up on a subsequent pickup. So the rule is: *apply the completed result,
-then reschedule iff the generation advanced during the run* — never throw a finished result away (discarding it
-would thrash the worker and, under continuous tile churn, could starve the display of any update at all).
+One reconcile is in flight at a time, keyed on the store's monotonic collect generation. Events during a run
+bump the generation but **do NOT start a second worker** (coalesced). When the worker returns, its result is
+**applied even if the store generation has advanced since it was scheduled** — the completed set is at most a
+few frames stale, and a slightly-stale label set for 1–4 frames is the accepted appearance latency (see
+"The model"). A completed result is **never discarded**. If the store generation moved during the run, a
+**reschedule** is issued so the displayed set catches up on a later pickup. The rule: *apply the completed result, then
+reschedule iff the generation advanced during the run*. Discarding a finished result would thrash the worker
+and, under continuous tile churn, could starve the display of any update at all.
 
 Two guards make the apply safe:
 - **Swap only on worker success.** A faulted/partial result never reaches the consumer (`SymbolGatherPlan.Build`
   assumes aligned lists). On a fault the old front set is held, the failed run's pins are released, the fault is
   logged once, and the schedule guard waits for a *new* tile event — no busy-retry.
-- **Native-block lifetime across the one-in-flight gap is the pin guard (§3.2).** The store defers disposing a
-  baked block that the in-flight OR the currently-displayed set references, until that set leaves service (a
-  double-buffer front/back swap). This is what lets the worker read, and the main thread later gather, a block
-  the store would otherwise have freed on a concurrent tile release/rebuild.
+- **Native-block lifetime across the one-in-flight gap is the pin guard** ("Input snapshot + native-block
+  lifetime"). The store defers disposing a baked block that the in-flight OR the currently-displayed set
+  references, until that set leaves service (a double-buffer front/back swap). This is what lets the worker
+  read, and the main thread later gather, a block the store would otherwise have freed on a concurrent tile
+  release/rebuild.
 
 ### 3.4 A→B swap → fade reconcile (diff, not replace)
 
 The swap is a *reconcile*, not a hard replace: diff A vs B → labels only in B **fade in**, labels only in A
-**fade out** (they become departing), labels in both keep their fade/incumbency state. Feed this through the
-existing departing/fade state machine (`SymbolPlacementSystem`'s per-symbol departing flag + fade triggers) so nothing
-pops. This is the other half of "label system as a state machine" and the trickiest interaction — cross-frame
-label *identity* (a label must be recognized as "the same" across an A→B swap to keep its fade) is the key
-sub-problem (see `labels-and-symbols-design.md` on cross-tile identity / `FadeId`).
+**fade out** (they become departing), labels in both keep their fade/incumbency state. The diff feeds the
+existing departing/fade state machine (`SymbolPlacementSystem`'s per-symbol departing flag + fade triggers),
+so nothing pops. A label must be recognized as "the same" across an A→B swap to keep its fade, so cross-frame
+label *identity* is the key sub-problem (see `labels-and-symbols-design.md` on cross-tile identity /
+`FadeId`).
 
-> **Identity: SOLVED — one canonical id.** *(LANDED — Stage 3b, `3f6aa95d`.)* The dedup identity and the point
-> fade identity are now the **same** canonical cell — `PointFadeId` and the store `DedupKey` both quantize to
-> `CrossTileSymbolKey.CanonicalGridMeters` (4.0 m) over `(cell, layer, interned text, interned icon)`. Because that
-> id is fixed and camera-independent, a point label keeps its identity across an A→B set swap by construction — the
-> reconcile diff can key A↔B matching directly on this id, no bespoke identity scheme. (Curved/line labels keep
-> `LineFadeId` — never deduped, per-anchor.) The deeper "fade id IS the literal interned-int" (Design Y) is
-> deferred; the *partition* is unified, which is what the reconcile needs.
+**Identity is one canonical id.** The dedup identity and the point fade identity are the **same** canonical
+cell: `PointFadeId` and the store `DedupKey` both quantize to `CrossTileSymbolKey.CanonicalGridMeters` over
+`(cell, layer, interned text, interned icon)`. That id is fixed and camera-independent, so a point label keeps
+its identity across an A→B set swap, and the reconcile diff keys A↔B matching directly on it — no separate
+identity scheme. Curved (line) labels keep `LineFadeId`: they are never deduped and are identified per
+anchor. The partition is unified; making the fade id the literal interned integer is not done and is not
+needed by the reconcile.
+
+Two properties keep the swap stable:
+
+- **Curved (line) labels never dedup:** the reconcile emits every active curved symbol in scan order, with
+  no key and `LineFadeId` as identity, so they are always-winners and cannot churn the dedup.
+- **`ClassifyActive` stays per-frame** (camera-dependent, cheap) and classifies the same front set the plan
+  is built from, in the same `CurrentBatch` call, so a stale front stays self-consistent.
 
 ---
 
 ## 4. Off-main mechanics + the GC caveat
 
-- **Scheduling:** the dedup is plain managed C# over label lists (no Unity API, no Burst — it's a `Dictionary`
-  keyed on interned text/icon ids), so it runs on a worker via the repo's linear-async idiom (UniTask
+- **Scheduling:** the dedup is plain managed C# over label lists (no Unity API, no Burst — a `Dictionary`
+  keyed on interned text/icon ids), so it runs on a worker through the repo's linear-async idiom (UniTask
   `SwitchToThreadPool` → work → `SwitchToMainThread` to pick up), the same pattern as the async tile pipeline
-  (off-main-thread-principle). Pump/pickup on the main-thread label update.
-- **GC caveat (do not over-promise):** off-main removes *CPU time* from the render thread, but Unity's Mono GC
-  is **stop-the-world** — a heavy-allocating dedup on a worker can still trigger a collection that pauses the
-  main thread. So the reconcile must *also* be **low-alloc** (reused buffers; and intern label text → `int` so
-  the dedup key is all-integer, killing the per-frame string hash *and* its allocations). Off-main and
-  alloc-reduction **compose** — they are not either/or. The interning is not wasted work; it makes the off-main
-  job cheap enough to not GC-stall.
+  (off-main-thread-principle). Pump and pickup run on the main-thread label update.
+- **GC caveat:** off-main removes *CPU time* from the render thread, but Unity's Mono GC is
+  **stop-the-world** — a heavy-allocating dedup on a worker can still trigger a collection that pauses the
+  main thread. So the reconcile is *also* **low-alloc**: buffers are reused, and label text is interned to an
+  `int` so the dedup key is all-integer, with no string hash and no allocation per key. Off-main and
+  alloc-reduction **compose** — they are not either/or.
 
 ---
 
-## 5. Salvage from the reverted D2/D3, and scope fences
+## 5. Open questions
 
-**Salvage (cherry-pick from history `6e39e282`/`962c1349`):**
-- The `SymbolStagingMath` **finite-`SortKey` / NaN collision-order fix** (D2 edit 0) — a real, orthogonal
-  hardening in the *placement* path (a NaN sort key makes the collision comparator intransitive →
-  nondeterministic survivor set). Independent of aggregation; re-land it.
-- The **13-mutation-point map** (§3.1) — knowledge, not code.
-- The **`source→int` interning** pattern — extend to text interning (§4).
-
-**Do NOT reuse:** the incremental winner index (its cell-state/contender/winner-record bookkeeping and delta log), the native
-tombstone/compaction mirror (D3), or any "maintain the set incrementally" machinery. That is the reverted
-regression.
-
-**Scope fence:** symbol label code only — `MapRenderer.Unity/Text/**`, `MapRenderer.Core/Text/**`, the symbol
-build/reconcile hooks. NOT the tile pipeline / camera / projection / fill-line meshing / backends.
-
----
-
-## 6. Open questions (resolve in the plan)
-
-- ~~**Native-block lifetime (§3.2):** refcount/borrow-guard vs "resolve native on main-thread at pickup."~~
-  **RESOLVED.** The former: `SymbolSnapshot` pins each block on the main thread at capture, and the pin lets
-  the worker read its native columns safely without disposing them. See §3.2's note.
-- ~~**Cross-frame label identity across an A→B swap (§3.4):**~~ **RESOLVED (Stage 3b).** One canonical fixed-grid
-  id serves dedup + fade; a point label keeps its identity across a swap by construction. See §3.4's note.
-- **When parent/child overlap lands (future):** the dedup grid must go back to zoom-scaled + finest-zoom-wins.
-  Localized to the one `CrossTileSymbolKey.CanonicalGridMeters` use + the store's grid input (a seam comment marks
-  it) — *not* integer-zoom keying (that approach was rejected; see §3.1).
-- **Curved (line) labels:** never dedup — they pass straight through (keep `LineFadeId`). Confirm they ride the
-  state machine as trivial always-winners with no reconcile churn.
-- **`ClassifyActive` stays per-frame** (camera-dependent, cheap) operating on the current set — confirm it
-  composes with A being stale for a frame (a just-swapped-out tile's coverage decision is harmless).
-
----
-
-## 7. Target
-
-`Collect.Dedup` → **~0 ms on frames with no tile event**; the ~11 ms happens once per tile-set change, on a
-worker, off the render thread. `BatchBuild` drops to the per-frame residual (`Classify` + `SoA` ≈ 1.5 ms).
-Byte-identical steady-state render; fade-smooth under set swaps; no motion-keyed cost cliff. **The gate is a
-maintainer Play-mode re-profile while panning/zooming — not a headless number.**
-
-## 8. OUTCOME — target met; the cost moved on (2026-07-25)
-
-Maintainer Play-mode re-profile after Stages 1–4 landed (`9bf19457`), camera moving:
-
-```
-MapRenderer.View.LateUpdate                19.36 ms
-  MapRenderer.Symbol.Gather                 5.12 ms   ← GatherIntoMirror (the native compaction)
-  MapRenderer.Symbol.LabelTick             12.45 ms
-    …Symbol.Project                         3.64 ms   (…ProjectPositions ≈ 1.4, …Stage 2.27)
-    …Symbol.Collide                         5.03 ms   (JobHandle.Complete 4.06 — LabelCollisionJob 4.05)
-    …Symbol.Emit                            3.04 ms
-```
-
-`BatchBuild` no longer even appears as a top cost — the residual it now holds is ≤ 1.8 ms (19.36 − 5.12 − 12.45),
-i.e. **§7's `Classify` + `SoA` ≈ 1.5 ms target was hit and the ~11 ms per-frame dedup is gone.** This design is
-**done**; the remaining per-frame label cost is a different set of hot spots (a still-per-frame native gather, the
-synchronous collision wait, and the managed emit loop) — tracked in
-[`symbol-label-perf-design.md` §10](symbol-label-perf-design.md), which is the umbrella SSOT for per-frame label
-cost.
+- **When parent/child overlap arrives:** the dedup grid must go back to zoom-scaled + finest-zoom-wins.
+  The change is local to the one `CrossTileSymbolKey.CanonicalGridMeters` use and the store's grid input (a
+  seam comment marks it). It is *not* integer-zoom keying (rejected; see "Invalidation events").

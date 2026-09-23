@@ -114,7 +114,7 @@ camera list. Understand the three-tier SRP callback family and pick deliberately
 - **`endContextRendering` — once per frame, ALLOCATION-FREE.** ✅ Use this.
 - `endFrameRendering` — once per frame, **same functionality but heap-allocates every frame** (Unity's own
   docs say so and recommend `endContextRendering` instead). ❌ Avoid — an allocating hook would defeat the
-  whole point, since the slack work must itself be GC-alloc-free (S95's teeth).
+  whole point, since the slack work must itself be GC-alloc-free (`TileLoadMeasurementTests`' teeth).
 - `Application.onBeforeRender` / anything in `Update`/`LateUpdate` — *before* submission (would delay render).
 - a custom `PlayerLoopSystem` at the loop tail — works too, but `endContextRendering` is the supported,
   allocation-free, URP-native seam.
@@ -195,8 +195,9 @@ The pool's payoff is **conditional**:
   `KickMeshBuild` is the `AllocateWritableMeshData` loop — `TileManager.cs:1001-1029` documents that
   nothing else touches a `Unity.Object` off-main). That architectural win stands **independently**.
 - But it is "free" (no added frame time) **only if the main thread has slack** (§2). If `CoverSelect` is
-  saturating the main thread every motion frame, the slack isn't there — so the pool and the S95 select-tax
-  are **coupled**, and the S95 Profiler trace tells you which regime you're in.
+  saturating the main thread every motion frame, the slack isn't there — so the pool and
+  `TileLoadMeasurementTests`' select-tax are **coupled**, and the Profiler capture in checklist item 2 tells
+  you which regime you're in.
 
 ## 6. Empirical checklist (before code depends on any of this)
 
@@ -207,4 +208,4 @@ Run these from the `TileLoadingStressTest` scene (`TileLoadStressDriver`, Berlin
    present), and where does the wait sit (`WaitForTargetFPS` vs `Gfx.WaitForPresentOnGfxThread`)? (§2)
 3. Does `AllocateWritableMeshData` at `endContextRendering` contend with the render thread? (§4)
 4. Which regime does a motion frame sit in — CPU-main-bound (`CoverSelect` saturating the main thread, no
-   slack) or consumer/GPU-bound (slack present)? (§5, and S95's trace)
+   slack) or consumer/GPU-bound (slack present)? (§5, and the Profiler capture in item 2)

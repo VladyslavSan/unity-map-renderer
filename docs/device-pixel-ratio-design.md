@@ -4,7 +4,7 @@
 *why*. The *contract* — the standing requirements a conforming implementation must hold — is the normative
 [`specs/device-pixel-ratio.md`](../specs/device-pixel-ratio.md), and is not restated here.
 
-**Read with:** `docs/line-rendering-design.md` §1 (the frame-constant ruler the line width family rides),
+**Read with:** `docs/line-rendering-design.md` § "The width model" (the frame-constant ruler the line width family rides),
 `docs/coordinates-and-projections.md` (the logical-pixel tile definition `WebMercator.TilePixelSize` sets),
 and `docs/meshing-design.md` (what the px-valued paint properties reach).
 

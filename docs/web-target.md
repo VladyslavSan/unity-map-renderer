@@ -159,7 +159,8 @@ Why it belongs here: a web player whose graphs all report thread 0 is running th
 main thread** — Burst off, or workers absent — and will merely render slowly rather than fail. That is the
 same class of silent lie as a Burst-off build, and it needs the same treatment: read it beside
 `Tools/build.sh web`'s `burst:` line, as a manual check, because the sample only exists in a running player.
-Per §7.4 this is the *only* reading that may be used to claim off-main execution — a build-step trail proves
+Per `docs/job-scheduling-design.md` § "Safety — making the Editor's check sufficient" (rule 4), this is
+the *only* reading that may be used to claim off-main execution — a build-step trail proves
 scheduling order, never placement.
 
 ## Threading

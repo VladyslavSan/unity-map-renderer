@@ -1,8 +1,9 @@
 # Map/Line — shader notes
 
 Design rationale and pass-set structure for `Map/Line` and its unlit twin `Map/LineUnlit`. The
-antialiasing model's full record — rejected directions, measurements, open findings — is
-`docs/line-antialiasing-design.md`; the width model is `docs/line-rendering-design.md` §1.
+antialiasing model's design — invariants, rejected directions, known limits, open questions — is
+`docs/line-antialiasing-design.md`; the hairline measurements live here, in "Hairline strategies". The width
+model is `docs/line-rendering-design.md` § "The width model".
 
 ## Pass set
 

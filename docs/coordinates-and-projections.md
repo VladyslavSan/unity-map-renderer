@@ -228,7 +228,7 @@ inverse trig, and drop the line flip. Measured, on a branch:
 3. **RTC/floating origin always on** (both modes).
 4. **Line width extrudes along the in-surface perpendicular:** `across = normalize(cross(along, up))`.
    Planar: `up = +Y` ⇒ the 2D perpendicular. Globe: `up = geodetic normal` ⇒ ribbon hugs the surface.
-   (Width itself is meters, converted to pixels per the styling model — see ARCHITECTURE.md §2.)
+   (Width itself is meters, converted to pixels per the styling model — see `ARCHITECTURE.md` § "Styling model — build geometry once, restyle via material".)
    *(Implemented S100 — `RibbonJob` builds the ribbon in 3D from a `(point, up)` array. NOTE the sign:
    `cross(along, up)`, NOT `cross(up, along)` — the two differ by a reflection, and only the former winds the
    flat Mercator ribbon like the confirmed-correct 2D reference. The sign is **calibrated** to that oracle,

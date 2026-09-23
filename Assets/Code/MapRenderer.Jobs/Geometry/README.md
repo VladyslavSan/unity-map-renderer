@@ -46,9 +46,8 @@ backing lists — and disposing a view is invalid. That is the entire reason the
 | `RingSelectJob` | `Geometry/` | narrows a tile's rings to one layer's visit order |
 | `RingClipJob` | `Geometry/` | the same, clipped to the tile's buffer window — production's default path |
 
-`FillGraphOutput` — the mesh-side columns a build produces — now lives in `Fill/`, not here (it moved when
-the fill mesher's namespace split out); `TileMeshBuffers`, its synchronous-pipeline twin
-(job-scheduling-design.md §8 stage 4 Group B), is retired.
+`FillGraphOutput` — the mesh-side columns a build produces — lives in `Fill/`, not here, with the rest of
+the fill mesher's namespace.
 
 ## A trap worth knowing
 

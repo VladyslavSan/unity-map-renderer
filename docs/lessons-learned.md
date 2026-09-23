@@ -201,8 +201,9 @@ not obvious from the code, and (c) will recur. Keep each entry tight and actiona
   two render loops per frame, so take perf verdicts from a Development standalone build — as a **capture
   caveat**, not as an explanation for any particular delta. And a telemetry surface that inflates the thing it
   measures is worse than no telemetry: the live Inspector panel writing public fields every frame was itself
-  forcing repaint, which is why the panel is now off by default. See `docs/telemetry-design.md` §1.3 and
-  `docs/symbol-label-perf-design.md` §10.4. (2026-07-25, corrected 2026-07-27.)
+  forcing repaint, which is why the panel is now off by default. See `docs/telemetry-design.md` § "Why"
+  (item 1) and `docs/symbol-label-perf-design.md` § "The memo is structurally dead under continuous motion".
+  (2026-07-25, corrected 2026-07-27.)
 
 ## DOTS / Entities Graphics
 
@@ -598,10 +599,11 @@ no tooth: the prose actively suppresses the question.
 
 *Epic A (2026-09-02) — four instances, none found by reading the doc:*
 
-- §7 rule 2 said "a structure test greps for both attributes and allows exactly the earcut batch job's
-  fields." No such test existed. Found only because a developer needed one of those attributes and asked
+- Rule 2 of `docs/job-scheduling-design.md` § "Safety — making the Editor's check sufficient" said "a
+  structure test greps for both attributes and allows exactly the earcut batch job's fields." No such test
+  existed. Found only because a developer needed one of those attributes and asked
   whether it was allowed.
-- §7's first qualification said the schedule-time write-write check "is contingent on the JobsDebugger
+- That section's first qualification said the schedule-time write-write check "is contingent on the JobsDebugger
   toggle… a gate whose debugger is off proves nothing here." Nothing read the toggle — so every
   dependency-edge RED in the epic rested on an unobserved environment flag. (`JobsUtility.JobDebuggerEnabled`
   is readable *and* settable, so this one is a tooth, not a log grep — unlike the Burst-compile hazard next
@@ -1247,6 +1249,22 @@ finding to write down, not a footnote to skip past.
   something happens" accepts a partial ready-set as a valid start and silently tests whichever candidate
   became ready first. Use a synchronous scheduler for the async hop under test, a fixed tick count, and
   assert the full ready-set as a precondition before asserting the pick.
+
+### Measuring coverage in a rendered image
+
+- **Measure a width as an alpha-weighted coverage integral, never as a count of pixels over a threshold.**
+  Sum `saturate((value − background) / (reference − background))` across a cut. A threshold count moves by
+  ±1–2 px when a feathered edge pixel crosses the threshold, so it flakes on a correct change.
+- **A coverage normaliser is a named reference region, read from unsaturated values.** When a test divides
+  by a full-coverage reference to get a coverage RATIO, never take "the brightest pixel on the column" as
+  that reference. A coverage function that ends in `saturate` pins that pixel at the clamp, so the ratio
+  loses the variation it must measure, and a run where the maximum lands on another pixel rescales the
+  result. A classifier that only sorts pixels into classes against the brightest one measures no ratio, so
+  this rule does not apply to it (`FillPaintTests.Classify` does that).
+- **An antialiased edge that is axis-aligned and on a pixel boundary has no partially covered pixel.** The
+  two pixel centres either side of the edge read 1.0 and 0.0, which is correct antialiasing. A test that
+  requires a partial pixel at an edge must offset the fixture by a fraction of a pixel (a quarter pixel is
+  enough), or it fails against a correct renderer.
 
 ### Run a new instrument against an unmodified tree before trusting what it reports
 

@@ -1,328 +1,174 @@
 # Mesh triangulation robustness — design (SSOT)
 
-**Status:** epic, in progress on `feat/mesh-triangulation-robustness`.
-**Owner doc:** this is the single source of truth — decisions, stage sequence, and open findings live here.
+What keeps fill triangulation correct on polygons with many holes, and what keeps the globe subdivision that
+follows it watertight: the invariants, the hole-elimination and failure-cascade design, the ear-scan index and
+why it cannot change the answer, conforming subdivision, and the instruments that check all of it.
 
-Fill polygons with many holes (water, at z6–z9 especially) are triangulated **wrong**: islands get filled
-in as water, and thin folded slivers tear across the interior. This doc records the measured evidence, the
-localized root cause, the validation testbench that guards the fix, and the staged fix plan.
+Many-hole polygons are the stress case — a water layer at z6–z9 is one large outer ring with dozens of island
+holes. The water polygon paints over a land-coloured background there, so a triangulator that folds renders
+islands as water and tears thin slits across the interior of a single tile.
+
+Earcut runs in flat tile space, before projection, and is identical for every projection. The renderer
+triangulates only with the Burst `EarcutJob`; there is no managed triangulator.
 
 ---
 
-## 1. Symptom (as observed)
-
-On the globe at z≈6–9, large water bodies render broken:
-- Parts of islands (e.g. England, the Danish isles) **disappear** — the water polygon fills over them, so
-  land reads as water. Roads (lines) on the same ground render correctly → "roads floating in water."
-- Thin **diagonal slits** cut across the interior of a single tile — *not* at any tile boundary. What looked
-  at first like inter-tile seams are also this: bad geometry *inside* one tile.
-- The artifacts **blink** as you zoom 6↔9. This is not a runtime cull — it is per-zoom-level **tile
-  swapping**: crossing zoom levels swaps tilesets, and the tiles whose fill is mis-generated simply aren't
-  drawn correctly, while the ones that happen to triangulate cleanly are.
-
-The rendering at these zooms is **inverted**: we paint the *water* polygon over a land-colored background,
-so a broken water mesh directly corrupts the land/water boundary.
-
-## 2. Root cause (measured + localized)
-
-Reproduced headless over two real OpenFreeMap `water`-layer tiles (`Tools/core-tests`, ~1 s, no Editor).
-Both are one large outer ring with many island holes:
-
-| Tile | outer verts | holes | earcut force-clips | area error | raster coverage error |
-|------|-------------|-------|--------------------|-----------|-----------------------|
-| z8/135/80 | 2571 | 50 | **54** | **+91%** | 20% (water spilled onto land) |
-| z6/32/20  | 879  | 13 | **5**  | +0.79% | thin sliver (near-zero area — invisible to an area check) |
-
-The `Earcut.Result.ForceClips` counter is the canary: **non-zero ⇒ the triangulator gave up and emitted
-geometrically invalid triangles.**
-
-Four discriminating checks on each tile's worst polygon (`WaterRepro.DeepDive_WorstWaterPolygon`) localize
-the defect to a single stage:
-
-| Check | Result | Conclusion |
-|-------|--------|------------|
-| (A) Input self-intersection — outer + every hole | outer clean; **0/50** and **0/13** holes self-intersect | **Input is clean** — not a sanitization problem |
-| (B) Assembler classification — each hole inside outer? | **50/50** and **13/13** holes correctly inside outer | **`PolygonAssembler` is correct** — no mis-nesting, no dropped/inverted rings |
-| (C) Outer ring triangulated ALONE (no holes) | **0 force-clips, 0.00% area error** | **The core ear-clip is fine** on a single ring |
-| (D) Same outer WITH its holes | **54 / 5 force-clips, +91% / +0.79% area** | **Hole handling is the whole defect** |
-
-**Root cause:** `Earcut.Triangulate` bridges each hole into the outer ring by splicing a zero-width seam
-(`FindBridgeVertex` + the `copyHoleLM`/`copyOuter` slit), then ear-clips the merged ring. With many holes
-the merged ring's seams interfere and ear detection **stalls**; the stall-guard (`Earcut.cs` ~L249-284)
-then **force-clips a non-ear triangle** to make progress. Those force-clipped triangles fold and overlap
-(z8's mesh area is ~1.9× the *outer ring's own* area — gross overlap, not merely unsubtracted holes), which
-renders as filled islands and torn slits. The exact interference mode (later bridge crossing an earlier
-seam vs. `IsEar` bridge-copy skipping breaking down at scale) is the **first fix-stage's investigation** —
-it is not needed to know the stage.
-
-Two independent mechanisms, same stage:
-- **Overlap/fold** (z8, dominant) — many holes → many force-clips → folded triangles fill the holes.
-- **Thin sliver** (z6, minor) — a few force-clips → a near-zero-area inverted triangle → a visible slit.
-
-### 2.1 Robustness vs performance — keep separate
-
-The **correctness** bug is *force-clip emits garbage*. The triangulator's **O(n³)** cost (`IsEar` scans all
-vertices, per clip) is an **independent** performance concern. They must not be conflated: the fix for the
-visible bug is "on failure, degrade correctly (never emit a fold)"; spatial acceleration of the ear scan is
-a separate perf item. **UMR-106 Stage 1 measured false the earlier claim that acceleration "changes no
-output"**: on a degenerate candidate triangle, `IsEar`'s linear scan is load-bearing — a distant collinear
-vertex is visited by the scan and, under the old predicate, wrongly reported as contained; that wrong
-answer is what today's output depends on (§6.1's `water-6-32-20` re-pin). Post-fix, the same vertex is
-correctly reported as not contained. So spatial acceleration is answer-preserving only once Stage 1's
-explicit degenerate-AABB test replaces the bare cross-product sign check (§6.1). **UMR-106 Stage 2 landed
-that acceleration** — a bounding-box index over `IsEar`'s scan (§6.1) — on the answer-preservation this
-precondition establishes.
-
-The degenerate-AABB test is safe at any coordinate precision, not just on the integer tile-space input this
-corpus happens to carry (production clips introduce fractional coordinates — `RingClipJob.Intersect`). A
-triangle's point set is always a subset of its own bounding box, so the branch can only turn a spurious
-`true` into a correct `false`; it can never discard a genuine containment.
-
-**Why the grid index cannot change the answer (the proof, not just the claim).** `PointInTriangle(A,B,C,P)
-== true ⇒ P ∈ AABB{A,B,C}` on both branches: the degenerate branch *is* the AABB test, and the non-
-degenerate (cross-product) branch can only accept a P inside the triangle's convex hull, which is always a
-subset of that same box (previous paragraph). So any vertex that could block an ear lies in the candidate
-triangle's own AABB. `EarGrid.CellX`/`CellY` are one monotone function, used identically at build time and
-at query time, so a vertex at x ∈ [triMinX, triMaxX] always maps to a cell in [CellX(triMinX), CellX(triMaxX)]
-— the exact range `IsEar` walks — and likewise for y. The cell walk therefore visits every base vertex the
-AABB could contain; nothing is skipped by construction, not by tuning. Split-added vertices (added after the
-grid is built) are covered separately by the unconditional `Overflow` scan, and the wide-AABB fallback (or
-the test-only `ForceLinearEarScan`) only widens the visited set to everything. The index changes which
-vertices `IsEar` visits, never which ones it is allowed to skip.
-
-## 3. Invariants the fix must hold
+## 1. Invariants
 
 For any valid (clean, correctly-classified) polygon-with-holes, the triangulation must satisfy:
 
-1. **No garbage on failure.** `ForceClips == 0`, OR — if a genuinely degenerate input is hit — the failure
-   path degrades *correctly* (drop/repair the offending locus) and **never emits an overlapping or inverted
-   triangle**. Emitting a fold is the bug; giving up cleanly is acceptable, folding is not.
+1. **No garbage on failure.** Where ear detection cannot progress, the failure path drops the offending locus
+   cleanly and **never emits an overlapping or inverted triangle**. `ForceClips` counts those clean drops.
+   Giving up cleanly is acceptable; a fold is the bug.
 2. **Area conservation.** Σ triangle area ≈ outerArea − Σ holeArea, within tolerance.
 3. **Holes subtracted.** No triangle covers the interior of a hole.
 4. **No spill.** No triangle covers area outside the outer ring.
-5. **Winding consistency.** All emitted triangles share orientation (a flipped triangle is a fold — this is
-   what makes thin slivers that area conservation alone can't catch).
+5. **Winding consistency.** All emitted triangles share orientation. A flipped triangle is a fold; this is
+   what catches a thin sliver that area conservation alone cannot.
 
-## 4. Testbench (the RED teeth)
+## 2. Hole elimination — the bridges must not cross
 
-A durable, reusable mesh-validation harness — the "identify weird holes made mid-pipeline" tool. Pure
-geometry (tile-space `double2`), engine-free, runs in the ~1 s fast `Tools/core-tests` loop.
+The core ear-clip is sound on a single ring. What fails on many-hole polygons is **hole elimination**: each
+hole is bridged into the outer ring by splicing a zero-width seam, and the merged ring is ear-clipped. The
+failure is a function of the **set** of holes bridged together, not of any one hole: every hole is fine alone,
+and the failure count grows with hole count and fluctuates with the combination. A later bridge that crosses
+an earlier seam tangles the merged ring into a self-intersecting one, ear detection stalls, and any path that
+forces progress by clipping a non-ear triangle emits folds.
 
-**Validator** (proposed `MeshCoverageValidator`, Core `Imaging`/`Geometry`, alongside the existing
-`SnapshotCoverage`): given assembled `Polygon`s and a triangulation result (triangles + force-clip
-count), reports and asserts invariants §3:
-- area expected vs actual + relative error;
-- rasterized coverage diff (even-odd over outer+holes = ground truth, nesting-agnostic) → **missing cells
-  (phantom holes)**, **extra cells (spill)**;
-- force-clip count;
-- winding consistency.
+There is **no single bad hole to repair**, so repairing an offending hole is rejected. The design makes hole
+elimination itself scale:
 
-**Corpus:** commit the two real pathological tiles as fixtures next to the existing
-`Assets/Fixtures/boundary-*.pbf.bytes` (`water-8-135-80.pbf.bytes`, `water-6-32-20.pbf.bytes`, ~170 KB each)
-— real data is what exposed this; synthetic stand-ins would not.
+- **Holes are eliminated one at a time, in a deterministic order** — leftmost x, then min y, then ring index
+  (`FillMeshPipeline.HoleRingComparer`) — each against the already-merged ring.
+- **Each bridge is validated non-crossing.** `FindBridgeVertex` picks a candidate, and `LocallyInside` +
+  `SectorContainsSector` check it against both the merged ring and the hole's own edges, falling back to
+  another candidate when it fails. The merged ring therefore stays simple on clean input.
 
-**Green-gate hygiene:** the bench asserts clean on good geometry (guards regressions). The two corpus tiles
-are **RED against today's earcut**, so their hard assertions land RED-first but **`[Explicit]`/ignored with
-a tracking note**, keeping the normal gate green while the reproduction is one flag away. Removing the
-ignore is the acceptance gate for the fix stages — flip to always-on green when the fix lands.
+This is the published ear-clipping-with-holes technique; `THIRD-PARTY-NOTICES.txt` records its provenance.
 
-**Optional later:** a thin Unity EditMode wrapper drives the *jobified* path (`FillMeshPipeline` +
-`GlobeFillSubdivideJob`) over the same corpus, so the full engine pipeline is covered, not just managed
-Core. Deferred behind the pure-Core bench (the bug is pre-projection, so Core covers it).
+## 3. The failure cascade
 
-The throwaway `Tools/core-tests/WaterRepro.cs` + the fetched `.raw` tiles are the seed; they get
-productionized into the validator + corpus and then removed.
+When ear detection stalls, `EarcutJob` runs a cascade that degrades correctly and never folds:
+`CureLocalIntersections` → `SplitPolygon` (via `TrySplit`) → clean drop. Every triangle the cascade emits
+passes `LocallyInside`/`IsValidDiagonal`; the only alternative is a counted clean drop.
 
-## 5. Fix approach (LOCKED — direction W: rewrite hole elimination)
+- **Explicit stack.** Burst does not reliably support recursion, so the split recursion is an explicit
+  stack of pending ring-jobs. `TrySplit` pushes the second half, then the first, so the first half — including
+  its own nested splits — finishes before the second starts, as a recursive call would.
+- **Bounded headroom.** The working buffers are pre-sized to the merged-ring size plus a split headroom of
+  `2 × min(MaxSplits, max(8, holeCount × 4))` vertices (`SizingJob`). `TrySplit` checks remaining capacity
+  before it writes a split's two new vertices and refuses the split when the headroom is exhausted, so the
+  caller falls through to a clean drop. `OutMergedVertexCount` reports the count used, which is usually less
+  than the capacity.
 
-The core ear-clip is sound (check C); only hole handling fails. **Stage 1 bisection locks the direction.**
+**Limitations.**
 
-**Stage 1 evidence** (z8/135/80 worst polygon, outer=2571, 50 holes, 54 force-clips):
-- **Every hole is individually fine** — outer + any *single* hole force-clips **0/50** times.
-- **Force-clips scale with hole COUNT and fluctuate with the combination** — cumulative outer+holes[0..k]:
-  k=3→6, k=6→29, k=13→35, … and adding some holes *reduces* the count (k=29: 53→52). The failure is a
-  function of the *set* of holes bridged together, not any one hole.
+- **The split path is not exercised by any committed test.** It is memory-safe (the capacity check refuses
+  before any write) and cannot fold (every cascade triangle passes the diagonal checks), but nothing fires it.
+  A test that does must craft a self-intersecting input that provably splits; a water-tile check passes
+  without touching the path.
+- **A headroom-exhaustion drop and a genuine-degeneracy drop are indistinguishable** — both increment
+  `ForceClips`.
+- **Adversarial synthetic polygons keep a small overlap tail.** Adversarial star polygons show no winding
+  flips, but a small fraction overlap by more than 1 % of their area (overlap, not fold; invisible for an
+  opaque fill). It is not observed on real tiles. The suspected cause: `IsEar` skips bridge-copy vertices in
+  its containment test, which can admit an ear that straddles a zero-width bridge seam. Tightening that is the
+  principled way to drive the tail toward zero.
+- **A reversed-concave residual** could in principle overlap with `ForceClips == 0` and no winding flip. The
+  non-crossing bridge keeps a clean input's merged ring simple, so it is not reachable on real data; a unit
+  test pins the case (`Unit_ReversedConcaveQuad_NoFold_AreaConserved`).
 
-⇒ **Bridge interference.** Bridging many holes into one merged ring (`FindBridgeVertex` + sequential splice)
-tangles it into a self-intersecting ring that stalls ear-detection; the stall-guard then force-clips folds.
-There is **no localized hole to repair** — so **(R) Repair is rejected**. The hole-elimination step itself
-does not scale.
+The level this design operates at is **correct on real data, plus bounded, counted degradation** on
+adversarial input — not overlap-free output on every input.
 
-**Decision: (W) Rewrite hole elimination** following the proven mapbox/earcut *algorithm* (clean-room — it
-is a published algorithm; ISC-licensed reference, compatible with this repo's no-copyleft rule), keeping the
-sound core ear-clip:
-- **Robust hole elimination** — a `findHoleBridge` that provably picks a **non-crossing** bridge from each
-  hole (sort holes by leftmost x; eliminate one at a time against the already-merged ring), so the merged
-  ring stays simple.
-- **A failure cascade** — `cureLocalIntersections` → `splitPolygon` → retry — that on ear-detection failure
-  **degrades correctly and NEVER emits an overlapping/inverted triangle**. This is the invariant that fixes
-  the visible bug; the force-clip-emits-a-fold path is deleted.
+## 4. The ear-scan index — why it cannot change the answer
 
-## 6. Stage sequence
+Correctness and cost are separate concerns. Without an index, every ear test scans every vertex of the merged
+ring. The index changes which vertices an ear test visits; it must never change the verdict.
 
-0. **Testbench + corpus (this branch, first).** Productionize the validator (§4), commit the two corpus
-   tiles, land the RED-first `[Explicit]` assertions. *No production change.* Green gate stays green.
-1. **Bridging root-cause + approach lock.** ✅ DONE — bisection proved bridge interference (no single bad
-   hole; force-clips scale with hole-set); **direction W locked** (§5).
-2. **Fix hole handling.** ✅ DONE (managed `Earcut.cs`). A **validate-and-fallback provably non-crossing**
-   bridge selection (`LocallyInside` + `SectorContainsSector`, checking the merged ring and each hole's own
-   edges) keeps the merged ring simple; the force-clip-fold path is deleted and replaced by a
-   `CureLocalIntersections → SplitPolygon → clean-drop` cascade that never folds (the reactive mirror-retry
-   an earlier iteration tried was removed — the non-crossing bridge makes it unnecessary). Corpus `[Explicit]`
-   assertions flipped to always-on GREEN. **Managed-vs-Burst note:** the renderer uses only the Burst
-   `EarcutJob`; managed `Earcut` is test-only, so this stage moves **zero rendered pixels**. `countries`
-   had 1 managed force-clip → 0, so its index hash moved → `JobifiedPipelineTests.…MatchManagedPath` is
-   `[Explicit]`-deferred to Stage 3 (managed fixed ahead of Burst; re-greened when Stage 3 ports it).
-3. **Jobified-path parity — THE VISIBLE FIX.** ✅ DONE (`4137f15a`). Ported into Burst `EarcutJob` via an
-   explicit-stack DFS (push c-then-a = managed's a-before-c order); scratch pre-sized
-   `baseCap + 2*min(MaxSplits, max(8, holeCount*4))` with `TrySplit` refusing (drop-clean) before any
-   overflow; `OutMergedVertexCount` keeps `MatchManagedPath`'s hash bit-identical. `MatchManagedPath`
-   un-`[Explicit]`'d and GREEN (managed==Burst on countries, resolved by cure not split). New
-   `JobifiedWaterTriangulationTests` drives the real `FillMeshPipeline` over `water-8-135-80` and validates
-   no-folds/area via `MeshCoverageValidator.ValidateTriangulation`. No GPU snapshot renders water → no
-   re-bake needed. `run-tests.sh` 1490/1490 green. Dual-reviewed (Opus APPROVE + Codex no-OOB).
+**The degenerate branch.** On a degenerate (zero-area) candidate triangle, `PointInTriangle` uses an explicit
+bounding-box test rather than the bare cross-product sign check, which would report a distant collinear vertex
+as contained. The branch is safe at any coordinate precision, not just on integer tile coordinates (the clip
+stage introduces fractional ones — `RingClipJob.Intersect`): a triangle's point set is always a subset of its
+own bounding box, so the branch can only turn a spurious `true` into a correct `false`; it never discards a
+genuine containment. This branch is the precondition for the index being answer-preserving.
 
-**EPIC COMPLETE (S0–S3), branch `feat/mesh-triangulation-robustness` unpushed. Maintainer confirmed the
-missing-land / islands-filled-as-water artefact is FIXED on the globe.** Each stage is one revertible commit.
+**The index.** `EarcutJob.EarGrid` is a uniform bucket grid (CSR layout, counting sort) built once per polygon
+over the merged ring (`BuildEarGrid`). `ComputeIsEar` walks only the cells that overlap the candidate
+triangle's bounding box, and falls back to the linear scan when that box spans too many cells. Vertices added
+by a split, after the grid is built, go to a linear `Overflow` list that every ear test scans.
 
-## 6.2 NEXT EPIC (separate) — globe fill SUBDIVISION artefact (NOT earcut)
+**Why nothing is skipped.** `PointInTriangle(A,B,C,P) == true ⇒ P ∈ AABB{A,B,C}` on both branches: the
+degenerate branch *is* the box test, and the cross-product branch can only accept a P inside the triangle's
+convex hull, which is a subset of that same box. So any vertex that could block an ear lies in the candidate
+triangle's own box. `EarGrid.CellX`/`CellY` are one monotone function, used identically at build time and at
+query time, so a vertex at x ∈ [triMinX, triMaxX] always maps to a cell in [CellX(triMinX), CellX(triMaxX)] —
+the range `ComputeIsEar` walks — and likewise for y. The cell walk therefore visits every base vertex the box
+could contain; split-added vertices are covered by the `Overflow` scan, and the wide-box fallback (or the
+test-only `ForceLinearEarScan`) only widens the visited set to everything.
 
-Maintainer isolated a *distinct* remaining artefact: a thin **diagonal "hole" in the middle of the ocean**,
-inside a single tile (e.g. **tile 6/32/20, water layer**), **present ONLY in globe view — Mercator is clean**
-(the Mercator mesh outline shows no gap there). Since earcut runs in flat tile space *before* projection and
-is identical for both, a globe-only artefact **cannot be earcut** — it is `GlobeFillSubdivideJob` (the 3°
-adaptive subdivision, the only globe-only stage).
+## 5. Globe subdivision must be conforming
 
-**Root cause CONFIRMED + MEASURED (managed mirror of the job over `water-6-32-20`, tile-space T-junction
-detection + render-space gap magnitude):**
+On a curved projection the straight triangle edges chord through the sphere, so `GlobeFillSubdivideJob`
+refines each earcut triangle after projection. It is the only globe-only stage, so a globe-only crack is a
+subdivision defect, never an earcut one.
 
-| Signal | Value | Conclusion |
-|--------|-------|-----------|
-| `maxDepthReached` | **1** (of MaxDepth 5) | shallow — only ~11 of 1676 earcut triangles curve enough to split |
-| `budgetFired` | **False** (Budget 200 000 untouched) | the Budget/MaxDepth hard-cutoff mechanism is **RULED OUT** |
-| worst render-space gap | **3612 m = 1.03% of the z6 tile span** (352 km) | a supra-pixel, visible crack — the diagonal the maintainer saw |
-| gap distribution | 18 sub-metre (invisible) + 2 mid + **3 in the 1–10 km bucket** | **severity, not count** — 3 big gaps are the artefact; the T-junction *tally* (23) is meaningless |
+**Non-conforming refinement cracks.** If a triangle splits (inserting midpoints on its edges) while its
+neighbour across a shared edge does not, the neighbour keeps that edge as a straight chord. In flat tile space
+the inserted midpoint is collinear and invisible, which is why Mercator shows nothing; on the sphere the
+midpoint bulges off the chord and opens a **T-junction gap**. The gap grows with the shared edge's subtended
+angle, so the largest gaps fall on earcut's longest edges — the coast→island bridge diagonals.
 
-**Mechanism (general — subsumes the earlier "bridge-slit" hypothesis):** the adaptive 1→4 refinement is
-**non-conforming**. A triangle splits (inserting a midpoint on *all three* edges) when any one of its edges
-subtends > 3°; its neighbour across a shared edge may be all-flat and **not** split, keeping that edge a
-straight chord. In flat tile space the inserted midpoint is exactly collinear (invisible — why Mercator is
-clean); on the sphere the midpoint bulges off the chord → a **T-junction gap**. The gap size scales with the
-shared edge's subtended angle, so the *largest* gaps fall on earcut's *longest* edges — the coast→island
-bridge diagonals. The "bridge-slit" is therefore just the **maximal-asymmetry instance** of the general
-depth-mismatch, not a separate cause. (Measured by `Tools/core-tests/SubdivRepro.cs` — throwaway seed.)
+**Per-edge marking.** An edge is marked iff its endpoints' great-circle angle exceeds the target (3°,
+`GlobeFillSubdivideDispatch.DefaultMaxEdgeAngleRad`). A mark is a function of the edge's two endpoints alone, so two
+triangles sharing an edge always compute the same mark: conforming without connectivity. Each triangle then
+takes one of the templates keyed by its mark count — 0: emit; 1: bisect; 2: the 1→3 split with the **shorter**
+interior diagonal; 3: the 1→4 split — and recurses. Interior diagonals are private to their parent, so the
+mesh is T-junction-free at every depth. On Mercator the up vector is constant, no edge is ever marked, and
+the stage is a byte-identical pass-through.
 
-**STATUS: RESOLVED (candidate A landed, commit `f566ad23` on `feat/globe-fill-subdivision`).** The Burst
-`GlobeFillSubdivideJob` now does **edge-conforming red-green refinement**: each edge is marked iff its
-endpoints' great-circle angle exceeds the 3° target (a function of the edge alone, so two triangles sharing
-it always agree — conforming without connectivity), split by mark-count via 3 templates (1→bisect, 2→1→3
-with the **shorter** interior diagonal, 3→1→4), recursing; interior diagonals are parent-private ⇒
-T-junction-free at every depth. Mercator stays a byte-identical pass-through (constant up ⇒ 0 marks). Both
-RED-first teeth flipped GREEN (z6 corpus + z2 depth-5 quad, maxGap 0.0m) + a z0 real-tile non-uniform tooth
-(rendered-geometry gap 0.0002%, sub-visible). Full gate 1500/1500. **Investigation note:** the z0 "residual"
-during the fix was phantom — zero-area earcut **bridge slits** + antimeridian earcut **needle slivers**
-(0.08% of z0 fill area), an *earcut* pathology (excluded from the subdivision-quality metrics, they paint
-nothing); a possible earcut-side antimeridian fix is a separate future epic.
+**Rejected alternatives.**
 
-**Fix-direction candidates (considered; A chosen):**
-- **(A) Edge-conforming refinement** — subdivide each edge by a count that is a function of its two
-  endpoints *alone* (great-circle angle between their ups), so both triangles sharing it agree → conforming
-  by construction, still adaptive. Fill each triangle's interior respecting its (possibly unequal) per-edge
-  sample counts (red-green / template tessellation). *Most work, truly conforming, keeps adaptivity.*
-- **(B) Uniform per-tile depth** — one depth for the whole tile from its max edge curvature; conforming by
-  construction (all edges split identically in tile space). *Simplest, but reintroduces the low-zoom
-  (z0–2 whole-globe triangle) explosion adaptivity exists to avoid — Budget-bounded but risky.*
-- **(C) T-junction stitching post-pass** — after adaptive subdivision, insert each T-junction midpoint into
-  the offending straight edge (fan the unsplit triangle). *Bolt-on; can cascade.*
+- **Uniform per-tile depth** — one depth for the whole tile from its maximum edge curvature. Conforming, but it
+  reintroduces the low-zoom explosion adaptivity exists to avoid (a z0–z2 triangle spans much of the globe).
+- **A T-junction stitching post-pass** — insert each T-junction midpoint into the offending straight edge
+  after adaptive subdivision. A bolt-on, and it can cascade.
 
-**Wanted (maintainer):** a **separate test suite for the subdivision** (analogous to the earcut testbench) —
-validate the subdivided globe mesh is watertight / introduces no coverage hole vs the flat triangulation, no
-flipped/degenerate sub-triangles, and no T-junction cracks. **Gate on render-space gap magnitude (visible vs
-sub-pixel), NOT T-junction count** (the earcut epic's "severity, not count" lesson — the count is large and
-meaningless by construction). `GlobeFillSubdivideJob` is Burst (Unity-only), but its logic mirrors managed
-via the engine-free `SphericalProjection` (in `core-tests`) for a fast first harness (the mirror iterates;
-it is NOT the acceptance tooth) — **source-of-truth is a Unity EditMode test over the REAL Burst job** on
-`water-6-32-20` (verify the mirror's gap numbers match the real job first). **Invariant to protect: Mercator
-stays a pass-through no-op** (constant up → never subdivides; byte-identical, matching the earcut epic's
-"zero pixels moved on Mercator" discipline). Corpus seed: `water-6-32-20.pbf.bytes` (already committed).
-This is a NEW epic — supersedes the "Globe fill T-junction seams" fence in §7.
+**Bounds.** `MaxDepth` (5) and two per-tile vertex budgets (`InteriorBudget`, `TotalBudget`) keep a whole-globe
+z0 tile from exploding.
 
-### 6.1 Stage-2 acceptance bar (measured) + hardening backlog
+**Limitation (no test observes it).** A forced stop can still leave a T-junction. The `MaxDepth` cap or either
+budget makes ONE triangle emit flat whatever its own marks say, including a still-marked edge shared with a
+neighbour that has not been forced to stop. On a tile with non-uniform curvature the two sides reach the cap
+at different times. The committed fixtures are uniformly curved, so every triangle there reaches its stop test
+in lockstep and the gap never appears.
 
-**Acceptance bar = "correct on real data + bounded, surfaced degradation"** (the level mapbox/earcut itself
-operates at — it does not guarantee overlap-free output on all inputs; it degrades and reports a deviation).
-Concretely, measured on the committed corpus + a fetched panel of coastline-dense tiles:
-- **Real tiles are clean or graceful.** 6 coastline/archipelago tiles (Aegean, Norway fjords/150 polys,
-  Palawan, Stockholm arch./28k tris, Croatia, Raja Ampat): 4 perfectly clean (ForceClips=0, WindingFlips=0,
-  area 0.00%); 2 with a **single surfaced clean drop** (ForceClips=1, area <0.8%, no fold). No folds, no
-  islands-as-water. These are committed as corpus teeth (4 strict, 2 graceful-bound).
-- **UMR-106 Stage 1 update — a sixth strict fixture, not five, and one of the six now pins a drop.**
-  `water-6-32-20` (the original stage-0/1/2 corpus tile, tested separately from the 6-tile panel above)
-  stays in the strict tier, but Stage 1's degenerate-candidate fix (§2.1) surfaces one clean drop there that
-  did not exist before: `ForceClips` moves 0 → 1. Measured at the drop site: 5 live vertices, residual
-  signed area +33.5 tile-space units² (0.000206% of the outer ring) in a 24×3 bounding box, a simple
-  (non-self-crossing) non-degenerate hole-bridging seam residual. The count is pinned EXACTLY
-  (`Corpus_Water_6_32_20_TriangulatesFaithfully`), not widened to an inequality, because `ForceClips` is the
-  only instrument in the suite that can see a drop this small — `MeshCoverageValidator`'s raster coverage
-  check cannot resolve below ~455 units² at its default `rasterN`, ~13× larger than this sliver.
-- **No folds anywhere.** 60 000 adversarial synthetic star polygons: **WindingFlips=0 across all** (no
-  inversions). Only 0.45% exceed 1% exact-area error (bounded overlaps, invisible for opaque fill; max
-  12.82% on 2 spiky stars). `ForceClips` surfaces genuine clean drops.
-- **UMR-106 Stage 2 — the bounding-box index landed, answer-preserving.** A uniform bucket grid (CSR
-  layout, counting sort, built once per polygon over the merged ring — `EarcutJob.EarGrid`/
-  `BuildEarGrid`) replaces `ComputeIsEar`'s full linear scan with a walk of only the cells overlapping
-  the candidate triangle's own AABB, falling back to the linear scan when the AABB spans too many cells.
-  Split-added vertices (rare, failure-path only) go to a linear overflow list instead of the grid.
-  Measured on Stockholm (the densest fixture, 25 482 live vertices): the ear-test scan's candidate-visit
-  count fell from **1 201 497 972** (linear) to **756 893** (indexed) — a ~1587× reduction, holding the
-  6.6× headroom `EarcutEarTestScanBoundTests` bounds it against (< 5 000 000). Byte-identical to the
-  linear-fallback arm on all eight water fixtures plus `sample-tile` (index construction and the
-  wide-AABB fallback change only which vertices are visited, never the verdict — §2.1's precondition).
-  No golden re-captured; this is a pure performance change.
+**Measure severity, not count.** A subdivision check gates on the render-space gap **magnitude** (visible vs
+sub-pixel), not on the T-junction count. The count is large and meaningless: almost all T-junctions are
+sub-metre and invisible, and a handful of kilometre-scale ones are the whole visible defect.
 
-**Hardening backlog (NOT blocking Stage 2 — quantified, deferred):**
-- **Synthetic-star overlap tail** — 0.45% of adversarial clean stars overlap >1% (max 12.82%), all
-  overlap-not-fold, `WindingFlips=0`. Not observed on real tiles. A dedicated hardening pass could drive
-  this toward zero.
-- **Root cause suspect (advisor):** `IsEar` skips `isBridgeCopy` vertices in its point-in-triangle test,
-  which can admit an ear straddling a zero-width bridge seam → the residual overlap on the synthetic tail.
-  Tightening this is the principled follow-up for driving the synthetic tail toward zero; do it in/after
-  Stage 3, guarded by the same testbench.
-- Codex-review note (kept as a permanent unit tooth, `Unit_ReversedConcaveQuad_…`): a reversed-*concave*
-  residual could in principle emit overlap with `ForceClips=0`/`WindingFlips=0`. The non-crossing bridge
-  keeps clean input's merged ring simple so this is not reachable on the real corpus; tracked by the tail
-  backlog above.
-- **Stage-3 Burst split-cascade is empirically UNEXERCISED (recorded, deferred).** The Burst `EarcutJob`
-  port is bit-identical to managed on the *bridge* path (`MatchManagedPath` green on `countries`, which the
-  fix resolves via `CureLocalIntersections` — no split), and the jobified water tooth passes with
-  `ForceClips=0`. But no committed test fires the `TrySplit`/`SplitPolygon`/explicit-stack-DFS path, so its
-  managed↔Burst bit-identity is unverified. It ships accepted because it is **memory-safe** (the
-  `total+2 > Vx.Length` guard refuses before any write — Opus + orchestrator both traced it) and
-  **cannot-fold by construction** (every cascade triangle passes `LocallyInside`/`IsValidDiagonal`; the only
-  alternative is a counted clean drop). The Burst headroom (`min(512, max(8, holeCount*4))*2`) intentionally
-  diverges from managed's grow-to-512 on exhaustion — both degrade to bounded, surfaced clean-drop, never
-  garbage. The proper future tooth (with the synthetic-star hardening): a crafted self-intersecting input
-  that provably fires a split (`splitCount>0`) AND asserts `managed == Burst` — a plain water-tile hash check
-  is insufficient (it passes without touching the path). Minor observability follow-up: a
-  headroom-exhaustion drop is currently indistinguishable from a genuine-degeneracy drop (both `ForceClips++`).
+## 6. Validation instruments
 
-## 6.3 Coverage shape after the managed triangulator was removed
+- **`MeshCoverageValidator`** (EditMode, test side) checks an already-triangulated result against its
+  ground-truth rings in flat tile space: `ForceClips`, winding flips, area relative error, and a rasterised
+  coverage diff against the even-odd source fill (missing cells = phantom holes, extra cells = spill).
+  Tolerances are the caller's (`areaEps`, `mismatchEps`). It rasterises because a folded sliver has ~zero area
+  but is visible. Winding flips use one global majority sign, because every outer ring is normalised to one
+  winding, so a flip anywhere is a fold. **`ForceClips` is the only instrument that sees a drop smaller than
+  one raster cell**, so a corpus test pins that count exactly rather than as an inequality.
+- **`SubdivisionCoverageValidator`** checks the subdivided globe mesh against the flat triangulation: no
+  coverage hole, no flipped or degenerate sub-triangle, and T-junction cracks measured as render-space gap
+  magnitude.
+- **A real-tile corpus** — many-hole water tiles (`water-8-135-80`, `water-6-32-20`) and a panel of
+  coastline/archipelago tiles. Real data exposes these defects; synthetic stand-ins do not. Adversarial
+  synthetic stars exercise the no-fold invariant beyond the corpus.
 
-Triangulation correctness is proven by *property* coverage against geometric ground truth
-(`PolygonAssembler` + `SignedArea` + even-odd rasterisation) run over the Burst `EarcutJob`'s own
-output. There is no second, independently-implemented triangulator to arm-check the Burst port
-against — that arm-agreement coverage ended when the managed triangulator was removed, with no
-replacement; property coverage is independent of the triangulator under test but weaker than a
-bit-identity check would be.
-
-**Permanent loss to the `Tools/core-tests` fast loop.** `EarcutTests.cs`, `EarcutDegenerateTriangleTests.cs`
-and `EarcutEarTestScanBoundTests.cs` (~14 test cases total: degenerate-input handling, synthetic hole
-triangulation, `PointInTriangle`'s degenerate branch, and the whole UMR-106
-Stage 2 scan-bound corpus sweep) moved off `core-tests.csproj`. They now drive `MapRenderer.Jobs.Fill.EarcutJob`
-— `NativeArray`, Burst, `Unity.Collections` — which `core-tests` cannot compile (no shim may bridge this;
-see that project's own doc for the silent-no-op `AsArray()` dispose hazard a shim would reintroduce). This
-is a durable consequence of going Burst-only, not a stage artefact: there is no future stage that restores
-these ~14 cases to the sub-second loop. They still run — every commit — as part of the Unity EditMode gate.
+**Coverage shape.** Correctness is *property* coverage against geometric ground truth (`PolygonAssembler` +
+signed area + even-odd rasterisation) over the Burst `EarcutJob`'s own output. There is no second,
+independently implemented triangulator to compare against: property coverage is independent of the
+triangulator under test but weaker than a bit-identity check. The earcut tests drive `NativeArray`/Burst, so
+they cannot compile in the `Tools/core-tests` fast loop (no shim may bridge that — see that project's own
+doc); they run in the Unity EditMode gate.
 
 **`TriangulationBuffers.HoleCountOffsets` is capacity, `PolyHoleCount` is truth.** `HoleCountOffsets[pi+1]
 - HoleCountOffsets[pi]` is the sizing pass's per-polygon CAPACITY — padded to 1 even for a zero-hole
@@ -330,21 +176,11 @@ polygon, to match `EarcutJob.SortedHoleCounts`'s own length-1-when-empty contrac
 polygon's real hole count; `PolyHoleCount[pi]` is. Reconstructing a polygon's holes from the offsets
 column alone silently manufactures one zero-vertex phantom hole per zero-hole polygon.
 
-## 7. Scope fences (out of this epic)
+## 7. Out of scope and open
 
-- **Globe fill T-junction seams** between adjacently-subdivided tiles (`GlobeFillSubdivideJob` refines each
-  tile's boundary edges independently) — a *separate* globe-fill watertightness issue; skirts or conforming
-  boundary tessellation. Tracked separately, not here.
-- ~~**Triangulator performance** (O(n³) → spatial ear search)~~ — **landed, UMR-106 Stage 2** (§2.1, §6.1):
-  a bounding-box index over `IsEar`'s scan, built on Stage 1's degenerate-AABB fix as its
-  answer-preserving precondition.
-- **Curved-line / symbol tile-bounds clipping** — unrelated prior work.
-- **Input sanitization** for genuinely self-intersecting source rings — not needed for these tiles (check A
-  clean); if a future corpus tile has dirty input, the correct-degradation path (§3.1) must still not fold.
-
-## 8. Open questions
-
-- ~~R vs W~~ — **resolved (W), §5.**
-- Winding-consistency tolerance and the exact area-conservation ε for the validator (set from the clean
-  corpus baseline).
-- Whether the Burst path shares the managed fix verbatim or needs its own port (stage 3).
+- **T-junction seams between adjacent tiles.** `GlobeFillSubdivideJob` refines each tile's boundary edges
+  independently — a separate globe-fill watertightness issue, for skirts or conforming boundary tessellation.
+- **z0 earcut slivers.** Zero-area bridge slits and antimeridian needle slivers appear at z0. They paint
+  nothing, and the subdivision-quality metrics exclude them; an earcut-side antimeridian fix is open.
+- **Input sanitization** for genuinely self-intersecting source rings is not built. On such input the failure
+  cascade must still not fold.

@@ -51,7 +51,7 @@ sample-tile.bytes ─► MvtDecoder ─► MvtGeometry (command stream → rings
 - **On screen (Batch 2):** a GameObject with the renderer shows the country fills; an unlit `Cull Off`
   material avoids winding/backface surprises for the spike.
 
-## Step-0 gotchas (see also docs/coordinates-and-projections.md §7)
+## Step-0 gotchas (see also docs/coordinates-and-projections.md § "Axis conventions (Unity is left-handed, Y-up)")
 - Don't pre-flip Y — the tile→lon/lat formula already encodes the top-left origin.
 - Read `extent` per layer (don't hardcode 4096).
 - `mesh.indexFormat = UInt32` (dense tiles exceed 65535 verts).

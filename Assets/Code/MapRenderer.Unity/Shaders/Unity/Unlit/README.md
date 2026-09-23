@@ -1,10 +1,10 @@
 # UnityUnlit — vendored URP Unlit shader (reference template)
 
 A **verbatim copy** of Unity's Universal Render Pipeline *Unlit* shader set, vendored into the repo to
-serve as a **reference template** for the planned GPU-cheap Unlit map-shader variant (see
-`docs/meshing-design.md` §3 "Unlit variant"). It is the Unlit counterpart to the `../Lit/` template:
-keeping these files in-tree lets a future `Map/*` Unlit shader be diffed directly against its upstream
-counterpart to confirm the only differences are the intended ones.
+serve as a **reference template** for the GPU-cheap Unlit map-shader variant, `Map/*/Unlit/` (see
+`docs/meshing-design.md` § "Unlit variant — a GPU-cheap render path"). It is the Unlit counterpart to the
+`../Lit/` template: keeping these files in-tree lets each `Map/*` Unlit shader be diffed directly against
+its upstream counterpart to confirm the only differences are the intended ones.
 
 ## Provenance
 
@@ -41,7 +41,7 @@ These are the **only** changes from the package originals — everything else is
 
 The `Template/UnityUnlit` shader is reference-only; it is not used by any material at runtime.
 
-## How a future Unlit map shader relates to this template
+## How an Unlit map shader relates to this template
 
 An Unlit `Map/*` shader should diff against this template down to the same small delta set the Lit map
 shaders keep over `../Lit/` (see `../Lit/README.md`):

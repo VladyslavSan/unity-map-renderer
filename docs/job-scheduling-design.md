@@ -7,9 +7,9 @@ imposes, and for which parts of `docs/tile-pipeline-design.md`'s build seam this
 
 **Read with:** `docs/web-target.md` §"Measured in THIS project" (what the web target can and cannot run
 off-main), `docs/async-architecture.md` §"Disposal & cancellation contract" (the lifetime contract §8
-extends), `docs/gc-and-allocation-design.md` §5 (why off-main scratch is `Persistent`),
-`docs/meshing-design.md` §1 (what the mesh stages compute), and `docs/tile-geometry-ir-design.md` (the
-buffers a graph reads).
+extends), `docs/gc-and-allocation-design.md` § "Allocator lifetime trap: `TempJob` is *main-thread*
+frames" (why off-main scratch is `Persistent`), `docs/meshing-design.md` § "Mesh pipeline" (what the mesh
+stages compute), and `docs/tile-geometry-ir-design.md` (the buffers a graph reads).
 
 ---
 
@@ -457,24 +457,25 @@ it needs no mutual exclusion because it is policy-independent.
 
 ## 12. What this design owns from `docs/tile-pipeline-design.md`
 
-§4 there plans the same seam. This design owns the two-phase split and its exact-size allocation, and nothing
-about chunking.
+Its § "The build seam this design hands over" describes the same seam. This design owns the two-phase split
+and its exact-size allocation, and nothing about chunking. Every § in the table below names a section of
+`docs/tile-pipeline-design.md`.
 
 **The write graph emits one mesh per layer.** Per-chunk mesh output answers a consume stall that is asserted
 and never measured, and that reading the code contradicts: a per-mesh budget already exists, consume is
 already mesh-by-mesh, the main-thread consume cost is dominated by per-mesh work rather than per-vertex
 bytes, and splitting a layer would multiply that cost while spending the whole consume budget on one layer.
 
-| §4 part | owner | how |
+| tile-pipeline part | owner | how |
 |---|---|---|
-| §4.1 the two-phase `LoadedTile` state | **this design** | `BuildStep`, with a third value for the prologue; a step transition of an admitted tile is uncharged (§3) |
-| §4.2 `ILayerGeometry` replacing `IRenderLayer.WriteInto` — a managed measure/write mesher interface | **superseded** | the graph builder plus the stream-write job *are* the measure/write split. There is no managed mesher interface in the middle, and `WriteInto` is gone. |
-| §4.3 exact-size allocation, the allocation counter, consume and backend unchanged | **this design** | one `MeshDataArray` per non-empty layer, sized to that layer's measured count |
-| §4.3 D7 — `PreparedTileCache` value `Mesh` → `Mesh[]` | **moot** | it existed only because one layer could become K > 1 meshes. One mesh per layer keeps the current value shape correct, and the cache is untouched by this design. |
-| §4's consume-overshoot tooth | **moot** | it asserted a per-Tick consume bound *and* "the layer produces ≥ 3 meshes"; the second half is false once a layer is one mesh |
-| the chunk target constant | **moot** | nothing reads it once chunking is gone |
+| the two-phase `LoadedTile` state (§ "The build seam this design hands over") | **this design** | `BuildStep`, with a third value for the prologue; a step transition of an admitted tile is uncharged (§ "The tile build — three polled steps" above) |
+| `ILayerGeometry` replacing `IRenderLayer.WriteInto` — a managed measure/write mesher interface (§ "The build seam this design hands over") | **superseded** | the graph builder plus the stream-write job *are* the measure/write split. There is no managed mesher interface in the middle, and `WriteInto` is gone. |
+| exact-size allocation (§ "The build seam this design hands over"); the allocation counter (`MeshDataArraysAllocatedLastKick`, not described there); consume and backend unchanged | **this design** | one `MeshDataArray` per non-empty layer, sized to that layer's measured count |
+| `PreparedTileCache` value `Mesh` → `Mesh[]` (§ "Rejected alternatives") | **moot** | it existed only because one layer could become K > 1 meshes. One mesh per layer keeps the current value shape correct, and the cache is untouched by this design. |
+| a consume-overshoot tooth (`docs/tile-pipeline-design.md` does not describe it) | **moot** | it asserted a per-Tick consume bound *and* "the layer produces ≥ 3 meshes"; the second half is false once a layer is one mesh |
+| the chunk target constant (§ "Rejected alternatives", the per-layer vertex cap) | **moot** | nothing reads it once chunking is gone |
 
-What §4 delivers here is the blind-allocation stall, which falls out of exact sizing. The consume stall
+What that seam delivers here is the blind-allocation stall, which falls out of exact sizing. The consume stall
 chunking was meant to close is **not** addressed and is not claimed to be.
 
 ## 13. Invariants that constrain what is built next
@@ -497,9 +498,10 @@ chunking was meant to close is **not** addressed and is not claimed to be.
    or depth-rejected. It is not invisible where it matters: at the edge of the loaded cover, and while a
    neighbour is still loading, this shows a closed truncated building where suppressing cut edges would show
    a hollow shell. **The one condition that reopens the alternative is translucent fill-extrusion**
-   (`docs/depth-and-render-regimes-design.md` §6.E), under which the hidden cut walls become a visible seam
-   band. Suppressing them then needs a new per-output-edge column out of `RingClipJob` — a contract change
-   across all its call sites. Do not build it before §6.E lands.
+   (`docs/depth-and-render-regimes-design.md` § "The general model — sub-areas", item E), under which the
+   hidden cut walls become a visible seam band. Suppressing them then needs a new per-output-edge column out
+   of `RingClipJob` — a contract change across all its call sites. Do not build it before translucent
+   fill-extrusion exists.
 4. **Every stream view of one `Mesh.MeshData` shares one safety handle.** Two writable views cannot be two
    job fields: scheduling throws an aliasing error. A stream-write job therefore holds the whole
    `Mesh.MeshData` as **one** field and resolves every stream and index view inside `Execute()`.

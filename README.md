@@ -22,7 +22,7 @@ runtime entry (reads inspector fields, builds the data source + style), `Wire(Ga
 the static, testable entry that does the component-graph wiring alone.
 
 ## Architecture at a glance
-See [`ARCHITECTURE.md`](./ARCHITECTURE.md) §2 for the current pipeline diagram and the module table
+See [`ARCHITECTURE.md`](./ARCHITECTURE.md) § "Architecture (DOTS)" for the current pipeline diagram and the module table
 (which assembly owns what, and why `MapRenderer.Core` is legacy).
 
 ## Supported rendering surface

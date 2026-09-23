@@ -1,8 +1,8 @@
 # GC & allocation — design and hard-won learnings
 
 Why managed-heap allocation is a first-class performance concern in this renderer, what the stutter it
-causes actually looks like in a profiler (rarely where you'd guess), the current allocation state, and the
-architecture that keeps it low.
+causes looks like in a profiler (rarely where you'd guess), where the allocation-prone paths are, and the
+architecture that keeps them low.
 
 This is the **narrative / "why"**. The two operational halves live elsewhere and are cross-referenced from
 here:
@@ -28,10 +28,10 @@ Two consequences follow, and both cost real debugging time before they are inter
 
 Because the pause freezes all threads and the profiler attributes the frozen wall-clock time to **whatever
 marker is on the stack at that instant**, a GC pause masquerades as a CPU cost *in an unrelated system*.
-During rapid-zoom cover churn this repo showed a "CPU spike" that jumped between `ApplyZoom`,
-`InstancedRebuild`, and `Symbol.Collect` **frame to frame** — three different, innocent markers. None of
-them was slow. They were the bystanders holding the stack when the collection landed. Kill the allocation
-and all three "spikes" vanish together.
+Under rapid-zoom cover churn, a GC-driven "CPU spike" jumps between `ApplyZoom`, `InstancedRebuild`, and
+`Symbol.Collect` **frame to frame** — three different, innocent markers. None of them is slow. They are the
+bystanders holding the stack when the collection lands. Kill the allocation and all three "spikes" vanish
+together.
 
 **The tell:** a heavy marker that (a) *changes identity* between otherwise-identical frames, and (b)
 *always co-occurs with a GC-alloc spike on the same frame*, is not that marker — it is GC, and the marker
@@ -44,64 +44,42 @@ is a phantom. Do not optimise the marker. Find the allocation.
 
 "It allocates on a job/worker thread, so it can't hurt frame time" is **false**. Stop-the-world means
 *all* threads, so a worker-thread allocation during an off-main tile build stalls the main thread mid-frame
-exactly as a main-thread allocation would. This is why the ladder (`conventions.md`) applies to **off-main
-build code at least as hard as to per-frame code** — and why the biggest remaining spikes here are on the
-*worker* threads (decode / mesh-build / symbol-extract), invisible on a Main-Thread-only profiler view.
+as a main-thread allocation would. This is why the ladder (`conventions.md`) applies to **off-main build
+code at least as hard as to per-frame code** — and why allocation on the *worker* threads (decode /
+mesh-build / symbol-extract) matters even though a Main-Thread-only profiler view never shows it.
 
 ---
 
-## 2. Where the allocations were, in this renderer
+## 2. Where the allocation-prone paths are, and what keeps them off the GC heap
 
-The rapid-zoom stutter was **process-wide GC**, driven by per-feature / per-vertex / per-glyph managed
-allocation in three off-thread stages fired during cover churn:
+Cover churn fires per-feature / per-vertex / per-glyph work in several stages at once. Any managed allocation
+there multiplies by the feature count of every newly covered tile, which crosses the block threshold within a
+few frames and forces a global pause. Each stage keeps its unit of work off the GC heap by one rung of the
+ladder:
 
-| Stage | What allocated, per unit of work |
-|---|---|
-| **Decode** (`MvtDecoder`) | a `Dictionary<string,Value>` **per feature**; `new MvtFeature` (class) + two `uint[]` per feature; per-layer `List<uint[]>` grown from empty |
-| **Mesh build** (`FillMeshPipeline` / line pipeline) | per-feature managed attribution arrays; a per-polygon `new int[holeCount]` for the hole-ring sort; a capturing sort comparator |
-| **Symbol extract** (`SymbolFeatureExtractor`) | per-path `double[]` / `double3[]` for subdivide / project / anchor placement |
-| **Expression eval** (`FunctionExpression.Evaluate`) | a `new Value[]` argument buffer per call node, per feature, during style filter evaluation |
+| Stage | Per-unit-of-work hazard | What keeps it off the GC heap |
+|---|---|---|
+| **Decode** (`MvtDecoder`) | a property dictionary and a command array per feature; layer lists that grow-and-copy | properties decode into a **dense tag-pair store**, not a dictionary per feature; each feature's geometry and tag words are captured as a byte range and flattened into shared per-layer `NativeArray`s — one for geometry commands, one for tag words — so no per-feature `uint[]` exists; layer lists are **pre-sized from a counting pass** |
+| **Mesh build** (fill / line) | per-feature attribution arrays; a per-polygon hole-sort array | line and fill attribution columns are `NativeArray`s (so is the symbol path's counting-sort scratch); ring-visit-order and sort-key arrays come from a thread-safe per-build pool; the hole-ring sort runs in a **reused `NativeArray<int>` through a struct comparer** (`FillMeshPipeline.HoleRingComparer`, taken by generic constraint, so no boxing) |
+| **Expression eval** (`FunctionExpression.Evaluate`) | an argument buffer per call node, per feature | a per-thread free-list (`EvalArgBuffers`) hands out a scratch `Value[]` and reclaims it on return, clearing every slot so no evaluated `Value` — which may hold a `string` — is retained |
+| **Off-main build scratch** | `TempJob` reclaimed mid-build | `Allocator.Persistent`, disposed when the build completes — see "Allocator lifetime trap" |
 
-At peak these summed to **20–96 MB in a single cover-churn frame** — far past the block threshold, so a
-collection was essentially guaranteed every few frames, each one a global pause.
+Steady-state camera motion over already-loaded cover therefore allocates next to nothing. The remaining GC
+pressure is the **new-tile-build tail**: worker-thread allocation during fetch → decode → build of freshly
+covered tiles, which a Main-Thread profiler view does not show ("An off-thread allocation freezes the
+main thread too").
 
 ---
 
-## 3. Current state (as of the `perf/gc-elimination` pass)
+## 3. Attacking the new-tile-build tail
 
-**Steady-state zoom is essentially solved.** A camera moving over already-loaded cover now allocates
-~**15 KB/frame**, down from a ~**20 MB/frame** average. There is no longer a steady-state GC pause; the
-stutter that motivated the campaign is gone in the common case.
-
-What that pass changed, at the level of *mechanism* (see git log on the branch for the commits):
-
-- **Per-feature `Dictionary` eliminated** — MVT properties decode into a **dense** tag-pair store instead
-  of one dictionary per feature.
-- **Decode / mesh managed buffers → native** — line and fill attribution columns, symbol counting-sort
-  scratch, and packed-varint decode all stage into `NativeArray` off the GC heap; the layer decode lists
-  are **pre-sized from a counting pass** so they never grow-and-copy.
-- **Per-build fill scratch pooled** — the ring-visit-order and sort-key arrays come from a thread-safe
-  per-build pool, and the hole-ring sort now runs in a **reused `NativeArray<int>` through a struct
-  comparer** (taken by generic constraint, so no boxing) instead of a per-polygon managed `int[]`.
-- **Expression argument buffers reused** — a per-thread free-list hands `FunctionExpression.Evaluate` a
-  scratch `Value[]` and reclaims it on return (clearing every slot so no evaluated `Value` — which may hold
-  a `string` — is retained).
-- **Off-main build scratch is `Persistent`, not `TempJob`** — see §5.
-
-### What remains (the new-tile-build tail)
-
-**New-tile-build frames still spike ~20–35 MB off-thread** during fetch → decode → build of freshly
-covered tiles. These do **not** show on a Main-Thread profiler view (§1.2). They are smaller-win than the
-steady-state fix that already landed, and they are **worker-thread** allocations, so the discipline for
-attacking them is:
-
-1. **Profile before chasing.** Capture a real ≥30 MB spike frame, switch the Profiler thread dropdown from
-   *Main Thread* to the *Worker/Job* thread, and sort by **GC Alloc**. The static allocation audit produced
-   at least one **phantom** ranking in this campaign (a "per-polygon closure" that the compiler had already
-   cached to one delegate per call — see §4), so a ranking is a hypothesis, not a target.
-2. Known candidates, unverified order: decode object graph (`new MvtFeature` + the two `uint[]` per
-   feature), globe symbol-extract per-path arrays, and a few per-kick layer-snapshot arrays. Each should be
-   re-measured against a captured frame before any code changes.
+1. **Profile before chasing.** Capture a real spike frame, switch the Profiler thread dropdown from
+   *Main Thread* to the *Worker/Job* thread, and sort by **GC Alloc**. A static allocation audit can rank a
+   **phantom** (a "per-polygon closure" that the compiler had already cached to one delegate per call — see
+   "Learnings that cost time"), so a ranking is a hypothesis, not a target.
+2. **Known candidates, unverified order:** the decode object graph (`new MvtFeature`, a class, per feature),
+   the globe symbol-extract per-path arrays (`SymbolFeatureExtractor`), and a few per-kick layer-snapshot
+   arrays. Re-measure each against a captured frame before any code changes.
 
 ---
 
@@ -111,14 +89,14 @@ attacking them is:
   Roslyn hoists it to one display-class instance at the capture's scope and caches the delegate in a
   synthesized field, so `Array.Sort(arr, (a,b) => f(local, a, b))` inside a `for`-loop allocates the
   delegate **once per method call**, not once per iteration. Only a capture of a *loop-local* allocates each
-  pass. In this campaign a per-polygon `Array.Sort` comparator was diagnosed as a per-polygon delegate
-  allocation and "fixed" — but the RED-verify meter stayed green, because the delegate was already cached.
-  The real per-polygon cost was the sibling `new int[holeCount]` managed array. **Moral:** before treating a
-  closure as a per-iteration cost, ask whether it captures a loop-local or a method-scoped local — and
-  RED-verify the allocation claim (inject the form, watch the meter go red) rather than trusting the reading
-  of the source.
+  pass. A per-polygon `Array.Sort` comparator of that shape reads like a per-polygon delegate allocation, yet
+  injecting it leaves the allocation meter green. In that shape the per-polygon cost is a sibling managed
+  array (`new int[holeCount]`), which is why the hole sort uses a reused `NativeArray<int>` (the table in
+  "Where the allocation-prone paths are"). **Moral:** before treating a closure as a per-iteration cost, ask whether it captures a
+  loop-local or a method-scoped local — and RED-verify the allocation claim (inject the form, watch the meter
+  go red) rather than trusting the reading of the source.
 
-- **A "working fix" is not a confirmed diagnosis.** Both the closure above and the timing-phantom (§1.1)
+- **A "working fix" is not a confirmed diagnosis.** Both the closure above and the timing-phantom ("GC inflates the timing of *everything*")
   are cases where an intervention *appeared* to help for the wrong reason. Confirm the mechanism (meter goes
   red on the specific seam; the spike moves when *this* allocation is removed), not just the outcome.
 

@@ -22,7 +22,7 @@ TileManager's per-tile KICK ──▶ SymbolSubsystem.TryBeginBuild (main, prolo
                  │  the tail's one glyph-ensure suspension has already populated the atlas
                  ▼
      SymbolTileBuffer ─▶ Bake ─▶ SymbolTileBlock ──▶ SymbolTileStore   (Unity/Text)
-                 │  native per-tile SoA block; per-(source,tile) sets, collected-set Version, static-frame skip
+                 │  native per-tile SoA block; per-(source,tile) sets, collected-set Version
                  ▼
       ┌── SymbolPlacementSystem.Tick(frame, labels, atlas)  (Unity/Text/Placement)  [PER FRAME, MAIN]
       │      1. ProjectPositions  — gather world points + project to screen  (SymbolProjectionJob, Jobs — .Run())
@@ -52,8 +52,6 @@ TileManager's per-tile KICK ──▶ SymbolSubsystem.TryBeginBuild (main, prolo
   compete for the same space. Runs as the Burst `CollisionJob`.
 - **Fade** (A-4) — labels ease in/out instead of popping; **cross-tile identity** (A-3) keeps a label's
   opacity across a parent/child tile swap; **sticky-placement hysteresis** (A-5) resists flicker.
-- **Static-frame skip** (B-1) — an idle camera with an unchanged label set re-submits the cached mesh
-  and skips project/collide/build entirely.
 - **Shaping** — a clean-room codepoint shaper with bidi reordering + Arabic joining, SDF glyphs from
   glyph-PBF ranges, multi-font stacks.
 - **Off-main tile build** — decode + feature-extract run on the thread pool; only glyph shaping and the
@@ -83,8 +81,8 @@ labels are **~21.8 ms** — labels *are* the frame cost right now.
    roads carry many vertices, this term alone is a large fraction of #1.
 
 3. **Stateless rebuild every frame** → pop/blink/slide and cost. `Tick` clears and rebuilds from scratch
-   with no cross-frame memory. The static-skip (B-1) hides this for a truly idle camera, but any motion
-   pays full price.
+   with no cross-frame memory. There is no static-frame skip (B-1 is rejected), so an idle camera still
+   runs the per-frame project → stage → collide pass.
 
 4. **`CollisionJob` is `Schedule().Complete()` with no interleaved work.** A single `IJob` scheduled
    onto a worker and immediately blocked on — worker hand-off + fence for zero parallelism. `.Run()`

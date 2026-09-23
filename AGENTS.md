@@ -2,7 +2,7 @@
 
 Unity-native (DOTS/ECS, C#) MapLibre-style vector map renderer. Read `ARCHITECTURE.md` for the design
 and decisions, `docs/coordinates-and-projections.md` for the math foundations, `docs/meshing-design.md`
-§1 for how MVT bytes become a mesh (the per-kind fill/line stage orderings + the build/consume tile loop;
+§ "Mesh pipeline" for how MVT bytes become a mesh (the per-kind fill/line stage orderings + the build/consume tile loop;
 line AA, lit shading, and the render-layer model are the later sections), `docs/conventions.md` for
 generic coding conventions, `docs/gc-and-allocation-design.md` for why managed allocation dominates
 frame timing (GC is stop-the-world) and how the hot paths avoid it, `README.md` for current status
@@ -41,7 +41,7 @@ logic still goes to `Unity`/`Jobs` only — `App` wires the product together, it
 where it belongs architecturally, then test it wherever it lands. **New features are designed data-oriented
 and native-first from the start** — the data
 plane (anything per tile / feature / vertex / glyph / frame, or read inside a job) is born native; nativizing
-later is not the plan. **Read `ARCHITECTURE.md` §2 "Module boundaries" before moving code between assemblies
+later is not the plan. **Read `ARCHITECTURE.md` § "Module boundaries" before moving code between assemblies
 or adding a type to Core** — it carries both rules, the rationale, and the three-workaround failure that
 produced the first one.
 
@@ -135,7 +135,7 @@ means every platform ran green.
 
 ### Fast Core tests (no Unity) — a faster loop for code that *already* lives in `MapRenderer.Core`
 > Use it for the legacy code that is there; **never** a placement argument, and never a reason to put new
-> code in Core — see `ARCHITECTURE.md` §2 "Module boundaries".
+> code in Core — see `ARCHITECTURE.md` § "Module boundaries".
 
 `MapRenderer.Core` is plain C# (its only Unity dependency is `Unity.Mathematics.double2`, which a 2-field
 shim replaces). `Tools/core-tests/` is a `dotnet test` project that compiles the **real** Core `.cs` files
@@ -173,7 +173,7 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
 - **`Logs/` is git-ignored** — safe to write test output there.
 
 ### Editing conventions
-- **Placement is architectural, not test-driven** — `ARCHITECTURE.md` §2 "Module boundaries" is the rule.
+- **Placement is architectural, not test-driven** — `ARCHITECTURE.md` § "Module boundaries" is the rule.
 - Logic that can be unit-tested **must** have EditMode tests wherever it lives; validate via the recipe above
   before declaring done.
 - **Where that test GOES — topic, kind, lane, size — is `docs/test-conventions.md`.** It is an ordered
@@ -182,7 +182,7 @@ dotnet test "$(git rev-parse --show-toplevel)/Tools/core-tests"
 - Engine-only behavior (mesh build, rendering, camera) lives in `MapRenderer.Unity`; verify it visually
   in the Editor (a step the user runs).
 - Vendored third-party code goes under `Assets/Code/ThirdParty/<name>/` with its license, and an entry in
-  `THIRD-PARTY-NOTICES.txt`. Avoid copyleft (see `ARCHITECTURE.md` §4).
+  `THIRD-PARTY-NOTICES.txt`. Avoid copyleft (see `ARCHITECTURE.md` § "Licensing posture").
 
 The code-style rules (math types, `System.Math` ban, `in` params, data carriers, builder naming,
 test-code-bloat) live in **Coding conventions** below — don't restate them here.

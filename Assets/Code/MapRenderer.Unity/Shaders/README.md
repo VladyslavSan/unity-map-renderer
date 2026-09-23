@@ -68,7 +68,7 @@ the other by accident; that file carries the authoritative per-consumer audit.
 | ruler | who reads it | why it must be that one |
 |---|---|---|
 | `MapPixelsToWorld(centerWS, unitDir_WS)` — a **per-vertex, per-direction measurement** | the AA straddle pad, the **min-width floor** (`minHalfWorld`), the `_HAIRLINE_SOLID_CORE` floor (via the pad), and `line-translate` (its own per-axis calls) | these are SAMPLING-GRID quantities *at that vertex*: half a device pixel of ramp must land on half a device pixel of framebuffer, a 1 px legibility floor must rescue a road **where** it thinned, and a translate is a screen displacement. The line shader binds one `metresPerDevicePx` for all of them so they cannot drift apart |
-| `_MapFrameMetersPerDevicePixel` — a **frame constant**, measured off the camera (`2·d_lookAt·tan(fov/2)/viewportPx.y`) and pushed by `MapCamera.SyncToCamera` | `widthWorld`, `line-gap-width`, `line-offset`, and the dash divisor `dashMetersPerUnit` (which reads the global directly) | `line-width: N px` means N px **top-down**: it fixes a world width once and the perspective divide decides the rest. A pattern welded to the ground must not depend on where on screen you look, and neither must the width (`docs/line-rendering-design.md` §1) |
+| `_MapFrameMetersPerDevicePixel` — a **frame constant**, measured off the camera (`2·d_lookAt·tan(fov/2)/viewportPx.y`) and pushed by `MapCamera.SyncToCamera` | `widthWorld`, `line-gap-width`, `line-offset`, and the dash divisor `dashMetersPerUnit` (which reads the global directly) | `line-width: N px` means N px **top-down**: it fixes a world width once and the perspective divide decides the rest. A pattern welded to the ground must not depend on where on screen you look, and neither must the width (`docs/line-rendering-design.md` § "The width model") |
 
 Keep them named and keep them distinct. One expression serving both is how a change to the width
 silently rebases every screen quantity that shares it.
@@ -109,22 +109,28 @@ amount. A screen-width measurement is therefore **not a null** for this class of
 vertices take a *common* offset, so `L` device px of offset leaks `e·L` into the **half-width** —
 **12.1 %** at `L = 160` on a 24 px line, and unbounded in `L`.
 
-### Open — `refPx` measures the wrong span for the width family
+### Open — `refPx` measures the wrong span for a directional probe
 
 **This needs a maintainer decision. It is not settled, and it is not fixed.**
+
+**Scope.** The line width family (width, `line-gap-width`, `line-offset`) reads the frame constant, so this
+affects it only through the missing-push fallback (see "Fail-safes"). The consumers of `MapPixelsToWorld` are
+the line's AA pad and min-width floor, the fill band width (`Fill_VertexModify.hlsl`), and the per-axis
+translate of line, fill and fill-extrusion. The analysis below applies to each of them; the band-width
+figures describe a band sized by this probe.
 
 `refPx` is the *length* of a 2D NDC delta. For a vertex whose screen-x is `sx` px off centre, the
 probe's step along `dirWS` changes that vertex's depth, so the projected point slides **radially** as
 well as along the intended screen direction — contributing a component ≈ `|sx|·e` px, which adds **in
 quadrature**: at `sx = 100` a 0.946 px component grows a 2.91 px span to 3.06 px, i.e. **+5.1 %**.
 
-That is not a harmless refinement, because **the width family does not want the 2D magnitude — it
-wants the component perpendicular to the line.** The radial component points away from the screen
+That is not a harmless refinement, because **a directional consumer does not want the 2D magnitude — it
+wants the component along its own screen direction** (for a band width, perpendicular to the line). The radial component points away from the screen
 centre; whatever part of it runs *along* the line contributes nothing to the band's perpendicular
 thickness, yet inflates `refPx` and so shrinks the returned scale. On an east–west road at heading 0
-the radial component is entirely along the road, so **all** of it is spurious: the band is ~5 % too
-narrow at `sx = 100`, measured as a **2.8–3.0 px** inward bow of the silhouettes across the central
-200 columns of a 120 px band at fov 60 / tilt 55.
+the radial component is entirely along the road, so **all** of it is spurious: a band sized by this
+probe is ~5 % too narrow at `sx = 100`, measured as a **2.8–3.0 px** inward bow of the silhouettes
+across the central 200 columns of a 120 px band at fov 60 / tilt 55.
 
 **That is larger than the 1.910 % sign asymmetry the `w`-ratio removes**, and the `w`-ratio does not
 touch it — that factor scales both signs alike. It is why the probe-symmetry teeth measure within
@@ -132,8 +138,10 @@ touch it — that factor scales both signs alike. It is why the probe-symmetry t
 
 The fork: project the NDC delta onto the perpendicular screen direction, or keep taking its
 magnitude. Projecting costs a second screen-space direction at every measured vertex and changes
-every rendered width away from the screen centre; keeping the magnitude leaves the bow. Nothing in
+every probe-sized quantity away from the screen centre; keeping the magnitude leaves the bow. Nothing in
 `PixelsToWorld.hlsl` records this, so this file is its only home — do not drop it while resolving it.
+It is also a candidate lead for `docs/line-antialiasing-design.md` § "Open questions" (the long-segment
+sag); that connection is not established.
 
 ### Dash period under a world-anchored pattern
 

@@ -7,8 +7,8 @@ and adds bridges, tunnels, terrain, and translucent 3D. This doc is the *why*; `
 acceptance. Where this doc and the code disagree today, it is because the general model is not yet built —
 each section marks **[implemented: S23]** vs **[target: UMR-74]**.
 
-Related: [`meshing-design.md`](meshing-design.md) (§3 material-as-styling, §4 the reserved fill-extrusion
-seat), `LayerDrawOrder.cs` / `RenderLayerSet.cs` (the queue model), and the fill-extrusion stage spec
+Related: [`meshing-design.md`](meshing-design.md) (§ "Styling as material properties", § "Fill-extrusion and
+the raster seat"), `LayerDrawOrder.cs` / `RenderLayerSet.cs` (the queue model), and the fill-extrusion stage spec
 `stages/S23-fill-extrusion-layer.md` (devloop).
 
 ---

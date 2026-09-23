@@ -3,8 +3,8 @@
 **Status:** the model below ships. `TileManager` owns one record per (tile, source), drives it through
 fetch → build → consume → release under per-frame budgets, and keeps a surviving layer's slot across a
 restyle. Read with `docs/async-architecture.md` § "Disposal & cancellation contract" (the rules those exit
-paths obey), `docs/job-scheduling-design.md` (the Burst graph the build step schedules; its §12 states which
-part of the build seam that design owns), `docs/per-layer-tile-processing-design.md` (the per-layer
+paths obey), `docs/job-scheduling-design.md` (the Burst graph the build step schedules; its § "What this design
+owns from `docs/tile-pipeline-design.md`" states which part of the build seam that design owns), `docs/per-layer-tile-processing-design.md` (the per-layer
 processor a kick fans out to), and `docs/smooth-transitions-design.md` (the fades the draw gate reads).
 
 Hard constraints throughout: Core stays engine-free; UniTask only; `UnityEngine.Object` create/destroy and
@@ -465,9 +465,9 @@ fade. Correct, merely not fast, and identical for both skip reasons.
 
 `docs/job-scheduling-design.md` owns the two-phase build split and its exact-size allocation: the `BuildStep`
 state a record moves through, the rule that a step transition of an admitted tile is uncharged against the
-kick cap, and one `MeshDataArray` per non-empty layer sized to that layer's measured count. Its §12 states the
-boundary in full. This design owns what surrounds that seam — admission, the caps of §2, consume, the cache
-and release.
+kick cap, and one `MeshDataArray` per non-empty layer sized to that layer's measured count. Its § "What this design
+owns from `docs/tile-pipeline-design.md`" states the boundary in full. This design owns what surrounds that
+seam — admission, the caps of §2, consume, the cache and release.
 
 There is no managed mesher interface between the two phases. The graph builder plus the stream-write job are
 the measure/write split, and `IRenderLayer.WriteInto`, the managed per-layer write entry point that preceded

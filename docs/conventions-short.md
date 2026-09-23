@@ -94,7 +94,8 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     (`StyledFill`/`StyledLineTileBuilder`) — same "convert at the Unity boundary, never upstream" rule as
     `double3`→`Vector3`.
   - Keeps `Core` engine-free and the parity oracles hashing canonical winding. Cause + full contract in
-    `docs/coordinates-and-projections.md` §7.1; pinned by `GlobeFill`/`GlobeLineWindingTests`.
+    `docs/coordinates-and-projections.md` § "Handedness, winding & why the ECEF reflection is
+    load-bearing"; pinned by `GlobeFill`/`GlobeLineWindingTests`.
 
 ## Memory, performance & lifetime
 
@@ -141,7 +142,7 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
     `EvalArgBuffers`, `TileBuildScratch`). Every pool pairs `Rent`/`Return` in a `finally` so a throw can't
     drain it, and pools only **scoped scratch, never a borrowed container** (releasing a `List` a consumer
     still holds clears it under them). `UnityEngine.Pool` is engine-only, but that never keeps code in Core —
-    placement follows architecture, not the fast-test loop (ARCHITECTURE.md §2).
+    placement follows architecture, not the fast-test loop (`ARCHITECTURE.md` § "Module boundaries").
   - **Prove it:** a GC-elimination change ships a **zero-alloc tooth, RED-verified**; the EditMode meter is
     `Is.Not.AllocatingGCMemory()` (`GetAllocatedBytesForCurrentThread()` is dead there — vacuous), the
     thread-local byte delta works only in `Tools/core-tests`.
@@ -341,9 +342,9 @@ Keep the two files in sync: when a rule changes, edit `conventions.md` and updat
   exceptions — `style` → `Style/` (expressions → `Expressions/`, filters → `Filters/`), `text` → `Text/`
   (placement/collision → `Text/Placement/`, sprite atlas → `Text/Sprites/`), `tile-pipeline` → `Tiles/`,
   `meshing` → `Meshing/`, `decode` → the format's own folder (`Mvt/`/`GeoJson/`/`Json/`), `render-layers` →
-  `Rendering/` — full table and reasoning in `test-conventions.md` §5. Files pack by topic and lane up to
+  `Rendering/` — full table and reasoning in `test-conventions.md` § "Where a new test goes". Files pack by topic and lane up to
   a 4,000-line cap; subject is not a merge criterion, only size (bounded by topic and lane) is
-  (`test-conventions.md` §4).
+  (`test-conventions.md` § "Size — pack by topic and lane, not by subject").
 
 - **Test code must not bloat the production codebase.** A member that exists solely for a test does not belong
   on the production class.

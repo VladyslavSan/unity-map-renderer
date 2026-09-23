@@ -263,11 +263,12 @@ at **exactly one place per mesh kind**: the GPU mesh-write boundary (`StyledFill
   Baking it upstream would (a) leak a Unity assumption into engine-free `Core`, and (b) break the parity oracles
   that hash the canonical IR (`JobifiedPipelineTests`, `GlobeSubdivisionJobParityTests`).
 - The conversion lives at **one** boundary per kind, stated in a comment that names the reflection cause
-  (`docs/coordinates-and-projections.md` §7.1). Don't scatter per-projection or per-path winding flips — the
+  (`docs/coordinates-and-projections.md` § "Handedness, winding & why the ECEF reflection is load-bearing").
+  Don't scatter per-projection or per-path winding flips — the
   winding is uniform by construction, so one reversal serves every projection.
 
 **Why:** the winding a producer emits in 2D tile space is *inverted* by the time it reaches Unity's left-handed
-render space (the load-bearing ECEF reflection, §7.1). If each producer's convention isn't stated, every consumer
+render space (the load-bearing ECEF reflection, cited above). If each producer's convention isn't stated, every consumer
 re-derives the sign by hand — the exact "why do we reverse this?" confusion this rule removes. Pinned by
 `GlobeFillWindingTests` / `GlobeLineWindingTests` (absolute: front face points out of the surface).
 
@@ -297,7 +298,7 @@ A managed capture on the data plane is **disqualifying**, not merely slow: a bod
 or a class reference cannot become an `IJob` at all until it is rewritten. Honor that up front.
 
 This rule sits *above* the allocation ladder below, and does not replace its top rung: the best data-plane
-code still allocates **nothing** per iteration, native or otherwise. See `ARCHITECTURE.md` §2.
+code still allocates **nothing** per iteration, native or otherwise. See `ARCHITECTURE.md` § "New code is designed for performance, not nativized later".
 
 ### Column layout: one struct per element vs. one column per field
 
@@ -375,7 +376,7 @@ to the next when the one above is genuinely impossible.
      instead — a `[ThreadStatic]` free-list, the `TileBuildScratch` per-build pool — whatever assembly it is
      in. `UnityEngine.Pool` is also engine-only, so engine-free `Core` reaches for `ArrayPool` / a hand-rolled
      pool — but that is a *consequence* of correct placement, never a reason to keep code in Core: per
-     `ARCHITECTURE.md` §2, if a type would be materially better with a Unity pool it belongs in Unity/Jobs
+     `ARCHITECTURE.md` § "Module boundaries", if a type would be materially better with a Unity pool it belongs in Unity/Jobs
      (Core is legacy, not a placement argument).
    - **Pool only scoped scratch, never a borrowed container.** Rent/release must bracket a scope the object
      never escapes. Releasing a `List` another object still references — a decoded layer's feature list handed
@@ -767,8 +768,8 @@ of a future rename.
 The same boundary runs the other way: a wording or naming convention governs prose we author, and never a
 citation of a real file, type, or section title. Retiring a word from our own prose is one edit; applying
 that edit to a citation only breaks the reference, because the thing being cited does not get renamed
-along with it. Strengthen a citation instead of trimming it — cite the full path (`docs/some-design.md
-§4`) rather than a bare, ambiguous section number.
+along with it. Strengthen a citation instead of trimming it — cite the full path and the section title
+(`docs/<name>-design.md § "Section Title"`) rather than a bare, ambiguous section number.
 
 ### Image and golden test fixtures live in a `~`-suffixed folder
 

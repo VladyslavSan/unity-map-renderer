@@ -40,8 +40,8 @@ changes (different sources, different source-layers, structural layer changes).
   `RenderLayerSet` / `TileManager` / `SymbolSubsystem` directly rather than building off-side and swapping
   atomically — a throw mid-rebuild is bounded and observable (`MapView.CommitPhase`, `CommitProbe`) but not
   rolled back. **Sub-topic 1 (full transactional atomicity for this arm) is therefore still open** — recorded
-  as a pre-existing gap fill/line share in `docs/per-layer-tile-processing-design.md`'s "Deliberately left
-  filed".
+  as a pre-existing gap fill/line share in `docs/per-layer-tile-processing-design.md` § "Out of
+  scope".
 
 ## Sub-topics (each likely its own stage)
 
@@ -101,8 +101,8 @@ evaluating only the Zoom-kind bindings):
 **Does NOT re-evaluate (the gaps):**
 
 - **Symbols (layout)** — text-size and other *layout* properties (as opposed to paint, above) are still
-  evaluated **at build time**; the tracked direction is to bake at *tile* zoom (see the tile-pipeline
-  unification epic's zoom-dual-meaning follow-up, `docs/per-layer-tile-processing-design.md`). Nothing
+  evaluated **at build time**; the recorded direction is to bake at *tile* zoom
+  (`docs/per-layer-tile-processing-design.md` § "Open: the zoom dual meaning"). Nothing
   re-evaluates layout as the camera zooms.
 - **Data-driven / per-feature properties** (feature-property expressions → per-vertex color, etc.) are evaluated
   at **build time** in `StyledFillTileBuilder` / `StyledLineTileBuilder` and **baked into the mesh** — they
@@ -153,7 +153,7 @@ duration.** A compatible restyle (§1.4) and a camera-zoom step (§2.5) are two 
 
 ## Relationship to other work
 
-- **Symbol projection support** (`docs/labels-and-symbols-design.md` §4) — orthogonal: that is *where* a label
+- **Symbol projection support** (`docs/labels-and-symbols-design.md` § "Projection support (globe-ready labels)") — orthogonal: that is *where* a label
   projects; §2 is *what value* its properties take. Both touch the symbol build/apply lifecycle.
 - Warm reuse (§1.3) builds on the tile-pipeline unification epic's per-source pipeline model and the geometry-IR
   epic's shared buffers.

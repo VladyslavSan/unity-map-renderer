@@ -3,8 +3,8 @@
 **Status:** the model below ships. A decoded tile owns its tile-local geometry for the tile's whole life,
 and format handling stops at the decoder. Read with `docs/per-layer-tile-processing-design.md` (the
 per-layer pipeline this sits under), `docs/job-scheduling-design.md` (how the Burst stages downstream of
-Waist 1 chain), and `docs/coordinates-and-projections.md` (the coordinate frames and §7.1's winding
-contract).
+Waist 1 chain), and `docs/coordinates-and-projections.md` (the coordinate frames, and the winding
+contract in § "Handedness, winding & why the ECEF reflection is load-bearing").
 
 ## The itch
 
@@ -235,7 +235,8 @@ format pays the slicing cost. Scoping a new format's Stage 1 as "add a decoder c
 6. **Ring winding is not part of the Waist-1 contract.** A producer may emit rings of either orientation;
    `RingAssemblyJob` derives the exterior sign per feature and classifies holes as the opposite sign. What a
    producer owes the buffer is only that one feature's own rings are mutually consistent. The canonical-CCW
-   rule in `docs/coordinates-and-projections.md` §7.1 governs *tessellator triangle output*, not decoded
+   rule in `docs/coordinates-and-projections.md` § "Handedness, winding & why the ECEF reflection is
+   load-bearing" governs *tessellator triangle output*, not decoded
    input rings.
 7. **A producer that yields no features yields no buffer.** Every materializer early-outs on
    `featureCount == 0`, not on a zero ring total. A zero ring total is reachable with features present —

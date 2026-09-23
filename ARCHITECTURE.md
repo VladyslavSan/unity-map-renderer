@@ -250,7 +250,7 @@ N per-layer graphs and is impractical for extrusion + fwidth AA). Each layer is 
 `Shaders/Map/<Layer>/` — its `.shader`, `<Layer>_LitInput.hlsl` (the `UnityPerMaterial` CBUFFER +
 DOTS bridge), and its pass bodies. `MapVertexModify` is a per-layer vertex hook; Fill defines its body
 in `Fill_VertexModify.hlsl`, included by the `.shader` before any pass that calls it.
-See `Shaders/README.md` for the layout and include-order rules; `docs/meshing-design.md` §3 (lit rendering)
+See `Shaders/README.md` for the layout and include-order rules; `docs/meshing-design.md` § "Lit rendering"
 for the full design rationale.
 
 Per-layer styling: **per-layer Material instances** (never `MaterialPropertyBlock` — it silently
@@ -276,8 +276,8 @@ The style is an **ordered list of layers**, composited in order (painter's algor
   order with `SortingCriteria.None` (owns the order; scales past the integer-queue trick). Simple interim
   fallback: each declared layer owns a small contiguous **band** of queue values
   (`material.renderQueue = base + layerIndex * SubSlotsPerLayer + subSlot`), ZWrite off — a symbol layer's
-  icon and text occupy two sub-slots of their own band so the icon always draws under its own text (G7/D7,
-  road-shields Stage 2); every other kind uses one sub-slot. Widening the stride from 1 to 2 halves the
+  icon and text occupy two sub-slots of their own band so the icon always draws under its own text (D7,
+  `docs/road-shields-design.md` § "Render queue: a layer owns a band of sub-slots"); every other kind uses one sub-slot. Widening the stride from 1 to 2 halves the
   interim's layer-count runway (~2000 → ~1000; realistic styles stay far below either).
 - **3D layers (fill-extrusion, terrain, globe):** ZWrite on + depth test; give each layer a **depth
   range/slice** so the depth buffer enforces *both* layer order *and* 3D occlusion (MapLibre's approach).
