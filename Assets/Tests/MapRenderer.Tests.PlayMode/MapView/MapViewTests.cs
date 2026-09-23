@@ -110,7 +110,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         public IEnumerator CaptureTelemetry_VisibleTileCount_MatchesIndependentSelector_AndChangesAcrossViews()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go = Track(new GameObject("MapView_S85_Decisive"));
+            var go = Track(new GameObject("MapView_Telemetry_Decisive"));
             var view = go.AddComponent<MapView>();
             view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.WithTestMaterials();
@@ -177,7 +177,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         public IEnumerator MultiSource_VisibleTileCount_DivergesFromLoadedTileCount()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go = Track(new GameObject("MapView_S85_MultiSource"));
+            var go = Track(new GameObject("MapView_Telemetry_MultiSource"));
             var view = go.AddComponent<MapView>();
             view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.WithTestMaterials();
@@ -212,7 +212,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         {
             var release = new CancellationTokenSource();
             var src     = new TestDataSource((id, ct) => SpinUntilReleased(release));
-            var go = Track(new GameObject("MapView_S85_Pending"));
+            var go = Track(new GameObject("MapView_Telemetry_Pending"));
             var view    = go.AddComponent<MapView>();
             view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.WithTestMaterials();
@@ -257,7 +257,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         public IEnumerator FixtureSource_AfterSettle_AllInFlightAndBacklogCountersZero_BuiltEqualsVisible()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go = Track(new GameObject("MapView_S85_Settled"));
+            var go = Track(new GameObject("MapView_Telemetry_Settled"));
             var view = go.AddComponent<MapView>();
             view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.WithTestMaterials();
@@ -391,7 +391,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
         public IEnumerator MapTelemetryPanel_Pull_PopulatesFieldsFromProviderTelemetry()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go = Track(new GameObject("MapView_S85_Panel"));
+            var go = Track(new GameObject("MapView_Telemetry_Panel"));
             var view = go.AddComponent<MapView>();
             view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.WithTestMaterials();
@@ -406,7 +406,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: MinimalStyle());
                 yield return PumpUntilSettled(view);
 
-                var panelGo = innerBag.Track(new GameObject("S85_TelemetryPanel"));
+                var panelGo = innerBag.Track(new GameObject("TelemetryPanel"));
                 var panel = panelGo.AddComponent<MapTelemetryPanel>();
                 panel.Map = view;
                 view.LateUpdate();   // the providers refresh their own structs during the frame

@@ -1310,8 +1310,8 @@ namespace MapRenderer.Tests.Visual
                 TestContext.WriteLine(
                     $"T3b same-layer junction under-coverage: worst composite coverage {worst:F3} " +
                     $"(deficit {(1f - worst):P1}) at ({worstColumn}, {worstRow}); " +
-                    $"{deficient} of {measured} deep-interior pixels below 0.95. " +
-                    $"Design §6.3 predicts ≲25% over a ~1–3 px wedge.");
+                    $"{deficient} of {measured} deep-interior pixels below 0.95. docs/line-antialiasing-design.md " +
+                    $"§ \"Where same-layer overlap under-covers\" predicts ≲25% over a ~1–3 px wedge.");
 
                 // Loose by design — a recorded limit, not a gate.
                 Assert.That(1f - worst, Is.LessThan(0.60f),
@@ -2925,7 +2925,7 @@ namespace MapRenderer.Tests.Visual
             finally { graph.Dispose(); }
         }
 
-        // ── Fakes (mirroring A6NonMvtDecoderTests' fan-out fixtures) ──────────────────────────────
+        // ── Fakes (mirroring NonMvtDecoderFanOutTests' fan-out fixtures) ──────────────────────────
 
         private const string SeamSourceLayerName = "seam-fixture-layer";
 

@@ -294,7 +294,7 @@ namespace MapRenderer.Tests.Cameras
         /// → camera centre moves SOUTH (lat decreases) so the grabbed point follows the cursor.
         /// </summary>
         [Test]
-        public void D6a_PanYSign_DragUp_NewIS_MovesCenterSouth()
+        public void PanYSign_DragUp_NewIS_MovesCenterSouth()
         {
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 4.0, 0, 0);
             IProjection proj   = new WebMercatorProjection();
@@ -309,7 +309,7 @@ namespace MapRenderer.Tests.Cameras
             var patch = MapRenderer.App.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
 
             Assert.Less(patch.Latitude.Value, v.LookAt.Latitude,
-                "D6a: cursor UP in +y-up convention must move the LookAt centre SOUTH " +
+                "cursor UP in +y-up convention must move the LookAt centre SOUTH " +
                 "(grabbed point glues to cursor above centre; content follows cursor correctly).");
         }
 
@@ -317,7 +317,7 @@ namespace MapRenderer.Tests.Cameras
         /// Complementary: cursor moves DOWN (−y in +y-up convention) → centre moves NORTH.
         /// </summary>
         [Test]
-        public void D6a_PanYSign_DragDown_NewIS_MovesCenterNorth()
+        public void PanYSign_DragDown_NewIS_MovesCenterNorth()
         {
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 4.0, 0, 0);
             IProjection proj   = new WebMercatorProjection();
@@ -331,7 +331,7 @@ namespace MapRenderer.Tests.Cameras
             var patch = MapRenderer.App.View.ViewInput.ApplyPan(proj, v, grabbed, cursorNow, vp);
 
             Assert.Greater(patch.Latitude.Value, v.LookAt.Latitude,
-                "D6a: cursor DOWN in +y-up convention must move the LookAt centre NORTH.");
+                "cursor DOWN in +y-up convention must move the LookAt centre NORTH.");
         }
 
         // ── Tilt-Y sign convention ──────────────────────────────────────────────────────────────────
@@ -353,7 +353,7 @@ namespace MapRenderer.Tests.Cameras
         /// clamped at 0.</para>
         /// </summary>
         [Test]
-        public void D6_TiltYSign_DragUp_NewIS_TiltsTowardOverhead()
+        public void TiltYSign_DragUp_NewIS_TiltsTowardOverhead()
         {
             // Start tilted (30°) so a decrease is observable (not clamped at 0).
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, heading: 0.0, tilt: 30.0);
@@ -367,7 +367,7 @@ namespace MapRenderer.Tests.Cameras
                 v, tiltDeltaDeg: viewInputDy * 0.3, maxPitch: 60.0);
 
             Assert.Less(patch.Tilt.Value, v.Tilt.Degrees,
-                "D6: a +Y drag (upward mouse move in the new Input System), after sign flip at the " +
+                "a +Y drag (upward mouse move in the new Input System), after sign flip at the " +
                 "MapController translator, must tilt the camera TOWARD overhead (pitch decreases). " +
                 "Failure means MapController.Update passes the wrong sign to ViewInput.ApplyTiltDelta " +
                 "(drag direction does not match the documented overhead-on-drag-up convention).");
@@ -378,7 +378,7 @@ namespace MapRenderer.Tests.Cameras
         /// Symmetric check for the same sign-flip convention.
         /// </summary>
         [Test]
-        public void D6_TiltYSign_DragDown_NewIS_TiltsTowardHorizon()
+        public void TiltYSign_DragDown_NewIS_TiltsTowardHorizon()
         {
             var v = new CameraProperties(new GeoCoordinate3D { Longitude = 0, Latitude = 0, Altitude = 0 }, 8.0, heading: 0.0, tilt: 30.0);
 
@@ -390,7 +390,7 @@ namespace MapRenderer.Tests.Cameras
                 v, tiltDeltaDeg: viewInputDy * 0.3, maxPitch: 60.0);
 
             Assert.Greater(patch.Tilt.Value, v.Tilt.Degrees,
-                "D6: a -Y drag (downward mouse move in the new Input System), after sign flip, must tilt " +
+                "a -Y drag (downward mouse move in the new Input System), after sign flip, must tilt " +
                 "the camera TOWARD the horizon (pitch increases).");
         }
 
@@ -430,7 +430,7 @@ namespace MapRenderer.Tests.Cameras
 
         // ── Oscillation stability under feedback ─────────────────────────────────────────────────────
         [Test]
-        public void B1_NoOscillation_WhenCameraSteady()
+        public void NoOscillation_WhenCameraSteady()
         {
             CameraProperties camera = Cam(zoom: 8.0, heading: 30.0, tilt: 20.0);
             SliderValues fields   = Idle(camera);
@@ -453,7 +453,7 @@ namespace MapRenderer.Tests.Cameras
 
         // ── THE decisive test: does NOT fight a self-moving camera ───────────────────────────────────
         [Test]
-        public void B2_DoesNotFightSelfMovingCamera()
+        public void DoesNotFightSelfMovingCamera()
         {
             CameraProperties before = Cam(zoom: 8.0, heading: 30.0, tilt: 20.0);
             SliderValues fields   = Idle(before);   // user idle
@@ -472,7 +472,7 @@ namespace MapRenderer.Tests.Cameras
 
         // ── Slider→camera survives ConstrainedAngle Wrap exactly ─────────────────────────────────────
         [Test]
-        public void B3_HeadingEdit_WrapsExactly()
+        public void HeadingEdit_WrapsExactly()
         {
             CameraProperties camera = Cam(zoom: 5.0, heading: 0.0, tilt: 0.0);
             SliderValues baseline = Idle(camera);
@@ -490,7 +490,7 @@ namespace MapRenderer.Tests.Cameras
 
         // ── Slider→camera survives ConstrainedAngle Clamp ────────────────────────────────────────────
         [Test]
-        public void B4_TiltEdit_ClampsExactly()
+        public void TiltEdit_ClampsExactly()
         {
             CameraProperties camera = Cam(zoom: 5.0, heading: 0.0, tilt: 0.0);
             SliderValues baseline = Idle(camera);
@@ -506,7 +506,7 @@ namespace MapRenderer.Tests.Cameras
 
         // ── Per-field isolation (no stomp) ───────────────────────────────────────────────────────────
         [Test]
-        public void B5_PerFieldIsolation_OnlyEditedFieldEmitted()
+        public void PerFieldIsolation_OnlyEditedFieldEmitted()
         {
             // Baseline says zoom 5; the live camera is at zoom 10 (a concurrent camera change). The Zoom
             // field still matches its baseline (idle), so Zoom must NOT be emitted despite the camera diff.
@@ -523,7 +523,7 @@ namespace MapRenderer.Tests.Cameras
 
         // ── A Zoom edit is emitted as canonical zoom ─────────────────────────────────────────────────
         [Test]
-        public void B6_ZoomEdit_EmittedAsCanonicalZoom()
+        public void ZoomEdit_EmittedAsCanonicalZoom()
         {
             CameraProperties camera = Cam(zoom: 8.0, heading: 0.0, tilt: 0.0);
             SliderValues baseline = Idle(camera);

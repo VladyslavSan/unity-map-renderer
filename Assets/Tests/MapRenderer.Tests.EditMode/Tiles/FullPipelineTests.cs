@@ -2040,7 +2040,7 @@ namespace MapRenderer.Tests.Tiles
     /// halves moved: <b>a fault in the mesh pass still settles every payload slot</b> and <b>the symbol pass
     /// PROPAGATES</b> are re-asserted in <c>TileLayerProcessorRunnerTests</c> against a released lease (the
     /// only fault that still reaches the runner), and <b>the fault is reported, once, as a DECODE fault</b>
-    /// is <c>A7TileFeatureSourceTests</c>' and <c>EagerDecodeOwnershipTests</c>' now. The two-concurrent-caller
+    /// is <c>TileFeatureSourceGetTileTests</c>' and <c>EagerDecodeOwnershipTests</c>' now. The two-concurrent-caller
     /// canary retired too, replaced by <c>SharedDisposableTests</c>' refcount race — the quantity under
     /// contention changed from a lazy decode to a counter, and the old canary would be green against a
     /// broken counter.</para>

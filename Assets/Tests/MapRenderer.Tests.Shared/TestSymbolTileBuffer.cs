@@ -21,7 +21,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// an omitted <c>paint</c> is <c>default(SymbolPaint)</c> — all-zero — NOT <see cref="SymbolPaint.Default"/>'s
     /// opaque black). Do NOT "helpfully" substitute a spec default here — leaving every unset field at
     /// <c>default(T)</c> is what keeps every fixture in this cluster byte-identical across a refactor of the
-    /// underlying representation.
+    /// underlying representation.</para>
     ///
     /// <para>Field → default(T) table (every field not called out below is either a required parameter here —
     /// <c>anchorRender</c>/<c>quads</c>/<c>boundsMin</c>/<c>boundsMax</c> for a point, <c>glyphs</c>/<c>anchors</c>/

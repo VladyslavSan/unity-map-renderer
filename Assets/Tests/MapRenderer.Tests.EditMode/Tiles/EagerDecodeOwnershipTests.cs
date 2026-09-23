@@ -116,7 +116,7 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>Wires an <see cref="ITileFeatureSource"/> DIRECTLY through the production
-        /// <c>SetSources</c> entry — the same seam <c>A7TileFeatureSourceTests</c> uses, and the reason no
+        /// <c>SetSources</c> entry — the same seam <c>ByteLessTileFeatureSourceTests</c> uses, and the reason no
         /// production observability is needed for any of this.</summary>
         private static void LoadStyleWithSource(MapView view, ITileFeatureSource source, CameraProperties cam)
         {

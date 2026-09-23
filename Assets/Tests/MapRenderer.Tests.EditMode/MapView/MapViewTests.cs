@@ -186,7 +186,7 @@ namespace MapRenderer.Tests.MapViews
             => new CameraProperties(new GeoCoordinate3D { Longitude = lon, Latitude = lat, Altitude = 0 }, zoom, 0, 0);
 
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
-            ""version"": 8, ""name"": ""S85"",
+            ""version"": 8, ""name"": ""Telemetry"",
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] } },
             ""layers"": [ { ""id"": ""countries-fill"", ""type"": ""fill"", ""source"": ""maplibre"",
                            ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
@@ -209,7 +209,7 @@ namespace MapRenderer.Tests.MapViews
         [Test]
         public void MapTelemetryPanel_Pull_NoOpsCleanly_WhenUnwired()
         {
-            var panelGo = Track(new GameObject("S85_TelemetryPanel_Unwired"));
+            var panelGo = Track(new GameObject("TelemetryPanel_Unwired"));
             var panel = panelGo.AddComponent<MapTelemetryPanel>();
             panel.Map = null;
             Assert.DoesNotThrow(() => panel.Pull());
@@ -221,7 +221,7 @@ namespace MapRenderer.Tests.MapViews
         public void CaptureTelemetry_AllocationFree_AcrossNTicks()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = Track(new GameObject("MapView_S85_Alloc"));
+            var go   = Track(new GameObject("MapView_Telemetry_Alloc"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg; // zero-alloc is the BRG backend's contract
             try
@@ -320,7 +320,7 @@ namespace MapRenderer.Tests.MapViews
         public void ConsumeBacklog_TracksTheThrottledBuildBacklog_ThenDrainsToZero()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = Track(new GameObject("MapView_S85_Backlog"));
+            var go   = Track(new GameObject("MapView_Telemetry_Backlog"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             try
             {

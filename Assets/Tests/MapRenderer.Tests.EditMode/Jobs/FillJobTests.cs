@@ -611,7 +611,7 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void Clip_AtZeroMargin_LeavesTheFullExtentBackgroundRingUntouched()
         {
-            // The plan calls A6NonMvtDecoderTests + TileBackgroundQuadProjectionTests "free falsifiers" for
+            // The plan calls NonMvtDecoderFanOutTests + TileBackgroundQuadProjectionTests "free falsifiers" for
             // this claim, but BOTH build a TileLayerProcessContext with BufferClip UNSET — i.e. disabled — so
             // neither is armed once the default margin is enabled. This is the armed version: the synthetic
             // full-extent ring sits exactly ON the b=0 window and must come out as the same 4 corners.

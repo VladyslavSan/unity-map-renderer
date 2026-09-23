@@ -8,7 +8,7 @@
 // CS0104) — see docs/conventions-short.md's "Plain-import collisions" note.
 //
 // Contents:
-//   A6AdapterFoldTests               — MvtFeature implements IFeature directly against its exact documented
+//   MvtFeatureIFeatureContractTests   — MvtFeature implements IFeature directly against its exact documented
 //                                       Null-Object semantics (TryGetProperty/Properties/GeometryType).
 //   FeatureSelectorTests              — FeatureSelector.SelectFeatures: source-layer resolution, $type and
 //                                       expression-form filters, ordinal reporting, the compiled-filter memo.
@@ -37,7 +37,7 @@ using MapRenderer.Tests;
 namespace MapRenderer.Tests.Filters
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // A6AdapterFoldTests — MvtFeature implements IFeature directly, pinned to exact semantics
+    // MvtFeatureIFeatureContractTests — MvtFeature implements IFeature directly, pinned to exact semantics
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
@@ -73,7 +73,7 @@ namespace MapRenderer.Tests.Filters
     /// so the Null-Object pin they exist for is unaffected.</para>
     /// </summary>
     [TestFixture]
-    public class A6AdapterFoldTests
+    public class MvtFeatureIFeatureContractTests
     {
         [Test]
         public void TryGetProperty_PresentKey_ReturnsTrueAndValue()

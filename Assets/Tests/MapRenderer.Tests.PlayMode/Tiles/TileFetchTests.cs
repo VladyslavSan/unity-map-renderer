@@ -257,7 +257,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
         // ── Symbol rides the kick, sharing ONE decode ───────────────────────────────────────────────────
         [UnityTest]
-        public IEnumerator F2_SymbolRidesKick_SharingOneDecode()
+        public IEnumerator SymbolRidesKick_SharingOneDecode()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(zoom: 0); // z0 = one tile — a clean single-decode measurement
@@ -300,7 +300,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
         // kick task completes with a real TilePrologueOutput (consume runs, array disposed); WITHOUT it, the
         // kick-allocated writable array leaks past settle.
         [UnityTest]
-        public IEnumerator F3_SymbolFaultNeverStrandsMeshArray_LambdaWrapCatches()
+        public IEnumerator SymbolFaultNeverStrandsMeshArray_LambdaWrapCatches()
         {
             long allocBefore = MeshDataPayload.DebugLiveAllocCount;
 
@@ -347,7 +347,7 @@ namespace MapRenderer.Tests.PlayMode.Tiles
 
         // ── A symbol-only source kicks; a mesh-only source runs no symbol pass ─────────────────────────
         [UnityTest]
-        public IEnumerator F5_SymbolOnlySourceKicks_MeshOnlySourceRunsNoSymbolPass()
+        public IEnumerator SymbolOnlySourceKicks_MeshOnlySourceRunsNoSymbolPass()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             // Cache DISABLED to isolate this tooth's concern (does the kick fire for a symbol-only source

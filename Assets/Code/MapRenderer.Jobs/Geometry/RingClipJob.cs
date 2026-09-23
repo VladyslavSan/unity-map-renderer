@@ -21,7 +21,7 @@ namespace MapRenderer.Jobs.Geometry
     /// <para><b>Boundary is inclusive</b> (<c>&gt;= min</c>, <c>&lt;= max</c>): a vertex exactly on the
     /// window edge is INSIDE. Combined with the bbox fast path this means the synthetic full-extent
     /// background ring passes through untouched at any margin ≥ 0 — the free falsifiers
-    /// (<c>A6NonMvtDecoderTests</c>, <c>TileBackgroundQuadProjectionTests</c>) assert exactly 4 vertices for
+    /// (<c>NonMvtDecoderFanOutTests</c>, <c>TileBackgroundQuadProjectionTests</c>) assert exactly 4 vertices for
     /// it, and would red on an exclusive test or a duplicated on-boundary point.</para>
     ///
     /// <para><b>Fast path (structural, not an optimisation).</b> A ring whose bbox already lies inside the

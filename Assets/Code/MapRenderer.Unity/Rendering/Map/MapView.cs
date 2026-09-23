@@ -468,7 +468,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// layers fetch MVT tiles (fill/line/symbol with a non-empty source; background is source-less by
         /// design; raster/circle/hillshade/unknown are excluded so no non-MVT bytes reach the MVT decode).
         /// </summary>
-        // internal (not private): several EditMode/PlayMode teeth (e.g. A7TileFeatureSourceTests,
+        // internal (not private): several EditMode/PlayMode teeth (e.g. TileFeatureSourceGetTileTests,
         // MapViewSourceSpecTests) drive this method directly, reached via InternalsVisibleTo — test-only
         // visibility widening, no behaviour change (ARCHITECTURE.md "test code must not bloat the
         // production codebase").

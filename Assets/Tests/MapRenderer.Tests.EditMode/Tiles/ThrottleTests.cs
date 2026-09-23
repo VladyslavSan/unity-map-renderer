@@ -82,7 +82,7 @@ namespace MapRenderer.Tests.Tiles
         /// <para><b>RED recipe:</b> two independent recipes, one per assertion. Hoisting
         /// <c>_pending.FlushAll()</c> above the <c>_loaded</c> teardown loop in <c>DoDispose</c> reds the
         /// graph assertion (<c>graphBaseline</c>). Deleting the fetch loop in
-        /// <c>PendingDisposalQueue.FlushAll</c> (the <c>for (int i = 0; i < _fetch.Count; i++)</c> loop —
+        /// <c>PendingDisposalQueue.FlushAll</c> (the <c>for (int i = 0; i &lt; _fetch.Count; i++)</c> loop —
         /// leave <c>_fetch.Clear()</c>) reds the fetch-lease assertion (<c>fetchBaseline</c>); this
         /// fixture is not that recipe's only observer.</para></summary>
         [Test]
@@ -833,7 +833,7 @@ namespace MapRenderer.Tests.Tiles
 
         private static StyleDocument MinimalStyle() => StyleParser.Parse(@"{
             ""version"": 8,
-            ""name"": ""S95"",
+            ""name"": ""LoadMeasurement"",
             ""sources"": {
                 ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.com/{z}/{x}/{y}.pbf""] }
             },
@@ -944,7 +944,7 @@ namespace MapRenderer.Tests.Tiles
         public void MapView_DeepCoverSelect_SubTileNudge_IsAllocFreeAtStallScale()
         {
             var src   = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go    = Track(new GameObject("MapView_S95_DeepCover"));
+            var go    = Track(new GameObject("MapView_LoadMeasurement_DeepCover"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             var style = MinimalStyle();
             view.Config.Backend                 = RenderBackend.Brg; // zero-alloc contract; avoid EG's intermittent alloc noise
@@ -1033,7 +1033,7 @@ namespace MapRenderer.Tests.Tiles
         public void CoverRecomputesLastTick_SumsToN_ForNSubTileNudges_BaselineNoThrottleYet()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = Track(new GameObject("MapView_S95_Counter"));
+            var go   = Track(new GameObject("MapView_LoadMeasurement_Counter"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg;
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5; // cheap z5 cover — this tooth is about the counter, not descent cost
@@ -1096,7 +1096,7 @@ namespace MapRenderer.Tests.Tiles
                 ct.Register(() => utcs.TrySetCanceled(ct));
                 return utcs.Task;
             });
-            var go   = Track(new GameObject("MapView_S95_CleanPending"));
+            var go   = Track(new GameObject("MapView_LoadMeasurement_CleanPending"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend = RenderBackend.Brg;
             view.Config.TileSelection.MinZoom = 5;
@@ -2644,7 +2644,7 @@ namespace MapRenderer.Tests.Tiles
 
         // ── The feed swap is real (structural) ──
         [Test]
-        public void F1_FeedSwapIsReal_NoResidualPushSymbols()
+        public void FeedSwapIsReal_NoResidualPushSymbols()
         {
             string tileManagerSrc = File.ReadAllText(SourcePath("MapRenderer.Unity", "Rendering", "Tile", "TileManager.cs"));
             string subsystemSrc   = File.ReadAllText(SourcePath("MapRenderer.Unity", "Text", "SymbolSubsystem.cs"));
@@ -2666,7 +2666,7 @@ namespace MapRenderer.Tests.Tiles
 
         // ── DrainMeshBuilds stays symbol-silent ────────────────────────────────────────────────────────
         [Test]
-        public void F4_DrainMeshBuilds_NeverDrivesSymbolFactory()
+        public void DrainMeshBuilds_NeverDrivesSymbolFactory()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
             var (go, view) = NewView(zoom: 0);
@@ -2697,10 +2697,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── F-6: a tile condemned before its kick never attempts a symbol build ────────────────────────
         [Test]
-        public void F6_DepartedBeforeKick_NeverBeginsSymbolBuild()
+        public void DepartedBeforeKick_NeverBeginsSymbolBuild()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = Track(new GameObject("MapView_TileSymbolKick_F6"));
+            var go   = Track(new GameObject("MapView_TileSymbolKick_DepartedBeforeKick"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5; view.Config.TileSelection.MaxZoom = 5; // known 9-tile z5 cover
             view.WithTestCamera();

@@ -1177,7 +1177,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// so the row term is negated on the way in.
         /// <para>Plain <c>{ get; set; }</c>, not <c>init</c>: MapRenderer.Tests.EditMode has no
         /// IsExternalInit polyfill of its own — the same call this assembly's other test-owned carriers make
-        /// (see <c>A6NonMvtDecoderTests.FixtureTileLayer</c>).</para></summary>
+        /// (see <c>NonMvtDecoderFanOutTests.FixtureTileLayer</c>).</para></summary>
         private struct SymbolInk
         {
             /// <summary>Ink bounding-box size in px — the direction-BLIND measure.</summary>
@@ -1599,7 +1599,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// toward the hard edge the border exists to soften, so the centroid's per-step advance is uneven
         /// even though its MEAN rate is exact. Measured after the fix: min 0.062–0.106, max 0.171–0.218
         /// across magnifications 1.0/1.37/2.5/4.0. The residual scales with a ONE-texel ramp being only
-        /// <c>M</c> device px wide; a wider border would smooth it, and that is deliberately out of scope.
+        /// <c>M</c> device px wide; a wider border would smooth it, and that is deliberately out of scope.</para>
         ///
         /// <para>What the tooth must discriminate is the STAIRCASE, and a staircase's signature is
         /// two-sided: the centroid holds EXACTLY still and then jumps a WHOLE pixel. Measured against the

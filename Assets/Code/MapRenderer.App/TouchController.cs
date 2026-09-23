@@ -28,7 +28,7 @@ namespace MapRenderer.App
     /// and folds each emitted <see cref="GestureIntent"/> through
     /// <see cref="ViewInput.Apply(in GestureIntent, in ViewContext)"/> into one
     /// <see cref="CameraPropertiesUpdate"/>, then calls
-    /// <see cref="MapCamera.Apply(CameraPropertiesUpdate)"/>.
+    /// <see cref="MapCamera.Apply(CameraPropertiesUpdate)"/>.</para>
     ///
     /// <para><b>Input backend: new Input System / EnhancedTouch</b>. Uses
     /// <see cref="Touch.activeTouches"/> exclusively — zero legacy UnityEngine.Input API.

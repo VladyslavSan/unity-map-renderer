@@ -353,7 +353,7 @@ namespace MapRenderer.Tests.Visual
     ///       verifying the GPU multiply is in the correct (linear) color space.
     ///
     ///   #7: MeshBuilder.SetColors linearizes — with a data-driven red vertex color, the rendered
-    ///       R channel must be < raw sRGB R=1.0 (it's linearized, ~0.21 in linear), whereas if
+    ///       R channel must be &lt; raw sRGB R=1.0 (it's linearized, ~0.21 in linear), whereas if
     ///       linearization were skipped, the vertex color would be sRGB=1.0 and still render as 1.0.
     ///       This test is necessarily loose (GPU rendering can't give exact float values), but
     ///       verifies the linearization is at least applied in the right direction.

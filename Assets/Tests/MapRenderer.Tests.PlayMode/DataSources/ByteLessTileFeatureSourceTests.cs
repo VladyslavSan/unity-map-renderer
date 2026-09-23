@@ -1,7 +1,7 @@
 // A BYTELESS source (no IDataSource, no bytes, no FetchAsync) flows through the UNCHANGED per-layer
 // fan-out. PlayMode: drives the real cover→build→settle loop over real frames (yield, never
 // Thread.Sleep). The pure async-Task GetTile teeth live in the EditMode half
-// (MapRenderer.Tests.DataSources.A7TileFeatureSourceTests).
+// (MapRenderer.Tests.DataSources.TileFeatureSourceGetTileTests).
 
 using System.Collections;
 using System.Collections.Generic;
@@ -24,7 +24,7 @@ using MapRenderer.Jobs.Tiles;
 namespace MapRenderer.Tests.PlayMode.DataSources
 {
     [TestFixture]
-    public class A7TileFeatureSourceTests : BaseTestFixture
+    public class ByteLessTileFeatureSourceTests : BaseTestFixture
     {
         /// <summary>A <see cref="ITileFeatureSource"/> with NO IDataSource, no bytes, no fetch — every
         /// <see cref="GetTile"/> builds a tile and hands back a fresh <see cref="SharedDisposable{T}"/> over
@@ -105,7 +105,7 @@ namespace MapRenderer.Tests.PlayMode.DataSources
                 ]
             }}");
 
-            var go   = Track(new GameObject("A7ByteLessSource"));
+            var go   = Track(new GameObject("ByteLessSource"));
             var view = go.AddComponent<MapView>();
             view.enabled = false; // manual-drive only — suppress the PlayerLoop's auto-LateUpdate (double-tick)
             view.WithTestMaterials();
@@ -133,7 +133,7 @@ namespace MapRenderer.Tests.PlayMode.DataSources
                 Assert.AreEqual(12, meshes[0].vertexCount,
                     "the byteless source's feature must flow through StyledFillTileBuilder unchanged and " +
                     "produce the flat 4-vertex quad (Mercator, no subdivision) plus its 8-vertex boundary " +
-                    "band — the same oracle A6NonMvtDecoderTests asserts one level down.");
+                    "band — the same oracle NonMvtDecoderFanOutTests asserts one level down.");
             }
             finally { view.Teardown(); }
         }

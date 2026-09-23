@@ -8,7 +8,7 @@
 //   DecodeTests                       — Headless validation of the decode + coordinate path against the real fixture tile.
 //   LineGraphKickTests                — Style: geolines-stroke@0 only, on the geolines source-layer (LineString geometry — the SAME fixture/ layer StyledLineBufferParityTests and ThrottleTests.FillAndLineStyle already use), so a mixed style's fill layer cannot satisfy either tooth's assertions…
 //   SourceRegistrySlotInvariantTests  — Unity EditMode only — drives the real MapView/TileManager restyle path.
-//   A6NonMvtDecoderTests              — Load-bearing acceptance: proves a NON-MvtDecoder ITileDecoder flows through the unchanged fill fan-out (RunWorkerPass -> TileMeshLayerProcessor -> StyledFillTileBuilder.WriteMeshData) and produces real geometry.
+//   NonMvtDecoderFanOutTests          — Load-bearing acceptance: proves a NON-MvtDecoder ITileDecoder flows through the unchanged fill fan-out (RunWorkerPass -> TileMeshLayerProcessor -> StyledFillTileBuilder.WriteMeshData) and produces real geometry.
 
 using System;
 using System.Collections.Generic;
@@ -1294,9 +1294,9 @@ namespace MapRenderer.Tests.Tiles
             Assert.AreSame(log[0].tile, log[2].tile, "every processor must observe the SAME decoded tile reference");
 
             Assert.AreEqual(3, output.Layers.Length, "one request slot per input slot");
-            Assert.AreSame(p0.Build, output.Layers[0], "dense-slot identity (job-scheduling-design.md §3.1)");
-            Assert.AreSame(p1.Build, output.Layers[1], "dense-slot identity (job-scheduling-design.md §3.1)");
-            Assert.AreSame(p2.Build, output.Layers[2], "dense-slot identity (job-scheduling-design.md §3.1)");
+            Assert.AreSame(p0.Build, output.Layers[0], "dense-slot identity (job-scheduling-design.md § \"Ownership — the graph as a value\")");
+            Assert.AreSame(p1.Build, output.Layers[1], "dense-slot identity (job-scheduling-design.md § \"Ownership — the graph as a value\")");
+            Assert.AreSame(p2.Build, output.Layers[2], "dense-slot identity (job-scheduling-design.md § \"Ownership — the graph as a value\")");
         }
 
         // ── Fault-parity: the fan-out read faults ─────────────────────────────────────────────────────
@@ -2011,11 +2011,11 @@ namespace MapRenderer.Tests.Tiles
     }
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // A6NonMvtDecoderTests — a non-MvtDecoder ITileDecoder flows through the unchanged fill fan-out
+    // NonMvtDecoderFanOutTests — a non-MvtDecoder ITileDecoder flows through the unchanged fill fan-out
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
-    public class A6NonMvtDecoderTests : BaseTestFixture
+    public class NonMvtDecoderFanOutTests : BaseTestFixture
     {
         // Deliberately malformed as MVT (a truncated length-delimited TileLayers field — MvtDecoder.Decode
         // throws decoding it — same fixture used by SharedTileDecodeTests/TileLayerProcessorRunnerTests).

@@ -2158,7 +2158,7 @@ namespace MapRenderer.Tests.Tiles
         /// <c>Step == Write</c> — the released graph is never disposed, <c>TileBuildGraph.DebugLiveCount</c>
         /// stays elevated above baseline forever.</para>
         ///
-        /// <para><b>No <see cref="LayerMeshBuildCounters.DebugTotalBuildsCreated"/> witness — same recorded
+        /// <para><b>No <see cref="LayerMeshBuildCounters.DebugTotalBuildsCreated"/> witness.</b> Same recorded
         /// limitation as the Measure case's own doc: a process-wide monotonic counter can't attest to this
         /// specific tile's activity in a multi-tile cover, and this case already has a sound non-vacuity
         /// pair on <see cref="TileBuildGraph.DebugLiveCount"/> (the <c>Greater</c> right after eviction, the
@@ -2629,7 +2629,7 @@ namespace MapRenderer.Tests.Tiles
         /// <see cref="MapViewTestExtensions.AwaitInFlightMeshBuilds"/> call, so one <c>LateUpdate</c>
         /// write-kicks every one of them at once. The per-tile ceiling is structural, not borrowed: the
         /// write step allocates one <see cref="Mesh.MeshDataArray"/> per non-empty layer, and
-        /// <see cref="FillStyle"/> declares exactly one fill layer.
+        /// <see cref="FillStyle"/> declares exactly one fill layer.</para>
         ///
         /// <para><b>RED:</b> the same reconstructed <c>transitionCharge</c> local as the sibling tooth
         /// above (one injected run serves both) — under it the single Tick charges one write kick and

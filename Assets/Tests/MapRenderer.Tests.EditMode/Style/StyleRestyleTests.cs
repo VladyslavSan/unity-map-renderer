@@ -1244,7 +1244,7 @@ namespace MapRenderer.Tests.Style
         // ── T6: globe subdivision + anchor alignment (the crux) ────────────────────────────────────────
 
         /// <summary>Minimal engine-free <see cref="IFeature"/>/<see cref="ITileLayer"/>/<see cref="IDecodedTile"/>
-        /// test doubles for a synthetic tile — mirrors <c>A7TileFeatureSourceTests.FixtureDecodedTile</c>/
+        /// test doubles for a synthetic tile — mirrors <c>ByteLessTileFeatureSourceTests.FixtureDecodedTile</c>/
         /// <c>FixtureTileLayer</c> (test-only, duplicated locally per convention rather than shared, since both
         /// are private test fixtures, not a production type).</summary>
         /// <summary>Protobuf zigzag ENcode — the inverse of <see cref="MvtGeometry.ZigZag"/> — for hand-building

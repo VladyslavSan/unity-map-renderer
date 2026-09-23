@@ -1558,7 +1558,7 @@ namespace MapRenderer.Tests.Text
                 Material m1 = symbolLayer1.Material;
                 Assert.IsNotNull(m0);
                 Assert.IsNotNull(m1);
-                Assert.AreSame(m0, symbolLayer0.WorldTextMaterial, "Material IS WorldTextMaterial (§0.2 — the screen material is retired).");
+                Assert.AreSame(m0, symbolLayer0.WorldTextMaterial, "Material IS WorldTextMaterial.");
                 Assert.AreNotSame(m0, m1, "per-layer materials are DISTINCT instances, not one shared material");
                 Assert.AreNotSame(set.SymbolTextWorld, m0, "a layer material is a CLONE of the SymbolTextWorld base, not the base asset");
 
@@ -2690,7 +2690,7 @@ namespace MapRenderer.Tests.Text
     /// (see <c>SymbolTileStore.CaptureSnapshot</c>'s guard). Winner identity is <c>(BlockId, LocalIndex)</c>;
     /// where a test needs to know WHICH symbol a winner is, it reads the winner's <c>OrderedBlocks[BlockId]</c>
     /// block's own columns (<c>TileKey</c>/<c>PairRoles</c>/…) — never a re-derivation of the oracle's own
-    /// indices, which would just restate them (see the T1 note below).
+    /// indices, which would just restate them (see the T1 note below).</para>
     /// </summary>
     [TestFixture]
     public class SymbolReconcilerTests

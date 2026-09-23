@@ -4,7 +4,7 @@
 // collision found across the four EditMode files merged here.
 //
 // Contents:
-//   A7TileFeatureSourceTests        — the raised ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile> interface, EditMode async-Task unit teeth.
+//   TileFeatureSourceGetTileTests   — the raised ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile> interface, EditMode async-Task unit teeth.
 //   UnityWebRequestDataSourceTests  — UnityWebRequestDataSource against a loopback HttpListener, including the 404 -> Absent mapping.
 //   DataSourceRenderPathTests       — FileDataSource through the render pipeline.
 //   DataSourceTests                 — FileDataSource/UnityWebRequestDataSource/MvtTileFeatureSource, migrated onto UniTask/UniTaskCompletionSource.
@@ -41,11 +41,11 @@ using MapRenderer.Jobs.Mvt;
 namespace MapRenderer.Tests.DataSources
 {
     // ───────────────────────────────────────────────────────────────────────────────────
-    // A7TileFeatureSourceTests — ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile>, EditMode async-Task teeth
+    // TileFeatureSourceGetTileTests — ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile>, EditMode async-Task teeth
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
-    public class A7TileFeatureSourceTests
+    public class TileFeatureSourceGetTileTests
     {
         // Off-main, matching production's desktop policy — these teeth exercise GetTile's own contract, not
         // the scheduler choice.
@@ -54,7 +54,7 @@ namespace MapRenderer.Tests.DataSources
         // ── F-4: GetTile decodes EAGERLY — the inversion of the retired lazy tooth ────────────────────────
 
         // Deliberately malformed as MVT (a truncated length-delimited TileLayers field — MvtDecoder.Decode
-        // throws decoding it — same fixture shape used by A6NonMvtDecoderTests).
+        // throws decoding it — same fixture shape used by NonMvtDecoderFanOutTests).
         private static readonly byte[] MalformedMvtBytes = { 0x1A, 0x64 };
 
         /// <summary>
