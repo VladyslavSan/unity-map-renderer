@@ -1,9 +1,5 @@
-// Engine-free: no UnityEngine dependency.
-// Construction convention: object initializer with named members.
-// BLITTABLE: this struct crosses into the Burst jobs as a NativeArray<GlyphAtlasEntry> element
-// at the MapRenderer.Jobs boundary (the same Core-defines-the-struct/Jobs-creates-the-NativeArray
-// pattern LineRibbonVertex/GeoCoordinate already use) — keep it to blittable fields only: no byte[],
-// no string, no reference types.
+// BLITTABLE: Burst jobs read it as a NativeArray<GlyphAtlasEntry> element, like LineRibbonVertex and
+// GeoCoordinate. Keep to blittable fields only: no byte[], no string, no reference types.
 
 using Unity.Mathematics;
 

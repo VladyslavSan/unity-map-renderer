@@ -1,19 +1,13 @@
 namespace MapRenderer.Unity.Rendering.ShaderProperties.Line
 {
     /// <summary>
-    /// Canonical string names for the <c>Map/Line</c>-specific shader properties — 12 in total: the 10
-    /// that appear in <c>Line_LitInput.hlsl</c>'s CBUFFER but not in <c>Fill_LitInput.hlsl</c>, plus two
-    /// editor-only keyword drivers that are declared in <c>Properties{}</c> and are NOT CBUFFER members.
-    ///
-    /// <para>The two are separated by region markers, the same shape the shared registry uses to let the
-    /// editor-only <c>_ReceiveShadows</c> sit beside the instanced names. The CBUFFER↔registry parity test
-    /// reads the CBUFFER region only, so it still holds bit-for-bit over every CBUFFER name.</para>
-    ///
-    /// <para>Shared properties (the 14 CBUFFER members common to both shaders, plus render-state and
-    /// texture bookkeeping) live in <see cref="ShaderProperties.PropertyNames"/>.</para>
-    ///
-    /// <para>Use <see cref="PropertyId"/> for <c>Material.Set/Get/Has</c> calls.
-    /// Use this class only where the Unity API requires a string: <c>MaterialEditor.FindProperty</c>.</para>
+    /// Canonical string names for the <c>Map/Line</c>-specific shader properties — 10 CBUFFER members (in
+    /// <c>Line_LitInput.hlsl</c> but not <c>Fill_LitInput.hlsl</c>) plus two editor-only keyword drivers
+    /// declared in <c>Properties{}</c>. Non-local invariant: the two groups are separated by region
+    /// markers, because the CBUFFER↔registry parity test reads only the CBUFFER region and must still hold
+    /// bit-for-bit over every CBUFFER name. Shared properties live in
+    /// <see cref="ShaderProperties.PropertyNames"/>; use <see cref="PropertyId"/> for
+    /// <c>Material.Set/Get/Has</c> calls.
     /// </summary>
     public static class PropertyNames
     {
@@ -33,11 +27,10 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.Line
         public const string WidthIsPixels  = "_WidthIsPixels";
 
         // region: Editor-only keyword drivers — Properties{} only, NOT in the CBUFFER
-        // Nothing in HLSL reads these; only the keyword the editor sync derives from them is read.
-        // Same shape as the shared registry's _ReceiveShadows.
+        // Nothing in HLSL reads these; only the derived keyword is (same shape as _ReceiveShadows).
         public const string EdgeAntialiasing = "_EdgeAntialiasing";
 
-        // 0 = Default (no keyword — today's straddle), 1 = Hard (_HAIRLINE_HARD),
+        // 0 = Default (no keyword — the plain straddle), 1 = Hard (_HAIRLINE_HARD),
         // 2 = SolidCore (_HAIRLINE_SOLID_CORE).
         public const string HairlineStrategy = "_HairlineStrategy";
     }

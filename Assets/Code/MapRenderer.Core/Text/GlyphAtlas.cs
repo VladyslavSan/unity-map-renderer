@@ -10,8 +10,8 @@ namespace MapRenderer.Core.Text
     /// <summary>
     /// CPU-side SDF glyph atlas: owns a <see cref="GlyphAtlasPacker"/> (per page) plus a single-channel
     /// (R8), row-major pixel buffer per page and a codepoint-keyed <see cref="GlyphAtlasEntry"/> lookup.
-    /// The Unity-side <c>Texture2DArray</c> upload is a later, engine-side pass — this type stays
-    /// engine-free (Core).
+    /// The Unity side (<c>GlyphAtlasTexture</c>) uploads it as a <c>Texture2DArray</c>; this type stays
+    /// engine-free.
     ///
     /// <see cref="Pixels"/> is always exactly <c>Size.x * Size.y</c> bytes — page 0's buffer (kept for
     /// back-compat with single-page callers; see <see cref="PagePixels"/> for the rest). Growth is
@@ -59,7 +59,7 @@ namespace MapRenderer.Core.Text
         private readonly Dictionary<long, GlyphAtlasEntry> _entries = new Dictionary<long, GlyphAtlasEntry>();
 
         // Font name -> dense id. Interned here because the atlas is the thing keyed by it; GlyphManager
-        // stamps ids onto the shaped glyphs from the same table, so both sides agree by construction.
+        // stamps ids onto the shaped glyphs from the same table, so both sides always agree.
         private readonly Dictionary<string, int> _fontIds = new Dictionary<string, int>(StringComparer.Ordinal);
 
         private int _committedHeight; // grow-mode only (page 0's row-preserving resize watermark)

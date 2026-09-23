@@ -13,13 +13,11 @@ namespace MapRenderer.Unity.Rendering.Materials
     public static class FillExtrusionTweaker
     {
         /// <summary>
-        /// Re-asserts the elevated-3D contract after cloning the base <c>.mat</c>, overriding any stale state
-        /// it may carry: depth WRITE on, <c>LEqual</c> test, opaque <c>One/Zero</c> blend, white <c>_BaseColor</c>
-        /// identity, and the transparent surface keyword DISABLED (the opaque fragment path keeps
-        /// <c>color.a = 1</c>). Cull is left to the <c>.mat</c> (Back — its winding is calibrated for stock Cull
-        /// Back in <c>StyledFillExtrusionTileBuilder</c>). This is the counterpart to
-        /// <see cref="FillTweaker.ApplyPainterContract"/> that <c>MaterialFactory.CreateFillExtrusionMaterial</c>
-        /// applies in its place.
+        /// Re-asserts the elevated-3D contract after cloning the base <c>.mat</c>: depth WRITE on,
+        /// <c>LEqual</c> test, opaque <c>One/Zero</c> blend, white <c>_BaseColor</c> identity, and the
+        /// transparent surface keyword DISABLED. Cull is left to the <c>.mat</c> (Back, calibrated for
+        /// stock Cull Back in <c>StyledFillExtrusionTileBuilder</c>). <c>MaterialFactory.CreateFillExtrusionMaterial</c>
+        /// applies it in place of its counterpart, <see cref="FillTweaker.ApplyPainterContract"/>.
         /// </summary>
         /// <param name="m">The cloned fill-extrusion material to re-assert the contract on.</param>
         public static void ApplyElevatedContract(Material m)

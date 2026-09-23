@@ -243,7 +243,7 @@ namespace MapRenderer.Unity.Text.Placement
         private int _mirrorAnchorCount;
         private int _mirrorFadeCount;
         private int _mirrorWorldPointCount;
-        /// <summary><c>_mirrorCount</c> includes Dropped symbols, so it no longer means "any placement
+        /// <summary><c>_mirrorCount</c> includes Dropped symbols, so it does not mean "any placement
         /// work this frame". <c>TickCore</c>'s gate reads this field instead, so an all-Dropped frame keeps fades frozen.</summary>
         private int _mirrorNonDroppedCount;
 
@@ -723,7 +723,7 @@ namespace MapRenderer.Unity.Text.Placement
 
             // Debug-only: catches a malformed staged stream here, with the offending candidate.
             AssertCandidateRangesTile(nc, candidateCount, boxCount);
-            // FadeId is now the display key (HarvestCollision re-keys by it) — see SymbolCandidate.FadeId's uniqueness contract.
+            // FadeId is the display key (HarvestCollision re-keys by it) — see SymbolCandidate.FadeId's uniqueness contract.
             AssertFadeIdsUnique(nc, candidateCount);
 
             // Pre-sizes the uniform grid; the node bound is counted per candidate box-reference so it can't under-count.
@@ -813,7 +813,7 @@ namespace MapRenderer.Unity.Text.Placement
                     bool riderFollows = d + 1 < _mirrorPointCount && points[d + 1].PairRole == SymbolPairRole.Rider;
                     if (!riderFollows)
                         UnityEngine.Debug.LogAssertion(
-                            $"[SymbolPlacementSystem] mirror point[{d}] is a §10 pair Owner with no Rider immediately " +
+                            $"[SymbolPlacementSystem] mirror point[{d}] is a pair Owner with no Rider immediately " +
                             "after it — StageJob degrades it to a lone badge (safe), but the reconciler's " +
                             "owner->rider adjacency contract was broken upstream; capture this frame.");
                 }
@@ -822,7 +822,7 @@ namespace MapRenderer.Unity.Text.Placement
                     bool ownerPrecedes = d > 0 && points[d - 1].PairRole == SymbolPairRole.Owner;
                     if (!ownerPrecedes)
                         UnityEngine.Debug.LogAssertion(
-                            $"[SymbolPlacementSystem] mirror point[{d}] is a §10 pair Rider with no Owner immediately " +
+                            $"[SymbolPlacementSystem] mirror point[{d}] is a pair Rider with no Owner immediately " +
                             "before it — an orphan rider; StageJob skips staging it (safe), but the reconciler's " +
                             "adjacency contract was broken upstream; capture this frame.");
                 }
@@ -837,7 +837,7 @@ namespace MapRenderer.Unity.Text.Placement
             return new float4(linear.r, linear.g, linear.b, srgb.w * paint.Opacity);
         }
 
-        // The halo sibling of LinearColor. text-opacity is deliberately NOT folded in: it already rides the
+        // The halo sibling of LinearColor. text-opacity is NOT folded in: it already rides the
         // quad's own colour, which the emit multiplies this alpha onto, so folding it here applies it twice.
         internal static float4 LinearHaloColor(in SymbolPaint paint)
         {
@@ -1170,9 +1170,8 @@ namespace MapRenderer.Unity.Text.Placement
         internal static long PointFadeId(in double3 anchorRender, int layerId, int textId, int iconImageId = 0)
             => Hash64(DedupKey.For(anchorRender, layerId, textId, iconImageId, CrossTileSymbolKey.CanonicalGridMeters));
 
-        // folds DedupKey's ints directly (was CrossTileSymbolKey's Text/IconImage string hashcodes) —
-        // ShapedSymbol no longer carries the raw strings, so this reuses the SAME all-integer identity the
-        // reconciler's DedupKey already establishes rather than re-deriving one.
+        // Folds DedupKey's ints directly. ShapedSymbol carries only interned ids, so this reuses the
+        // all-integer identity the reconciler's DedupKey already establishes.
         private static long Hash64(in DedupKey k)
         {
             unchecked

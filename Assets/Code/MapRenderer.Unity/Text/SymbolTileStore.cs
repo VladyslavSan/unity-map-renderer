@@ -285,13 +285,14 @@ namespace MapRenderer.Unity.Text
         private readonly List<Key> _reconcileRestore = new List<Key>();
 
         /// <summary>PULL model: reconcile the active set against the pipeline's currently <paramref name="loaded"/>
-        /// tiles. An active tile no longer loaded is released (kept warm iff <paramref name="keepWarmOnRelease"/>);
+        /// tiles. An active tile absent from <paramref name="loaded"/> is released (kept warm iff
+        /// <paramref name="keepWarmOnRelease"/>);
         /// a loaded tile currently on the cached side is restored (a cache re-entry has no re-fetch to rebuild it);
         /// a loaded tile with no entry is left for its bytes-ready build. Idempotent.</summary>
         public void ReconcileActiveSet(IReadOnlyList<Key> loaded, bool keepWarmOnRelease,
             double nowSeconds = 0.0, double departingGraceSeconds = 0.0)
         {
-            // Deliberately does NOT MarkCollectDirty() here: it runs EVERY frame and on a stable cover moves
+            // Does NOT MarkCollectDirty() here: it runs EVERY frame and on a stable cover moves
             // nothing, so a self-bump would dirty every frame and the memo would never fire. Real effects inherit
             // their bumps from Release/Restore/PurgeExpiredDeparting. (THE critical correctness point.)
             _loadedKeys.Clear();

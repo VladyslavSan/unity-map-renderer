@@ -11,37 +11,32 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
     /// The GeoJSON implementation of <see cref="ITileFeatureSource"/>: tiles sliced locally from a retained
-    /// dataset instead of fetched from a server. It owns no fetcher, no scheduler and no cache — there is
-    /// nothing to fetch — so the whole of it is "project once, then slice on demand".
+    /// dataset instead of fetched from a server. It owns no fetcher, no scheduler and no cache — the whole
+    /// of it is "project once, then slice on demand".
     ///
-    /// <para><b>The handle is EAGER, exactly as the MVT one is.</b> <see cref="GetTile"/> slices, then hands
-    /// back a <see cref="SharedDisposable{T}"/> over the finished tile. The laziness this type used to argue for was
-    /// load-bearing under the scoped lease for one reason only: <c>TileManager.Tick</c> calls
-    /// <c>GetTile</c> for EVERY cover tile while only some ever opened a scope, so a pre-built tile on the
-    /// others would have been freed by nothing. That premise is gone — every drop path is now an OWNER with
-    /// a release in it, so a tile handed out to a record that never kicks is freed when the record dies.</para>
+    /// <para>The handle is EAGER, exactly as the MVT one is: <see cref="GetTile"/> slices, then hands back
+    /// a <see cref="SharedDisposable{T}"/> over the finished tile — every drop path is an OWNER with a
+    /// release in it, so a tile handed to a record that never kicks is freed when the record dies.</para>
     ///
-    /// <para><b>The slice stays OFF the main thread under the desktop policy</b>, which laziness used to
-    /// arrange for free by deferring it into the kick's pool lambda. It is now arranged deliberately, by
-    /// routing through <see cref="TileDecodeDispatch.DecodeAsync"/> — the same dispatch the MVT source uses,
-    /// under whichever <see cref="IWorkScheduler"/> this source was constructed with — and pinned by a tooth
-    /// rather than by an accident of the design. Under <see cref="ThreadPoolWorkScheduler"/> (desktop/editor)
-    /// slicing inline inside <c>Tick</c> would be a per-cover-tile main-thread stall; under
+    /// <para>The slice stays OFF the main thread under the desktop policy, routed through
+    /// <see cref="TileDecodeDispatch.DecodeAsync"/> — the same dispatch the MVT source uses, under
+    /// whichever <see cref="IWorkScheduler"/> this source was constructed with, and pinned by
+    /// <c>GeoJsonSourceTests.T5_GetTile_SlicesOffTheMainThread</c>. Under
+    /// <see cref="ThreadPoolWorkScheduler"/> (desktop/editor) this is a pool hop, because slicing inline
+    /// inside <c>Tick</c> would stall the main thread once per cover tile; under
     /// <see cref="InlineWorkScheduler"/> (WebGL) the slice runs synchronously on whatever thread calls
-    /// <c>GetTile</c> by design — there is no worker thread to hop to.</para>
+    /// <c>GetTile</c> — there is no worker thread to hop to.</para>
     ///
-    /// <para><b>Reusing the shared decode dispatch verbatim</b> costs zero lines in the most safety-critical
-    /// part of the pipeline (the pool hop's completion invariant, the profiler marker, the lease's refcount
-    /// and dispose-outside-the-lock ordering) and leaves every lease tooth unmodified — which is also the
-    /// evidence the decode seam was drawn in the right place. The price, stated: a permanently-null
-    /// <c>bytes</c> argument, which <see cref="ITileDecoder.Decode"/> documents.</para>
+    /// <para>Reusing the shared decode dispatch verbatim keeps every lease tooth (the pool hop's completion
+    /// invariant, the profiler marker, the refcount, dispose-outside-the-lock ordering) unmodified. The
+    /// price: a permanently-null <c>bytes</c> argument, which <see cref="ITileDecoder.Decode"/> documents.</para>
     ///
-    /// <para><b>Slice options are a CONSTRUCTOR PARAMETER, never a constant.</b> Extent and buffer set the
-    /// positional resolution of everything this source will ever be used to state, so a hardcoded
+    /// <para>Slice options are a CONSTRUCTOR PARAMETER, never a constant: extent and buffer set the
+    /// positional resolution of everything this source will ever state, so a hardcoded
     /// <c>GeoJsonSliceOptions.Default</c> here would turn a per-source choice into a production constant.</para>
     ///
     /// Internal (not public): constructed only from <c>MapView.BuildSourceSpecs</c> and from the test
-    /// assembly via <c>InternalsVisibleTo</c> — the same posture as the MVT source beside it.
+    /// assembly via <c>InternalsVisibleTo</c>.
     /// </summary>
     internal sealed class GeoJsonTileFeatureSource : ITileFeatureSource
     {
@@ -54,17 +49,15 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// it is the whole of the work that can be shared across every tile this source will serve. Recorded
         /// cost: that happens on the main thread inside <c>SetStyle</c>, O(N) once per style-set; negligible
         /// for a fixture, a hitch for a large dataset.</param>
-        /// <param name="options">Slice options — see the type doc: a parameter, deliberately.</param>
+        /// <param name="options">Slice options — a parameter, not a constant (see the type doc).</param>
         /// <param name="scheduler">The execution policy the slice hop runs under — see
         /// <see cref="TileDecodeDispatch.DecodeAsync"/>.</param>
         internal GeoJsonTileFeatureSource(GeoJsonDataset dataset, in GeoJsonSliceOptions options,
             IWorkScheduler scheduler)
         {
             // Validated HERE, not at the first slice. These options are retained for the source's whole
-            // life, so an unusable set (a `default(GeoJsonSliceOptions)`, whose zero extent makes the probe
-            // window NaN, the probe answer "keep", and every slice throw; or an unimplemented non-zero
-            // SimplifyTolerance) would otherwise surface once per tile, as a faulted GetTile task, far from
-            // the wiring site that chose it.
+            // life, so an unusable set would otherwise surface once per tile, as a faulted GetTile task, far
+            // from the wiring site that chose it.
             options.Validate();
 
             _dataset   = GeoJsonProjectedDataset.Project(dataset);
@@ -76,26 +69,19 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <summary>Slices the tile and hands back a lease over it, or null for a tile this dataset provably
         /// cannot reach.
         ///
-        /// <para>The emptiness probe is O(1) and CONSERVATIVE: it intersects the tile's buffered unit-square
-        /// window against the dataset's own bounding box, both from the same
-        /// <see cref="GeoJsonSliceOptions.UnitSquareWindow"/> arithmetic the slicer's per-feature reject uses,
-        /// so it can never reject a tile that has geometry. It cannot be an exact answer without slicing, and
-        /// the point of it is to avoid slicing a tile at all just to learn it is empty — not to keep the
-        /// slice off the main thread, which the scheduler hop below arranges (a pool hop under
-        /// <see cref="ThreadPoolWorkScheduler"/>; inline, on WebGL). A tile
-        /// inside the box but between features therefore yields a non-null handle over an
-        /// empty tile, which the coordinator already handles (zero layers ⇒ every processor settles at zero
-        /// vertices).</para>
+        /// <para>Non-local invariant: the emptiness probe is O(1) and CONSERVATIVE — it intersects the
+        /// tile's buffered unit-square window against the dataset's own bounding box, using the same
+        /// <see cref="GeoJsonSliceOptions.UnitSquareWindow"/> arithmetic the slicer's per-feature reject
+        /// uses, so it can never reject a tile that has geometry. It exists to avoid slicing a tile only to
+        /// learn that it is empty. A tile inside the box but between
+        /// features yields a non-null handle over an empty tile, which the coordinator already handles.</para>
         ///
-        /// <para>The probe runs on the CALLER's thread — three comparisons — and only the slice runs under the
-        /// injected scheduler. A disjoint tile therefore still costs nothing and still never decodes.</para></summary>
+        /// <para>The probe runs on the CALLER's thread — three comparisons — and only the slice runs under
+        /// the injected scheduler, so a disjoint tile costs nothing and never decodes.</para></summary>
         public async UniTask<SharedDisposable<IDecodedTile>> GetTile(TileId id, CancellationToken ct = default)
         {
-            // Nothing here is long enough to cancel MID-call, and no production caller threads a token
-            // today — `TileManager.Tick` calls `GetTile(id)` (TileManager.cs:1215), the sole call site, for
-            // both implementations. So this is CONTRACT CONFORMANCE ahead of the coordinator, not an
-            // observed cancellation path: the seam declares a `CancellationToken`, and an implementation
-            // that ignored it would go on minting handles the moment one is threaded through a teardown.
+            // No production caller threads a token, so this is CONTRACT CONFORMANCE. An
+            // implementation that ignored it would go on minting handles once a token reaches a teardown.
             ct.ThrowIfCancellationRequested();
 
             _options.UnitSquareWindow(id, out double2 windowMin, out double2 windowMax);

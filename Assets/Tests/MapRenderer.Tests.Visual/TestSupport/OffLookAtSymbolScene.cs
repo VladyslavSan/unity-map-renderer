@@ -20,7 +20,7 @@
 // its intended anchor and its per-gap numbers are asserted; the receding roads are built symmetric in world
 // metres for exactly that reason (see `Build`). The assertions live in `MapPitchedWorldArcLayoutTests`.
 //
-// THE CROSS-AZIMUTH ARM CANNOT CARRY THE FIXTURE ALONE. It is iso-depth BY CONSTRUCTION, and for an
+// THE CROSS-AZIMUTH ARM CANNOT CARRY THE FIXTURE ALONE. It is iso-depth INHERENTLY, and for an
 // iso-depth symbol a true per-glyph world walk and a screen walk scaled by ONE per-symbol constant produce
 // IDENTICAL output. Every cross-azimuth tooth can be green while a screen-walk model sits in the tree. The
 // depth-SPANNING arm is the falsifiability.
@@ -379,7 +379,7 @@ namespace MapRenderer.Tests
         ///
         /// <para><b>Why the receding arm needs this at all.</b> <see cref="InkPixels"/> is rendered from the
         /// two CROSS-AZIMUTH symbols only — <see cref="Create"/>'s two-pass note explains that a receding
-        /// symbol crosses the frame vertically by construction, so with everything drawn at once no band can
+        /// symbol inherently crosses the frame vertically, so with everything drawn at once no band can
         /// say WHICH symbol put ink in it. The two receding symbols additionally run along the same ground
         /// direction ĝ from the same origin, so at heading 0 they project into nearly the SAME columns and a
         /// column band cannot separate them either. Rendering one symbol at a time removes the attribution
@@ -392,7 +392,7 @@ namespace MapRenderer.Tests
         /// <para><b>Safe after construction.</b> Every geometric reading — <see cref="Measure"/>,
         /// <see cref="Vertices"/>, <see cref="VertexCount"/> — was captured into a dictionary during the
         /// geometry pass, and <see cref="InkPixels"/> is already a cloned pixel array, so re-Ticking here
-        /// cannot change any of them. It DOES overwrite the live slot meshes, which is precisely why nothing
+        /// cannot change any of them. It DOES overwrite the live slot meshes, which is why nothing
         /// reads those lazily.</para>
         /// </summary>
         public Color32[] RenderIsolated(OffLookAtSymbolId id)
@@ -404,7 +404,7 @@ namespace MapRenderer.Tests
         /// render, three readings from ONE frame, so a tooth comparing a box to the quad it is supposed to
         /// bound is comparing two things the same staging pass produced.
         ///
-        /// <para><b>The <c>boxes[g]</c> ↔ <c>vertices[4g … 4g+3]</c> pairing holds by construction with a
+        /// <para><b>The <c>boxes[g]</c> ↔ <c>vertices[4g … 4g+3]</c> pairing holds inherently with a
         /// SINGLE symbol in the frame</b> — <c>StageCurvedAnchor</c> appends box <c>g</c> and quad <c>g</c> in
         /// the same loop iteration, <c>WorldSymbolRenderer.Emit</c> walks the quads in order, and
         /// <c>CollisionJob</c> does not reorder the box pool (it sorts the CANDIDATES; the
@@ -491,7 +491,7 @@ namespace MapRenderer.Tests
         /// <para><b>TWO TICK PASSES, ONE SCENE AND ONE CAMERA.</b> Pass 1 ticks all six symbols and takes every
         /// geometric measurement off the built meshes. Pass 2 re-ticks with ONLY the two cross-azimuth symbols
         /// and renders — because the receding and point symbols' ink sweeps across both cross-azimuth row
-        /// bands (a receding symbol crosses the frame vertically by construction), which would make the ink
+        /// bands (a receding symbol inherently crosses the frame vertically), which would make the ink
         /// arm unable to say WHICH symbol put ink in a band. The two passes share the camera, so their
         /// projections are identical; that the cross-azimuth geometry is unchanged between them is ASSERTED
         /// (bit-identical anchors), not assumed. The headline measurement is the mesh readback, not the ink —
@@ -979,7 +979,7 @@ namespace MapRenderer.Tests
         /// non-linear: extrapolating the local metres-per-px linearly there overshoots the vanishing line and
         /// would place a road whose SCREEN midpoint (which is where <c>LineCenter</c> anchors) sits hundreds
         /// of pixels from the intended anchor, off-frame. Solving in screen px instead puts the anchor at the
-        /// screen arc midpoint by construction.</para>
+        /// screen arc midpoint exactly.</para>
         ///
         /// <para>REACHABILITY CAP: the target is unreachable up-screen from an already-far anchor (the
         /// vanishing line is a finite screen row). When it is, the solve returns the offset achieving 90 % of

@@ -465,7 +465,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Test whether the center pixel (col, centerRow) is background.
-        /// Used to distinguish hollow (gap) vs solid center.
+        /// Distinguishes hollow (gap) vs solid center.
         /// </summary>
         private static bool IsCenterPixelBackground(Frame frame, int col, int row)
         {
@@ -618,9 +618,9 @@ namespace MapRenderer.Tests.Visual
         // ── line-translate is a SCREEN-pixel offset regardless of the width's units ──
 
         /// <summary>
-        /// The defect this pins: <c>pxToWorld</c> used to be left at 1.0 unless <c>_WidthIsPixels &gt; 0.5</c>,
-        /// so a layer whose <c>line-width</c> is in world metres applied <c>line-translate</c> as raw
-        /// METRES — off by 1/metresPerPixel (≈3.7× here, and zoom-dependent in the real renderer).
+        /// The defect this pins: a shallow implementation leaves <c>pxToWorld</c> at 1.0 unless
+        /// <c>_WidthIsPixels &gt; 0.5</c>, so a layer whose <c>line-width</c> is in world metres applies
+        /// <c>line-translate</c> as raw METRES — off by 1/metresPerPixel (≈3.7× here, and zoom-dependent in the real renderer).
         ///
         /// <para>No existing test could see it: every fixture in this file sets
         /// <c>_WidthIsPixels = 1</c>, so the world-width path had never once executed with a translate set.
@@ -898,7 +898,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>Builds the styled <see cref="RenderLayerSet"/> and its ten preconditions FIRST, and
-        /// <see cref="TiltedGroundScene.Create"/> LAST — deliberately, not incidentally. <c>Create</c>
+        /// <see cref="TiltedGroundScene.Create"/> LAST — not incidentally. <c>Create</c>
         /// mutates PROCESS-GLOBAL state (ambient mode, quality level) that only <c>Dispose</c> restores; if
         /// any precondition below fired while the scene already existed, an assertion failure would abort
         /// this method with no <c>try</c>/<c>finally</c> in scope and leak that global state for the REST OF
@@ -1291,7 +1291,7 @@ namespace MapRenderer.Tests.Visual
         /// arm performs anyway. <b>It is NOT the direction-symmetry discriminator any more.</b></item>
         /// </list>
         /// Direction symmetry at pad amplitude is currently pinned NOWHERE in a render —
-        /// <c>Estimator_…_TopDown</c> is a control with <c>e ≡ 0</c> by construction, so it cannot see it
+        /// <c>Estimator_…_TopDown</c> is a control that fixes <c>e ≡ 0</c>, so it cannot see it
         /// either. Closing that gap needs a fixture that can resolve a pad-sized effect, which is not
         /// this one.</para>
         /// </summary>
@@ -1504,13 +1504,13 @@ namespace MapRenderer.Tests.Visual
         /// <para>NAME AND SCOPE, narrow on purpose: this tooth measures a WORLD-space coupling about the
         /// original centreline. It neither claims nor delivers screen-width preservation — the band is at a
         /// different depth from the centreline the width was fixed at, so its rendered device width is
-        /// smaller and MOVES with the offset by construction. Whether line-offset should re-measure at the
+        /// smaller and necessarily MOVES with the offset. Whether line-offset should re-measure at the
         /// SHIFTED position is a spec question about what line-offset means under perspective, filed and out
         /// of scope.</para>
         ///
         /// <para>Discriminates at 11.426080 against 12.800 ± 2.5 % — a 4.3× margin — under the padded
         /// formulation. The same injection against the current one is larger, not smaller: the leak adds
-        /// <c>e·L·K</c> to a half-width that no longer carries the pad, ~29 %.</para>
+        /// <c>e·L·K</c> to a half-width that carries no pad, ~29 %.</para>
         /// </summary>
         [Test]
         public void OffsetRibbon_HalfWidthDoesNotTrackTheOffset_UnderTilt()

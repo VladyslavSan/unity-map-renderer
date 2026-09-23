@@ -1172,10 +1172,9 @@ namespace MapRenderer.Tests.Style
         [Test]
         public void ScreenRelative_IsContinuousInZoom_NoSteppingAndNoPerLevelSnap()
         {
-            // The artefact this replaced: repeats used to be rounded to whole numbers per tile, so a
-            // continuous zoom produced ~16 discrete snaps per zoom level — invisible in a screenshot, obvious
-            // while zooming. Period is now a smooth function of zoom, so consecutive samples must differ
-            // smoothly and never repeat a value (which is what a stair-step looks like numerically).
+            // Period is a smooth function of zoom. Rounding repeats to whole numbers per tile would produce
+            // ~16 discrete snaps per zoom level — invisible in a screenshot, obvious while zooming — so
+            // consecutive samples must differ smoothly and never repeat a value (a stair-step, numerically).
             Assert.IsTrue(Fill.FillPattern.TryResolve("plaza", Sheet(), out var r));
 
             double previous = -1.0;
@@ -1377,7 +1376,7 @@ namespace MapRenderer.Tests.Style
         {
             // Pins WHY the shader must clip rather than paint: this is Liberty's road_area_pattern verbatim,
             // and its Color evaluates to opaque black. Nothing here is wrong — the spec default IS black —
-            // which is precisely why "unresolved" cannot be allowed to fall through to the colour path.
+            // which is why "unresolved" cannot be allowed to fall through to the colour path.
             var paint = TestStyle.FillPaint(@"{""fill-pattern"":""pedestrian_polygon""}");
 
             Assert.AreEqual("pedestrian_polygon", paint.PatternName);

@@ -6,7 +6,7 @@ namespace MapRenderer.Core.Tiles
     /// How much of a tile's <b>buffer</b> — the geometry an MVT tile carries beyond <c>[0, extent)</c> so
     /// neighbours can join seamlessly — the fill path keeps before triangulating.
     ///
-    /// <para>Every tile paints its whole buffer today, so two neighbours double-paint the overlap strip.
+    /// <para>An unclipped tile paints its whole buffer, so two neighbours double-paint the overlap strip.
     /// Under the fill shader's <c>SrcAlpha</c>/<c>OneMinusSrcAlpha</c>, <c>ZWrite</c>-off contract a
     /// translucent fill composites to <c>1 − (1 − α)²</c> there instead of <c>α</c> — a uniform brighter
     /// band one buffer-width wide along every seam. Clipping fill rings to
@@ -17,11 +17,10 @@ namespace MapRenderer.Core.Tiles
     /// <see cref="TryWindow"/> — the single conversion site. Raw tile units would mean 8× the intended
     /// margin on a 512-extent layer (extent is a per-layer property, not a constant); a bare
     /// fraction-of-extent is correct but unreadable to author (<c>0.015625</c> for the standard buffer).
-    /// <c>64</c> is the OpenMapTiles standard buffer and reproduces the pre-clip geometry exactly;
+    /// <c>64</c> is the OpenMapTiles standard buffer and reproduces the unclipped geometry exactly;
     /// <c>0</c> cuts at the tile boundary.</para>
     ///
-    /// <para><c>default</c> is <see cref="Disabled"/>, so an unset knob means "no clip" — the
-    /// behaviour-preserving state.</para>
+    /// <para><c>default</c> is <see cref="Disabled"/>, so an unset knob means "no clip".</para>
     /// </summary>
     public readonly struct TileBufferClip
     {
@@ -32,9 +31,6 @@ namespace MapRenderer.Core.Tiles
         /// <summary>No clipping: rings reach triangulation exactly as decoded.</summary>
         public static TileBufferClip Disabled => default;
 
-        /// <summary>Keep <paramref name="unitsAtReferenceExtent"/> tile units of buffer on every side, measured
-        /// at <see cref="ReferenceExtent"/>. Negative input clamps to 0 (cut at the tile boundary) rather than
-        /// eroding into the tile.</summary>
         /// <summary>
         /// Decodes an Inspector-authored margin, which carries one state this value type does not:
         /// <b>negative means "do not run the clip stage at all"</b>, which is NOT the same as a zero margin
@@ -42,12 +38,15 @@ namespace MapRenderer.Core.Tiles
         /// already-enabled margin, so the two meanings never meet.
         ///
         /// <para>This lives here rather than at the Inspector boundary so that every consumer decodes the
-        /// same field identically — in particular the parity oracles, whose reference arm must build under
-        /// the SAME window as the arm it is compared against or it stops being a comparison.</para>
+        /// same field identically — in particular the parity oracles, whose reference arm must build under the
+        /// SAME window as the arm it is compared against or it stops being a comparison.</para>
         /// </summary>
         public static TileBufferClip FromInspectorUnits(double unitsAtReferenceExtent)
             => unitsAtReferenceExtent < 0.0 ? Disabled : KeepTileUnits(unitsAtReferenceExtent);
 
+        /// <summary>Keep <paramref name="unitsAtReferenceExtent"/> tile units of buffer on every side, measured
+        /// at <see cref="ReferenceExtent"/>. Negative input clamps to 0 (cut at the tile boundary) rather than
+        /// eroding into the tile.</summary>
         public static TileBufferClip KeepTileUnits(double unitsAtReferenceExtent)
             => new TileBufferClip(
                 // NaN is rejected explicitly, not clamped: math.max(0, NaN) IS NaN (the comparison is

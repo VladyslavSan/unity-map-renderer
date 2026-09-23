@@ -2,16 +2,11 @@
 namespace MapRenderer.Unity.Rendering.Map
 {
     /// <summary>
-    /// The <see cref="ProfilerCounterTelemetry"/> half of <see cref="MapViewComponent"/> — everything the
-    /// counter consumer needs to be owned and driven, kept out of the glue class so that class carries no
-    /// conditional compilation at all. The WHOLE file is inside <c>ENABLE_PROFILER</c>: in a release player it
-    /// contributes nothing, the partial methods declared on the other half have no implementation, and the C#
-    /// compiler erases their call sites. That is what "stripped from release" means here — not a runtime flag.
-    ///
-    /// <para>Owned by the component rather than dropped into a scene deliberately: a consumer that exists only
-    /// when someone remembered to add a component is missing exactly when a build misbehaves. It is affordable
-    /// permanently because <see cref="ProfilerCounterTelemetry.Mirror"/> early-outs unless the profiler is
-    /// recording, so an unprofiled frame never touches a provider.</para>
+    /// The <see cref="ProfilerCounterTelemetry"/> half of <see cref="MapViewComponent"/>, kept out of the
+    /// glue class so that class carries no conditional compilation. The whole file is inside
+    /// <c>ENABLE_PROFILER</c>; in a release player the partial methods have no implementation, so the
+    /// compiler erases their call sites. Owned by the component so it is never missing when a build
+    /// misbehaves; <see cref="ProfilerCounterTelemetry.Mirror"/> early-outs unless the profiler is recording.
     /// </summary>
     public sealed partial class MapViewComponent
     {

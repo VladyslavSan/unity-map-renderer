@@ -18,11 +18,11 @@ namespace MapRenderer.Unity.Rendering.Materials
     [CreateAssetMenu(fileName = "MapMaterialSet", menuName = "MapRenderer/Material Set", order = 0)]
     public sealed class MapMaterialSet : ScriptableObject
     {
-        [Tooltip("S4 (unlit epic): whether this set's base materials are lit or unlit. A map view draws in " +
+        [Tooltip("Whether this set's base materials are lit or unlit. A map view draws in " +
                  "whichever mode the MapMaterialSet it references declares — reference a Lit set for lit, an " +
                  "Unlit set (Map/FillUnlit / Map/FillExtrusionUnlit / Map/LineUnlit bases) for unlit. Under " +
-                 "Unlit the host also skips the directional-light + ambient-probe setup the unlit " +
-                 "twins never read. Lit is value 0, so a set authored before this epic stays lit.")]
+                 "Unlit the host skips the ambient-probe setup but keeps the directional light, whose " +
+                 "direction the unlit fill-extrusion reads. Lit is value 0, so a set that does not set it stays lit.")]
         [SerializeField] public RenderMode RenderMode = RenderMode.Lit;
 
         [Tooltip("Base material for all fill (polygon) layers. Cloned per style layer.")]

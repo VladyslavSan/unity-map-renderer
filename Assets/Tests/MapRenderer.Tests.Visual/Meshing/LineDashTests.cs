@@ -37,7 +37,7 @@ namespace MapRenderer.Tests.Visual
     // variation along the road instead of being bounded by the styled width:
     //   1. with DEPTH                     — the world period grew with distance; the pattern crawled under tilt.
     //   2. with DIRECTION                 — measured along `across` while dashes run `along`.
-    //   3. with the SIGN of the direction — no longer reachable; the helper is direction-symmetric. The two ribbon
+    //   3. with the SIGN of the direction — not reachable; the helper is direction-symmetric. The two ribbon
     //                                       vertices of a station share one centreline point and carry opposite
     //                                       extrudeN, so MapPixelsToWorld probed ONE-SIDED in opposite
     //                                       directions and their rulers differed by (1+e)/(1−e); every dash
@@ -334,7 +334,7 @@ namespace MapRenderer.Tests.Visual
         /// — and the next, 27, is off the road entirely. Under the un-fixed ruler the road only reaches
         /// <c>dashU</c> 13.5, so its boundaries (3, 9) are nowhere near.</para>
         ///
-        /// <para>The clearance is deliberately quoted against the nearest BOUNDARY, not against the road's
+        /// <para>The clearance is quoted against the nearest BOUNDARY, not against the road's
         /// far end (110 000 − 102 731 = 7 269 m): that is a different quantity and stating it here would
         /// overstate the margin by 2.2×. The exclusion can only ever DISCARD a crossing, so a window that is
         /// too wide costs a false RED and never a false GREEN — it cannot let a wrong ruler through.</para></summary>
@@ -603,7 +603,7 @@ namespace MapRenderer.Tests.Visual
                         $"{StyledLineWidthPx} would mean the band is holding a constant DEVICE width under " +
                         "tilt — the compensation this repo reverted.");
 
-                    // The probes are placed from the band that RENDERED, so this tooth no longer encodes any
+                    // The probes are placed from the band that RENDERED, so this tooth encodes no
                     // width premise at all. 2 px inside the styled edge, integer rows because the probe is a
                     // scanline.
                     int probeOffset = (int)math.floor(0.5 * thickness - T7ProbeInsetPx);

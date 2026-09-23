@@ -35,11 +35,10 @@ namespace MapRenderer.Tests.Text.Sprites
     /// <summary>
     /// The sprite sheet must be fetched for a style that has <b>no symbol layers</b>.
     ///
-    /// <para>The sheet used to be an icons-only resource, so <c>SymbolSubsystem.SetStyle</c> returned
-    /// early ("no symbol layers — stay idle") <i>before</i> kicking off the fetch. Once <c>fill-pattern</c>
-    /// began resolving against the same sheet that early return became a silent feature-killer: a style with
-    /// pattern fills and no symbol layers would never fetch a sheet, so every pattern layer would stay
-    /// unresolved and clip forever — no error, no warning, just missing fills.</para>
+    /// <para><c>SymbolSubsystem.SetStyle</c> must not return early on "no symbol layers — stay idle"
+    /// before kicking off the fetch: <c>fill-pattern</c> resolves against the same sheet, so a style with
+    /// pattern fills and no symbol layers would never fetch a sheet if that early return fired — every
+    /// pattern layer would stay unresolved and clip forever, no error, no warning, just missing fills.</para>
     ///
     /// <para>Liberty hides this (it has symbol layers), which is exactly why it needs its own tooth.</para>
     /// </summary>
@@ -73,7 +72,7 @@ namespace MapRenderer.Tests.Text.Sprites
                     return new FixtureSpriteSource();
                 };
 
-                // No symbol layers at all — the case the early return used to swallow.
+                // No symbol layers at all — the case an early return on "no symbol layers" would swallow.
                 var style = StyleParser.Parse(SymbolFreePatternStyle);
                 subsystem.SetStyle(style, System.Array.Empty<SymbolStyle.StyleLayer>());
 
@@ -314,7 +313,7 @@ namespace MapRenderer.Tests.Text.Sprites
             // tooth has to be taken here, on the decode itself.
             var decoded = Track(new UnityEngine.Texture2D(2, 2, UnityEngine.TextureFormat.RGBA32, mipChain: false));
             {
-                // The static form of the `LoadImage` EXTENSION method — this file deliberately carries no
+                // The static form of the `LoadImage` EXTENSION method — this file carries no
                 // top-level `using UnityEngine;` (it qualifies its few engine references instead), and an
                 // extension method cannot be reached through a qualified type name.
                 Assert.IsTrue(UnityEngine.ImageConversion.LoadImage(decoded, response.Png),
@@ -342,7 +341,7 @@ namespace MapRenderer.Tests.Text.Sprites
         public void SpriteSourceFactory_NullSpriteUrl_ReturnsNullAndWarnsOnce()
         {
             // The "warn once" latch is process-wide, and the sprite fetch runs for far more styles
-            // (it is no longer gated on a style having symbol layers — fill-pattern resolves against the same
+            // (it is not gated on a style having symbol layers — fill-pattern resolves against the same
             // sheet). Any earlier test that applies a sprite-less style consumes the one warning, so clear
             // the latch here rather than let this assertion depend on test order.
             SpriteSourceFactory.WarnedMissingUrl = false;

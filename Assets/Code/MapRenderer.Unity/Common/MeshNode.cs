@@ -4,33 +4,11 @@ using MapRenderer.Core.Lifetime;
 namespace MapRenderer.Unity.Common
 {
     /// <summary>
-    /// A <see cref="GameObject"/> that draws one mesh: it and its <see cref="MeshFilter"/> /
-    /// <see cref="MeshRenderer"/>, resolved once at construction and held as properties.
-    ///
-    /// <para><b>What this is for.</b> Both GameObject-based draw paths — the world-symbol leaves
-    /// (<c>WorldSymbolRenderer</c>) and the tile backend's per-layer children
-    /// (<c>Backend.GameObjects.TileRenderer</c>) — pool exactly this shape, and both used to express it as an
-    /// unenforced handshake: a <c>createFunc</c> that happened to <c>AddComponent</c> both, and rent/release
-    /// sites that <c>GetComponent</c> them back and null-checked the result. Making it a type turns that
-    /// handshake into a guarantee (the properties are non-null by construction, so the null checks go), and
-    /// collapses two near-identical create/clear pairs into one.</para>
-    ///
-    /// <para><b>State, not policy.</b> This deliberately owns nothing about how a node is USED — no
-    /// parenting, no naming, no shadow mode, no <c>hideFlags</c>, no initial visibility. A shared type that
-    /// guessed those would be wrong for someone: a symbol leaf sits at local identity under a layer node,
-    /// while a tile layer child is named per style layer and placed under a tile container. A pool wrapping
-    /// this type's *behaviour* was tried and removed for exactly that reason, and the constructor then
-    /// briefly repeated the mistake with three renderer settings, which is why this paragraph enumerates
-    /// what it does NOT decide.</para>
-    ///
-    /// <para>Both current callers happen to agree on some of those (shadows off,
-    /// <see cref="HideFlags.DontSave"/> — every runtime-built map object carries it). That agreement is not
-    /// a reason to move the settings in here: "both callers want it today" is precisely the reasoning that
-    /// put a TRS reset into the retired pool wrapper, where a third caller then didn't.</para>
-    ///
-    /// <para>A class rather than a struct because <see cref="UnityEngine.Pool.ObjectPool{T}"/> constrains
-    /// <c>T : class</c> — which is also the intended home for instances of this type. Main-thread only
-    /// (touches the scene graph).</para>
+    /// A <see cref="GameObject"/> with one <see cref="MeshFilter"/>/<see cref="MeshRenderer"/> pair — the shape
+    /// both GameObject-based draw paths pool (<c>WorldSymbolRenderer</c>, <c>Backend.GameObjects.TileRenderer</c>).
+    /// It decides nothing about use (parenting, naming, shadows, hideFlags, visibility), even where both callers
+    /// agree: a shared type that guesses a setting is wrong for some caller. A class because
+    /// <see cref="UnityEngine.Pool.ObjectPool{T}"/> requires <c>T : class</c>. Main-thread only.
     /// </summary>
     internal sealed class MeshNode : VerifiedDisposable
     {
@@ -40,10 +18,8 @@ namespace MapRenderer.Unity.Common
         /// where the answer is actually known.</summary>
         internal MeshNode(string name)
         {
-            // The components-in-constructor overload: one construction that carries the component set, rather
-            // than a bare GameObject followed by two AddComponent calls. It says "this object always has
-            // these two" in the expression that creates it — which is the whole claim this type exists to
-            // make. (Only reached on a pool MISS, so read it as expressiveness, not a hot-path saving.)
+            // The components-in-constructor overload: reached only on a pool MISS, so this is
+            // expressiveness (the object always has both components), not a hot-path saving.
             GameObject = new GameObject(name, typeof(MeshFilter), typeof(MeshRenderer));
             Filter     = GameObject.GetComponent<MeshFilter>();
             Renderer   = GameObject.GetComponent<MeshRenderer>();
@@ -57,18 +33,11 @@ namespace MapRenderer.Unity.Common
         internal Transform Transform => GameObject.transform;
 
         /// <summary>
-        /// Drops every reference to the tenancy that just ended, leaving the node safe to park.
-        ///
-        /// <para>Clearing <see cref="MeshFilter.sharedMesh"/> is not hygiene, it is required: neither draw
-        /// path owns its Mesh (TileManager owns tile meshes; a symbol slot destroys its own), and both may
-        /// destroy it immediately after releasing the node — so a node that kept the binding would carry a
-        /// DESTROYED Mesh into its next tenancy.</para>
-        ///
-        /// <para>Does NOT reparent. WHERE a released node goes is the owner's decision and it is a real one:
-        /// <c>SetParent(null)</c> looks like "detached" but actually promotes the node to a SCENE-ROOT
-        /// object — live in the Hierarchy, still active, and (if it carries
-        /// <see cref="HideFlags.DontSave"/>) surviving scene unload. Owners park under their own inactive
-        /// root instead; see any <c>actionOnRelease</c> in this codebase.</para>
+        /// Drops every reference to the tenancy that just ended, leaving the node safe to park. It clears
+        /// <see cref="MeshFilter.sharedMesh"/> because the Mesh owner (TileManager or a symbol slot) may destroy
+        /// it right after release, and a kept binding carries a destroyed Mesh into the next tenancy.
+        /// Does not reparent — <c>SetParent(null)</c> promotes the node to a live scene-root object, not a
+        /// detached one; the owner must park it under its own inactive root.
         /// </summary>
         internal void Release()
         {

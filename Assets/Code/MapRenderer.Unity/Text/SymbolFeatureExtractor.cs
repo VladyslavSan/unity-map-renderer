@@ -1,4 +1,4 @@
-// No `using UnityEngine` — but NOT engine-free any more, and NOT a core-tests file. It consumes
+// No `using UnityEngine` — but NOT engine-free, and NOT a core-tests file. It consumes
 // Unity.Collections transitively through TileGeometryBuffers (the Waist-1 buffer it materializes and reads),
 // so it cannot compile in Tools/core-tests and must not be re-added to core-tests.csproj. That dependency is
 // why it lives in MapRenderer.Unity at all: MapRenderer.Core references only
@@ -48,13 +48,13 @@ namespace MapRenderer.Unity.Text
     /// spans the WHOLE layer, per-feature side data is keyed on <see cref="SelectedTileFeature.Ordinal"/>,
     /// which is what <c>RingFeatureIdx</c> names.</para>
     ///
-    /// <para><b>Landmine #5 — the fused-<c>RingAssemblyJob</c> fence.</b> Symbol has no polygon, hole, area or
+    /// <para><b>The fused-<c>RingAssemblyJob</c> fence.</b> Symbol has no polygon, hole, area or
     /// triangulation concept and rejects Polygon features outright, so it must never call
     /// <c>FillMeshGraph.Schedule</c>, never schedule or consume <c>RingAssemblyJob</c>/<c>RingClipJob</c>/
     /// <c>EarcutJob</c>/<c>GlobeFillSubdivideJob</c>, and never apply an area/shoelace test to a symbol path —
     /// a Point feature's 1-point path has no area at all and a straight road has exactly zero.</para>
     ///
-    /// <para><b>Landmine #2 — symbol is the consumer that finally OBSERVES the unfiltered buffer.</b> The
+    /// <para><b>Symbol is the consumer that OBSERVES the unfiltered buffer.</b> The
     /// point branch below has <b>no path-length filter at all</b>: a 1-point path is a real, rendered symbol.
     /// The line branch filters <c>&lt; 2</c> and fill filters <c>&lt; 3</c> — three consumers, three
     /// thresholds, one unfiltered buffer. A short-ring filter in the Waist-1 materializer, in
@@ -102,7 +102,7 @@ namespace MapRenderer.Unity.Text
             if (!(layer is MapRenderer.Core.Style.Symbol.StyleLayer symbolLayer) || tile == null || projection == null || output == null)
                 return;
 
-            // NOTE: layer minzoom/maxzoom is deliberately NOT gated here. Tile DATA tops out at a max source zoom
+            // NOTE: layer minzoom/maxzoom is NOT gated here. Tile DATA tops out at a max source zoom
             // (e.g. z14 for OpenFreeMap), so at higher camera zooms those tiles are OVERZOOMED (reused, not
             // rebuilt) — gating at build time would freeze layer visibility at the build zoom and hide layers
             // (poi_r1/r7/r20 @ minzoom 15/16/17) that MapLibre reveals as you zoom past the data level. The gate
@@ -132,9 +132,9 @@ namespace MapRenderer.Unity.Text
             // unchanged — the selector appends in Features order, so selected order IS decode order.
             var selected = new List<SelectedTileFeature>();
             FeatureSelector.SelectFeatures(layer, tileLayer, zoom, selected);
-            // Nothing selected ⇒ no symbol can be emitted. The decode already materialized
-            // every layer, so this no longer avoids any work upstream — it is the plain early-out it reads
-            // as, mirroring TileMeshLayerProcessor's `selected.Count > 0`.
+            // Nothing selected ⇒ no symbol can be emitted. The decode already materialized every layer, so
+            // this avoids no work upstream — it is the plain early-out it reads as, mirroring
+            // TileMeshLayerProcessor's `selected.Count > 0`.
             if (selected.Count == 0) return;
             long                        tileKey  = SymbolTileKey.Pack(tileAddress);
             int                         ordinal  = 0;
@@ -186,16 +186,16 @@ namespace MapRenderer.Unity.Text
             // (StyledLineTileBuilder). `RingFeatureIdx`'s values ARE indices into the buffer's own feature
             // column, so that column's length is the domain being bucketed; `Features.Count` is a different
             // list that merely happens to hold the same count. For MVT it always does (OrdinalDomainTests
-            // clause B pins the lockstep); the two consumers now agree on one source of truth rather than on
+            // clause B pins the lockstep); the two consumers agree on one source of truth rather than on
             // an invariant only one writer maintains.
             int layerFeatureCount = geometry.FeatureCount;
 
             // RingFeatureIdx joins each ring back to its feature's LAYER ORDINAL. Bucket ONCE, ascending in r,
-            // so each feature's paths keep DECODE ORDER (landmine #4 — the extractor's per-tile `ordinal` is
+            // so each feature's paths keep DECODE ORDER (the extractor's per-tile `ordinal` is
             // the stable FeatureIndex tiebreak, so path order is observable output, not an implementation
             // detail). Contiguity is NOT assumed: a counting sort is stable and correct either way.
             // RingCount is the DECODED count, not RingCapacity; RingOffsets carries a trailing sentinel.
-            // Rank 3 GC fix: the counting-sort scratch is native now (no per-tile managed garbage). `using var`
+            // The counting-sort scratch is native (no per-tile managed garbage). `using var`
             // — construction and disposal are one statement per handle, so a constructor throw partway through
             // leaves nothing stranded and there is no hand-rolled finally to keep in sync. Allocator.Persistent,
             // NOT TempJob: this extract runs off-main and can span >4 main-thread frames, tripping TempJob's
@@ -294,7 +294,7 @@ namespace MapRenderer.Unity.Text
                 float      padding    = layout.TextPadding.Evaluate(zoom, feature);
                 float      sortKey    = layout.SymbolSortKey.Evaluate(zoom, feature);
                 float      spacing    = math.max(1f, layout.SymbolSpacing.Evaluate(zoom, feature)); // px, >= 1 (spec)
-                float      maxAngle   = layout.TextMaxAngle.Evaluate(zoom, feature);                // degrees (#6)
+                float      maxAngle   = layout.TextMaxAngle.Evaluate(zoom, feature);                // degrees
                 SymbolPaint symbolPaint = EvaluatePaint(paint, zoom, feature);
 
                 // The icon quad/paint are feature-constant (icon-size/-padding/-opacity don't vary per
@@ -379,7 +379,7 @@ namespace MapRenderer.Unity.Text
                         // extent + the 512 convention, no projection scale.
                         double spacingTileUnits = spacing * extent / WebMercator.TilePixelSize;
 
-                        // S4: subdivide the tile-local path ONCE so ProjectPath/anchor-resolve and
+                        // Subdivide the tile-local path ONCE so ProjectPath/anchor-resolve and
                         // LineAnchorPlacement.Compute both index against the SAME finer sequence — never
                         // subdivide only one of the two, or LineAnchor.Segment silently desyncs from
                         // PathRender (docs/labels-and-symbols-design.md). On a flat projection
@@ -497,7 +497,7 @@ namespace MapRenderer.Unity.Text
                                 // emitted symbol owns. Text side: a map-aligned text leaves `Text`
                                 // null here, which would stamp the icon Owner with no Rider ever following.
                                 // With both conjuncts EmitAtAnchor's "PairedInstance implies both halves" is
-                                // true by construction rather than by convention. Byte-identical wherever
+                                // always true, not merely conventional. Byte-identical wherever
                                 // both sides resolve to viewport — which is every shipped shield layer.
                                 PairedInstance = pairedInstance && iconAtAnchors && textAtAnchors,
                             };
@@ -577,11 +577,10 @@ namespace MapRenderer.Unity.Text
         }
 
         /// <summary>Copies ring <paramref name="r"/>'s tile-local span out of the shared buffer into a managed
-        /// array — the same shape (and the same allocation count) the retired managed decoder produced per
-        /// path, so every downstream consumer (<see cref="LineCurvatureSubdivision.Subdivide"/> /
-        /// <see cref="LineAnchorPlacement.Compute"/> / <see cref="KeepAnchorsInsideTile"/> /
-        /// <see cref="ProjectPath"/>) is byte-for-byte unchanged. TILE-LOCAL, never geodetic, never projected
-        /// (THE NAMED FENCE).
+        /// array, one per path — the shape every downstream consumer
+        /// (<see cref="LineCurvatureSubdivision.Subdivide"/> / <see cref="LineAnchorPlacement.Compute"/> /
+        /// <see cref="KeepAnchorsInsideTile"/> / <see cref="ProjectPath"/>) reads. TILE-LOCAL, never
+        /// geodetic, never projected (THE NAMED FENCE).
         /// <para><paramref name="geometry"/> is passed BY VALUE, not <c>in</c>:
         /// <see cref="TileGeometryBuffers"/> is not a <c>readonly struct</c>, so <c>in</c> would force a
         /// defensive copy per field read (docs/conventions-short.md's <c>in</c> ⟺ <c>readonly struct</c>
@@ -683,10 +682,10 @@ namespace MapRenderer.Unity.Text
         /// <c>x == extent</c> in tile T is <c>x == 0</c> in tile T+1. An inclusive upper bound duplicates every
         /// anchor sitting on a shared edge and an exclusive lower bound orphans it; only <c>[0, extent)</c>
         /// makes adjacent tiles' anchor sets a true PARTITION of world space — exactly one owner per position,
-        /// no gaps. That is why this is a hard 0 and deliberately not
+        /// no gaps. That is why this is a hard 0, not
         /// <c>MapViewConfig.FillTileBufferClip</c>: a buffer is a MARGIN for geometry (a wider polygon, a
         /// cosmetic cost), whereas anchor assignment is an OWNERSHIP partition, and a non-zero margin on a
-        /// partition means two tiles both emit the strip — the doubled-arrow defect this closes.</para>
+        /// partition means two tiles both emit the strip (doubled arrows).</para>
         ///
         /// <para>It filters ANCHORS, never the path: the path stays whole because clipping a polyline turns a
         /// join into a cap, and the per-frame arc walk needs the vertices beyond the surviving anchors.</para></summary>

@@ -1,6 +1,6 @@
-// Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2/4 — this
-// file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to a
-// (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the sibling
+// Engine-free. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2/4 — this file lives in
+// MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to a (nonexistent)
+// `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the sibling
 // SymbolScreenProjection header comment for the namespace-collision trap.
 
 using System;
@@ -27,19 +27,18 @@ namespace MapRenderer.Core.Text.Placement
         /// staging loop both clamp to this same value, so their anchor counts agree.</summary>
         public const int MaxAnchorsPerLine = 256;
 
-        // A NON-FINITE symbol-sort-key breaks
-        // ComparePlacementOrder's totality — with a NaN key BOTH `a < b` and `a > b` are false, so the compare
-        // FALLS THROUGH the sort-key branch (never returning 0 for the pair) and the resulting order becomes
-        // INTRANSITIVE (a 3-cycle whose sort-key/feature comparisons disagree), making the unstable heapsort's
-        // survivor set seed-/mirror-order dependent. `symbol-sort-key` projects raw expression output to float
-        // with no finite check, and `/` returns raw IEEE, so a style like ["/", 0, 0] yields NaN. Normalizing at
-        // THIS candidate-build choke (the single point where the raw baked value becomes a sort key) restores a
-        // strict total order. float.MaxValue sorts LAST (lowest priority) — a broken authoring value sorts no
-        // earlier than a legitimately-authored float.MaxValue key (a tie there falls to feature/tile/fade order).
-        // No-op on every shipped scene (defaults to 0; real styles use finite exprs).
-        // Finite ⇔ |k| ≤ MaxValue (NaN and ±Inf both fail the
-        // compare). Expressed via math.abs (not math.isfinite) so it also compiles under the Tools/core-tests
-        // Unity.Mathematics shim (has math.abs, not math.isfinite) — this file is compiled by BOTH runners.
+        // Non-obvious why: a NON-FINITE symbol-sort-key breaks ComparePlacementOrder's totality. With a NaN key
+        // BOTH `a < b` and `a > b` are false, so the compare FALLS THROUGH the sort-key branch (never returning 0
+        // for the pair) and the resulting order becomes INTRANSITIVE (a 3-cycle whose sort-key/feature comparisons
+        // disagree), making the unstable heapsort's survivor set seed-/mirror-order dependent. `symbol-sort-key`
+        // projects raw expression output to float with no finite check, and `/` returns raw IEEE, so a style like
+        // ["/", 0, 0] yields NaN. Normalizing at THIS candidate-build choke (the single point where the raw baked
+        // value becomes a sort key) keeps a strict total order. float.MaxValue sorts LAST (lowest priority) — a
+        // broken authoring value sorts no earlier than a legitimately-authored float.MaxValue key (a tie there
+        // falls to feature/tile/fade order). No-op on every shipped scene (defaults to 0; real styles use finite
+        // exprs). Finite ⇔ |k| ≤ MaxValue (NaN and ±Inf both fail the compare). Expressed via math.abs (not
+        // math.isfinite) so it also compiles under the Tools/core-tests Unity.Mathematics shim (has math.abs, not
+        // math.isfinite) — this file is compiled by BOTH runners.
         internal static float SanitizeSortKey(float k) => math.abs(k) <= float.MaxValue ? k : float.MaxValue;
 
         /// <summary>
@@ -76,7 +75,7 @@ namespace MapRenderer.Core.Text.Placement
 
         /// <summary>
         /// Stages a centred icon+text PAIR as ONE candidate spanning both halves' boxes —
-        /// the existing all-or-nothing multi-box machinery (<c>CollisionJob</c>) curved symbols already run
+        /// the all-or-nothing multi-box machinery (<c>CollisionJob</c>) curved symbols also run
         /// on, so the pair cannot self-block. The projection/viewport gate runs ONCE,
         /// on <paramref name="owner"/> — the halves share an anchor (both emitted from the extractor's same
         /// <c>EmitAtAnchor</c> anchor), which is what makes the pair atomic at the cull too.
@@ -187,7 +186,7 @@ namespace MapRenderer.Core.Text.Placement
                 AnchorLocal = s.AnchorLocal, TileOriginRender = s.TileOriginRender, TileKey = s.TileKey,
                 TranslateDeltaPx = translatedScreenPx - screenPx, IsWorld = true,
                 SurfaceUp = surfaceUp,
-                // text-halo-*: carried per emit, not per quad — the halo is a second copy of THIS label's
+                // text-halo-*: carried per emit, not per quad — the halo is a second copy of THIS symbol's
                 // whole glyph run (WorldSymbolRenderer.Emit), so one set of values covers all of it.
                 HaloColor = s.HaloColor, HaloWidthPx = s.HaloWidthPx, HaloBlurPx = s.HaloBlurPx,
             };
@@ -228,7 +227,7 @@ namespace MapRenderer.Core.Text.Placement
         /// depth. A spacing measured in world metres against glyphs sized in screen px would instead diverge
         /// with depth, and the letters would pile up as the symbol receded.</para>
         ///
-        /// <para><b>Under the world walk the SCREEN point is the approximate side, deliberately.</b>
+        /// <para><b>Under the world walk the SCREEN point is the approximate side.</b>
         /// <c>AtWithSegment</c> resolves <c>(seg, t)</c> against the world table and then reads the screen
         /// point as <c>lerp(path[seg], path[seg+1], t)</c> — an AFFINE interpolation at a WORLD parameter,
         /// which is not perspective-correct. Clip space is linear in the WORLD parameter, so
@@ -251,13 +250,13 @@ namespace MapRenderer.Core.Text.Placement
         /// <c>AlongLine</c> in favour of <c>CandidateEmit.ExtraRotationRadians</c>. <b>The limitation is
         /// therefore cosmetic on the map arm:</b> implementing <c>t'</c> would change no live output there.
         /// It still governs the non-map arm, where the screen walk is the walk.
-        /// <b>The exact form is also not implementable from today's inputs:</b>
+        /// <b>The exact form is also not implementable from this method's inputs:</b>
         /// <paramref name="depthPath"/> is NDC depth (<c>clip.z / clip.w</c>), and clip <c>w</c> is not
         /// recoverable from it without the projection's <c>m22</c>/<c>m23</c>, which this math never
         /// receives — though the view MATRIX it does receive yields <c>w</c> at any point.</para>
         ///
         /// <para><b>The map-pitched COLLISION BOX is the screen AABB of the glyph's four PROJECTED WORLD
-        /// CORNERS.</b> Two gates select it, both already in this method: <c>cornerMetresPerLogicalPixel &gt; 0</c>
+        /// CORNERS.</b> Two gates select it, both in this method: <c>cornerMetresPerLogicalPixel &gt; 0</c>
         /// (the same value written onto the emit, so a metre-sized quad with a pixel-sized box is not
         /// expressible) and <see cref="SymbolViewTransform.IsUsable"/> on <paramref name="view"/> (a
         /// default-constructed transform means "no camera was supplied" and keeps the screen box — which is
@@ -268,9 +267,9 @@ namespace MapRenderer.Core.Text.Placement
         /// falls back to the screen box on a degenerate ground frame or an unprojectable corner.</para>
         ///
         /// <para><b>The max-angle gate stays on the SCREEN tangent</b> (see <c>StageCurvedAnchor</c>): one
-        /// stage, one concern, and the existing Burst-vs-managed atan2 ULP argument for using the raw segment
+        /// stage, one concern, and the Burst-vs-managed atan2 ULP argument for using the raw segment
         /// tangent is unaffected by which table resolved the position. Whether a ground-welded symbol should
-        /// instead gate on world curvature is a separate, later question.</para>
+        /// instead gate on world curvature is an open question.</para>
         ///
         /// <para><b>The <c>MetresPerLogicalPixel &gt; 0</c> conjunct is a degradation guard.</b> Without it a
         /// map-pitched symbol whose per-frame ruler was never patched would get <c>arcScale == 0</c>, every
@@ -309,9 +308,9 @@ namespace MapRenderer.Core.Text.Placement
             // is half-converted.
             bool worldArc = s.PitchAlignment == AlignmentMode.Map && s.MetresPerLogicalPixel > 0f;
 
-            // The SAME predicate, one evaluation, also selects the CORNER unit. 0 ⇒ the emit's corner
-            // offsets stay logical px; > 0 ⇒ they are metres and this is the factor. StageCurvedAnchor only
-            // carries it — it must never re-evaluate the predicate (see CandidateEmit's doc).
+            // The SAME predicate, one evaluation, also selects the CORNER unit. 0 ⇒ the emit's corner offsets
+            // stay logical px; > 0 ⇒ they are metres and this is the factor. StageCurvedAnchor only carries it —
+            // it must never re-evaluate the predicate (see CandidateEmit's doc).
             float cornerMetresPerLogicalPixel = worldArc ? s.MetresPerLogicalPixel : 0f;
 
             float total = worldArc
@@ -331,10 +330,10 @@ namespace MapRenderer.Core.Text.Placement
             int anchorCount = math.min(anchors.Length, MaxAnchorsPerLine);
             for (int a = 0; a < anchorCount; a++)
             {
-                // With the world table this is the anchor's WORLD arc distance. A (seg, t) anchor is
-                // build-time tile-space topology, so resolving it on the world path is strictly more faithful
-                // than resolving it on the per-frame projected one — the two agree only at constant view
-                // depth, which is why a map-pitched curved anchor used to drift with the pose.
+                // With the world table this is the anchor's WORLD arc distance. A (seg, t) anchor is build-time
+                // tile-space topology, so resolving it on the world path is more faithful than resolving it on the
+                // per-frame projected one. The two agree only at constant view depth, so a map-pitched curved
+                // anchor resolved from the projected path would drift with the pose.
                 float centerArc = PolylineArcMath.ArcDistanceAt(cumulativeLengths, pathLen, anchors[a].Segment, anchors[a].T);
                 if (centerArc - halfSpan < 0f || centerArc + halfSpan > total) continue; // symbol spills the ends
                 if (StageCurvedAnchor(in s, pathPoints, cumulativeLengths, pathLen, total, worldPath, worldUpPath, glyphs, ref cursor,
@@ -357,10 +356,10 @@ namespace MapRenderer.Core.Text.Placement
             return staged;
         }
 
-        // Stage AC (curved-world): resolves `arc` to its screen point/tangent AND (seg,t) in one pass — the
-        // SAME formula PolylineArcMath.At uses internally (byte-identical to At's own output), but also
-        // surfaces the segment index/parametric t so the caller can sample the WORLD polyline at the
-        // IDENTICAL position — no second, independently-diverging walk.
+        // Resolves `arc` to its screen point/tangent AND (seg,t) in one pass — the SAME formula
+        // PolylineArcMath.At uses internally (byte-identical to At's own output), but also surfaces the segment
+        // index/parametric t so the caller can sample the WORLD polyline at the IDENTICAL position — no second,
+        // independently-diverging walk.
         private static void AtWithSegment(ReadOnlySpan<float2> path, ReadOnlySpan<float> cumulative, int pathLen,
             float total, float arc, ref int cursor,
             out float2 point, out float tangentRadians, out int seg, out float t)
@@ -391,7 +390,7 @@ namespace MapRenderer.Core.Text.Placement
         // screen walk, world METRES under map pitch alignment (StageCurved's doc has the branch). This method
         // never re-derives which; it just uses them consistently. `path` stays the SCREEN polyline in both
         // cases: AtWithSegment resolves (seg, t) from `cumulative`/`total` and reads the point/tangent from
-        // `path`, so passing the world table with the screen path is exactly right — resolve the position in
+        // `path`, so passing the world table with the screen path is right — resolve the position in
         // metres, report where that lands on screen.
         private static bool StageCurvedAnchor(in CurvedStageInput s,
             ReadOnlySpan<float2> path, ReadOnlySpan<float> cumulative, int pathLen, float total,
@@ -431,9 +430,9 @@ namespace MapRenderer.Core.Text.Placement
                     out float2 pt, out float centerTangentAtGlyph, out int segArc, out float tArc);
 
                 // The max-angle gate answers "is the PATH too kinky to place a symbol here" — a path-curvature
-                // property, so it stays on the raw per-glyph SEGMENT tangent (byte-identical to pre-fix
-                // behaviour; a Burst-vs-managed atan2 ULP mismatch on the blended angle below would otherwise
-                // flip cull decisions right at the threshold, see SymbolStageJobTests.BurstStage_MatchesManaged).
+                // property, so it stays on the raw per-glyph SEGMENT tangent: a Burst-vs-managed atan2 ULP
+                // mismatch on the blended angle below would otherwise flip cull decisions right at the threshold
+                // (see SymbolStageJobTests.BurstStage_MatchesManaged_CurvedBends).
                 if (g > 0 && math.abs(AngleDelta(centerTangentAtGlyph, prevCenterTangent)) > maxAngleRad)
                 {
                     boxCount = boxStart; quadCount = quadStart; // roll back this anchor's partial appends
@@ -441,21 +440,21 @@ namespace MapRenderer.Core.Text.Placement
                 }
                 prevCenterTangent = centerTangentAtGlyph;
 
-                // Stage AC: the world anchor at the SAME (seg,t) the screen walk above just resolved — the
-                // Level-1 RTC bake (worldPoint − TileOriginRender). segDirWorld is the raw-segment fallback
-                // direction (SampleWorld's zero-length-segment skip), used below when the chord is degenerate.
+                // The world anchor at the SAME (seg,t) the screen walk above just resolved — the Level-1 RTC
+                // bake (worldPoint − TileOriginRender). segDirWorld is the raw-segment fallback direction
+                // (SampleWorld's zero-length-segment skip), used below when the chord is degenerate.
                 PolylineArcMath.SampleWorld(worldPath, pathLen, segArc, tArc, out double3 worldPt, out double3 segDirWorld);
-                // P2: the up analogue, sampled at the IDENTICAL (segArc, tArc) — never re-sampled at the
+                // The up analogue, sampled at the IDENTICAL (segArc, tArc) — never re-sampled at the
                 // chord probe's (segLeft,…)/(segRight,…) below; the anchor is the sample point.
                 float3 surfaceUp = PolylineArcMath.SampleUp(worldUpPath, segArc, tArc);
 
-                // Orient the rigid glyph quad by the CHORD across its OWN footprint, not the single-point
-                // segment tangent: a glyph straddling a polyline VERTEX would otherwise rotate to one
-                // segment's raw angle while its neighbour (advance-spaced, not vertex-spaced) rotates to
-                // the other, so their inner corners collide on the concave side of the bend. The chord
-                // blends the two segment angles in proportion to how much of the footprint sits on each
-                // side of the vertex, so consecutive glyphs tile edge-to-edge (MapLibre's fix). This is
-                // purely a RENDER-orientation choice — it does not feed the cull gate above.
+                // Non-obvious why: orient the rigid glyph quad by the CHORD across its OWN footprint, not the
+                // single-point segment tangent. A glyph straddling a polyline VERTEX would otherwise rotate to one
+                // segment's raw angle while its neighbour (advance-spaced, not vertex-spaced) rotates to the
+                // other, so their inner corners collide on the concave side of the bend. The chord blends the two
+                // segment angles in proportion to how much of the footprint sits on each side of the vertex, so
+                // consecutive glyphs tile edge-to-edge. This is purely a RENDER-orientation choice — it does not
+                // feed the cull gate above.
                 // The CONTENT width: an icon cell carries a transparent border (CellSkirt) that is drawn but
                 // is not ink, and the chord probe must straddle the ink's footprint, not the skirt's. Text
                 // has CellSkirt == 0, so this is an exact `x - 0f` there.
@@ -463,7 +462,7 @@ namespace MapRenderer.Core.Text.Placement
                 // scaled by `arcScale`, i.e. it is METRES whenever the walk is. Leaving it on the px scale
                 // while `arc` is in metres makes the probe span ~10 units of a ~10⁴-metre advance: the chord
                 // degenerates below the 1e-12 guards below, the code silently falls back to the RAW segment
-                // direction, and the vertex-straddling fix above is undone. On a STRAIGHT path that is a
+                // direction, and the vertex-straddling chord above is undone. On a STRAIGHT path that is a
                 // no-op, so only a bent-path fixture can observe it.
                 float halfWidthArc =
                     (cg.Cell.BottomRight.x - cg.Cell.TopLeft.x - 2f * cg.CellSkirt) * arcScale * 0.5f;
@@ -489,7 +488,7 @@ namespace MapRenderer.Core.Text.Placement
                     if (math.lengthsq(worldChord) > 1e-12) chordDirWorld = worldChord;
                 }
 
-                // Unit-normalize (direction only feeds the shader's atan2, D-E — magnitude never matters) and
+                // Unit-normalize (direction only feeds the shader's atan2 — magnitude never matters) and
                 // bake the SAME keep-upright negation the screen `flip` above already decided.
                 double3 unitTangent = math.lengthsq(chordDirWorld) > 1e-18 ? math.normalize(chordDirWorld) : double3.zero;
                 if (reversed) unitTangent = -unitTangent;
@@ -504,13 +503,12 @@ namespace MapRenderer.Core.Text.Placement
                 pt = SymbolTranslate.ApplyTranslate(pt, s.TranslatePx, s.TranslateAnchor, bearingRadians);
                 float rotation = tangent + flip; // tangent ONLY — not the symbol bearing (would double-rotate)
 
-                // The map-pitched box is the screen AABB of the FOUR PROJECTED WORLD CORNERS, so it tracks
-                // the ink at every depth. A screen box sized from TextSizePx has no depth term, while the
-                // glyph is DRAWN as a world-metre quad, so it over-reserves without bound as the symbol
-                // recedes. Same predicate the corner UNIT already rides on (cornerMetresPerLogicalPixel), so
-                // a metre-sized quad with a pixel-sized box is not expressible. A degenerate ground frame or
-                // a corner behind the camera falls back to the screen box. The scale is the RENDERER's own
-                // association,
+                // Non-obvious why: the map-pitched box is the screen AABB of the FOUR PROJECTED WORLD CORNERS, so
+                // it tracks the ink at every depth. A screen box sized from TextSizePx has no depth term, while the
+                // glyph is DRAWN as a world-metre quad, so it over-reserves without bound as the symbol recedes.
+                // Same predicate the corner UNIT already rides on (cornerMetresPerLogicalPixel), so a metre-sized
+                // quad with a pixel-sized box is not expressible. A degenerate ground frame or a corner behind the
+                // camera falls back to the screen box. The scale is the RENDERER's own association,
                 // TextSizePx · cornerMetres — NOT the equal-but-differently-associated `arcScale` above.
                 // (`glyphBox` is declared up front rather than as an `out var`: the two gates short-circuit,
                 // so the compiler cannot prove it assigned at the ternary below.)
@@ -557,8 +555,8 @@ namespace MapRenderer.Core.Text.Placement
                 QuadStart = quadStart, QuadCount = glyphs.Length, Slot = s.Slot, AtlasKind = s.AtlasKind,
                 TileKey = s.TileKey, TileOriginRender = s.TileOriginRender, TranslateDeltaPx = translateDeltaPx,
                 IsWorld = true, AlongLine = true,
-                // text-halo-*: carried per emit, not per quad — the halo is a second copy of THIS label's
-                // whole glyph run (WorldSymbolRenderer.Emit), so one set of values covers all of it.
+                // text-halo-*: carried per emit, not per quad — the halo is a second copy of THIS symbol's whole
+                // glyph run (WorldSymbolRenderer.Emit), so one set of values covers all of it.
                 HaloColor = s.HaloColor, HaloWidthPx = s.HaloWidthPx, HaloBlurPx = s.HaloBlurPx,
 
                 // The corner unit, decided ONCE by StageCurved's `worldArc` and only carried here. It is
@@ -585,7 +583,7 @@ namespace MapRenderer.Core.Text.Placement
         /// different line-symbol layers share it. Without the layer dimension their fade ids collide, and because a
         /// fade id must be unique per live candidate (each frame's <see cref="SymbolPlacementSystem"/> does one
         /// read-modify-write of the opacity per id), the collision makes two candidates FIGHT over one opacity and
-        /// stick at a partial value forever. <see cref="SymbolPlacementSystem.PointFadeId"/> already folds in its
+        /// stick at a partial value forever. <see cref="SymbolPlacementSystem.PointFadeId"/> folds in its
         /// layer id for the same reason; this is the line analogue.</para></summary>
         public static long LineFadeId(long tileKey, int layerId, int featureIndex, int anchorIndex)
         {

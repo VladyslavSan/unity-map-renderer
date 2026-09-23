@@ -21,26 +21,17 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>
         /// Builds this layer's graph build off the already-selected features — the prologue half of the
         /// mesh build; the graph's write step does the rest. Returns <c>null</c> when there is nothing to
-        /// build for this layer; otherwise a rented <see cref="ILayerMeshBuild"/> of the layer's own kind
-        /// (<see cref="FillLayerBuild"/>/<see cref="FillExtrusionLayerBuild"/>/<see cref="LineLayerBuild"/>)
-        /// carrying exactly the columns its kind needs.
-        ///
-        /// <para><paramref name="selected"/> pairs each feature with its <b>ordinal</b> in the source layer,
-        /// and <paramref name="geometry"/> is the whole source layer's tile geometry, materialized once per
-        /// worker pass and <b>BORROWED</b> — an implementation must not dispose it, retain it or write to it.
-        /// The ordinal is how a per-feature side array joins back to the buffer's <c>RingFeatureIdx</c>. The
-        /// tile extent is <c>geometry.Extent</c>; it is not a separate parameter, because a second copy is
-        /// what lets a stage quietly substitute a constant.</para>
-        ///
-        /// <para><b>There is no <c>TileId</c> parameter.</b> The buffer
-        /// declares its own tile as <c>geometry.Tile</c>, exactly as it declares its own extent, so a caller
-        /// cannot pair a z0 buffer with a z1 address — the mispairing shape does not exist in the signature.</para>
-        ///
-        /// <para><paramref name="context"/>'s <c>BufferClip</c> is the global tile-buffer clip window.
-        /// <b>Fill honours it; every other kind ignores it BY DECISION.</b> Clipping an input polyline at the
-        /// tile boundary turns the join at that vertex into a cap — trading the alpha band for a notch at
-        /// every seam — so the line equivalent is clipping the tessellated RIBBON, a different and harder
-        /// operation that is not attempted here.</para>
+        /// build for this layer; otherwise a rented <see cref="ILayerMeshBuild"/> of the layer's own kind,
+        /// carrying exactly the columns its kind needs. <paramref name="geometry"/> is the whole source
+        /// layer's tile geometry, BORROWED — an implementation must not dispose it, retain it or write to
+        /// it. There is no <c>TileId</c> or extent parameter: the buffer declares its own <c>geometry.Tile</c>
+        /// and <c>geometry.Extent</c>, so a caller cannot pair a z0 buffer with a z1 address, and a stage
+        /// cannot substitute a constant extent. The ordinal in <paramref name="selected"/> joins a per-feature
+        /// side array back to the buffer's <c>RingFeatureIdx</c>. Non-local invariant:
+        /// <paramref name="context"/>'s <c>BufferClip</c> is the global tile-buffer clip window, and only
+        /// Fill honours it — clipping an input polyline at the tile boundary turns a join into a cap, so
+        /// the line equivalent (clipping the tessellated ribbon) is a different, harder operation not
+        /// attempted here.
         /// </summary>
         /// <param name="selected">This layer's already-selected features, paired with their ordinal in the
         /// source layer.</param>

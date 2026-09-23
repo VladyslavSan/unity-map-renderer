@@ -114,7 +114,7 @@ namespace MapRenderer.Jobs.Mvt
             // the read loop — so without this the Features / Keys / Values lists and the four per-feature
             // scratch lists grow by doubling, discarding a chain of backing arrays per layer. The extra scan
             // is off-main CPU traded for less GC (the goal). A miscount could only mis-SIZE a list, never
-            // change what is decoded, so this is behaviour-preserving by construction.
+            // change what is decoded, so this cannot alter behaviour.
             var (featureCount, keyCount, valueCount) = CountLayerElements(r);
             layer.Features.Capacity = featureCount;
             layer.Keys.Capacity     = keyCount;
@@ -239,14 +239,14 @@ namespace MapRenderer.Jobs.Mvt
 
                 FlattenFeatureColumn(r, tagStart, tagEnd, featCount, ref tagOffsets, ref tagLengths, ref tagWords);
 
-                // N2 hardening: validate the tag-slice columns' feature-count lockstep HERE — before
-                // AdoptGeometry — not only inside AdoptFeatureTagColumns (which keeps its own copy as
-                // defence-in-depth). By the time AdoptFeatureTagColumns runs, AdoptGeometry has already
-                // handed the layer its geometry; a throw at that point would leak it, because the layer is
-                // not yet reachable from tile.Layers and Decode's catch can only free what IS reachable.
-                // Unreachable today — FlattenFeatureColumn builds tagOffsets/tagLengths at featCount by
-                // construction — but this converts "unreachable in practice" into "structurally cannot fire
-                // after the adopt". See ValidateTagSliceColumnsMatchFeatureCount's regression tooth.
+                // Validate the tag-slice columns' feature-count lockstep HERE — before AdoptGeometry — not
+                // only inside AdoptFeatureTagColumns (which keeps its own copy as defence-in-depth). By the
+                // time AdoptFeatureTagColumns runs, AdoptGeometry has already handed the layer its geometry; a
+                // throw at that point would leak it, because the layer is not yet reachable from tile.Layers
+                // and Decode's catch can only free what IS reachable.
+                // Unreachable — FlattenFeatureColumn always builds tagOffsets/tagLengths at featCount — but
+                // this converts "unreachable in practice" into "structurally cannot fire after the adopt".
+                // See ValidateTagSliceColumnsMatchFeatureCount's regression tooth.
                 ValidateTagSliceColumnsMatchFeatureCount(tagOffsets.Length, tagLengths.Length, featCount, layer.Name);
 
                 // Resolver takes the tag-words, value-table AND per-feature (offset,count) columns here (all
@@ -313,7 +313,7 @@ namespace MapRenderer.Jobs.Mvt
         }
 
         /// <summary>
-        /// N2 hardening: throws unless <paramref name="tagOffsetsLength"/> and <paramref name="tagLengthsLength"/>
+        /// Throws unless <paramref name="tagOffsetsLength"/> and <paramref name="tagLengthsLength"/>
         /// both equal <paramref name="featCount"/> — the lockstep <see cref="MvtLayer.AdoptFeatureTagColumns"/>
         /// also enforces, called here <b>before <see cref="MvtLayer.AdoptGeometry"/></b> so a mismatch throws
         /// while every decode buffer is still local to <see cref="DecodeLayer"/> and its <c>finally</c> can
@@ -464,16 +464,12 @@ namespace MapRenderer.Jobs.Mvt
         /// <c>ProtobufReader.Slice</c>), so the caller can re-open that exact byte range later with its OWN
         /// reader and flatten every feature's tag words / commands straight into one shared
         /// <c>NativeArray&lt;uint&gt;</c> apiece — no per-feature managed <c>uint[]</c> ever exists. A second
-        /// (or later) occurrence of either field overwrites its bounds, matching the old last-wins behaviour
-        /// where a repeated packed-varint read discarded the previous array. Absent field ⇒ <c>(0, 0)</c>,
-        /// the same "zero words" default the old <c>null</c>/empty result meant.</para>
+        /// (or later) occurrence of either field overwrites its bounds, so the last occurrence wins. Absent
+        /// field ⇒ <c>(0, 0)</c>, meaning "zero words".</para>
         ///
-        /// <para><b>Deliberate: a repeated <c>FeatureTags</c> is now last-wins AND lazily parsed.</b> Only the
-        /// LAST occurrence's bounds survive here, and those bytes are parsed once, later, by the caller — so
-        /// a malformed EARLIER occurrence (e.g. an unterminated packed varint) is never parsed at all and is
-        /// no longer eagerly rejected, where the old per-occurrence eager parse threw as soon as it reached
-        /// it. <c>FeatureGeometry</c> has carried this exact deferred-parse, last-wins-on-repeat behaviour
-        /// since it was first flattened; tags now share it.</para>
+        /// <para><b>A repeated tag or geometry field is also lazily parsed.</b> Only the LAST occurrence's bounds
+        /// survive here, and those bytes are parsed once, later, by the caller — so a malformed EARLIER
+        /// occurrence (e.g. an unterminated packed varint) is never parsed and is not rejected.</para>
         /// </summary>
         private static (TileGeometryType kind, Value id, int tagStart, int tagEnd, int geomStart, int geomEnd)
             DecodeFeature(ProtobufReader r)

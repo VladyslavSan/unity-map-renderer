@@ -108,7 +108,8 @@ void SetupDOTSMapUnlitFillMaterialPropertyCaches()
 // ── [MAP DELTA] fill-pattern sheet — same contract as Fill_LitInput.hlsl's copy ─────────────────
 TEXTURE2D(_PatternMap);         SAMPLER(sampler_PatternMap);
 
-// Samples the fill-pattern sprite at tile-normalized `uv`, tiling it _PatternScale times across the tile.
+// Samples the fill-pattern sprite at `uv` (the world-unit offset from the tile origin), tiling it
+// _PatternScale times per world unit.
 // Returns the sprite texel; `clipped` is true when this is a pattern layer whose sprite did not resolve.
 // Verbatim logic/rationale as Fill_LitInput.hlsl's SampleFillPattern (explicit-gradient sampling to avoid
 // mip/bleed artifacts at the frac() wrap seam) — duplicated here because the two CBUFFERs differ and

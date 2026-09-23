@@ -79,8 +79,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
         private const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        // internal, not private (vestige sweep): a test-assembly caller (via InternalsVisibleTo) reads this
-        // default the same way WriteMeshData used to, before it moved to the test assembly.
+        // internal, not private: a test-assembly caller (via InternalsVisibleTo) reads this default the
+        // same way WriteMeshData, which lives in the test assembly, does.
         internal static readonly IProjection DefaultProjection = new WebMercatorProjection();
 
         /// <summary>
@@ -202,8 +202,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
         // grouping — same "avoid the non-standard-order warning" convention as
         // StyledFillTileBuilder.FillVertexDescriptors. staticLightmapUV/dynamicLightmapUV/pattern-UV
         // (TEXCOORD0-2, declared in the shader's Attributes structs only for URP-variant compile
-        // completeness) are DELIBERATELY not supplied here — Unity zero-fills an absent vertex stream,
-        // exactly like StyledFillTileBuilder's mesh already omits TexCoord1/2 today.
+        // completeness) are not supplied here — Unity zero-fills an absent vertex stream,
+        // the same way StyledFillTileBuilder's mesh omits TexCoord1/2.
         private static readonly VertexAttributeDescriptor[] VertexDescriptors = new[]
         {
             new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0),
@@ -364,7 +364,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <param name="projection">The layer's build projection — decides the roof's globe/flat arm.</param>
         /// <param name="tile">The layer's tile address — feeds the per-vertex sec φ bake on the flat arm.</param>
         /// <param name="extent">The layer's tile extent — feeds the same sec φ bake.</param>
-        /// <remarks><c>internal</c>, not <c>private</c> (vestige sweep): the production write node,
+        /// <remarks><c>internal</c>, not <c>private</c>: the production write node,
         /// <see cref="ScheduleWrite"/>, plus a test-assembly caller reached
         /// through <c>MapRenderer.Unity</c>'s own <c>InternalsVisibleTo("MapRenderer.Tests.Shared")</c>
         /// grant.</remarks>

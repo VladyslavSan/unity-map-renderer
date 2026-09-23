@@ -55,7 +55,7 @@ namespace MapRenderer.Build
 
         /// <summary>
         /// The DEVELOPMENT macOS player — the build that makes the map's telemetry readable outside the Editor
-        /// (<c>docs/telemetry-design.md</c> §1.2, the reason the counter consumer exists). See
+        /// (<c>docs/telemetry-design.md</c> § "Why", item 2, the reason the counter consumer exists). See
         /// <see cref="ApplyDevelopmentSettings"/> for what "development" costs and why the backend is not lowered.
         /// </summary>
         [MenuItem("Tools/Build/macOS DEVELOPMENT (.app, profileable)")]
@@ -448,7 +448,7 @@ namespace MapRenderer.Build
         /// compile far faster, but this project's perf work is about MANAGED main-thread cost (the label Stage
         /// loop, the batch build), and Mono and IL2CPP do not generate comparable code for it — a Mono profile
         /// would produce numbers that do not describe what ships. Building IL2CPP also exercises the reachability
-        /// risk in <c>docs/telemetry-design.md</c> §6: the generic instantiations over
+        /// risk in <c>docs/telemetry-design.md</c> § "Risks": the generic instantiations over
         /// <c>ProfilerCounterValue&lt;int/long/double&gt;</c> have to be statically reachable, and a build that
         /// produces working counters is the proof.</para>
         ///

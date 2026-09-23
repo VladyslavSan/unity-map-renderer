@@ -386,13 +386,13 @@ namespace MapRenderer.Tests.Style
         // the material reference actually moving.)
 
         /// <summary>
-        /// <c>text-opacity</c> is the still-refusing symbol paint key this tooth's ORIGINAL intent
-        /// (a symbol paint change generally takes the rebuild path) now needs — Constant <c>text-color</c>
-        /// itself flips to the in-place path (see <see cref="SymbolPaintChange_TakesTheInPlacePath_MaterialSurvives"/>
-        /// below), so it can no longer carry this guard. <c>text-opacity</c> ALWAYS bakes into the vertex
-        /// stream (<c>SymbolPaint.Opacity</c>), so it is NOT a gate key — the
-        /// Fork-A hazard class, approached from the refusing side. RED-verify: add <c>text-opacity</c> to
-        /// <c>SurvivingLayerGate.TransitionablePaintKeys</c> — the gate then wrongly accepts.
+        /// <c>text-opacity</c> is the symbol paint key that still refuses a symbol paint change (the general
+        /// case is the rebuild path). Constant <c>text-color</c> takes the in-place path instead (see
+        /// <see cref="SymbolPaintChange_TakesTheInPlacePath_MaterialSurvives"/> below) and so cannot carry
+        /// this guard. <c>text-opacity</c> ALWAYS bakes into the vertex stream (<c>SymbolPaint.Opacity</c>),
+        /// so it is NOT a gate key — the Fork-A hazard class, approached from the refusing side. RED-verify:
+        /// add <c>text-opacity</c> to <c>SurvivingLayerGate.TransitionablePaintKeys</c> — the gate then
+        /// wrongly accepts.
         /// </summary>
         [Test]
         public void SymbolPaintChange_TakesTheRebuildPath()

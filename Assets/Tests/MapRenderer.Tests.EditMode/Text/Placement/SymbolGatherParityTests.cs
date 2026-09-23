@@ -262,8 +262,8 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── A 1-box candidate is exactly a point symbol: the unified path changed nothing for single-box
-        //    symbols. Both the legacy box-only path and the differential this used to run against are gone
-        //    So this is a direct property — the same overlapping-cluster-plus-disjoint-label shape
+        //    symbols. The legacy box-only path and its differential are both gone, so this is a direct
+        //    property — the same overlapping-cluster-plus-disjoint-label shape
         //    that pins the box-only comparator tooth, rebuilt as 1-box candidates through the same job. ──────
         [Test]
         public void Collision_AllSingleBoxCandidates_MatchLegacyPointPath()
@@ -1140,7 +1140,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             // Tick 1: {A} alone — nothing has been harvested yet (no prior scheduled collision) ⇒ nothing shows.
             h.System.TickSymbols(in h.Frame, aOnly, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
-            Assert.AreEqual(0, h.System.LastQuadCount, "tick 1: no pending verdict yet — nothing shows (§2.6).");
+            Assert.AreEqual(0, h.System.LastQuadCount, "tick 1: no pending verdict yet — nothing shows (symbol-label-perf-design.md § \"The collision verdict applies one frame late\").");
 
             // Tick 2: {A} again — harvests tick 1's scheduled collision over {A} ⇒ A shows.
             h.System.TickSymbols(in h.Frame, aOnly, h.Atlas, h.Projection, deltaTime: float.PositiveInfinity);
@@ -1299,8 +1299,8 @@ namespace MapRenderer.Tests.Text.Placement
                 paint: SymbolPaint.Default, textSizePx: 24f, paddingPx: 2f, sortKey: sortKey, text: text,
                 featureIndex: feature, tileKey: 0L);
 
-        // Point symbols draw through the WORLD path — the fade opacity (stream 1) no longer
-        // rides system.Mesh's vertex-colour alpha (BillboardVertex.Color.a); it lives on the world slot's
+        // Point symbols draw through the WORLD path — the fade opacity (stream 1) does not
+        // ride system.Mesh's vertex-colour alpha (BillboardVertex.Color.a); it lives on the world slot's
         // Opacity stream (WorldMeshReadback.MaxOpacity). tileKey defaults to 0L — every symbol in this file
         // uses it (fade/opacity assertions are position-independent).
         private static float MaxAlpha(SymbolPlacementSystem system, long tileKey = 0L)
@@ -1714,9 +1714,9 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── incumbency plumbing ──────────────────────────────────────────────────────────────────────────────
-        // End-to-end coverage for the _placedLastFrame → WasPlacedLastFrame plumbing — previously untested
-        // anywhere (SymbolCandidateCollisionTests sets WasPlacedLastFrame by hand, never through
-        // SymbolPlacementSystem; SymbolStageJobTests feeds it as a raw input; SymbolProjectionJobTests deliberately
+        // End-to-end coverage for the _placedLastFrame → WasPlacedLastFrame plumbing — untested anywhere else
+        // (SymbolCandidateCollisionTests sets WasPlacedLastFrame by hand, never through
+        // SymbolPlacementSystem; SymbolStageJobTests feeds it as a raw input; SymbolProjectionJobTests
         // arranges distinct sort keys "so incumbency is a no-op"). X and Y sit at the SAME anchor with an
         // EQUAL SortKey, so SymbolCollision.ComparePlacementOrder falls to its incumbency term (SymbolCollision.cs:144)
         // strictly BEFORE the FeatureIndex term (:145) — if a future change reorders those two lines this test
@@ -1921,7 +1921,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// <see cref="SymbolPlacementSystem"/> behind a throwaway camera/material (<see cref="LpsHarness"/> — a plain
     /// camera, no real look-at, since <see cref="SymbolPlacementSystem.GatherIntoMirror"/>/<c>CopyMirrorInto</c>
     /// never touch the camera; <see cref="TickHarness"/> adds a real look-at only for the tests below that drive
-    /// a full <c>Tick</c>). T3 deliberately compares content across a <see cref="TickHarness"/> (zoom 12 @
+    /// a full <c>Tick</c>). T3 compares content across a <see cref="TickHarness"/> (zoom 12 @
     /// 10°,10°, needed for its demo-batch <c>Tick</c> call) and a plain <see cref="LpsHarness"/> oracle (zoom 5 @
     /// 0°,0°) — valid, not an oversight, because the gather/mirror comparison is camera-independent; the two
     /// harnesses' differing cameras never enter it. The content-diff oracle is the shared
@@ -2620,8 +2620,8 @@ namespace MapRenderer.Tests.Text.Placement
             var oracleDecisions = new List<byte>(compactDecisions);
 
             // RED-verify (b): skip compaction entirely for the plan feed — the RAW, uncompacted arrays (which
-            // still carry the Dropped winner) desync from the oracle's compacted winner set, exactly the class of
-            // bug the retired FilterActive parallel-permute used to guard against.
+            // still carry the Dropped winner) desync from the oracle's compacted winner set — the class of
+            // bug the permute step exists to prevent.
             List<int> feedBlockId = skipPermute ? planBlockId : compactBlockId;
             List<int> feedLocalIndex = skipPermute ? planLocalIndex : compactLocalIndex;
             List<byte> feedIsDeparting = skipPermute ? planIsDeparting : compactIsDeparting;
@@ -2794,8 +2794,8 @@ namespace MapRenderer.Tests.Text.Placement
 
                 plan.WinnerSetVersion++; // force the measured call to take the heavy (rebuild) path, not a memo hit
                 // The version bump above is a PRECONDITION this test's own claim ("measures the
-                // heavy rebuild path") rests on — nothing previously asserted it actually engaged. A MirrorRebuildCount
-                // delta makes that load-bearing, so this test can never silently degrade into measuring a memo hit.
+                // heavy rebuild path") rests on, and only the MirrorRebuildCount delta below actually proves it
+                // engaged, so this test can never silently degrade into measuring a memo hit.
                 int rebuildsBefore = harness.Lps.MirrorRebuildCount;
                 Assert.That(() => { harness.Lps.GatherIntoMirror(plan); }, Is.Not.AllocatingGCMemory(),
                     "a warm GatherIntoMirror must allocate ZERO managed garbage — native lists + plan are reused");

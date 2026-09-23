@@ -5,14 +5,12 @@ namespace MapRenderer.Unity.View
 {
     /// <summary>
     /// A snapshot of the symbol PLACEMENT pass — what the last Tick projected, culled, collided and drew.
-    /// Produced and published by <c>SymbolPlacementSystem</c>, which owns every number in it. Its sibling is
-    /// <see cref="SymbolStoreTelemetrySnapshot"/> (what the store is holding); they are separate snapshots
-    /// because they have separate owners, and each publishes when its own pass finishes rather than at one
-    /// shared frame instant (<c>docs/telemetry-design.md</c>).
-    ///
-    /// <para>Every field is an instantaneous LEVEL at the instant of capture (a count), never a rate. A plain
-    /// <c>init</c>-only, engine-free carrier so it compiles in the fast core-tests project and the Unity runner
-    /// alike.</para>
+    /// Produced and published by <c>SymbolPlacementSystem</c>, which owns every number in it. Its sibling,
+    /// <see cref="SymbolStoreTelemetrySnapshot"/> (what the store is holding), is a separate snapshot
+    /// because it has a separate owner and publishes when its own pass finishes, not at one shared frame
+    /// instant (<c>docs/telemetry-design.md</c>). Every field is an instantaneous LEVEL at the instant of
+    /// capture, never a rate — a plain <c>init</c>-only, engine-free carrier so it compiles in the fast
+    /// core-tests project and the Unity runner alike.
     /// </summary>
     public readonly struct SymbolPlacementTelemetrySnapshot
     {

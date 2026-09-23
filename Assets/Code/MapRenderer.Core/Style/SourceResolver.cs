@@ -1,15 +1,11 @@
 namespace MapRenderer.Core.Style
 {
     /// <summary>
-    /// Resolves a <see cref="SourceDefinition"/>'s tile fields from its TileJSON document. In the
-    /// MapLibre model a source declares its tiles either inline (<c>tiles[]</c>) or indirectly via a
-    /// TileJSON <c>url</c>; this is the "indirect → resolved" step that fills
+    /// Resolves a <see cref="SourceDefinition"/>'s tile fields from its TileJSON document. A source declares
+    /// its tiles inline (<c>tiles[]</c>) or through a TileJSON <c>url</c>; this step fills
     /// <c>Tiles</c>/<c>MinZoom</c>/<c>MaxZoom</c>/<c>Scheme</c>/<c>Bounds</c> from the parsed
-    /// <see cref="TileJson"/>. Engine-free; pure parse-and-fill.
-    ///
-    /// <b>Fetching</b> the TileJSON document (file://, http) and deciding <i>when</i> to do it (once at
-    /// SetStyle time) is the integration concern of S83b — deliberately not here, which is what keeps
-    /// this unit engine-free and fast-core-testable.
+    /// <see cref="TileJson"/>. It does not fetch the TileJSON document; the caller fetches it once, at
+    /// SetStyle time. That keeps this type engine-free and fast-core-testable.
     /// </summary>
     public static class SourceResolver
     {
@@ -25,13 +21,10 @@ namespace MapRenderer.Core.Style
                && !string.IsNullOrEmpty(source.Url);
 
         /// <summary>
-        /// Fills <paramref name="source"/>'s <c>Tiles</c>/<c>MinZoom</c>/<c>MaxZoom</c>/<c>Scheme</c>/
-        /// <c>Bounds</c> from <paramref name="tileJson"/> and returns the same instance.
-        ///
-        /// <b>Inline <c>tiles[]</c> wins:</b> a source that already lists tiles is returned UNCHANGED —
-        /// the TileJSON is never applied (and a well-behaved caller, via <see cref="NeedsTileJson"/>,
-        /// will not even have fetched it). A null <paramref name="tileJson"/> (e.g. the document failed
-        /// to load) also leaves the source unchanged.
+        /// Fills <paramref name="source"/>'s tile fields from <paramref name="tileJson"/> and returns the same
+        /// instance. <b>Inline <c>tiles[]</c> wins:</b> a source that already lists tiles is returned UNCHANGED,
+        /// and a caller that checks <see cref="NeedsTileJson"/> never fetches its TileJSON. A null
+        /// <paramref name="tileJson"/> (the document failed to load) also leaves the source unchanged.
         /// </summary>
         public static SourceDefinition Resolve(SourceDefinition source, TileJson tileJson)
         {

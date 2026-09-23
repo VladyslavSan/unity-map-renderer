@@ -660,7 +660,7 @@ namespace MapRenderer.Tests.Visual
                 // AUTHORITATIVE: NUnit's GC.Alloc-recorder constraint (the same instrument the BRG zero-alloc
                 // test trusts). It counts the Mono GC.Alloc profiler sampler, so it sees transient churn and
                 // is immune to GC timing. The two naive counters were both proven WRONG on this runtime and
-                // are deliberately NOT used here:
+                // are NOT used here:
                 //   • GC.GetTotalMemory(false) — net heap delta; GC-timing-dependent, reported 0 and ~409 on
                 //     identical code in back-to-back runs.
                 //   • GC.GetAllocatedBytesForCurrentThread() — returns a constant 0 on this Unity Mono build

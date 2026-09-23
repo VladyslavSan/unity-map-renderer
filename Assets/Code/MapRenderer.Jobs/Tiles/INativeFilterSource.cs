@@ -10,8 +10,8 @@ namespace MapRenderer.Jobs.Tiles
     /// <see cref="NativeFilterProgram"/> against its own features without going through
     /// <see cref="MapRenderer.Core.Filters.CompiledFilter"/>. Mirrors <see cref="IIndexedFeatureSource"/> —
     /// a capability probed with <c>as</c>, handing back a per-selection product — so
-    /// <c>FeatureSelector</c> stays format-agnostic: a future GeoJSON native path opts in by implementing
-    /// this interface too, never by an <c>is MvtLayer</c> allow-list.
+    /// <c>FeatureSelector</c> stays format-agnostic: another layer type (the GeoJSON one has no native path)
+    /// opts in by implementing this interface too, never by an <c>is MvtLayer</c> allow-list.
     /// </summary>
     internal interface INativeFilterSource
     {

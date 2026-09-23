@@ -1,6 +1,6 @@
-// Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified double3/float2/
-// float4x4 — this file lives in MapRenderer.Core.Text.Placement (see SymbolTileCoverage's header for the
-// inline-qualification trap this avoids).
+// Engine-free. TOP-LEVEL `using Unity.Mathematics;` + unqualified double3/float2/float4x4 — this file lives in
+// MapRenderer.Core.Text.Placement (see SymbolTileCoverage's header for the inline-qualification trap this
+// avoids).
 
 using System.Collections.Generic;
 using Unity.Mathematics;
@@ -16,7 +16,7 @@ namespace MapRenderer.Core.Text.Placement
     /// tile's records never enter the SoA build at all (the SoA-copy cost scales with what's on
     /// screen). NOT before/inside dedup: culling pre-dedup would change dedup WINNERS (a &lt;5%-coverage
     /// child tile culled first would let its &gt;5% parent win the finest-zoom-wins tiebreak and render a
-    /// symbol that is hidden today).
+    /// symbol the dedup hides).
     ///
     /// <para><b>Fade, not pop.</b> A tile crossing BELOW threshold is not dropped outright — it is a 3-way
     /// classification (Keep / Fade / Drop) so a tile that was actually on screen gets to ease out instead of
@@ -120,9 +120,9 @@ namespace MapRenderer.Core.Text.Placement
 
             // Phase A — classify each block that carries an ACTIVE record, once. A departing-only block (a tile
             // that left cover — the reconciler emits departing records into their OWN blocks) is NEVER classified,
-            // so a departing tile touches no cross-frame state (deadline stamp / above-set / fading-set), matching
-            // the old per-record scope fence (its records short-circuit to Keep in Phase B anyway). Blocks sharing
-            // a physical tile key collapse in tileDecisions, so each active tile's side effect fires once.
+            // so a departing tile touches no cross-frame state (deadline stamp / above-set / fading-set); its
+            // records short-circuit to Keep in Phase B anyway. Blocks sharing a physical tile key collapse in
+            // tileDecisions, so each active tile's side effect fires once.
             const byte needsClassify = 0xFF; // transient marker (never a valid Keep/Fade/Drop) — overwritten below
             int blockCount = blockTileKeys.Count;
             blockDecision.Clear();
@@ -151,12 +151,12 @@ namespace MapRenderer.Core.Text.Placement
         // Classify (once per tile per call, cached in tileDecisions) whether tileKey's on-screen coverage
         // this frame keeps it, fades it, or drops it — applying the corresponding cross-frame side effect
         // (above-set membership / deadline stamp) exactly once, regardless of how many symbols share the tile:
-        //   ≥ threshold             → Keep: recorded as above this frame; any live fade deadline is cleared
-        //                              (a tile that crossed back above stops fading — CrossBackAbove_ClearsDeadline).
-        //   < threshold, was above  → Fade: a FRESH crossing stamps the deadline (now + grace) once; an ALREADY-
-        //     last frame OR still                fading tile (deadline already live) keeps its original deadline —
-        //     within its fade deadline           re-stamping every frame would make the grace window meaningless.
-        //   < threshold, neither    → Drop: never visible (or its grace already expired) — nothing to pop.
+        //   ≥ threshold → Keep: recorded as above this frame; any live fade deadline is cleared
+        //     (a tile that crossed back above stops fading).
+        //   < threshold, was above last frame OR still within its fade deadline → Fade: a FRESH crossing
+        //     stamps the deadline (now + grace) once; an ALREADY-fading tile (deadline already live) keeps its
+        //     original deadline — re-stamping every frame would make the grace window meaningless.
+        //   < threshold, neither → Drop: never visible (or its grace already expired) — nothing to pop.
         private static byte ClassifyTile(long tileKey, IProjection projection, in double3 sceneOriginRender,
             in float4x4 viewProj, in double2 viewportLogicalPx, in float3x3 rebase, double minCoverage,
             HashSet<long> coverageAbovePrev, HashSet<long> coverageAboveThisFrame,

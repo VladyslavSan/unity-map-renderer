@@ -27,7 +27,7 @@ namespace MapRenderer.Jobs.Expressions
 
         /// <summary>Caps distinct literal-string operands, bounding the binding array, the per-layer
         /// <c>Rebind</c> scan, and the per-feature <c>InStringSet</c> loop. Needed because <c>InStringSet</c>
-        /// emits O(1) ops regardless of label count, so <c>MaxOperations</c> no longer caps a match's label
+        /// emits O(1) ops regardless of label count, so <c>MaxOperations</c> does not cap a match's label
         /// list ("always bound loops"). Far above any real style (liberty's largest match is ~15
         /// labels).</summary>
         private const int MaxLiterals = 256;

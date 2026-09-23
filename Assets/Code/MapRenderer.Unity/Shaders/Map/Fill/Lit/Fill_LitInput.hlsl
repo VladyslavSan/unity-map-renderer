@@ -72,9 +72,10 @@ UNITY_TEXTURE_STREAMING_DEBUG_VARS;
 //                   (zw == 0) means "pattern layer, sprite not resolved" and the fragment clips. That is
 //                   not a sentinel: an unresolvable sprite genuinely has no area. The sheet is fetched
 //                   asynchronously, so every pattern layer starts here and resolves later.
-// _PatternScale   — pattern repeats across one tile edge (xy; a non-square sprite repeats fewer times on
+// _PatternScale   — pattern repetitions per world unit (xy; a non-square sprite repeats fewer times on
 //                   its longer axis). zw unused; packed as float4 for the same alignment reason as
-//                   _FillTranslate. Tile-space anchored — see docs/fill-parity-design.md §3.2.
+//                   _FillTranslate. World-space anchored — see docs/fill-parity-design.md § "Why the
+//                   pattern coordinate is world-space".
 float  _Opacity;
 float4 _FillOutlineColor;
 float4 _FillTranslate;
@@ -219,29 +220,27 @@ TEXTURE2D(_ClearCoatMap);       SAMPLER(sampler_ClearCoatMap);
 TEXTURE2D(_PatternMap);         SAMPLER(sampler_PatternMap);
 
 // The pattern is sampled through this INLINE sampler state, not through sampler_PatternMap, so that pattern
-// filtering does not depend on the shared texture's filterMode. That coupling is not hypothetical: the
-// sheet moved to FilterMode.Bilinear to fix icon resampling (docs/labels-and-symbols-design.md §5.2.1), and
-// because filterMode is state on the TEXTURE rather than on a sampler, it silently changed pattern sampling
-// too — the exact bleed the SampleFillPattern note below had already named. A pattern wraps with frac()
-// INSIDE its rect and samples it edge-to-edge, so a bilinear tap at a tiling seam reaches into whichever
-// sprite abuts it in the sheet (in the shipped style, wetland_bg_11 and pedestrian_polygon both abut a
-// neighbour with a zero-pixel gap).
+// filtering does not depend on the shared texture's filterMode. The sheet is FilterMode.Bilinear for icon
+// resampling (docs/labels-and-symbols-design.md § "Sampling the sheet — bilinear + a one-texel padded
+// repack"). filterMode is state on the TEXTURE rather than on a sampler, so without this inline sampler it
+// would change pattern sampling too — the bleed the SampleFillPattern note below names. A pattern wraps
+// with frac() INSIDE its rect and samples it edge-to-edge, so a bilinear tap at a tiling seam reaches into
+// whichever sprite abuts it in the sheet (in the shipped style, wetland_bg_11 and pedestrian_polygon both
+// abut a neighbour with a zero-pixel gap).
 //
-// Point is what patterns rendered with before that change, so this restores them exactly rather than
-// trading one artifact for another. It is a CONTAINMENT, not the destination.
-//
-// The padded repack has since LANDED (SpriteSheetPadder/SpriteSheetComposer), but it gives every sprite a
-// TRANSPARENT border — the fill a silhouette needs to ramp into — which a pattern must never sample: a
-// tiling seam has to continue into the OPPOSITE edge's pixels, not fade out. Patterns therefore keep point
-// sampling inside their content rect and simply never touch the border (pinned by
-// FillPatternThroughSpriteSheetTests). This inline sampler goes away only at the FOLLOW-ON stage that adds
-// a second border-fill ROLE — wrap-replicated instead of transparent — selected per sprite; see
-// docs/labels-and-symbols-design.md §5.2.1's follow-on list.
+// The padded repack (SpriteSheetPadder/SpriteSheetComposer) gives every sprite a TRANSPARENT border — the
+// fill a silhouette needs to ramp into — which a pattern must never sample: a tiling seam has to continue
+// into the OPPOSITE edge's pixels, not fade out. Patterns therefore keep point sampling inside their
+// content rect and never touch the border (pinned by FillPatternThroughSpriteSheetTests). This inline
+// sampler is a CONTAINMENT, not the destination. It goes away only when a second border-fill ROLE —
+// wrap-replicated instead of transparent — is selected per sprite. docs/labels-and-symbols-design.md
+// § "Sampling the sheet — bilinear + a one-texel padded repack" lists it as open follow-on P1.
 //
 // sampler_PointClamp is NOT declared here — Core.hlsl (included above) pulls in the core library's
 // GlobalSamplers.hlsl, which declares the whole inline-sampler set. Redeclaring it is a redefinition error.
 
-// Samples the fill-pattern sprite at tile-normalized `uv`, tiling it _PatternScale times across the tile.
+// Samples the fill-pattern sprite at `uv` (the world-unit offset from the tile origin), tiling it
+// _PatternScale times per world unit.
 // Returns the sprite texel; `clipped` is true when this is a pattern layer whose sprite did not resolve.
 //
 // Sampled with an EXPLICIT GRADIENT rather than a plain sample. frac() wraps the pattern, and at every wrap

@@ -1260,7 +1260,7 @@ namespace MapRenderer.Tests.Expressions
                 "precondition: GeoJsonFeature must not be index-capable, or this tooth proves nothing");
 
             // A binding a real bind site would never build for a GeoJSON source (no IIndexedFeatureSource
-            // capability) — deliberately nonsense (slot 0 -> key index 999) so a wrongly-taken int path
+            // capability) — nonsense (slot 0 -> key index 999) so a wrongly-taken int path
             // would visibly misbehave rather than coincidentally answering right.
             var nonsenseBinding = new[] { 999 };
             Value result = ExpressionParser.Parse("[\"get\",\"name\"]")

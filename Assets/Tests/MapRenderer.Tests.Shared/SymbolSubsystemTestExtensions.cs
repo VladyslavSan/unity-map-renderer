@@ -1,14 +1,13 @@
 // Shared between EditMode and PlayMode (pump-split: ReadyTailCount is read by PlayMode's off-main symbol
-// teeth too — see MapRenderer.Tests.PlayMode.Text.SymbolTailPumpTests / SymbolSubsystemPumpTests).
-// NOT registered in core-tests.csproj (SymbolSubsystem is engine-side).
+// teeth too — see MapRenderer.Tests.PlayMode.Text.SymbolTailPumpTests / SymbolSubsystemPumpTests). NOT
+// registered in core-tests.csproj (SymbolSubsystem is engine-side).
 //
-// The SymbolSubsystem test seams. They read _reconciler / _reconcileInFlight / _store / _readyTails /
-// _handoffQueue, broadened private -> internal, which IS the sanctioned footprint. The LOCATION carries
-// what a `*ForTest` suffix used to, so `Reconciler` needs no suffix.
-//
-// NOT here: ReconcileFaultObserved, TailsStartedLastPump, AtlasUploadsLastPump, CancelledBuildCount,
-// CollectRecomputeCount. The subsystem WRITES all of those — they are state it produces, not queries over
-// it, so an extension method cannot own them. Same split as the three render backends.
+// Non-obvious why: these are the SymbolSubsystem test seams, reading _reconciler / _reconcileInFlight /
+// _store / _readyTails / _handoffQueue, broadened private -> internal, the sanctioned footprint — the
+// LOCATION carries what a `*ForTest` suffix would, so `Reconciler` needs no suffix. NOT here:
+// ReconcileFaultObserved, TailsStartedLastPump, AtlasUploadsLastPump, CancelledBuildCount,
+// CollectRecomputeCount — the subsystem WRITES those (state it produces, not queries over it), so an
+// extension method cannot own them, the same split as the three render backends.
 
 using System.Collections.Generic;
 using MapRenderer.Unity.Text;
@@ -18,9 +17,8 @@ namespace MapRenderer.Tests
 {
     internal static class SymbolSubsystemTestExtensions
     {
-        // The store materializes no managed symbol list. A caller that polls "has anything committed yet"
-        // uses CollectedWinnerCount; one that needs a tile's exact baked columns reads
-        // SymbolTileStore.DebugBlockFor directly.
+        // The store materializes no managed symbol list. A caller that polls "has anything committed yet" uses
+        // CollectedWinnerCount; one needing a tile's exact baked columns reads SymbolTileStore.DebugBlockFor directly.
 
         /// <summary>Winner count from the store's plan-aware CollectInto shim — a build-completion poll
         /// ("has anything committed yet").</summary>

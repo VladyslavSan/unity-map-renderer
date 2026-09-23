@@ -44,7 +44,7 @@ namespace MapRenderer.Tests.Cameras
         /// <para><b>What this does NOT pin:</b> <c>MapView.LateUpdate</c>'s internal refresh-before-build
         /// ordering. This test builds the selector config <i>itself</i>, after <c>LateUpdate</c> has returned,
         /// so the camera already carries the config's ratio however the two steps inside were ordered.
-        /// Reordering them leaves this test green. The ordering is instead safe by construction —
+        /// Reordering them leaves this test green. The ordering is instead safe:
         /// <c>BuildTileSelectionConfig</c> has a single production caller and nothing between the refresh and
         /// the consume mutates the ratio — and that argument, not this tooth, is what holds it.</para>
         /// </summary>

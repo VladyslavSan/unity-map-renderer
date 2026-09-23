@@ -876,7 +876,7 @@ namespace MapRenderer.Tests.Meshing
         };
 
         /// <summary>The three drawable features alone, as their OWN layer with an identity selection — the
-        /// control arm. Ordinal == slot here, which is precisely the configuration every pre-existing line
+        /// control arm. Ordinal == slot here, which is the configuration every pre-existing line
         /// instrument runs in.</summary>
         private static Mesh BuildControl()
         {
@@ -2405,10 +2405,10 @@ namespace MapRenderer.Tests.Meshing
         // *.json instead. Stream1/Stream3/Indices/Bounds are still compared against these strings directly.
         //
         // Stream3 (colour) was re-captured 2026-09-07 and is the ONLY digest here that has moved
-        // since. This fixture styles a CONSTANT fill-extrusion-color, which is no longer baked into
+        // since. This fixture styles a CONSTANT fill-extrusion-color, which is not baked into
         // the COLOR stream — it rides the _BaseColor uniform and the vertex carries the white identity. The
-        // digest therefore pins the OPPOSITE fact it used to (see its assertion below). Stream0/1/2, Indices
-        // and Bounds are untouched, which is what confines that change to the colour path.
+        // digest therefore pins that white-identity fact, not a baked colour (see its assertion below).
+        // Stream0/1/2, Indices and Bounds are untouched, which is what confines that change to the colour path.
         //
         // vertex sharing (Spherical only — WebMercator never enters the subdivider):
         // GlobeFillSubdivideJob shares the roof's shared vertices, so its storage layout shrank
@@ -2481,14 +2481,13 @@ namespace MapRenderer.Tests.Meshing
         /// any doubt about which message belonged to which arm.
         ///
         /// <para><b>A real defect the first roof-prefix RED-verify surfaced, in this test itself, not
-        /// production:</b> <c>AssertStreamComponent</c> for Normal/Tangent originally passed the WALL-TAIL ULP
+        /// production:</b> <c>AssertStreamComponent</c> for Normal/Tangent passed the WALL-TAIL ULP
         /// bound unconditionally, never gated to bit-exact on the roof prefix — so a roof regression smaller
         /// than the wall-tail margin (2-4 ULP) would have passed silently. The first roof-prefix RED still
         /// caught the (enormous, 614458-ULP) injected error, but through the loose bound, not the bit-exact
         /// roof pin the doc above claims — a red for the wrong reason looks identical to a red for the right
-        /// one. Fixed by gating Normal/Tangent's bound to <c>roof ? 0 : measuredBound</c>, same as Position;
-        /// re-verified after the fix that the roof-prefix RED now fires the bit-exact assertion, not the
-        /// bounded one.</para>
+        /// one. Gating Normal/Tangent's bound to <c>roof ? 0 : measuredBound</c>, same as Position, fixes it:
+        /// the roof-prefix RED now fires the bit-exact assertion, not the bounded one.</para>
         /// </summary>
         // vertex sharing: the permanent de-indexed tooth item 6 asks for, standing in
         // for the deleted managed WriteWalls oracle. What it certifies: walking the INDEX buffer and
@@ -2644,12 +2643,12 @@ namespace MapRenderer.Tests.Meshing
                 var b3 = b.GetVertexData<Vector4>(3);
                 NativeArray<int> bi = b.GetIndexData<int>();
 
-                // vertex sharing: STORAGE order, deliberately — this whole-stream golden
+                // vertex sharing: STORAGE order — this whole-stream golden
                 // pins what the write step actually PUT in the buffer (the same reason TileBuildGraphTests
                 // stays storage-order). The de-indexed representation lives separately, as its own permanent
                 // tooth (RoofDeindexedStream_MatchesFrozenDigest_Spherical, below) — that is what certifies
                 // these freshly-captured storage-order numbers are representation-equivalent to what the
-                // (now-retired) managed oracle originally validated, without conflating two different
+                // (now-retired) managed oracle validated, without conflating two different
                 // questions ("what got written" vs "is it still the same geometry") in one digest.
                 var s1 = new List<byte>(); var s3 = new List<byte>();
                 bool anyBaked = false;
@@ -2692,8 +2691,8 @@ namespace MapRenderer.Tests.Meshing
                 // constant (the split narrows only Stream0/Stream2, below).
                 Dictionary<string, string> frozen = ParseGolden(spherical ? FrozenGoldensSpherical : FrozenGoldensFlat);
                 Assert.AreEqual(frozen["Stream1"], Sha256(s1), $"[spherical={spherical}] Stream1 (ExtrudeUpAndT+Bake) diverges — a real regression, not a re-bake candidate.");
-                // NOT "never a re-bake candidate" — that claim was written when a constant colour WAS baked
-                // into this stream; it no longer is. The digest now encodes a white vertex, so what a
+                // NOT "never a re-bake candidate" — that claim held when a constant colour WAS baked
+                // into this stream; it is not now. The digest encodes a white vertex, so what a
                 // divergence means has flipped: reading a STYLED colour here means the constant-colour bake
                 // came back and the layer renders colour-squared. Any OTHER divergence is still a regression.
                 Assert.AreEqual(frozen["Stream3"], Sha256(s3), $"[spherical={spherical}] Stream3 (colour) diverges. This fixture's fill-extrusion-color is CONSTANT, so the stream must carry the WHITE identity and the colour must ride _BaseColor; a styled colour here means the vertex bake was re-introduced (colour-squared). Re-bake ONLY on a deliberate, stated change to which carrier holds a constant colour.");

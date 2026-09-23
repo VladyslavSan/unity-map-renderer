@@ -672,7 +672,7 @@ namespace MapRenderer.Tests.Visual
     /// test-only knob on <see cref="TestTileMeshBuilder.BuildFillFromLayer"/>. No production code is
     /// modified to make this measurable.</para>
     ///
-    /// <para><b>What the clock is, precisely.</b> Batch EditMode has a live Metal device but no player loop,
+    /// <para><b>What the clock is.</b> Batch EditMode has a live Metal device but no player loop,
     /// so there is no GPU frame timer (<see cref="Probe_WhichTimingInstrumentsExistHeadless"/> records what
     /// is actually available). The number below is therefore a labelled PROXY: wall clock around
     /// <see cref="RendersPerSample"/> bare <c>Camera.Render()</c> calls followed by ONE terminal readback
@@ -771,7 +771,7 @@ namespace MapRenderer.Tests.Visual
         /// about one pixel — their vertices are still transformed and submitted while they cover almost no
         /// fragments, which is the vertex-only sensitivity the band's 3x vertex count depends on.</para>
         ///
-        /// <para>The band-OFF arm is the one duplicated, deliberately: a pinhead-scaled band-ON mesh would
+        /// <para>The band-OFF arm is the one duplicated: a pinhead-scaled band-ON mesh would
         /// displace its outer ring by one DEVICE pixel measured in world metres, which at that scale is
         /// enormous relative to the object and would not be the same geometry at all.</para>
         /// </summary>
@@ -1207,8 +1207,8 @@ namespace MapRenderer.Tests.Visual
         /// <summary>Side of the magnified crop window, in source pixels.</summary>
         private const int CropPx = 64;
 
-        /// <summary>Integer pixel-replication factor for the crop. Nearest-neighbour by construction — any
-        /// filtered resize would manufacture a soft edge in the band-OFF arm and destroy the comparison.
+        /// <summary>Integer pixel-replication factor for the crop. Integer replication introduces no
+        /// filtering; a filtered resize would manufacture a soft edge in the band-OFF arm and destroy the comparison.
         /// </summary>
         private const int CropMag = 8;
 
@@ -1668,7 +1668,7 @@ namespace MapRenderer.Tests.Visual
         // ── One arm's mesh + material ──────────────────────────────────────────────────────────────────
 
         /// <summary>One arm: the fill mesh a fixture produces with the band emitted or suppressed, plus the
-        /// material it draws with. One uniform fill colour per arm, deliberately — a per-feature palette
+        /// material it draws with. One uniform fill colour per arm: a per-feature palette
         /// would make every non-brightest feature classify as Graded and destroy the control.</summary>
         private sealed class MeshArm : IDisposable
         {
@@ -1868,7 +1868,7 @@ namespace MapRenderer.Tests.Visual
                 "an empty FeatureCollection must render background-only — this is the PRIMARY negative " +
                 "control: without it, T-Fill's positive arm cannot distinguish 'rendered the authored " +
                 "dataset' from 'rendered anything at all'. Meaningful only because the background is the " +
-                "mandated non-black slate (plan §7) — a black background would make this pass vacuously on " +
+                "mandated non-black slate — a black background would make this pass vacuously on " +
                 "a GPU-less machine.");
 
             double[] center = frame.RegionMeanColor(CenterLo, CenterLo, CenterHi, CenterHi);

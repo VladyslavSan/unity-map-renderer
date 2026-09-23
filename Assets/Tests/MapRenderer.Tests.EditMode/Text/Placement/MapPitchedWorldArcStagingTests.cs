@@ -198,9 +198,9 @@ namespace MapRenderer.Tests.Text.Placement
             finally { boxes.Dispose(); cands.Dispose(); ns.Dispose(); outCount.Dispose(); }
         }
 
-        // The hazard the differential used to hold implicitly: the caller pre-sizes the grid node
-        // storage and a Burst job cannot grow it, so an under-count silently drops blocker inserts — a
-        // candidate isn't blocked, and wrong survivors follow with no crash to notice. Directly observable
+        // The hazard: the caller pre-sizes the grid node storage and a Burst job cannot grow it, so an
+        // under-count silently drops blocker inserts — a candidate isn't blocked, and wrong survivors
+        // follow with no crash to notice. Directly observable
         // with no mirroring of the job's cell mapping: CellHead/NodeBox/NodeNext are plain public
         // NativeArray<int> on CollisionJob, so a test can walk each cell's CellHead -> NodeNext chain and
         // count linked nodes after Complete().
@@ -567,7 +567,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── C6 ────────────────────────────────────────────────────────────────────────────────────────────
-        // Two-box PAIR candidates whose halves OVERLAP BY CONSTRUCTION (what a centred icon+text pair is),
+        // Two-box PAIR candidates whose halves OVERLAP (what a centred icon+text pair is),
         // each carrying a random OptionalBoxMask, interleaved with ordinary single-box candidates in a
         // congested region so most halves actually contend. AssertGreedyContract's exact DroppedBoxMask
         // characterisation is what now guards this — a different bit, a different insert-skip, fails there.
@@ -624,7 +624,7 @@ namespace MapRenderer.Tests.Text.Placement
                 float sortKey = rng.Next(0, 5);
                 int start = boxes.Count;
                 // Owner box and rider box share the anchor and overlap — the pair geometry that makes
-                // test-all-then-insert load-bearing. The world is deliberately small so these actually contend.
+                // test-all-then-insert load-bearing. The world is kept small so these actually contend.
                 boxes.Add(new SymbolBox { Min = new float2(x - 20, y - 20), Max = new float2(x + 20, y + 20),
                     SortKey = sortKey, FeatureIndex = symbol, TileKey = 0, SymbolIndex = symbol });
                 boxes.Add(new SymbolBox { Min = new float2(x - 12, y - 8), Max = new float2(x + 34, y + 8),
@@ -877,7 +877,7 @@ namespace MapRenderer.Tests.Text.Placement
     ///     Mercator symbol snapshot elsewhere — nothing to re-prove here).</item>
     /// </list>
     ///
-    /// <para><b>Footgun avoided (Stage-U carry-over both reviewers flagged):</b> the harness builds its
+    /// <para><b>Footgun avoided:</b> the harness builds its
     /// <see cref="SceneFrame"/> via <see cref="MapView.BuildSceneFrame"/> — the REAL 3-arg path wired off the
     /// live <see cref="MapCamera.CameraRelativePosition"/> — NOT the 2-arg ctor / <c>SceneFrame.Mercator</c>,
     /// which defaults <c>CameraRelativePosition</c> to <c>(0,0,0)</c> (camera at the sphere centre) and would
@@ -1626,7 +1626,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         /// <summary>The symbol Arc-T8/Arc-T9 compare across rulers: three glyphs on a plain two-vertex path, with the
-        /// world span deliberately UNRELATED to the screen span (100 m vs 400 px) so that if the world walk
+        /// world span UNRELATED to the screen span (100 m vs 400 px) so that if the world walk
         /// ever did run here the difference would be enormous, not marginal.</summary>
         private static int StageReferenceSymbol(AlignmentMode pitch, float metresPerLogicalPixel, ref Pools p,
             SymbolViewTransform view = default)
@@ -1816,12 +1816,12 @@ namespace MapRenderer.Tests.Text.Placement
         /// arc walk is spacing its anchors with, so the drawn size and the spacing cannot come from different
         /// constants.
         ///
-        /// <para><b>This also observes the <c>PitchAlignment == Map</c> conjunct.</b> <c>Arc-T8</c> used to
-        /// be its sole observer, so weakening Arc-T8 would have left the predicate unobserved. These three
-        /// cases and Ruler-T7 read the same <c>worldArc</c> bool through a different output. Arc-T8's doc
-        /// carries the reciprocal cross-reference.</para>
+        /// <para><b>This also observes the <c>PitchAlignment == Map</c> conjunct.</b> These three cases and
+        /// Ruler-T7 read the same <c>worldArc</c> bool that <c>Arc-T8</c> reads, through a different output, so
+        /// weakening Arc-T8 alone does not leave the predicate unobserved. Arc-T8's doc carries the
+        /// reciprocal cross-reference.</para>
         ///
-        /// <para><b>Ruler magnitudes are bounded by the reference symbol's own road, deliberately.</b> Under the
+        /// <para><b>Ruler magnitudes are bounded by the reference symbol's own road.</b> Under the
         /// world walk the reference symbol's arc span is <c>60 · ruler</c> metres against a 100 m world path, so
         /// a ruler above ≈ 1.6 makes <c>StageCurved</c> return 0 at its <c>symbolSpanArc &gt; total</c> spill
         /// gate and there is no emit to read. Arc-T8 and Arc-T9 never hit that because they run this symbol
@@ -2480,7 +2480,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// <para><b>Why this is a different state from Projected-T7's</b>, and why one tooth cannot cover both: that
         /// corner is BEHIND the camera and is rejected by <c>TryProjectPoint</c> itself. This corner
         /// PROJECTS — successfully, to a real finite number — and is rejected only by the magnitude test.
-        /// Removing the magnitude guard leaves Projected-T7 green (see the RED sweep), which is precisely why this tooth
+        /// Removing the magnitude guard leaves Projected-T7 green (see the RED sweep), which is why this tooth
         /// exists.</para>
         ///
         /// <para><b>The geometry.</b> Same GROUND-normal probe as Projected-T7, so ŷ runs along the view axis and a
@@ -2575,7 +2575,7 @@ namespace MapRenderer.Tests.Text.Placement
         ///
         /// <para><b>The expected numbers are derived from the CELL's own corners</b> — half-extent
         /// <c>= PxPerMetreAtUnitDepth · (cellHalfBaked · TextSizePx · mpp / OneEm) / depth</c> — and
-        /// <c>SymbolBearing.IconRotationRadians</c> is deliberately NOT read back. Because the cell is centred on
+        /// <c>SymbolBearing.IconRotationRadians</c> is NOT read back. Because the cell is centred on
         /// its anchor, +90° and −90° produce the SAME axis-aligned bound, so this tooth is independent of the
         /// sign that conversion applies; what it pins is that the rotation is APPLIED AT ALL.</para>
         ///
@@ -2792,7 +2792,7 @@ namespace MapRenderer.Tests.Text.Placement
         //      anchors its symbol at the arc midpoint, so a spherical fixture built the obvious way is
         //      exactly as blind as Mercator while LOOKING like coverage. GA-T2 anchors at t = 0.9 and
         //      GA-T1 asserts the achieved |axial| against an absolute floor with its measured value
-        //      printed; GA-T3 stages the midpoint deliberately, as the contrast that proves the placement
+        //      printed; GA-T3 stages the midpoint as the contrast that proves the placement
         //      is load-bearing rather than decorative.
         //   2. Anchoring at an interior POLYLINE VERTEX is a second, unrecorded inert shape.
         //      StageCurvedAnchor orients the glyph by the CHORD across its own footprint, not by the raw
@@ -2818,7 +2818,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// (<c>SphericalProjection.MaxCurveSegmentRad</c>, 2°). This is the WORST case a realistically built
         /// spherical path can present to the ground frame, since <c>SymbolFeatureExtractor</c> subdivides to
         /// this bound — so the fixture is not inflating the angle. Narrowing the cap will red GA-T1's
-        /// |axial| floor, deliberately: the achieved signal is a function of it.</summary>
+        /// |axial| floor: the achieved signal is a function of it.</summary>
         private const double GlobeSegmentRad = SphericalProjection.MaxCurveSegmentRad;
 
         /// <summary>The map tilt: the angle between the surface normal at the anchor and the direction back
@@ -2881,7 +2881,7 @@ namespace MapRenderer.Tests.Text.Placement
             => math.sin(phi) * GlobeEast + math.cos(phi) * GlobeUpAtArcStart;
 
         /// <summary>The on-sphere point at arc angle <paramref name="phi"/>, in the SPHERE's frame (centre at
-        /// the origin) — exactly <see cref="GlobeRadiusM"/> from the centre, by construction.</summary>
+        /// the origin) — always exactly <see cref="GlobeRadiusM"/> from the centre.</summary>
         private static double3 GlobeSurfacePoint(double phi) => GlobeRadiusM * GlobeSurfaceUp(phi);
 
         /// <summary>
@@ -3038,7 +3038,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// </list>
         ///
         /// <para><b>Why the floor is a typed literal and not "agrees with the closed form".</b> Agreement is
-        /// satisfied with both sides at ZERO — which is precisely what happens if the anchor drifts back
+        /// satisfied with both sides at ZERO — which is what happens if the anchor drifts back
         /// toward the chord midpoint, and it is the failure this whole section exists to prevent. The two
         /// assertions answer different questions: the floor says the fixture still has signal, the closed
         /// form says the signal is the one we think it is.</para>
@@ -3151,7 +3151,7 @@ namespace MapRenderer.Tests.Text.Placement
         /// defect at ordinary text sizes.</b> It guards two things. First, and mainly, a wrong OPERAND ORDER
         /// (<c>normalize(up − tangent·axial)</c> and friends), which does not perturb x̂ — it replaces it
         /// with a different vector entirely, ≈120 px away here. Second, the presence of the subtraction at
-        /// all, which is observable only because this fixture deliberately amplifies <c>text-size</c> to
+        /// all, which is observable only because this fixture amplifies <c>text-size</c> to
         /// 7 em; the separation at that size is ≈1.6 px per y edge, asserted below as a non-vacuity floor
         /// rather than assumed.</para>
         ///

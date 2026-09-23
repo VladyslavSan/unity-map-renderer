@@ -44,7 +44,7 @@ namespace MapRenderer.Unity.Text
         /// guarded (this class has no reference back to the scheduler) — a test must not do both.</para></summary>
         internal ManualResetEventSlim GateForTest;
 
-        /// <summary>When true, the next <see cref="Run"/> throws once after writing a deliberately misaligned
+        /// <summary>When true, the next <see cref="Run"/> throws once after writing a misaligned
         /// partial result — the tooth for swap-only-on-success (swapping a non-success result would feed that
         /// partial buffer to <c>SymbolGatherPlan.Build</c> and crash). Test-only.</summary>
         internal bool FaultNextRun;

@@ -2,19 +2,15 @@ namespace MapRenderer.Unity.Rendering.ShaderProperties.FillExtrusion
 {
     /// <summary>
     /// Canonical string names for the <c>Map/FillExtrusion</c>-specific shader properties — the names that
-    /// appear in <c>FillExtrusion_LitInput.hlsl</c>'s CBUFFER but not in <c>Fill_LitInput.hlsl</c> /
-    /// <c>Line_LitInput.hlsl</c>.
-    ///
-    /// <para>Shared properties (<c>_BaseColor</c>, <c>_Opacity</c>, …) live in
-    /// <see cref="ShaderProperties.PropertyNames"/>.</para>
-    ///
-    /// <para>Use <see cref="PropertyId"/> for <c>Material.Set/Get/Has</c> calls.
-    /// Use this class only where the Unity API requires a string: <c>MaterialEditor.FindProperty</c>.</para>
+    /// appear in <c>FillExtrusion_LitInput.hlsl</c>'s CBUFFER but not in <c>Fill_LitInput.hlsl</c> or
+    /// <c>Line_LitInput.hlsl</c>. Shared properties live in <see cref="ShaderProperties.PropertyNames"/>.
+    /// Use <see cref="PropertyId"/> for <c>Material.Set/Get/Has</c> calls; use this class only where the
+    /// Unity API requires a string.
     /// </summary>
     public static class PropertyNames
     {
         /// <summary>fill-extrusion-height, constant/zoom path (the uniform; data-driven bakes per-vertex
-        /// instead). NOT named <c>_Height</c> — reserved for a future generic height property.</summary>
+        /// instead). NOT named <c>_Height</c>, which stays free for a generic height property.</summary>
         public const string ExtrusionHeight = "_ExtrusionHeight";
 
         /// <summary>fill-extrusion-base, constant/zoom path (the uniform; data-driven bakes per-vertex

@@ -35,7 +35,7 @@ namespace MapRenderer.Core.Geometry
     /// test recognises it as a seam vertex, and (in the frames the slicer actually builds, which do not
     /// round alike — see <c>GeoJsonTileSlicerTests.T13b</c>) the two tiles need not even agree on the point.
     /// The assignment removes all of that: the clipped axis is the boundary literal in each frame, so the
-    /// vertex is on the seam by construction and the two tiles name the same edge. This is the same
+    /// vertex is on the seam exactly and the two tiles name the same edge. This is the same
     /// guarantee <see cref="RingWindowClipper"/>'s <c>Intersect</c> makes, stated the same way, so ring and
     /// line geometry meeting at one tile edge cannot part company by a rounding step.
     /// <c>WindowClipperTests</c>' seam and corner teeth are what observe it.</para>
@@ -43,7 +43,7 @@ namespace MapRenderer.Core.Geometry
     /// <para><i>Note on scope of the claim:</i> <c>GeoJsonTileSlicer</c> quantizes to integers AFTER
     /// clipping, which currently masks a sub-ulp disagreement of this size. The guarantee is the clipper's
     /// own, and it is what a consumer working at unquantized precision — seam-matched stroke and symbol
-    /// geometry, S2/S3 — gets to rely on.</para>
+    /// geometry — gets to rely on.</para>
     /// </summary>
     public static class PolylineWindowClipper
     {

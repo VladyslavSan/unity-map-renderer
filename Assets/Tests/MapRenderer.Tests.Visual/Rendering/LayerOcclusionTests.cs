@@ -164,7 +164,7 @@ namespace MapRenderer.Tests.Visual
 
                 // Falsifier: a DIFFERENT style background must sample DIFFERENTLY. Under the camera-clear
                 // hack both renders would sample the same slate clear colour regardless of the style — this
-                // fails by construction against that implementation.
+                // is guaranteed to fail against that implementation.
                 double[] redMean = RenderBackgroundOnlyStyle(camera, "#ff0000", "red-background.png");
 
                 Debug.Log($"[BackgroundSnapshot] red style: meanRGB=({redMean[0]:F3},{redMean[1]:F3},{redMean[2]:F3})");

@@ -3,7 +3,7 @@
 // The three pump-related fixtures first (subsystem pump, work scheduler, tail pump), then the store lifecycle fixture, then the standalone allocation regression pin.
 //
 // Contents:
-//   SymbolSubsystemPumpTests           — the symbol subsystem no longer builds every fetched tile inline on the main thread and no longer re-uploads the 16 MB glyph atlas per glyph-adding tile.
+//   SymbolSubsystemPumpTests           — the symbol subsystem builds a fetched tile off the main thread and does not re-upload the 16 MB glyph atlas per glyph-adding tile.
 //   SymbolSubsystemWorkSchedulerTests  — ReconcileDispatch_* proves T2 (the WebGL-only permanent placement wedge at :899): under Inline the pickup lands ONE CurrentBatch call later than the schedule (PickupCompletedReconcile runs BEFORE ScheduleReconcileIfDirty inside CurrentBatch), so the tooth…
 //   SymbolTailPumpTests                — The acceptance teeth for the worker-phase / tail split — the worker phase (TryBeginBuild's returned pass) stops after the pool-side extract and hands a ready tail (via the pool→main handoff) to PumpBuilds' budgeted tail-start loop…
 //   SymbolTileStoreTests               — The symbol-lifecycle fix (zoom-out-then-in "no symbols" bug): SymbolTileStore keeps a released-to-cache tile's symbols WARM and restores them on a prepared-cache hit (which does not re-fetch), while a truly-evicted tile drops them.
@@ -53,9 +53,9 @@ namespace MapRenderer.Tests.Text
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The symbol subsystem no longer builds every fetched tile inline on the main
-    /// thread and no longer re-uploads the 16 MB glyph atlas per glyph-adding tile. The worker phase is
-    /// now driven by <see cref="SymbolSubsystem.TryBeginBuild"/> (kick-time) + the returned pass's
+    /// The symbol subsystem builds a fetched tile off the main thread and does not
+    /// re-upload the 16 MB glyph atlas per glyph-adding tile. The worker phase is
+    /// driven by <see cref="SymbolSubsystem.TryBeginBuild"/> (kick-time) + the returned pass's
     /// <c>RunWorkerAndHandoff</c> (pool), and <see cref="SymbolSubsystem.PumpBuilds"/> starts at most
     /// <c>MaxBuildsPerFrame</c> ready TAILS/frame + performs at most ONE coalesced atlas upload (the
     /// build-start throttle + stale-drop teeth moved to TileManager's kick — see TileSymbolKickTests). These
@@ -103,8 +103,8 @@ namespace MapRenderer.Tests.Text
                 new GeoCoordinate3D { Latitude = 0.0, Longitude = 0.0, Altitude = 0.0 },
                 zoom: 5.0, heading: 0.0, tilt: 0.0));
 
-            // The subsystem no longer owns a MapMaterialSet (per-layer materials moved to
-            // SymbolRenderLayer) — this suite tests build/pump/atlas behaviour only, none of which touches
+            // The subsystem owns no MapMaterialSet — per-layer materials live on
+            // SymbolRenderLayer — so this suite tests build/pump/atlas behaviour only, none of which touches
             // materials.
             _subsystem = new SymbolSubsystem(mapCamera);
             _tileBytes = LoadUp("Assets", "Fixtures", "sample-tile.bytes");
@@ -158,8 +158,8 @@ namespace MapRenderer.Tests.Text
             }).Forget();
         }
 
-        // Production SetStyle no longer walks style.Layers itself (RenderLayerFactory is the sole
-        // registry, MapView derives the list). Tests that call the subsystem directly need the equivalent
+        // Production SetStyle does not walk style.Layers itself: RenderLayerFactory is the sole
+        // registry, MapView derives the list. Tests that call the subsystem directly need the equivalent
         // extraction — kept local to the test assembly (outside the grep tooth's scope).
         private static List<Symbol.StyleLayer> ExtractSymbolLayers(StyleDocument style)
         {
@@ -169,17 +169,17 @@ namespace MapRenderer.Tests.Text
             return result;
         }
 
-        // ── Tooth 1 (bounded worker-phase starts) RETIRED: the build-start throttle + QueuedBuildCount
-        //    moved to TileManager's kick cap (MaxMeshBuildsPerTick) — see TileSymbolKickTests' F-2/kick-cap
-        //    coverage. This subsystem no longer owns a build-start queue to bound.
+        // ── Tooth 1 (bounded worker-phase starts): the build-start throttle + QueuedBuildCount
+        //    live in TileManager's kick cap (MaxMeshBuildsPerTick) — see TileSymbolKickTests' F-2/kick-cap
+        //    coverage. This subsystem owns no build-start queue to bound.
 
         // ── Tooth 2 (coalesced atlas upload), Tooth 5 (off-main extract), Tooth 4 (cancellation), and the
         //    departing-flag production seam MOVED to the PlayMode half (pump-split): each yield-waits for
         //    genuinely off-main symbol work, which starves deterministically in EditMode (a yielded frame is
         //    instantaneous there) — see MapRenderer.Tests.PlayMode.Text.SymbolSubsystemPumpTests.
 
-        // ── Tooth 3 (stale-drop before build start) RETIRED: a queued-but-departed tile can no longer
-        //    occur here — the kick itself never fires for a condemned/departed tile (TileManager's
+        // ── Tooth 3 (stale-drop before build start): a queued-but-departed tile cannot
+        //    occur here — the kick never fires for a condemned/departed tile (TileManager's
         //    _releaseQueued check, ahead of TryBeginBuild). Replaced by TileSymbolKickTests' F-6
         //    (departed-before-kick tile: no TryBeginBuild).
 
@@ -857,7 +857,7 @@ namespace MapRenderer.Tests.Text
     [TestFixture]
     public class SymbolTailPumpTests
     {
-        // ── The split is real (structural) — re-expressed (BuildTileAsync no longer exists;
+        // ── The split is real (structural) — re-expressed (BuildTileAsync does not exist;
         //    the worker-pass call now lives in SymbolTileWorkerPass.RunWorkerAndHandoff, not a coroutine
         //    method this grep-narrow tool can anchor on by signature). Genuinely RED before the change: both call
         //    forms lived inside one method's body, and RunTailAsync did not exist. ───────────────────────
@@ -1039,7 +1039,7 @@ namespace MapRenderer.Tests.Text
         /// <summary>Extracts the brace-balanced body (inclusive of the outer braces) of the method whose
         /// definition contains <paramref name="signatureAnchor"/>, by scanning forward from the first '{'
         /// after the anchor and counting nesting depth. Mirrors
-        /// <c>Structure.TileProcessingStructureTests.ExtractMethodBody</c> — a deliberately narrow tool for a
+        /// <c>Structure.TileProcessingStructureTests.ExtractMethodBody</c> — a narrow tool for a
         /// call-form-narrow grep guard, not a C# parser.</summary>
         private static string ExtractMethodBody(string source, string signatureAnchor, string path)
         {
@@ -1126,15 +1126,15 @@ namespace MapRenderer.Tests.Text
             => TestSymbolTileBuffer.Point(new double3(marker * 10_000.0, 0, marker * 10_000.0), null, float2.zero, float2.zero,
                 featureIndex: marker);
 
-        // Test-only: a baked block's source buffer, so Collect() can hand back the SAME ShapedSymbol values
-        // CollectInto used to hand back as managed-object references (see the type doc — not used for the oracle
-        // test).
+        // Test-only: a baked block's source buffer, so Collect() can hand back ShapedSymbol values as
+        // managed-object references — production CollectInto instead emits blockId/localIndex arrays (see
+        // the type doc — not used for the oracle test).
         private readonly Dictionary<SymbolTileBlock, SymbolTileBuffer> _blockSources = new();
 
         // Bakes a REAL block for `buffer` and commits it — the reconciler cutover means every commit a test wants
-        // CaptureSnapshot/CollectInto to see needs a real SymbolTileBlock (a block-less entry is no longer
+        // CaptureSnapshot/CollectInto to see needs a real SymbolTileBlock (a block-less entry is not
         // collected — SymbolTileStore.CaptureSnapshot's `Block == null` guard). Bake does not intern
-        // (it copies the ids ShapedSymbol already carries), so there is no table to share here any more.
+        // (it copies the ids ShapedSymbol already carries), so there is no table to share here.
         private bool Commit(SymbolTileStore store, SymbolTileStore.Key key, int gen, SymbolTileBuffer buffer)
         {
             SymbolTileBlock block = SymbolTileBlockBaker.Bake(buffer, slotCount: 1, double3.zero);
@@ -1404,7 +1404,7 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(1, store.DepartingTileCount, "still within the grace window");
             Assert.AreEqual(1, Collect(store).Count, "…still collected");
 
-            // Past the window → purged. The symbols stay WARM (a cache hit still restores them) but are no longer
+            // Past the window → purged. The symbols stay WARM (a cache hit still restores them) but are not
             // collected as departing (by now they have fully faded, so this is not a pop).
             store.ReconcileActiveSet(Loaded(), keepWarmOnRelease: true, nowSeconds: 10.6, departingGraceSeconds: 0.5);
             Assert.AreEqual(0, store.DepartingTileCount, "grace elapsed → purged");
@@ -1863,8 +1863,8 @@ namespace MapRenderer.Tests.Text
         // finest-zoom rule, the same per-tile blockId assignment — but keyed on the STRING CrossTileSymbolKey.
         // activeTiles/departingTiles are in the SAME order the store enumerates _active / _departing.
         // The oracle grids on the fixed CrossTileSymbolKey.CanonicalGridMeters (mirroring the store, which
-        // no longer takes a caller grid) — so parity holds by construction, still proving interned-key ==
-        // string-key under the SAME grid. `q` is passed through unchanged as the store's dedup GATE (magnitude
+        // takes no caller grid) — so parity holds because both sides fix the same grid, still proving
+        // interned-key == string-key under the SAME grid. `q` is passed through unchanged as the store's dedup GATE (magnitude
         // irrelevant now); it is not the oracle grid. Reads `_parityText`/`_parityIcon` (ParityPoint/
         // ParityCurved's side table), never symbol.TextId/IconImageId — see the field doc above.
         private OracleResult Oracle(

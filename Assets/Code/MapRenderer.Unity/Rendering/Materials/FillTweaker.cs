@@ -17,23 +17,12 @@ namespace MapRenderer.Unity.Rendering.Materials
 
 
         /// <summary>
-        /// Re-asserts the fill compositing contract after cloning a base <c>.mat</c>: shared base contract
-        /// (no depth write, LEqual test, white identity) + straight ALPHA blend (each fill layer composites
-        /// in painter's order — code-owned, overriding any stale blend a base .mat may carry).
-        ///
-        /// <para>Also enables <c>_SURFACE_TYPE_TRANSPARENT</c>. That is a keyword, and this class otherwise
-        /// leaves keywords to the import-baked ones — but this one is not styling, it is the other half of
-        /// the blend above. URP 17 deprecated the <c>_Surface</c> property: <c>IsSurfaceTypeTransparent()</c>
-        /// reads the KEYWORD and falls back to a hardcoded 0 (see URP's <c>Shaders/Utils/SurfaceType.hlsl</c>),
-        /// and <c>Fill_LitForwardPass</c> ends with <c>color.a = OutputAlpha(color.a,
-        /// IsSurfaceTypeTransparent())</c> — which returns 1.0 for an opaque surface. Without the keyword the
-        /// fragment's alpha is discarded and the blend set here is a no-op: fills render solid however
-        /// transparent their colour, opacity or pattern says they are.</para>
-        ///
-        /// <para>The keyword is also baked into <c>MapFill.mat</c>, and that is load-bearing rather than
-        /// redundant: <c>shader_feature_local_fragment</c> variants are stripped from player builds unless a
-        /// material in the build declares the keyword, so enabling it only at runtime would work in the
-        /// Editor and silently fall back to the opaque variant in a build.</para>
+        /// Re-asserts the fill compositing contract: shared base contract (no depth write, LEqual test,
+        /// white identity) + straight ALPHA blend, plus the <c>_SURFACE_TYPE_TRANSPARENT</c> keyword —
+        /// without it the fragment's alpha is discarded and fills render solid regardless of colour,
+        /// opacity or pattern. Non-local invariant: the keyword is also baked into <c>MapFill.mat</c>,
+        /// because <c>shader_feature_local_fragment</c> variants are stripped from player builds unless a
+        /// material in the build declares it — enabling it only at runtime falls back to opaque in a build.
         /// </summary>
         public static void ApplyPainterContract(Material m)
         {

@@ -17,7 +17,7 @@ namespace MapRenderer.Core.Text.Placement
     ///
     /// <para><b>Lifetime — one instance per IN-FLIGHT build, not a shared field.</b> Builds interleave on the
     /// main thread (<c>SymbolSubsystem</c>'s tail pump awaits glyph fetches), so a single reused instance
-    /// shared across concurrent builds would corrupt both — this type is deliberately NOT a singleton;
+    /// shared across concurrent builds would corrupt both — this type is NOT a singleton;
     /// <c>SymbolSubsystem</c> pools whole instances per build, <see cref="Clear"/>ing and returning one
     /// only once its bake has consumed it.</para>
     ///

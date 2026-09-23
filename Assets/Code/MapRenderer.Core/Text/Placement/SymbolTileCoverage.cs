@@ -1,6 +1,6 @@
-// Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified double3/float2/
-// float4x4 — this file lives in MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header for the
-// inline-qualification trap this avoids).
+// Engine-free. TOP-LEVEL `using Unity.Mathematics;` + unqualified double3/float2/float4x4 — this file lives in
+// MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header for the inline-qualification trap this
+// avoids).
 
 using Unity.Mathematics;
 
@@ -11,8 +11,8 @@ namespace MapRenderer.Core.Text.Placement
     /// (<see cref="SymbolFarPlaneCull"/>). A tile that covers only a sliver of the screen (the tilt-foreshortened
     /// horizon pile-up) has most of its symbols collision-discarded anyway, so gathering/projecting/staging them
     /// is wasted work; skipping the whole tile stabilizes per-frame symbol cost with barely any lost information.
-    /// Where the distance cull is a per-symbol camera <i>range</i>, this is a per-tile screen <i>area</i>, which catches the
-    /// foreshortened slivers a radius keeps.
+    /// Where the distance cull is a per-symbol camera <i>range</i>, this is a per-tile screen <i>area</i>, which
+    /// catches the foreshortened slivers a radius keeps.
     ///
     /// <para>The measurement is camera-dependent, so it runs per-frame; only the tile's 4 render-space corners
     /// are camera-independent and stored once per rebuild (on <see cref="SymbolBatch"/>). Corners are

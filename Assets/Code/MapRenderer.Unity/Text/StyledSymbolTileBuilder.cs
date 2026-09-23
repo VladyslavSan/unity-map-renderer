@@ -1,10 +1,9 @@
-// No `using UnityEngine` — but this file is NO LONGER compiled by Tools/core-tests and must not be re-added
+// No `using UnityEngine` — but this file is NOT compiled by Tools/core-tests and must not be re-added
 // to core-tests.csproj. It calls SymbolFeatureExtractor.Extract, which materializes
 // a Waist-1 TileGeometryBuffers and therefore depends on Unity.Collections transitively; core-tests has no
-// Unity.Collections and deliberately gets no shim (a hand-written one would be a second implementation of
+// Unity.Collections and gets no shim (a hand-written one would be a second implementation of
 // Collections' ownership semantics, and disposing an AsArray() view there is a SILENT no-op — the fast loop
-// would lie about exactly the bug class this epic keeps hitting). Its tests run unchanged in the Unity
-// EditMode runner: no coverage was lost, only iteration speed.
+// would pass the ownership bugs it exists to catch). Its tests run in the Unity EditMode runner.
 
 using System.Collections.Generic;
 using System.Threading;
@@ -149,17 +148,17 @@ namespace MapRenderer.Unity.Text
         /// <summary>
         /// WORKER-OR-MAIN, pure and synchronous: collects every distinct <c>(fontName, rangeStart)</c> pair
         /// <paramref name="extractedLayers"/>' symbols will need once shaped, into <paramref name="into"/> in
-        /// FIRST-ENCOUNTER order (layers → symbols → UTF-16 code units → stack names — the exact order the
-        /// deferred two-pass build used to fetch in). <b>That order is load-bearing, not stylistic:</b>
+        /// FIRST-ENCOUNTER order (layers → symbols → UTF-16 code units → stack names). <b>That order is
+        /// load-bearing, not stylistic:</b>
         /// <see cref="GlyphAtlas"/> is an insertion-order shelf packer, so this order determines every baked
         /// glyph's UV — reordering it (e.g. emitting from <paramref name="seen"/> instead of <paramref
         /// name="into"/>) diffs every golden snapshot that shapes text. <paramref name="seen"/> is a
         /// caller-owned dedup scope, cleared once per BUILD (not per layer) so the set is build-wide.
         ///
-        /// <para>This reproduces the set pass 1 used to REQUEST, not the set the shaper's presentation-form
-        /// mapping (Arabic joining) actually RESOLVES — the two differ (a pre-existing, deferred gap),
-        /// and this method must not "fix" that: doing so would fetch a different glyph set and change
-        /// rendering output.</para>
+        /// <para>This is the set named by each symbol's UTF-16 code units, not the set the shaper's
+        /// presentation-form mapping (Arabic joining) actually RESOLVES — the two differ (a known,
+        /// deferred gap), and this method must not "fix" that: doing so would fetch a different glyph set
+        /// and change rendering output.</para>
         /// </summary>
         /// <param name="extractedLayers">This build's <see cref="ExtractLayers"/> output; null is a no-op.</param>
         /// <param name="into">Appended to, in first-encounter order; not cleared by this method.</param>
@@ -185,8 +184,8 @@ namespace MapRenderer.Unity.Text
                 {
                     if (extracted[i].Kind == SymbolKind.Icon) continue;
                     string text = extracted[i].Text;
-                    // UTF-16 CODE UNIT, not a decoded codepoint — deliberately reproduces the pre-existing
-                    // surrogate-pair gap (deferred). Do not "fix" this into a combined-codepoint walk;
+                    // UTF-16 CODE UNIT, not a decoded codepoint — keeps the known surrogate-pair gap
+                    // (deferred). Do not "fix" this into a combined-codepoint walk;
                     // that changes the requested set.
                     for (int c = 0; c < text.Length; c++)
                     {
@@ -230,11 +229,9 @@ namespace MapRenderer.Unity.Text
         /// order matches the extractor's per-tile
         /// ordinal (stable FeatureIndex).
         ///
-        /// <para><b>No new cancellation checks were added here.</b> This method's only cancellation-observation
-        /// point (the deleted fetch <c>await</c>) is gone, so a cancel landing mid-shape now lets the loop run
-        /// to completion into a buffer the caller then discards — commit semantics are unchanged, since the
-        /// caller's trailing <c>ThrowIfCancellationRequested</c> was, and remains, the sole partial-commit
-        /// guard.</para>
+        /// <para><b>No cancellation checks in the loop.</b> A cancel landing mid-shape lets the loop run to
+        /// completion into a buffer the caller then discards. The caller's trailing
+        /// <c>ThrowIfCancellationRequested</c> is the sole partial-commit guard.</para>
         /// </summary>
         public void Shape(
             List<ExtractedLayer> extractedLayers, SymbolTileBuffer buffer, CancellationToken ct = default)
@@ -248,7 +245,7 @@ namespace MapRenderer.Unity.Text
             // NOT one of these — it is rented per-build by SymbolSubsystem (the pairing-adjacency rule:
             // every layer processor of ONE build must write into the SAME buffer instance).
             var glyphQuads = new List<PositionedGlyph>();
-            // 4.4c (3b): reused per-call temp buffers the no-alloc TextQuadLayout/CurvedTextLayout overloads
+            // Reused per-call temp buffers the no-alloc TextQuadLayout/CurvedTextLayout overloads
             // clear-and-fill per symbol — copied into buffer's own growing pools right after, since those
             // pools accumulate EVERY symbol of the whole build and the no-alloc overloads always Clear() their
             // output first (a build-wide pool passed directly would erase every earlier symbol's quads/glyphs).
@@ -371,10 +368,10 @@ namespace MapRenderer.Unity.Text
                         ShapedRun run = new ShapedRun { Glyphs = glyphQuads, Direction = direction };
                         if (s.Placement == SymbolPlacement.Point)
                         {
-                            // Slice A: the per-feature options threaded from the style layer (anchor/offset/justify/
-                            // max-width/line-height/letter-spacing/radial-offset). Was hardcoded TextLayoutOptions.Default.
+                            // The per-feature options threaded from the style layer (anchor/offset/justify/
+                            // max-width/line-height/letter-spacing/radial-offset).
                             // No-alloc overload writes into the reused quadCorners (Clear()-ed internally); copy
-                            // its contents into buffer's own build-wide Quads pool right after (3b: quadCorners
+                            // its contents into buffer's own build-wide Quads pool right after (quadCorners
                             // itself never allocates once its capacity has stabilized across symbols).
                             TextLayoutBounds bounds = TextQuadLayout.Layout(run, _glyphManager.Atlas, s.LayoutOptions, quadCorners);
                             int textQuadStart = buffer.Quads.Count;
@@ -409,7 +406,7 @@ namespace MapRenderer.Unity.Text
                         }
                         else
                         {
-                            // #5: curved along-line symbol — per-glyph layout placed on the projected line each
+                            // Curved along-line symbol — per-glyph layout placed on the projected line each
                             // frame. Orientation is the line tangent, so no point-layout options / rotation-alignment.
                             // Same reused-then-copied pattern as the point-text branch above.
                             CurvedTextLayout.Layout(run, _glyphManager.Atlas, curvedPlacements);
@@ -445,7 +442,7 @@ namespace MapRenderer.Unity.Text
                     }
                     catch (System.Exception ex) when (!(ex is System.OperationCanceledException) && !ct.IsCancellationRequested)
                     {
-                        // Layer 1 robustness: one symbol's build failure (e.g. a deferred mixed-direction bidi
+                        // Per-symbol robustness: one symbol's build failure (e.g. a deferred mixed-direction bidi
                         // NotSupportedException) must never blank the whole tile. Skip THIS symbol; the rest still
                         // build and commit. buffer.AddSymbol is the last statement of every guarded emit branch,
                         // so no partial RECORD was added — a throw before it can leave at most an orphaned tail

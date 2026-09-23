@@ -1,7 +1,7 @@
 // Unity EditMode only — NativeArray, Burst jobs, UnityEngine.Application. NOT registered in core-tests.csproj.
 //
 // The compile checkpoint (job-scheduling-design.md): three Burst behaviours the fill graph's
-// shape depends on, none previously exercised in this repo:
+// shape depends on:
 //   (i)   GetSubArray + a nested `new EarcutJob{...}.Execute()` call, inside another job's Execute — EarcutBatchJob.
 //   (ii)  NativeSortExtension.Sort<int, TComparer> over a generic comparer holding two NativeArray fields,
 //         inside a job — FillGatherJob<TComparer>.
@@ -154,9 +154,8 @@ namespace MapRenderer.Tests.Jobs
 
                 for (int pi = 0; pi < polyCount; pi++)
                 {
-                    // The capacity backstop this job used to write lives in AggregateJob — checked here directly
-                    // instead, against the same bound
-                    // (WorkOffsets[pi+1] - WorkOffsets[pi]) AggregateJob now compares against.
+                    // The capacity backstop lives in AggregateJob — checked here directly, against the
+                    // same bound (WorkOffsets[pi+1] - WorkOffsets[pi]) AggregateJob compares against.
                     int sLen = s.Buffers.WorkOffsets[pi + 1] - s.Buffers.WorkOffsets[pi];
                     Assert.LessOrEqual(batchMergedVC[pi], sLen, $"polygon {pi}: the earcut batch must not overrun buffers on real corpus input");
 

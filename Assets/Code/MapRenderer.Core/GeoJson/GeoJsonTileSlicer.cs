@@ -126,7 +126,7 @@ namespace MapRenderer.Core.GeoJson
         }
 
         /// <summary>
-        /// The inclusive clip window in tile units — <c>[−b, Extent + b]²</c>. Deliberately the same
+        /// The inclusive clip window in tile units — <c>[−b, Extent + b]²</c>. Uses the same
         /// arithmetic, in the same order, as <see cref="TileBufferClip.TryWindow"/>, so the two windows are
         /// bit-equal and not merely close. The operand ORDER is in fact free while
         /// <see cref="TileBufferClip.ReferenceExtent"/> is a power of two — dividing by it is an exact binary
@@ -302,7 +302,8 @@ namespace MapRenderer.Core.GeoJson
     /// evaluated per requested tile; memoization belongs to the source that calls it. Eager pyramid slicing
     /// would mean enumerating up to <c>4^z</c> tiles for a world-spanning dataset — an unbounded loop that
     /// laziness ELIMINATES rather than caps. Per-slice cost is O(features) via the bbox reject, over a count
-    /// fixed at parse time; a spatial index is a later optimisation, invisible at this signature.</para>
+    /// fixed at parse time. There is no spatial index: every slice visits every feature. An index would not
+    /// change this signature.</para>
     ///
     /// <para><b>Quantization.</b> Rounding to integers happens AFTER clipping, so that when the extent and
     /// the rescaled buffer are integral the window edges land on integers and an intersection vertex placed

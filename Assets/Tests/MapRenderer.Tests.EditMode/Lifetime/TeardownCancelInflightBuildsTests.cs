@@ -2,7 +2,7 @@
 // cancellation contract, docs/async-architecture.md). Drives load, kicks mesh builds, and tears down WITHOUT
 // settling first — the exact race the maintainer reproduced (Stop while tiles are still loading).
 //
-// This is EditMode, and deliberately so: the un-fixed stall must be measured by the TEST thread, which
+// This is EditMode: the un-fixed stall must be measured by the TEST thread, which
 // requires Teardown() to be a direct synchronous call. EditMode's model does exactly that (OnDestroy does
 // not fire under DestroyImmediate headlessly, so tests call view.Teardown() explicitly, same as
 // DisposalLeakGuardTests). In PlayMode a 10s block would freeze the PlayerLoop and a yield-pump could not

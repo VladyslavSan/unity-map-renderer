@@ -15,7 +15,8 @@
 //     RUNTIME contract for fill-extrusion is ELEVATED-3D — opaque, depth-writing (ZWrite On, ZTest LEqual,
 //     One/Zero blend) — asserted by FillExtrusionTweaker.ApplyElevatedContract and baked into the
 //     Map/FillExtrusion .mat (I3). Buildings must occupy the depth buffer to occlude one another and their
-//     own walls; see docs/depth-and-render-regimes-design.md §5. [_Cull] drives winding as Fill's does.
+//     own walls; see docs/depth-and-render-regimes-design.md § "What S23 implements — the degenerate
+//     case". [_Cull] drives winding as Fill's does.
 //
 // Clean-room: this is URP integration, not MapLibre. URP docs/source are fair reference.
 // Authored for URP 17.5 / Unity 6000.x.

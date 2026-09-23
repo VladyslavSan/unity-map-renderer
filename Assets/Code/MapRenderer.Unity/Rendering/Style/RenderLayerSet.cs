@@ -53,7 +53,7 @@ namespace MapRenderer.Unity.Rendering.Style
         private Texture2D       _spriteTexture;
 
         /// <summary>Number of render-layer SLOTS — every consumer indexes by slot, including a vacated one
-        /// (a <see cref="TombstoneRenderLayer"/>). <c>index == slot == material index</c>, no longer
+        /// (a <see cref="TombstoneRenderLayer"/>). <c>index == slot == material index</c>, but not
         /// <c>== draw order</c> after a partial-survival reorder (see <see cref="TryRestyleInPlace"/>).</summary>
         public int Count => _layers.Count;
 

@@ -5,11 +5,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// <summary>
     /// Process-wide debug counters shared by every <see cref="ILayerMeshBuild"/> implementer
     /// (job-scheduling-design.md). A DELTA meter for teeth: absolute values are meaningless — this is a
-    /// process-wide static and an EditMode batch run is one process.
-    ///
-    /// <para>Every build funnels through <see cref="LayerMeshBuildPool{T}.Rent"/> — a pooled class has no
-    /// object-initializer bypass — so this counter has no excluded construction path: a background tile's
-    /// build (<c>TileManager.KickSourcelessBackground</c>) counts like a source tile's.</para>
+    /// process-wide static and an EditMode batch run is one process. Every build funnels through
+    /// <see cref="LayerMeshBuildPool{T}.Rent"/>, so this counter has no excluded construction path.
     /// </summary>
     internal static class LayerMeshBuildCounters
     {

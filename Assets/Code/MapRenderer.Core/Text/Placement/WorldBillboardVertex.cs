@@ -1,15 +1,13 @@
-// Engine-free: no UnityEngine dependency.
-// BLITTABLE (mirrors BillboardVertex): ONE per billboard corner = stream 0 of the world-anchored symbol
-// mesh — fed straight to Mesh.SetVertexBufferData by WorldBillboardMeshBuilder — field
-// DECLARATION order is the vertex stream byte layout and MUST match
+// Engine-free. BLITTABLE (mirrors BillboardVertex): ONE per billboard corner = stream 0 of the world-anchored
+// symbol mesh — fed straight to Mesh.SetVertexBufferData by WorldBillboardMeshBuilder.
+// Non-local invariant: field DECLARATION order is the vertex stream byte layout and MUST match
 // WorldBillboardMeshBuilder.VertexDescriptors' order EXACTLY: Position (AnchorLocal), Color (ColorRGB),
 // TexCoord0 (Uv), TexCoord1 (Page), TexCoord2 (Offset), TexCoord3 (AlignFlags), TexCoord5 (Tangent),
 // TexCoord6 (Up), TexCoord7 (SdfWidenPx) — Unity's canonical ascending VertexAttribute enum order
 // (Position=0, Color=3, TexCoord0=4, TexCoord1=5, TexCoord2=6, TexCoord3=7, TexCoord5=9, TexCoord6=10,
-// TexCoord7=11; see
-// BillboardVertex/StyledLineTileBuilder's identical rule). Declaring these out of order triggers Unity's
-// "non-standard order" auto-adjustment, which silently reinterprets the byte layout against a DIFFERENT
-// stream than this struct actually writes (BillboardVertex's header documents the exact failure mode: the
+// TexCoord7=11; see BillboardVertex/StyledLineTileBuilder's identical rule). Declaring these out of order
+// triggers Unity's "non-standard order" auto-adjustment, which silently reinterprets the byte layout against a
+// DIFFERENT stream than this struct actually writes (BillboardVertex's header documents the failure mode: the
 // symbol renders nothing). Keep to blittable fields only.
 //
 // FROZEN: a new attribute is APPENDED as the new last field, never a reshuffle of stream 0.
@@ -23,9 +21,9 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// One world-anchored billboard-corner vertex — the world-space sibling of <see cref="BillboardVertex"/>.
     /// The anchor is a real render-space position (GPU-projected via stock MVP,
-    /// <c>TransformObjectToHClip</c>); the glyph corner itself is still a constant-px screen offset applied
-    /// in the vertex shader, so text stays legible-sized at any distance (see
-    /// <c>SymbolTextWorld_ForwardPass.hlsl</c>).
+    /// <c>TransformObjectToHClip</c>); the glyph corner is an offset the vertex shader applies — constant
+    /// screen px, so text stays legible-sized at any distance, except a map-pitched glyph's, which is world
+    /// metres (see <see cref="Offset"/> and <c>SymbolTextWorld_ForwardPass.hlsl</c>).
     /// </summary>
     public struct WorldBillboardVertex
     {
@@ -50,10 +48,12 @@ namespace MapRenderer.Core.Text.Placement
         /// not an <c>int</c>, because it rides a Float32x1 vertex stream.</summary>
         public float Page;
 
-        /// <summary>UNROTATED glyph-corner offset from the anchor (TEXCOORD2) — the world-path analogue of
-        /// <see cref="BillboardMath.BuildQuad"/>'s anchor-relative corner, minus any rotation (north-up;
-        /// map-aligned bearing rotation is applied in the vertex shader once <c>AlignFlags</c> is wired —
-        /// see <c>SymbolTextWorld_ForwardPass.hlsl</c>).
+        /// <summary>Glyph-corner offset from the anchor (TEXCOORD2) — the world-path analogue of
+        /// <see cref="BillboardMath.BuildQuad"/>'s anchor-relative corner. <see cref="BillboardMath.BuildWorldQuad"/>
+        /// bakes the CPU-side rotation into it. For an along-line glyph (<see cref="AlignFlags"/> bit1) the
+        /// vertex shader also orients it by <see cref="Tangent"/>: with bit2 clear it rotates the offset by the
+        /// tangent's live screen angle; with bit2 set the ground frame built from the tangent orients it instead
+        /// (see <c>SymbolTextWorld_ForwardPass.hlsl</c>).
         /// <para><b>TWO UNITS, selected by <see cref="AlignFlags"/> bit2.</b> Bit2 CLEAR (every point/icon
         /// symbol, every viewport-pitched curved symbol): LOGICAL SCREEN PIXELS, added to
         /// <c>clip.xy</c> after projection, so the glyph is a fixed screen size at any depth. Bit2 SET
@@ -63,9 +63,9 @@ namespace MapRenderer.Core.Text.Placement
         /// never off the name.</para></summary>
         public float2 Offset;
 
-        /// <summary>Bit flags (TEXCOORD3): bit0 = rotation-alignment map(1)/viewport(0), always 0 today and
+        /// <summary>Bit flags (TEXCOORD3): bit0 = rotation-alignment map(1)/viewport(0), always 0 and
         /// unread by the shader; bit1 = along-line tangent rotation (set only by curved; point/icon leave it
-        /// clear).</summary>
+        /// clear); bit2 = map pitch alignment (set only with bit1; <see cref="Offset"/> is then metres).</summary>
         public float AlignFlags;
 
         /// <summary>TEXCOORD5 — for the curved (along-line) arm:
@@ -78,7 +78,8 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>TEXCOORD6 — unit surface normal at the anchor, pre-RTC render-space DIRECTION (the
         /// Level-1 RTC translation does not apply to a direction), supplied by
         /// <c>IProjection.ProjectPoint(...).Up</c> via <see cref="BillboardMath.BuildWorldQuad"/>.
-        /// Written, but not yet read by any shader.</summary>
+        /// The shader reads it only for a map-pitched glyph (<see cref="AlignFlags"/> bit2), to build its
+        /// ground frame.</summary>
         public float3 Up;
 
         /// <summary>TEXCOORD7 — how far this corner's glyph is

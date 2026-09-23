@@ -27,7 +27,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <summary>This layer's <b>slot</b> — the backend <c>materialIndex</c>, the
         /// <c>LoadedTile.MaterialIndices</c> entry, and <c>PreparedKey</c>'s layer id. Set once by
         /// <see cref="RenderLayerSet.Build"/> and <b>stable across a restyle</b> for a surviving layer
-        /// (<see cref="RenderLayerSet.TryRestyleInPlace"/>). No longer the queue input — see
+        /// (<see cref="RenderLayerSet.TryRestyleInPlace"/>). Not the queue input — see
         /// <see cref="SetDrawOrder"/> for that.</summary>
         int DrawIndex { get; }
 
@@ -35,12 +35,11 @@ namespace MapRenderer.Unity.Rendering.Style
         /// not a style property: only <c>fill-extrusion</c> returns <see cref="ShadowCastingMode.On"/> —
         /// ground-draped kinds (fill, line, background) are coplanar with the surface they would shadow
         /// (an acne source, no benefit), and symbols are camera-facing billboards whose shadow would be a
-        /// floating dark quad. Receiving is unconditional for tile geometry, separate from this axis.
-        ///
-        /// <para>Non-local invariant: <see cref="Backend.ITileRenderBackend"/>'s three implementations
-        /// TRANSPORT this value verbatim, indexed by <see cref="DrawIndex"/>, and must never re-derive it
-        /// from the layer type or the material — that is what keeps the three backends from drifting
-        /// apart.</para></summary>
+        /// floating dark quad. Receiving is unconditional for tile geometry, separate from this axis — Off
+        /// means does-not-CAST, not does-not-receive. Non-local invariant:
+        /// <see cref="Backend.ITileRenderBackend"/>'s three implementations TRANSPORT this value verbatim,
+        /// indexed by <see cref="DrawIndex"/>, and must never re-derive it from the layer type or the
+        /// material, or the three backends drift apart.</summary>
         ShadowCastingMode CastShadows { get; }
 
         /// <summary>Which sub-slot of this layer's queue band (see <see cref="SetDrawOrder"/>) its primary

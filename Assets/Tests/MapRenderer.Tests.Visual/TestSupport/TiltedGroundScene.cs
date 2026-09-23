@@ -103,7 +103,7 @@ namespace MapRenderer.Tests
         /// <summary>Builds the scene: ambient/light (if <see cref="TiltedGroundSceneConfig.LitAmbient"/>) →
         /// camera + off-screen RT → <see cref="MapCamera"/>, in that order.
         ///
-        /// <para><b>Safe by construction against a partial failure.</b> The ambient/light block mutates
+        /// <para><b>Safe against a partial failure.</b> The ambient/light block mutates
         /// PROCESS-GLOBAL state that only <see cref="Dispose"/> restores — but nothing owns that restore
         /// until this method RETURNS. If <c>new RenderTexture</c> / <c>new CameraProperties</c> /
         /// <c>new MapCamera</c> below were to throw, the light and the ambient override would otherwise leak

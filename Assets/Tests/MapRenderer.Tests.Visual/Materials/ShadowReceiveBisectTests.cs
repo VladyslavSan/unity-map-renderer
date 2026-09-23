@@ -91,7 +91,7 @@ namespace MapRenderer.Tests.Visual
         private const float CameraHeight = 120f;
 
         /// <summary>Uniform scale on Unity's Plane primitive (10×10 units at scale 1) — a 50×50 ground,
-        /// deliberately smaller than the 60×60 frustum so the frame carries visible background and the
+        /// smaller than the 60×60 frustum so the frame carries visible background and the
         /// coverage precondition has a real signal to read.</summary>
         private const float GroundScale = 5f;
 
@@ -131,7 +131,7 @@ namespace MapRenderer.Tests.Visual
         /// The basemap's REAL ground albedo: <c>liberty.json</c>'s background layer paints
         /// <c>#f8f4f0</c>, converted to linear ≈ (0.939, 0.905, 0.871) — Rec.709 luminance 0.910, i.e.
         /// near-white. <see cref="GroundColor"/>'s 0.62 was chosen for "plenty of headroom above and
-        /// below", which is precisely the headroom the app does not have, so every rung above it measures
+        /// below", which is the headroom the app does not have, so every rung above it measures
         /// a scene brighter than the one under diagnosis cannot be.
         ///
         /// <para><c>Color.linear</c> rather than a baked triple, because that is the exact conversion
@@ -491,7 +491,7 @@ namespace MapRenderer.Tests.Visual
         /// ~1201 m) both predict a boundary near 950-1070 m of altitude, since the ground at screen centre
         /// sits ~1.126× the altitude away.</para>
         ///
-        /// <para>Deliberately NOT varied here, so a failure has one cause: ambient (a separate test below)
+        /// <para>NOT varied here, so a failure has one cause: ambient (a separate test below)
         /// and the floating origin. The latter is left for last because <c>SceneFrame</c> rebases the
         /// camera and the geometry together and URP rebuilds its light matrices from the live transforms
         /// each frame, so it has no mechanism to desynchronise them — it is the weakest of the three.</para>
@@ -563,7 +563,7 @@ namespace MapRenderer.Tests.Visual
         /// still does not reproduce the app and the difference lies somewhere nobody has named yet — a
         /// louder finding than either story, and one to report rather than tune away.</para>
         ///
-        /// <para>Post-processing is deliberately NOT added to reach the app's tonemapped frame:
+        /// <para>Post-processing is NOT added to reach the app's tonemapped frame:
         /// <c>DefaultVolumeProfile.asset</c> sets Tonemapping <c>mode = None</c>, so UberPost performs no
         /// highlight compression and the LDR conversion hard-clamps at 1.0 — which this fixture's ARGB32
         /// target already does. A real tonemapper would have PRESERVED highlight contrast, not destroyed
@@ -1233,8 +1233,8 @@ namespace MapRenderer.Tests.Visual
         /// whether the lit surface is clipping and so has no headroom left for a shadow to darken into.</param>
         /// <param name="ambientIntensity">Multiplier on the ambient probe. Only <see cref="AmbientMode.Skybox"/>
         /// reads it, so it is inert for every flat-ambient rung.</param>
-        /// <param name="scanPoints">Ground points to sample in both frames, or null for no scan. Used to
-        /// locate the shadow's far edge, which a fixed sample box cannot see.</param>
+        /// <param name="scanPoints">Ground points to sample in both frames, or null for no scan. Locates
+        /// the shadow's far edge, which a fixed sample box cannot see.</param>
         /// <param name="scanHalfExtent">Half-extent of each scan sample, world metres.</param>
         /// <param name="configureCaster">Runs on the occluder object after it is built and BEFORE the
         /// entity conversion reads its mesh and transform, or null to cast with the primitive cube as

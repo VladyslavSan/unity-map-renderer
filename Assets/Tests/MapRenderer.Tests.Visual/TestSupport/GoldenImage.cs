@@ -10,7 +10,7 @@
 //      GeoJsonPointSymbolFixtureTests.Neg_) runs before every compare, so an all-black frame fails
 //      rather than passing vacuously.
 //   2. Orientation-blind compare: the frame is bottom-left; a Texture2D.LoadImage'd PNG must be read back
-//      the SAME way. RED-verified empirically against a deliberately flipped reference.
+//      the SAME way. RED-verified empirically against a flipped reference.
 
 #if UNITY_EDITOR
 using System;
@@ -129,7 +129,7 @@ namespace MapRenderer.Tests
         /// </summary>
         /// <param name="frame">The rendered frame (the "actual" side).</param>
         /// <param name="reference">The reference frame, same layout as <see cref="VisualFrame.Pixels"/>.</param>
-        /// <param name="referenceName">Reference file stem, used to name artifacts.</param>
+        /// <param name="referenceName">Reference file stem that names artifacts.</param>
         /// <param name="referencePath">Absolute path of the reference PNG, copied to <c>&lt;name&gt;.expected.png</c> on fail.</param>
         private static void Compare(VisualFrame frame, Frame reference, string referenceName, string referencePath)
         {

@@ -62,7 +62,7 @@ namespace MapRenderer.Unity.Text.Placement
         private sealed class Slot
         {
             public Mesh Mesh;
-            public MeshNode Node; // lazy — rented on the first visible EndFrame (mirrors old Presenter laziness)
+            public MeshNode Node; // lazy — rented on the first visible EndFrame
             public NativeList<WorldBillboardVertex> Vertices;
             public NativeList<float> Opacity;
             public NativeList<int> Indices;
@@ -97,7 +97,7 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         // Hierarchy names for the symbol tree's three levels. Const so the two leaf names are picked from a
-        // named pair rather than a literal ternary at the construction site. Deliberately NOT shared with
+        // named pair rather than a literal ternary at the construction site. NOT shared with
         // WorldSymbolGroupingTests, which asserts these strings literally — pointing the test at the same
         // constant would make it compare a value to itself and stop pinning the name at all.
         private const string TreeRootName  = "Map Symbols";
@@ -113,7 +113,7 @@ namespace MapRenderer.Unity.Text.Placement
         // "MapTiles (GameObject backend)" tree: symbols always maintain their own
         // tree so the organization is identical no matter which backend draws tile fills).
         // internal (not private): SymbolPlacementSystemTestExtensions reads NodeCount off it — the LIVE
-        // tile-container count, which _tree.Root.childCount is no longer (it also holds the pool node).
+        // tile-container count, which _tree.Root.childCount is not (it also holds the pool node).
         internal readonly SceneTileTree                          _tree       = new(TreeRootName);
         private readonly Dictionary<LayerNodeKey, LayerNodeRec> _layerNodes = new();
 
@@ -171,8 +171,8 @@ namespace MapRenderer.Unity.Text.Placement
                 maxSize: 512);
 
         /// <summary>A leaf's per-node settings, applied once at CREATION (not per rent): symbols neither cast
-        /// nor receive shadows, and DontSave keeps these out of the saved scene. MeshNode deliberately
-        /// decides none of this — see its header.
+        /// nor receive shadows, and DontSave keeps these out of the saved scene. MeshNode decides none of
+        /// this — see its header.
         ///
         /// <para>The shadow flags are a DECISION, not an oversight, and unlike tile geometry they are
         /// per-node rather than per-rent because every leaf answers the same way: a symbol is a camera-facing
@@ -566,8 +566,7 @@ namespace MapRenderer.Unity.Text.Placement
             layerRec.ChildCount--;
             if (layerRec.ChildCount <= 0)
             {
-                // Null-guarded: unlike the DestroySafely this replaced, ObjectPool.Release faults on a
-                // GameObject destroyed out from under us.
+                // Null-guarded: ObjectPool.Release faults on a GameObject destroyed out from under us.
                 if (layerRec.Go != null) _layerNodePool.Release(layerRec.Go);
                 _layerNodes.Remove(layerKey);
                 _tree.ReleaseChildFrom(tileId);

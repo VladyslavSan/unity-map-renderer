@@ -54,11 +54,8 @@ namespace MapRenderer.Core.Expressions
         /// <param name="buffer">The exact array from the paired <see cref="Rent"/>.</param>
         internal static void Return(Value[] buffer)
         {
-            // Clear before pooling so a returned buffer roots none of its arguments. A Value can hold a
-            // string / list / dictionary, and the *oversized tail* (slots past the current request's arity,
-            // hidden by the caller's AsSpan(0, count)) would otherwise retain a feature-owned graph for the
-            // worker thread's lifetime. Clearing the whole array is O(arity) — negligible, and it keeps every
-            // pooled buffer reference-free.
+            // Clear before pooling: a Value can hold a string/list/dictionary, and the oversized tail past this
+            // request's arity would otherwise root a feature-owned graph for the worker thread's lifetime.
             System.Array.Clear(buffer, 0, buffer.Length);
             (_free ??= new Stack<Value[]>()).Push(buffer);
         }

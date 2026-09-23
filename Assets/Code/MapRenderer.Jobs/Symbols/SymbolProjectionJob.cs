@@ -9,21 +9,21 @@ namespace MapRenderer.Jobs.Symbols
     /// <summary>
     /// The parallel per-frame SYMBOL projection — projects a flat buffer of render-space world points
     /// (every visible symbol's screen geometry this frame: a point symbol's anchor, a line symbol's path
-    /// vertices) to logical screen pixels + NDC depth, culling only behind-camera. It is deliberately GENERIC
-    /// over what a symbol renders — text today, an icon later, both together — because a symbol is projected as
-    /// its anchor/path world points regardless; the glyph/icon layout is a separate, serial staging step that
-    /// reads this job's output. Uses the SAME <see cref="SymbolScreenProjection.TryProjectPoint"/> the serial
-    /// path uses (one copy of the projection math), so the job and inline results are bit-identical.
+    /// vertices) to logical screen pixels + NDC depth, culling only behind-camera. It is GENERIC over what a
+    /// symbol renders — text, icon, or both — because a symbol is projected as its anchor/path world points
+    /// regardless; the glyph/icon layout is a separate, serial staging step that reads this job's output. Uses
+    /// the SAME <see cref="SymbolScreenProjection.TryProjectPoint"/> the serial path uses (one copy of the
+    /// projection math), so the job and inline results are bit-identical.
     ///
     /// <para><b>Pure projection, cull downstream.</b> The point-anchor viewport-margin cull
     /// (<see cref="SymbolScreenProjection.IsWithinViewportMargin"/>) and the line near-plane blow-up guard are
     /// applied by the serial staging pass, NOT here — they are cheap screen-space tests, and keeping them out
     /// makes this job a single uniform matrix-mul over both symbol kinds.</para>
     ///
-    /// <para>Note: Burst runs this job only if Jobs ▸ Burst ▸ Enable Compilation is on AND the job compiles —
-    /// <c>CompileSynchronously = true</c> falls back to managed IL SILENTLY on a compile failure
-    /// (<c>FillGraphBurstProbeTests</c>), so a passing numeric/index-mapping test alone never proves Burst
-    /// compiled it. The runner is not the discriminator; in this project's practice
+    /// <para>Non-obvious why: Burst runs this job only if Jobs ▸ Burst ▸ Enable Compilation is
+    /// on AND the job compiles — <c>CompileSynchronously = true</c> falls back to managed IL SILENTLY on a
+    /// compile failure (<c>FillGraphBurstProbeTests</c>), so a passing numeric/index-mapping test alone never
+    /// proves Burst compiled it. The runner is not the discriminator; in this project's practice
     /// <c>./Tools/run-tests.sh</c> (batch mode) is the path verified Burst-compiled, via its log's Burst-error
     /// grep, not the test result. Below a count threshold the caller fills the same output arrays with a
     /// serial loop instead — the Schedule+Complete overhead beats a parallel job only at high counts.</para>

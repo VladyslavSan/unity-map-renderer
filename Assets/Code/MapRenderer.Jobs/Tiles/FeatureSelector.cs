@@ -81,7 +81,7 @@ namespace MapRenderer.Jobs.Tiles
             }
             try
             {
-                // 3. Evaluate per feature — indexed so the native branch has an ordinal to address. A6: the
+                // 3. Evaluate per feature — indexed so the native branch has an ordinal to address. The
                 // feature IS an IFeature (the neutral carrier implements it directly), so it passes straight
                 // to filter.Matches — no adapter alloc.
                 IReadOnlyList<IFeature> features = tileLayer.Features;
@@ -149,8 +149,7 @@ namespace MapRenderer.Jobs.Tiles
         /// selection contract.
         ///
         /// <para>No <see cref="ITileLayer"/> is available here to probe for <see cref="IIndexedFeatureSource"/>
-        /// capability, so this overload always evaluates on the string key-lookup path (no binding) — exactly
-        /// what it did before the string→id key hoist.</para></summary>
+        /// capability, so this overload always evaluates on the string key-lookup path (no binding).</para></summary>
         public static void SelectFeatures(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, List<SelectedTileFeature> into)
             => SelectFeaturesInto(layer, features, zoom, into, keyResolver: null, native: null);
@@ -231,8 +230,7 @@ namespace MapRenderer.Jobs.Tiles
         /// <paramref name="into"/> (grow-only-buffer contract).
         ///
         /// <para>No <see cref="ITileLayer"/> is available here to probe for <see cref="IIndexedFeatureSource"/>
-        /// capability, so this overload always evaluates on the string key-lookup path (no binding) — exactly
-        /// what it did before the string→id key hoist.</para>
+        /// capability, so this overload always evaluates on the string key-lookup path (no binding).</para>
         /// </summary>
         public static int SelectFeatures(
             StyleLayer layer, IReadOnlyList<IFeature> features, double zoom, SelectedTileFeature[] into)
@@ -324,7 +322,7 @@ namespace MapRenderer.Jobs.Tiles
         /// <summary>
         /// The <see cref="CompiledFilter"/> for <paramref name="layer"/>, compiled on first use and reused
         /// thereafter — <see cref="CompiledFilter"/>'s own contract ("built once per style layer, evaluated
-        /// many times per feature"), which this seam used to break by compiling per call.
+        /// many times per feature"); compiling per call would violate it.
         ///
         /// <para><b>Keyed on the filter JSON node, not on the <see cref="StyleLayer"/>.</b>
         /// <see cref="StyleLayer.Filter"/> is a public mutable field, so a layer-keyed memo could serve a

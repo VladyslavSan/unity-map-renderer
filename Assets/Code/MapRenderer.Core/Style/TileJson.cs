@@ -7,12 +7,12 @@ namespace MapRenderer.Core.Style
     /// MapLibre model a source declares its tiles <b>either</b> inline (<c>"tiles": [...]</c>) <b>or</b>
     /// indirectly via a TileJSON <c>url</c> pointing at one of these documents. This is the typed view
     /// of the fields the tile pipeline needs (<c>tiles</c>, <c>minzoom</c>, <c>maxzoom</c>, <c>scheme</c>,
-    /// <c>bounds</c>); every other TileJSON field is retained verbatim on <see cref="Raw"/> for later
-    /// stages (attribution, vector_layers, center, …).
+    /// <c>bounds</c>); every other TileJSON field (attribution, vector_layers, center, …) is retained
+    /// verbatim on <see cref="Raw"/>.
     ///
     /// The <c>SourceDefinition</c> resolution that fills a source from this document is
-    /// <see cref="SourceResolver"/>. <b>Fetching</b> the document (file://, http) is deliberately out of
-    /// scope here (S83b) — this is the engine-free parse step.
+    /// <see cref="SourceResolver"/>. <b>Fetching</b> the document (file://, http) is out of
+    /// scope here — this is the engine-free parse step.
     /// </summary>
     public sealed class TileJson
     {

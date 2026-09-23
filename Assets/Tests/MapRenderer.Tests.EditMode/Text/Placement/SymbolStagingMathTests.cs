@@ -44,8 +44,8 @@ namespace MapRenderer.Tests.Text.Placement
     /// <summary>
     /// <see cref="BillboardMath.BuildWorldQuad"/> golden
     /// (element-by-element corners/UVs, up to the Y-negation) + AnchorLocal/Tangent/AlignFlags carry-
-    /// through. The screen-space <c>BuildQuad</c> this class used to test is retired with the dead
-    /// screen render path it built for; <c>BuildWorldQuad</c> is its only surviving production consumer.
+    /// through. <c>BuildWorldQuad</c> is the only production consumer; the screen-space <c>BuildQuad</c>
+    /// and the render path it built for are both gone.
     /// </summary>
     [TestFixture]
     public class BillboardMathTests
@@ -143,7 +143,7 @@ namespace MapRenderer.Tests.Text.Placement
         public void BuildWorldQuad_ColorRgb_CarriesVerbatim_NoGammaConversion()
         {
             SymbolQuad quad = MakeQuad();
-            var colorRgb = new float3(0.73f, 0.11f, 0.42f); // deliberately non-trivial — a double-convert would move this
+            var colorRgb = new float3(0.73f, 0.11f, 0.42f); // non-trivial — a double-convert would move this
 
             BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in colorRgb, 0f, in float2.zero,
                 in ZeroFloat3, in ZeroFloat3, 0f,
@@ -184,7 +184,7 @@ namespace MapRenderer.Tests.Text.Placement
         {
             SymbolQuad quad = MakeQuad();
             var tangentLocal = new float3(0.6f, 0.0f, 0.8f); // a unit-ish along-line direction
-            var surfaceUp = new float3(0.0f, 0.6f, 0.8f);    // deliberately distinct from tangentLocal
+            var surfaceUp = new float3(0.0f, 0.6f, 0.8f);    // distinct from tangentLocal
             const float alongLineAlignFlags = 2f; // D-I bit1
 
             BillboardMath.BuildWorldQuad(in quad, in ZeroFloat3, TextQuadLayout.OneEm, in ZeroFloat3, 0f, in float2.zero,
@@ -349,7 +349,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// <summary>
     /// The globe far-side horizon cull — a polar-plane test, EXACT for on-surface points (globe symbol
     /// anchors). Teeth: near-side kept / far-side hidden, cross-checked against an INDEPENDENT ray-sphere
-    /// oracle (deliberately NOT the horizon half-angle test — that is algebraically identical to
+    /// oracle (NOT the horizon half-angle test — that is algebraically identical to
     /// <c>dot &lt; radius²</c> and would be a tautological check); the planar no-op (<c>globeRadiusSq &lt; 0</c>)
     /// is unconditional, no state read.
     /// </summary>
@@ -420,7 +420,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         // Shared globe rig: look-at at the equator/prime-meridian, camera straight overhead at 2R altitude
         // (horizon half-angle = acos(R/(R+altitude)) = acos(1/3) ≈ 70.53°) — heading/tilt = 0 keeps `pos` on
-        // the +Y axis, matching TryGetHorizonOccluder's (0,-R,0) centre by construction.
+        // the +Y axis, matching TryGetHorizonOccluder's (0,-R,0) centre.
         private static void BuildOverheadRig(out IProjection proj, out double3 sceneOriginRender,
             out float3x3 rebase, out double3 camRelative, out double3 centreRelative, out double radiusSq)
         {
@@ -925,7 +925,7 @@ namespace MapRenderer.Tests.Text.Placement
 
     /// <summary>
     /// #4 — the alignment→billboard-rotation mapping. The mode selection (Map → bearing; Viewport/Auto → 0)
-    /// is fully testable here; these assert the selection and the ×sign relation, and deliberately do NOT
+    /// is fully testable here; these assert the selection and the ×sign relation, and do NOT
     /// pin SymbolBearing.MapAlignedSign itself — multiplying by the constant under test can only restate it.
     /// The sign is pinned where a sign can actually be observed, by the rendered tooth
     /// SymbolIconRenderSnapshotTests.MapAlignedPointIcon_TurnsWithTheMap_UnderAnActiveBearing; every case
@@ -1248,8 +1248,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsFalse(SymbolPairing.TryGetRider(symbols, 0, out _));
         }
 
-        // --- ShapedSymbol overload (the live production carrier that Bake resolves; the overload over the
-        //     pre-migration per-symbol managed carrier was retired along with that carrier) ---
+        // --- ShapedSymbol overload: the live production carrier that Bake resolves ---
 
         [Test]
         public void ShapedSymbol_IntactPair_Paired()
@@ -1811,7 +1810,7 @@ namespace MapRenderer.Tests.Text.Placement
             var worldPath = new[] { double3.zero, new double3(dir.x, 0, dir.y) * 600.0 };
             var worldUpPath = new float3[worldPath.Length]; // unread by this rotation/atlas tooth
 
-            // A deliberately WIDE cell (24 x 12) so the rotated box is measurably wider in x than the cell.
+            // A WIDE cell (24 x 12) so the rotated box is measurably wider in x than the cell.
             var iconCell = new SymbolQuad
             {
                 TopLeft = new float2(-12f, 6f), BottomRight = new float2(12f, -6f),
@@ -2178,16 +2177,15 @@ namespace MapRenderer.Tests.Text.Placement
             //   BuildWorldQuad rotates the corners in the quad's y-UP LOCAL frame and then negates Y, which
             //   puts Offset in a y-DOWN SCREEN frame. That negation is the frame flip, not a sense
             //   correction: read through a mirrored axis a rotation reverses, so a positive angle handed to
-            //   BuildWorldQuad appears COUNTER-clockwise on screen. This test previously asserted the
-            //   opposite (Offset y-up, so the negation supplied the clockwise sense) — two claims that
-            //   cannot both hold, and the pair of them mechanised the very convention they assumed. What
-            //   settled it is a RENDERED tooth, not a derivation:
+            //   BuildWorldQuad appears COUNTER-clockwise on screen. Derivation alone is ambiguous here —
+            //   asserting Offset is y-up would let the negation appear to supply the clockwise sense instead,
+            //   a self-consistent but wrong reading. What settles it is a RENDERED tooth, not a derivation:
             //   SymbolIconRenderSnapshotTests.AlongLineIcon_IconRotateSign_TurnsTheIconClockwiseOnScreen.
             //
             // So a CLOCKWISE-on-screen quarter-turn is +90 deg in Offset components: (x, y) -> (-y, x).
             // That is what a +90 icon-rotate must produce, since MapLibre defines icon-rotate as clockwise.
             // Drop SymbolBearing.IconRotationRadians' negation and this lands at (y, -x) instead — which is
-            // precisely the shipped defect, and which the 180 deg case in (e) could never see.
+            // the shipped defect, and which the 180 deg case in (e) could never see.
             SymbolQuad cell = Cell(6f);
             var zeroAnchor = new float3(0f, 0f, 0f);
             var white = new float3(1f, 1f, 1f);
@@ -2215,7 +2213,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(unrotatedTopRight.Uv.x, rotatedTopRight.Uv.x, Tol, "UVs never rotate with the corners");
             Assert.AreEqual(unrotatedTopRight.Uv.y, rotatedTopRight.Uv.y, Tol);
 
-            // (e) 180 deg negates every corner offset exactly (the liberty `_opposite` case). Deliberately
+            // (e) 180 deg negates every corner offset exactly (the liberty `_opposite` case). This case is
             // sign-BLIND — R(pi) == -I is its own inverse — which is why (d) carries the sign coverage.
             PointStageInput flipInput = RotatedIconInput(math.PI, AlignmentMode.Viewport);
             var pFlip = Pools.New();
@@ -2584,16 +2582,13 @@ namespace MapRenderer.Tests.Text.Placement
     /// <see cref="SymbolTileCoverageFilter.ClassifyActive"/> — the per-block tile-coverage classifier that WRITES
     /// a per-record Keep / Fade / Drop decision (a tile that WAS on screen fades out instead of popping) without
     /// compacting the record list. Real <see cref="WebMercatorProjection"/> + a diagonal viewProj scaled by
-    /// <see cref="WebMercator.WorldExtent"/> so a z=0 tile (spans the WHOLE Mercator square by construction)
-    /// projects to ~full-viewport NDC (coverage ~1.0, always kept) and a deep-zoom tile at the same origin
-    /// projects to a vanishingly small NDC quad (coverage ~1e-12, always below <see cref="MinCoverage"/>) — no
-    /// exact-area arithmetic needed, just a robust big/tiny contrast.
+    /// <see cref="WebMercator.WorldExtent"/> so a z=0 tile (spans the WHOLE Mercator square) projects to
+    /// ~full-viewport NDC (coverage ~1.0, always kept) and a deep-zoom tile at the same origin projects to a
+    /// vanishingly small NDC quad (coverage ~1e-12, always below <see cref="MinCoverage"/>) — no exact-area
+    /// arithmetic needed, just a robust big/tiny contrast.
     ///
-    /// <para>The retired compaction sibling <c>FilterActive(List&lt;…&gt;,…)</c> (over the pre-migration
-    /// per-symbol managed carrier) — and its independent per-symbol coverage oracle — was deleted along with that
-    /// carrier; these direct
-    /// <c>ClassifyActive</c> assertions (over hand-built per-block tile keys, the shape the subsystem feeds) are
-    /// now the guard for the classifier.</para>
+    /// <para>These direct <c>ClassifyActive</c> assertions (over hand-built per-block tile keys, the shape
+    /// the subsystem feeds) are the guard for the classifier.</para>
     /// </summary>
     [TestFixture]
     public class SymbolTileCoverageFilterTests
@@ -2612,7 +2607,7 @@ namespace MapRenderer.Tests.Text.Placement
             new float4(0, (float)(1.0 / WebMercator.WorldExtent), 0, 0),
             new float4(0, 0, 0, 1));
 
-        // z=0's single tile spans the WHOLE Mercator square (±WorldExtent on both axes, by construction of
+        // z=0's single tile spans the WHOLE Mercator square (±WorldExtent on both axes, set by
         // MaxLatitude) → ~full-viewport coverage.
         private static readonly long BigTileKey = SymbolTileKey.Pack(new TileId { Z = 0, X = 0, Y = 0 });
 

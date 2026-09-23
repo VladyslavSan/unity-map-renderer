@@ -74,8 +74,8 @@ namespace MapRenderer.Tests.Visual
         private static readonly Color BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
         private static readonly Color32 Bg32 = new Color32(26, 28, 38, 255);
 
-        // Opaque black — what a fill-pattern layer's fill-color defaults to, and the colour that used to
-        // paint these regions. Baking it here is what makes the tooth faithful rather than modelled.
+        // Opaque black — what a fill-pattern layer's fill-color defaults to, and the colour a renderer
+        // that never consults the pattern paints these regions. Baking it here is what makes the tooth faithful rather than modelled.
         private const string OpaqueBlack = "[\"rgba\",0,0,0,1]";
 
         /// <summary>Any zoom works — these teeth assert colour, not size — but it must be a real one so the
@@ -548,7 +548,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>The world span <c>FillSceneHelper</c> fits the fixture mesh into (its
-        /// <c>DefaultViewSize</c>), used to derive a period that yields many seams on screen.</summary>
+        /// <c>DefaultViewSize</c>), the basis for a period that yields many seams on screen.</summary>
         private const double FillSceneHelperWorldSpan = 100.0;
 
         private static (GameObject go, Camera camera) BuildCamera()
@@ -1348,7 +1348,7 @@ namespace MapRenderer.Tests.Visual
                 "derivative there is exactly 0, so this is the 1e-6 clamp failing to saturate — the " +
                 "outward-band mechanism needs a different interior encoding.");
 
-            // …and the ramp must actually exist, or the interior verdict above is vacuous. Deliberately
+            // …and the ramp must actually exist, or the interior verdict above is vacuous. This tooth is
             // NOT "coverage is 0 beyond the geometry": that holds trivially when nothing is drawn there and
             // would pass a shader returning 1 for every fragment it does run. A pixel strictly between 0
             // and 1 can only come from a working ramp.
@@ -1697,7 +1697,7 @@ namespace MapRenderer.Tests.Visual
         /// <list type="number">
         /// <item><b>Why <see cref="FillBandJob.MiterLimit"/> + 1, not 1.</b> The band is one device pixel
         /// measured PERPENDICULAR to an edge, and the join factor rides in the band vector's magnitude
-        /// precisely to hold that through a corner — so at a sharp coastline spike the outer vertex sits up
+        /// to hold that through a corner — so at a sharp coastline spike the outer vertex sits up
         /// to <c>MiterLimit</c> px along the bisector, by the same design
         /// <c>FillBandJob</c>'s <c>AMiterKeepsThePerpendicularWidthThroughARightAngle</c> asserts. A bound
         /// below that contradicts a tooth of this same feature. The <c>+ 1</c> is the rasterised pixel the
@@ -1738,7 +1738,7 @@ namespace MapRenderer.Tests.Visual
         /// What the bound cannot discriminate is sub-pixel geometry, which is a property of the oracle and
         /// is written down here rather than left as an unexplained residual.</para>
         ///
-        /// <para><b>Two behaviours this deliberately passes, because they are the contract.</b> A band vertex
+        /// <para><b>Two behaviours this passes, because they are the contract.</b> A band vertex
         /// up to <see cref="FillBandJob.MiterLimit"/> px out at a sharp corner, with the perpendicular width
         /// still one pixel — that is what the miter is FOR. And band ink over a feature the hard rasterizer
         /// dropped entirely: an island narrower than a pixel renders as nothing band-free and is painted
@@ -1746,7 +1746,7 @@ namespace MapRenderer.Tests.Visual
         /// away). Neither is a defect to suppress; suppressing either would change what the feature
         /// promises.</para>
         ///
-        /// <para><b>No interior-purity assertion here, deliberately.</b> The fixture is the countries layer,
+        /// <para><b>No interior-purity assertion here.</b> The fixture is the countries layer,
         /// whose polygons share internal edges, and a band along an intra-layer shared edge composites over
         /// its neighbour's interior BY DESIGN — the residual rim the mechanism accepts. An interior-purity
         /// check over this fixture would therefore red on correct behaviour. What covers that claim instead:
@@ -1962,7 +1962,7 @@ namespace MapRenderer.Tests.Visual
         private static readonly Color BgColor = new Color(0.10f, 0.11f, 0.15f, 1f);
         private static readonly Color32 Bg32  = new Color32(26, 28, 38, 255); // BgColor, byte-quantised
 
-        // Coverage thresholds — deliberately wide to be GPU/driver/Unity-tolerant.
+        // Coverage thresholds — wide to be GPU/driver/Unity-tolerant.
         private const float MinFill    = 0.10f; // at least 10% fill pixels
         private const float MaxFill    = 0.85f; // at most 85% fill pixels
         private const int   MinBuckets = 8;     // at least 8 of 64 grid cells hit

@@ -128,7 +128,7 @@ Shader "Map/Fill"
         // than painting fill-color's opaque-black default.
         [NoScaleOffset] _PatternMap ("Fill Pattern Sheet", 2D) = "white" {}
         _PatternRect ("Fill Pattern Rect (xy=px origin, zw=px size)", Vector) = (0, 0, 0, 0)
-        _PatternScale ("Fill Pattern Repeats Per Tile", Vector) = (1, 1, 0, 0)
+        _PatternScale ("Fill Pattern Repeats Per World Unit", Vector) = (1, 1, 0, 0)
     }
 
     SubShader

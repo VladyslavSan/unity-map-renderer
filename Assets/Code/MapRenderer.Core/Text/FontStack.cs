@@ -17,12 +17,10 @@ namespace MapRenderer.Core.Text
         public IReadOnlyList<string> Names { get; init; }
 
         /// <summary>
-        /// The MapLibre glyph-PBF <c>{fontstack}</c> request token: the ordered font names joined with
-        /// <c>", "</c> (comma + space) — confirmed against the committed glyph-PBF fixtures, whose
-        /// decoded multi-font <see cref="FontStackGlyphs.Name"/> uses this exact join (e.g.
-        /// "Noto Sans Regular, Noto Naskh Arabic Regular, ..."). Not URL-encoded — that is the fetch
-        /// layer's job (deferred to the Unity <c>GlyphManager</c>). Computed on demand, not an
-        /// <c>init</c> property, so a <c>Names</c>-only object initializer still constructs it.
+        /// The MapLibre glyph-PBF <c>{fontstack}</c> request token: the ordered font names joined with <c>", "</c>,
+        /// the same join as the committed fixtures' decoded multi-font <see cref="FontStackGlyphs.Name"/>. Not
+        /// URL-encoded; the fetch layer (<c>UnityWebRequestGlyphSource</c>) encodes. Computed on demand, not an
+        /// <c>init</c> property, so a <c>Names</c>-only object initializer still yields it.
         /// </summary>
         public string RequestToken => BuildRequestToken(Names);
 

@@ -11,7 +11,7 @@
 //   TileGeometryBuffersOwnershipTests       — the MVT decode/materialize seam's native buffer ownership.
 //   SymbolExtractorStructureTests           — SymbolFeatureExtractor mints/disposes exactly the buffers it owns.
 //   StyledLineBuilderStructureTests         — the line builder never frees geometry it only borrows.
-//   TileProcessingStructureTests            — TileManager.KickMeshBuild no longer decodes/dispatches directly.
+//   TileProcessingStructureTests            — TileManager.KickMeshBuild does not decode/dispatch directly.
 //   FillMeshGraphStructureTests             — FillMeshGraph's source shape: no Complete/stale .AsArray()/.Run/IWorkScheduler.
 //   FillMeshPipelineRetirementFenceTests    — retired fill-pipeline symbols never regrow a caller.
 //   WallChainCallerFenceTests               — the wall-job chain cannot re-inline into the extrusion prologue.
@@ -455,7 +455,7 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>2a: the other end of the ownership move above. <c>MvtDecoder.DecodeLayer</c> flattens
         /// every feature's geometry command words directly off the wire into three
-        /// <c>Allocator.Persistent</c> native buffers and, since they are no longer handed off for the
+        /// <c>Allocator.Persistent</c> native buffers and, since they are not handed off for the
         /// materializer to free, must free each itself — exactly once, on EVERY exit path, including a
         /// thrown <c>ArgumentException</c> from a mismatched kind column AND a thrown
         /// <c>InvalidOperationException</c> from a malformed varint in either count/fill loop (both re-read
@@ -474,12 +474,12 @@ namespace MapRenderer.Tests.Structure
         /// "no IsCreated guard, Dispose() early-returns on default" idiom the geometry buffers already
         /// use.</para>
         ///
-        /// <para><b>Post-Stage-1 readability refactor: the two count-then-fill flattens moved into one
-        /// shared <c>FlattenFeatureColumn</c> helper, called twice.</b> The allocations this tooth used to
-        /// find directly in <c>DecodeLayer</c>'s body (<c>new NativeArray&lt;int&gt;(featCount</c>) now live
+        /// <para><b>The two count-then-fill flattens live in one
+        /// shared <c>FlattenFeatureColumn</c> helper, called twice.</b> The allocations this tooth pins
+        /// (<c>new NativeArray&lt;int&gt;(featCount</c>) live
         /// in the HELPER, not the caller — so "an allocation made before <c>DecodeLayer</c>'s <c>try</c>
-        /// leaks" is no longer provable by finding <c>try {</c> before an allocation token in
-        /// <c>DecodeLayer</c>'s own body; that token isn't there anymore. The guard is re-expressed across
+        /// leaks" is not provable by finding <c>try {</c> before an allocation token in
+        /// <c>DecodeLayer</c>'s own body; that token is not there. The guard is re-expressed across
         /// BOTH ends of the call, and is NOT weaker — each half closes a distinct way the leak-safety
         /// contract could break:
         /// <list type="bullet">
@@ -723,7 +723,7 @@ namespace MapRenderer.Tests.Structure
     /// is off-limits to it. The behavioural half is impossible to write here (symbol never produces triangles),
     /// which is exactly why the fence is structural.</para>
     ///
-    /// <para><b>Ownership is INVERTED.</b> Waist 1 no longer <i>transfers</i> the buffer to
+    /// <para><b>Ownership is INVERTED.</b> Waist 1 does not <i>transfer</i> the buffer to
     /// <c>Extract</c> — <c>Extract</c> <b>BORROWS</b> it from the worker pass's <c>TileGeometryStore</c>,
     /// which lends the same instance to every symbol layer naming that source-layer and frees it at the end
     /// of the pass. So <c>Extract</c> must mint <b>zero</b> buffers and dispose <b>zero</b>. Freeing a
@@ -794,7 +794,7 @@ namespace MapRenderer.Tests.Structure
                 "corruption). This tooth is structural to fail on the offending LINE, not because the " +
                 "behavioural signal is missing.");
 
-            // The three store clauses that used to sit here are RETIRED WITH THEIR SUBJECT, not
+            // The three store clauses are RETIRED WITH THEIR SUBJECT, not
             // dropped to make the file pass. They pinned (a) that Extract never disposes the caller's store,
             // (b) that it builds exactly one private fallback store, and (c) that the fallback is hoisted
             // above the try. There is no store: geometry belongs to the layer, so there is no borrowed
@@ -995,7 +995,7 @@ namespace MapRenderer.Tests.Structure
     /// the type would evade this file, and a shortcut that scheduled the job on a fixture whose geometry
     /// happens to survive would evade the behavioural one.</para>
     ///
-    /// <para><b>Ownership is INVERTED.</b> The buffer is no longer transferred to the line builder —
+    /// <para><b>Ownership is INVERTED.</b> The buffer is not transferred to the line builder —
     /// it is <b>BORROWED</b> from the pass-scoped <c>TileGeometryStore</c>, which lends the same instance to
     /// every style layer naming that source-layer. The builder must therefore mint <b>zero</b> buffers and
     /// dispose <b>zero</b>. A consumer that freed a borrowed buffer would free geometry its sibling layers are
@@ -1063,7 +1063,7 @@ namespace MapRenderer.Tests.Structure
         /// Vestige sweep (ordinal 7): re-founded file-wide. The retired synchronous <c>WriteMeshData</c> was
         /// this tooth's whole subject — its per-ring loop was the only place a mint/dispose could have crept
         /// back in. <c>WriteMeshData</c> moved to the test assembly (zero production callers), so extracting
-        /// its body is no longer meaningful; the fence now scans BOTH partial files that make up
+        /// its body is not meaningful; the fence now scans BOTH partial files that make up
         /// <c>StyledLineTileBuilder</c> (it is declared <c>partial</c> across
         /// <c>StyledLineTileBuilder.cs</c> and <c>StyledLineTileBuilder.WriteJob.cs</c>), comments stripped.
         /// This is STRICTLY STRONGER than the method-body version: a mint or a <c>geometry.Dispose()</c>
@@ -1076,7 +1076,7 @@ namespace MapRenderer.Tests.Structure
 
             // Non-vacuity anchors, re-pointed from the retired method-body extraction: a wrong or gutted
             // scan would still need to explain away BOTH of these, present across the two files today.
-            // LineMeshGraph.Schedule is deliberately NOT an anchor here — precondition 13 measured its one
+            // LineMeshGraph.Schedule is NOT an anchor here — precondition 13 measured its one
             // occurrence to be INSIDE the method that moved out of production, so keeping it would red this
             // fence immediately against otherwise-correct code.
             Assert.GreaterOrEqual(CountOccurrences(body, "BuildLayerInput("), 1,
@@ -1115,7 +1115,7 @@ namespace MapRenderer.Tests.Structure
 
         // WriteMeshData_StagesRibbonInNativeScratch_
         // NotManagedLists is RETIRED here, not "made to pass". Its subject was the cross-ring staging
-        // accumulators (NativeList<LinePositionNormal>/<LineWidthColor>/<Vector2>) that used to live INSIDE
+        // accumulators (NativeList<LinePositionNormal>/<LineWidthColor>/<Vector2>) INSIDE
         // WriteMeshData's own per-ring loop, block-copied into the Mesh.MeshData at the end. B.5 deleted
         // that loop: the ribbon is now built by RibbonBatchJob (MapRenderer.Jobs/LineMeshGraph.cs) and
         // written straight into the Mesh.MeshData by LineStreamWriteJob — there is no cross-ring staging
@@ -1187,13 +1187,13 @@ namespace MapRenderer.Tests.Structure
 
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // TileProcessingStructureTests — TileManager.KickMeshBuild no longer decodes/dispatches directly
+    // TileProcessingStructureTests — TileManager.KickMeshBuild does not decode/dispatch directly
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Falsifiable acceptance tooth: a
-    /// RED-verifiable structural pair proving <c>TileManager.KickMeshBuild</c> no longer decodes/dispatches
-    /// directly — the shared decode + fan-out now lives ONLY in
+    /// RED-verifiable structural pair proving <c>TileManager.KickMeshBuild</c> does not decode/dispatch
+    /// directly — the shared decode + fan-out lives ONLY in
     /// <see cref="MapRenderer.Unity.Rendering.Tile.Processing.TileLayerProcessorRunner"/>.
     ///
     /// Against the pre-rewire source this test FAILS on both forbidden call forms (a direct
@@ -1209,14 +1209,14 @@ namespace MapRenderer.Tests.Structure
         // an already-decoded tile, so reading it is a property access, not a call.
         private const string DecodeReadForm = "decode.Value";
         // `.WriteInto(` retired with the seam arm — the token
-        // no longer names anything a compiling program can contain, so the clause it fenced would be
+        // does not name anything a compiling program can contain, so the clause it fenced would be
         // unfalsifiable. Swapped, not deleted (first swap): `WriteMeshData(` became the direct-mesh-write
         // entry point a regression would now reach for, so fencing it continued to guard the SAME property
         // — KickMeshBuild delegates the mesh write entirely to the runner→graph pipeline, never calling a
         // builder's write method itself.
         //
         // `WriteMeshData(` was later retired for real — the synchronous public method moved to the test
-        // assembly with zero production callers, so the token can no longer appear in any compiling
+        // assembly with zero production callers, so the token cannot appear in any compiling
         // PRODUCTION program and the clause it fenced would go unfalsifiable again. Swapped to
         // `TileBuilder.ScheduleWrite(` — the entry point a regression would now reach for.
         //
@@ -1293,15 +1293,15 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>The primary structural delegation tooth (RED-verified
-        /// against the previous <c>SymbolSubsystem</c>): the subsystem no longer decodes, extracts, or
-        /// shapes symbols itself — that machinery moved into the processor contract. Against the un-rewired
+        /// against the previous <c>SymbolSubsystem</c>): the subsystem does not decode, extract, or
+        /// shape symbols itself — that machinery lives in the processor contract. Against the un-rewired
         /// source (decode at <c>BuildTileAsync</c>'s old <c>:324</c>, <c>ExtractLayers</c> at <c>:325</c>,
         /// <c>ShapeAsync</c> at <c>:333</c>, no runner call) this test FAILS on all four forms — adding the
         /// interface/processor as an unused façade while <c>BuildTileAsync</c> keeps its inline decode/
         /// extract/shape (the "rename" non-implementation) cannot pass.
         /// <para>Glyph-fetch hoist: <c>ShapeAsync</c> was renamed to the synchronous <c>Shape</c>, so the
-        /// call-form assertion checks BOTH <c>".ShapeAsync("</c> (must stay dead — the identifier no longer
-        /// exists) AND <c>"_builder.Shape("</c> (must also be absent — the shape loop still runs entirely
+        /// call-form assertion checks BOTH <c>".ShapeAsync("</c> (must stay dead — the identifier does not
+        /// exist) AND <c>"_builder.Shape("</c> (must also be absent — the shape loop still runs entirely
         /// inside <c>TileSymbolLayerProcessor.CompleteOnMain</c>, never called directly by the subsystem).
         /// Anchored on the concrete call form, not a bare <c>".Shape("</c> — the bare form would also ban the
         /// identifier from appearing in PROSE (a comment or XML doc explaining why it is not called), which
@@ -1383,12 +1383,12 @@ namespace MapRenderer.Tests.Structure
         /// <summary>The positive half of the sole-decode-site proof: the ONE production
         /// <c>MvtDecoder.Decode(</c> call site lives in
         /// <c>Tiles/ITileDecoder.cs</c> (<c>MvtTileDecoder.Decode</c>) and nowhere else — and
-        /// <c>MapRenderer.Core</c>, which used to host it, now decodes <b>nowhere</b>. The positive count
+        /// <c>MapRenderer.Core</c> decodes <b>nowhere</b>. The positive count
         /// (not just a zero-elsewhere scan) proves the decode actually landed there, not merely that the
         /// assemblies it left went quiet. Widening this scan to <c>Assets/Code</c> would sweep the TEST
         /// assembly too, where <c>DecodeTests</c>/<c>MvtPropertyDecodeTests</c> legitimately call
         /// <c>MvtDecoder.Decode(</c> for fixture setup — so the per-assembly assertions (this one +
-        /// <see cref="MapRendererUnity_DecodesMvtNowhere"/>) are deliberately narrower than one combined
+        /// <see cref="MapRendererUnity_DecodesMvtNowhere"/>) are narrower than one combined
         /// scan. RED on both clauses before the move: the file lived under Core, so the Jobs count was 0 and the Core
         /// scan found it.</summary>
         [Test]
@@ -1436,28 +1436,28 @@ namespace MapRenderer.Tests.Structure
 
             Assert.IsEmpty(coreOffenders,
                 $"no file under MapRenderer.Core may call '{DecodeCallForm}' — the whole tile-" +
-                "decode seam moved out of Core (ARCHITECTURE.md §2: the product is Unity + Jobs; Core is legacy, " +
-                $"not a destination for new code). Found it in: {string.Join(", ", coreOffenders)}");
+                "decode seam moved out of Core (ARCHITECTURE.md § \"Module boundaries\": the product is Unity + Jobs; " +
+                $"Core is legacy, not a destination for new code). Found it in: {string.Join(", ", coreOffenders)}");
         }
 
         /// <summary>WriteInto-path neutralization, structural. The
         /// fill/line/symbol fan-out — from feature selection through mesh/symbol build — references NO MVT
         /// carrier type (<c>MvtTile</c>/<c>MvtFeature</c>/<c>MvtLayer</c>/<c>MvtDecoder</c>) by name; only the
         /// neutral <c>IDecodedTile</c>/<c>ITileLayer</c>/<c>IFeature</c>/<c>ITileDecoder</c> surface.
-        /// Every one of these 15 files used to name an MVT carrier type. The set is
+        /// Each of these 15 files would otherwise name an MVT carrier type. The set is
         /// still 15 files, re-derived not re-asserted — the symbol extractor moved from
         /// <c>MapRenderer.Core/Style/Symbol/</c> to <c>MapRenderer.Unity/Text/</c>, and
         /// <c>FeatureSelector</c> and <c>SourceLayerResolver</c> from <c>MapRenderer.Core</c> to
         /// <c>MapRenderer.Jobs/Tiles/</c>; none was added or removed by either.
         ///
-        /// <para><b>Anti-vacuity, REPLACED.</b> The clause used to require the bare substring
-        /// <c>MvtGeometry</c> in each codec file's RAW text. Both halves broke: a rename made
-        /// <c>new MvtGeometryMaterializer(</c> satisfy it by substring on the line file, and the count included
-        /// comments, so removing the last real <c>MvtGeometry.Decode</c> call left the symbol file
-        /// satisfied by an XML <c>see cref</c>. It could no longer detect a gutted file — and it could not
-        /// merely be tightened, because its premise (<i>these files still decode geometry</i>) is expiring by
-        /// design as consumers move onto the shared buffer: a word-boundary
-        /// <c>\bMvtGeometry\b</c> would go RED on the line file for a legitimate reason.
+        /// <para><b>Anti-vacuity, REPLACED.</b> A clause requiring the bare substring
+        /// <c>MvtGeometry</c> in each codec file's RAW text has two failure modes: a rename makes
+        /// <c>new MvtGeometryMaterializer(</c> satisfy it by substring on the line file, and counting
+        /// comments lets an XML <c>see cref</c> satisfy it on the symbol file even after the last real
+        /// <c>MvtGeometry.Decode</c> call is gone — so it cannot detect a gutted file. Tightening it to a
+        /// word-boundary <c>\bMvtGeometry\b</c> does not fix this either, because its premise (<i>these
+        /// files still decode geometry</i>) is expiring by design as consumers move onto the shared
+        /// buffer: that form would go RED on the line file for a legitimate reason.
         /// It is therefore RE-POINTED at what is still true — a per-file REQUIRED-IDENTIFIER SET naming the
         /// geometry mechanism each file actually uses (matched comment-stripped, with word boundaries, so
         /// neither prose nor a longer identifier containing the token can satisfy it) plus the explicit
@@ -1489,7 +1489,7 @@ namespace MapRenderer.Tests.Structure
                 (jobsRoot,  Path.Combine("Tiles", "SourceLayerResolver.cs")),
                 (unityRoot, Path.Combine("Text", "SymbolFeatureExtractor.cs")),
             };
-            Assert.AreEqual(15, scanned.Length, "the F-1 file set is pinned at 15 files (plan §E-13).");
+            Assert.AreEqual(15, scanned.Length, "the F-1 file set is pinned at 15 files.");
 
             string[] mvtCarrierTokens = { "MvtTile", "MvtFeature", "MvtLayer", "MvtDecoder" };
             var offenders = new System.Collections.Generic.List<string>();
@@ -1509,14 +1509,14 @@ namespace MapRenderer.Tests.Structure
                 "MvtLayer/MvtDecoder) — only the neutral IDecodedTile/ITileLayer/IFeature/ITileDecoder " +
                 $"surface. Offenders: {string.Join(", ", offenders)}");
 
-            // Anti-vacuity — REPLACED; see the XML doc above for why the previous
-            // clause could no longer detect a gutted file. Each geometry-obtaining file must name every
+            // Anti-vacuity — REPLACED; see the XML doc above for why a substring
+            // clause cannot detect a gutted file. Each geometry-obtaining file must name every
             // identifier of the mechanism it actually uses today, matched on comment-stripped text with word
             // boundaries.
             (string relativePath, string[] required)[] mechanisms =
             {
                 // Both files stopped minting and now BORROW the source-layer buffer, so
-                // "MvtGeometryMaterializer" is no longer an identifier either of them uses — it was REPLACED
+                // "MvtGeometryMaterializer" is not an identifier either of them uses — it was REPLACED
                 // (not dropped: a required-set with entries removed is a disarmed test) by the identifiers of
                 // the mechanism they use instead. The store is gone too,
                 // so symbol's `GetOrMaterialize` is replaced by `tileLayer` — the object it now reads the
@@ -1527,7 +1527,7 @@ namespace MapRenderer.Tests.Structure
                 // RingFeatureIdx/RingOffsets/RibbonJob
                 // retired from the LINE row (they survive only in prose comments now, stripped here) — the
                 // per-ring buffer read and the ribbon build moved into the Burst job graph
-                // (MapRenderer.Jobs/LineMeshGraph.cs), which StyledLineTileBuilder.cs no longer names; it
+                // (MapRenderer.Jobs/LineMeshGraph.cs), which StyledLineTileBuilder.cs does not name; it
                 // schedules and completes that graph instead. Replaced by identifiers of THAT mechanism —
                 // SymbolFeatureExtractor.cs is untouched by this stage and keeps its original set.
                 (Path.Combine("Rendering", "Meshing", "StyledLineTileBuilder.cs"),
@@ -1559,7 +1559,7 @@ namespace MapRenderer.Tests.Structure
                 }
 
                 // The other half of the same intent, made explicit: the retired managed decoder is GONE from
-                // both files — precisely what the old clause could no longer tell you.
+                // both files — what the old clause could not tell you.
                 Assert.IsFalse(ContainsIdentifier(code, "MvtGeometry"),
                     $"{relativePath} must NOT name the bare identifier 'MvtGeometry' — the managed reference " +
                     "decoder has zero production callers. Word-boundary matched, so a longer " +
@@ -1648,7 +1648,7 @@ namespace MapRenderer.Tests.Structure
                 int standaloneTileCacheCount = Regex.Matches(source, @"\bTileCache\b").Count;
                 Assert.AreEqual(0, standaloneTileCacheCount,
                     $"{name} must contain ZERO STANDALONE 'TileCache' occurrences (word-boundary match, " +
-                    "excluding the 19 kept 'PreparedTileCache' references, which plan §D leaves untouched) — the " +
+                    "excluding the 19 kept 'PreparedTileCache' references) — the " +
                     "byte-level LRU cache now lives inside MvtTileFeatureSource.");
             }
 
@@ -1679,8 +1679,8 @@ namespace MapRenderer.Tests.Structure
             Assert.AreEqual(10, properties.Length + methods.Length,
                 $"SourceRegistry's public surface must be EXACTLY 10 members — found " +
                 $"{properties.Length} properties ({string.Join(", ", properties.Select(p => p.Name))}) + " +
-                $"{methods.Length} methods ({string.Join(", ", methods.Select(m => m.Name))}). An eleventh " +
-                "member is a STOP-and-report finding (§6.1), not a tooth to widen.");
+                $"{methods.Length} methods ({string.Join(", ", methods.Select(m => m.Name))}). An eleventh member " +
+                "is a STOP-and-report finding (tile-pipeline-design.md § \"The source registry's narrow surface\"), not a tooth to widen.");
 
             // Matches SourcePipeline itself, an `out`/`ref` byref (`&`), an array, or any type nested inside
             // a generic (e.g. IReadOnlyList<SourcePipeline>) — not just a bare-name match, which a widened
@@ -1876,7 +1876,7 @@ namespace MapRenderer.Tests.Structure
         /// above it). A future refactor that legitimately moves a jump-containing block above the clears
         /// will red this tooth with nothing actually broken — check the jump's owning loop before assuming
         /// a regression.</para>
-        /// <para><b>Clause 2 is currently unreachable, RED-verified twice over, deliberately kept.</b> The
+        /// <para><b>Clause 2 is currently unreachable, RED-verified twice over, and kept.</b> The
         /// <c>hasBackground</c> loop's <c>break</c> always precedes <c>_sources.Rebuild</c>, so any clear
         /// moved after <c>Rebuild</c> trips clause 1 first — confirmed by injecting the ordering inversion
         /// on <c>_loaded.Clear()</c> and again, isolated, on <c>_desiredSet.Clear()</c>; both reds landed
@@ -1909,9 +1909,9 @@ namespace MapRenderer.Tests.Structure
                     $"TileManager.SetSources must call '{clearForm}' EXACTLY once.");
                 AssertUnconditionallyReachedOnce(body, Regex.Escape(clearForm),
                     $"'{clearForm}' in TileManager.SetSources",
-                    "a conditional clear can leave a slot-keyed entry alive across the registry rebuild — " +
-                    "the exact hazard §6.1 names. This clause, not the ordering below, is what actually " +
-                    "guards it.");
+                    "a conditional clear can leave a slot-keyed entry alive across the registry rebuild. " +
+                    "This clause, not the ordering below, " +
+                    "is what actually guards against that.");
                 lastClearIndex = Math.Max(lastClearIndex, body.IndexOf(clearForm, StringComparison.Ordinal));
             }
 
@@ -2059,9 +2059,9 @@ namespace MapRenderer.Tests.Structure
         /// <c>WorkScheduler.Schedule</c>, and both of its ownership-guard releases must sit in a <c>finally</c>
         /// rather than a trailing statement.
         ///
-        /// <para><b>What is NOT here any more, and why.</b> This tooth used to count
-        /// <c>DecodeRef.Dispose()</c> spellings and justify itself with "the ct-drop is unreachable from a
-        /// test". Both were wrong. A count cannot tell a release that runs from one that is guarded, nested
+        /// <para><b>What is NOT here, and why.</b> A count of
+        /// <c>DecodeRef.Dispose()</c> spellings, justified by "the ct-drop is unreachable from a
+        /// test", would be wrong on both counts: a count cannot tell a release that runs from one that is guarded, nested
         /// or jumped over, and the ct-drop IS reachable — reflecting the private CTS and cancelling WITHOUT
         /// draining produces exactly the interleaving a pool-vs-main race produces, which is what
         /// <c>SymbolParkedRedecodeTests.AParkedEntryCancelledWithoutADrain_…</c> now drives. The
@@ -2211,7 +2211,7 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>
         /// <c>KickMeshBuild</c> ACQUIRES its OWN reference in its
-        /// main-thread prologue — it no longer borrows the caller's and transfers it into the pool lambda —
+        /// main-thread prologue — it does not borrow the caller's and transfer it into the pool lambda —
         /// so it must release exactly the token it acquired, from that lambda's <c>finally</c>, and NEITHER
         /// caller may null the record's field around the call any more.
         ///
@@ -2373,7 +2373,8 @@ namespace MapRenderer.Tests.Structure
         /// <c>TileManager.RemoveAndTeardownRecord</c>, which drops the record from <c>_loaded</c> before
         /// calling this, and <c>DoDispose</c>, which does not. A throw mid-loop still abandons the records
         /// the loop never reached — that half stays open, in
-        /// `docs/per-layer-tile-processing-design.md` § "D1 recorded limitations".</para>
+        /// `docs/per-layer-tile-processing-design.md` § "Recorded limitations — two things no test can
+        /// observe".</para>
         ///
         /// <para><b>RED injection:</b> swap the two statements back to
         /// <c>lt.Decode?.Release(); lt.Decode = null;</c>.</para>
@@ -2402,7 +2403,7 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>Extracts the brace-balanced body (inclusive of the outer braces) of the method whose
         /// definition contains <paramref name="signatureAnchor"/>, by scanning forward from the first '{'
-        /// after the anchor and counting nesting depth. A simple, deliberately narrow tool for a
+        /// after the anchor and counting nesting depth. A simple, narrow tool for a
         /// call-form-narrow grep guard — not a C# parser.</summary>
         private static string ExtractMethodBody(string source, string signatureAnchor, string path)
         {
@@ -2445,8 +2446,8 @@ namespace MapRenderer.Tests.Structure
         /// <summary>The paren-balanced argument list of the call whose <c>(</c> is the first at or after
         /// <paramref name="searchFrom"/> — the same tool as <see cref="ExtractBlockAfter"/>, one bracket
         /// kind over. It exists so a clause about ONE call site is scoped to that call site instead of to
-        /// the whole enclosing method (arm 1 NIT 4: the token clause used to forbid
-        /// <c>cancellationToken:</c> anywhere in <c>PumpBuilds</c> and would have tripped on an unrelated
+        /// the whole enclosing method (arm 1 NIT 4: a token clause forbidding
+        /// <c>cancellationToken:</c> anywhere in <c>PumpBuilds</c> would trip on an unrelated
         /// future dispatch).</summary>
         private static string ExtractParenAfter(string source, int searchFrom, string path)
         {
@@ -2534,8 +2535,8 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary><see cref="StripLineComments"/> plus block comments — the anti-vacuity clause in
         /// <see cref="WriteIntoPath_ReferencesNoMvtCarrierTypes"/> must not be satisfiable by prose (the
-        /// finding: the old clause passed on an XML <c>see cref</c> after the real call was gone). Additive,
-        /// deliberately: <see cref="StripLineComments"/> is shared by five other assertions and is not
+        /// finding: the old clause passed on an XML <c>see cref</c> after the real call was gone). Additive:
+        /// <see cref="StripLineComments"/> is shared by five other assertions and is not
         /// modified. Measured at the time of writing: neither target file contains a block comment, so the
         /// block-comment half is defence against the NEXT instance rather than the current one — which is why
         /// it carries its own RED row rather than being assumed armed. Inherits
@@ -2629,7 +2630,7 @@ namespace MapRenderer.Tests.Structure
             // buffers.PerPolyOuterCount (a sizing-owned column) to a borrowed count. This literal pins that
             // source structurally — the only thing that reds on that regression.
             "Schedule(buffers.PerPolyOuterCount, EarcutPolygonBatch, gathered)",
-            // Retired two identifier pins that used to live here (a literal join call, then a literal
+            // Two identifier pins are retired (a literal join call, then a literal
             // `.Schedule(node3Handle)`/`Dispose(node7Handle)` local-name match): a pin on a LOCAL VARIABLE'S
             // spelling is the weakest form of the check it stood in for, and the only one that breaks on a
             // rename rather than a real regression. What each guarded is now covered behaviourally instead —
@@ -2695,7 +2696,7 @@ namespace MapRenderer.Tests.Structure
         /// file as "whatever it says today" — a pin that merely records the current count detects a LATER
         /// widening but blesses today's. EarcutBatchJob.cs's single <c>Buffers</c> field carries exactly one
         /// occurrence: red here means a written column was added to or removed from
-        /// <see cref="EarcutBatchJob"/> in a way that changed its field shape — update this deliberately,
+        /// <see cref="EarcutBatchJob"/> in a way that changed its field shape — update this with intent,
         /// never to whatever the file now says.</summary>
         private static readonly AttributeFenceException[] AttributeFenceAllowedFiles =
         {
@@ -2747,9 +2748,9 @@ namespace MapRenderer.Tests.Structure
                         if (exception.FileName == name && exception.Token == token) allowedCount = exception.ExpectedCount;
 
                     Assert.AreEqual(allowedCount, CountOccurrences(code, token),
-                        $"{name} must carry exactly {allowedCount} occurrence(s) of {token} — job-scheduling-" +
-                        "design.md §7 rule 2 confines it to the sanctioned (file, token, count) exceptions in " +
-                        "AttributeFenceAllowedFiles.");
+                        $"{name} must carry exactly {allowedCount} occurrence(s) of {token} — job-scheduling-design.md " +
+                        "§ \"Safety — making the Editor's check sufficient\" rule 2 confines it to the sanctioned " +
+                        "(file, token, count) exceptions in AttributeFenceAllowedFiles.");
                 }
             }
         }
@@ -2821,10 +2822,10 @@ namespace MapRenderer.Tests.Structure
             var expected = new List<string>(KnownSizingOwnedBuffersConsumers);
             expected.Sort();
             CollectionAssert.AreEqual(expected, consumers,
-                "the set of files declaring a TriangulationBuffers/RibbonBuffers field no longer " +
-                "matches KnownSizingOwnedBuffersConsumers — job-scheduling-design.md §7 rule 2 requires every " +
-                "node in this family to bound its own loop by a column the sizing job resizes, never a " +
-                "borrowed count; verify the new/removed file against that rule before updating this list.");
+                "the set of files declaring a TriangulationBuffers/RibbonBuffers field no longer matches " +
+                "KnownSizingOwnedBuffersConsumers — the bounding rule in job-scheduling-design.md § \"Safety — making the " +
+                "Editor's check sufficient\" requires every node in this family to bound its own loop by a column the sizing " +
+                "job resizes, never a borrowed count; verify the new/removed file against that rule before updating this list.");
         }
 
         private static string FillMeshGraphSource()
@@ -2869,8 +2870,8 @@ namespace MapRenderer.Tests.Structure
     ///
     /// Identifier-anchored (lessons-learned "a source-text fence must match the IDENTIFIER") — scans every
     /// <c>.cs</c> file under <c>MapRenderer.Jobs/</c> and <c>MapRenderer.Unity/Rendering/</c>, comments
-    /// stripped first so a HISTORICAL prose mention of a retired name (historical docs are full of them,
-    /// deliberately — "the synchronous entry point Run/RunTyped is retired with its callers X, Y") does not
+    /// stripped first so a HISTORICAL prose mention of a retired name (historical docs are full of them
+    /// — "the synchronous entry point Run/RunTyped is retired with its callers X, Y") does not
     /// fail the fence; only a real reference in CODE does.
     ///
     /// <para><c>GlobeFillSubdivideDispatch.Run</c>/<c>RunTyped</c> stay banned throughout even though the
@@ -2910,7 +2911,7 @@ namespace MapRenderer.Tests.Structure
         /// <c>ProjectionDispatch.Run</c>/<c>RunTyped</c>'s own re-retirement in the wall-job-graph stage —
         /// see the class doc) that STILL has no production caller, one pattern each — a call form where a
         /// bare identifier would false-positive on an unrelated member of the same name, a word-boundary bare
-        /// match otherwise. <c>Run\s*\(</c> deliberately does NOT match <c>RunTyped(</c>, hence the separate
+        /// match otherwise. <c>Run\s*\(</c> does NOT match <c>RunTyped(</c>, hence the separate
         /// <c>RunTyped</c> entries for both <c>GlobeFillSubdivideDispatch</c> and
         /// <c>ProjectionDispatch</c>.</summary>
         private static readonly (string Label, Regex Pattern)[] ForbiddenPatterns =
@@ -2964,7 +2965,7 @@ namespace MapRenderer.Tests.Structure
         }
 
         /// <summary>The retired synchronous <c>WriteMeshData</c> methods cannot grow back into the three
-        /// builder source files that used to declare them. Identifier-anchored, declaration-form
+        /// builder source files. Identifier-anchored, declaration-form
         /// (<c>\bWriteMeshData\s*[(&lt;]</c>) rather than the call-form patterns above — see the class doc's
         /// last paragraph for why: the risk is the method growing back with a different modifier or arity,
         /// which only the declaration form sees.</summary>
@@ -3001,7 +3002,7 @@ namespace MapRenderer.Tests.Structure
         /// <summary>Strips everything from <c>//</c> to end of line — the same narrow grep-guard idiom
         /// <c>TileGeometryBuffersOwnershipTests</c> uses. Also removes every <c>///</c> XML-doc line (a
         /// <c>///</c> line IS a <c>//</c> line syntactically, so this is the same pass): this repo's docs
-        /// deliberately keep past-tense prose naming these retired symbols as the reason they were retired,
+        /// keep past-tense prose naming these retired symbols as the reason they were retired,
         /// and that history is not what this fence exists to police.</summary>
         private static string StripLineComments(string text)
         {
@@ -3133,7 +3134,7 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>Strips everything from <c>//</c> to end of line, including <c>///</c> XML-doc lines — the
         /// same idiom <see cref="FillMeshPipelineRetirementFenceTests"/>'s own copy uses, for the same
-        /// reason: this repo's docs deliberately keep past-tense prose naming retired call shapes, and that
+        /// reason: this repo's docs keep past-tense prose naming retired call shapes, and that
         /// history is not what this fence exists to police.</summary>
         private static string StripLineComments(string text)
         {
@@ -3343,7 +3344,7 @@ namespace MapRenderer.Tests.Structure
 
         /// <summary>Strips everything from <c>//</c> to end of line, including <c>///</c> XML-doc lines — the
         /// same idiom <see cref="WallChainCallerFenceTests"/>'s own copy uses, for the same reason: this
-        /// repo's docs deliberately keep past-tense prose naming retired call shapes, and that history is not
+        /// repo's docs keep past-tense prose naming retired call shapes, and that history is not
         /// what this fence exists to police.</summary>
         private static string StripLineComments(string text)
         {
@@ -3367,7 +3368,7 @@ namespace MapRenderer.Tests.Structure
     /// Unlit mode's HARD CONSTRAINT, made falsifiable: <b>mesh preparation never branches on render
     /// mode.</b> One builder produces one per-layer vertex/mesh layout; the Lit and Unlit shader twins both
     /// consume it. That is what makes unlit a material-set setting rather than a parallel pipeline — and it
-    /// holds today only <i>by construction</i>, since nothing in the meshing path names
+    /// holds today only because nothing in the meshing path names
     /// <see cref="RenderMode"/> at all. This fixture is what notices if that stops being true.
     ///
     /// <para><b>The discriminator (fenced by LOCATION, and stated so a reader can tell an intentional
@@ -3381,7 +3382,7 @@ namespace MapRenderer.Tests.Structure
     /// <item><c>MapRenderer.Unity/Rendering/Tile</c> — the tile pipeline that drives them (build graph,
     /// layer processors, prepared-tile cache).</item>
     /// </list>
-    /// <para><c>MapRenderer.Core</c> is deliberately NOT listed: it is engine-free and its asmdef does not
+    /// <para><c>MapRenderer.Core</c> is NOT listed: it is engine-free and its asmdef does not
     /// reference <c>MapRenderer.Unity</c>, so it cannot name the enum even if someone tried —
     /// <c>CoreAssemblyBoundaryTests</c> already fences that direction. Everything OUTSIDE the fence
     /// (<c>Rendering/Materials</c>, <c>Rendering/Map</c>, <c>MapRenderer.App</c>) may name the mode freely;

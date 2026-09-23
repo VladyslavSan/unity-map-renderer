@@ -4,19 +4,17 @@ using MapRenderer.Core.Text.Sprites;
 namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
-    /// An <see cref="IRenderLayer"/> that paints from the style's sprite sheet — today <c>fill-pattern</c>,
-    /// later <c>line-pattern</c> and <c>background-pattern</c>, which resolve a sprite name the same way.
-    ///
-    /// <para><b>Why this exists as a seam rather than a constructor argument:</b> the sheet is fetched
-    /// asynchronously (it is one keyless request per style, owned by <c>SymbolSubsystem</c>), while
-    /// layer materials are built eagerly and synchronously inside <c>MapView.SetStyle</c>. So at
-    /// <c>TryCreate</c> time the sheet provably does not exist yet, and a pattern-bearing layer must be able
-    /// to start unresolved and be told later. <see cref="RenderLayerSet.SetSprites"/> is the push.</para>
-    ///
-    /// <para>Resolving late is cheap precisely because it is a pure material-uniform change: the fill mesh
-    /// already carries tile-normalized UVs in stream 1 (both the flat and the subdivided globe path), so no
-    /// tile is re-meshed and no restyle is triggered when the sheet lands. That claim is pinned by
-    /// <c>FillPatternResolveTests</c>.</para>
+    /// An <see cref="IRenderLayer"/> that paints from the style's sprite sheet — <c>fill-pattern</c>.
+    /// <c>line-pattern</c> and <c>background-pattern</c> are not implemented; they would resolve a sprite
+    /// name the same way.
+    /// A seam rather than a constructor argument because the sheet is fetched asynchronously (one keyless
+    /// request per style, owned by <c>SymbolSubsystem</c>) while layer materials build eagerly and
+    /// synchronously inside <c>MapView.SetStyle</c>: at <c>TryCreate</c> time the sheet provably does not
+    /// exist yet, so a pattern-bearing layer starts unresolved and is told later via
+    /// <see cref="RenderLayerSet.SetSprites"/>. Resolving late is cheap because it is a pure
+    /// material-uniform change — the fill mesh already carries world-unit pattern coordinates in stream 1
+    /// (flat and globe paths), so no tile is re-meshed and no restyle is triggered
+    /// (<c>FillPatternResolveTests</c>).
     /// </summary>
     internal interface ISpriteConsumerRenderLayer : IRenderLayer
     {

@@ -4,21 +4,10 @@ using Unity.Mathematics;
 namespace MapRenderer.Tests.TestSupport
 {
     /// <summary>
-    /// Shoelace (surveyor's formula) signed area for a ring of 2D points.
-    ///
-    /// Uses the standard cross-product shoelace:
-    ///   2A = Σ (x_i * y_{i+1} − x_{i+1} * y_i)
-    ///
-    /// Sign convention (standard math / right-handed 2D):
-    ///   Positive → CCW in a right-handed (Y-up) system.
-    ///   Negative → CW  in a right-handed (Y-up) system.
-    ///
-    /// In MVT tile space (Y-down / top-left origin), the sign is FLIPPED relative to Y-up:
-    ///   Positive → CW  on screen  (exterior rings in MVT spec).
-    ///   Negative → CCW on screen  (hole rings in MVT spec).
-    ///
-    /// This class returns the raw shoelace value; callers must interpret the sign for their
-    /// coordinate system.
+    /// Shoelace signed area for a ring of 2D points: 2A = Σ (x_i·y_{i+1} − x_{i+1}·y_i). Non-local
+    /// invariant: the sign means opposite things in the coordinate systems this repo uses — positive is
+    /// CCW in a right-handed Y-up system, but CW on screen in MVT's Y-down tile space (MVT exterior rings
+    /// are positive-shoelace). Returns the raw value; callers interpret the sign for their own space.
     /// </summary>
     public static class SignedArea
     {

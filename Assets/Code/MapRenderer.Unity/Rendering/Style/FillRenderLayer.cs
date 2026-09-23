@@ -41,8 +41,8 @@ namespace MapRenderer.Unity.Rendering.Style
         private Fill.LayoutProperties _layout;
         private readonly ZoomStyleApplier      _applier;
 
-        // The sprite's resolved rect + base repeat count. What reaches the shader is this run through
-        // Fill.FillPattern.EffectiveRepeats for the live zoom and the chosen sizing — see PushPatternScale.
+        // The sprite's resolved rect + logical size. What reaches the shader is this run through
+        // Fill.FillPattern.RepeatsPerWorldUnit for the live zoom and the chosen sizing — see PushPatternScale.
         private Fill.FillPattern.Resolution _pattern;
         private bool                        _patternResolved;
         private double                      _lastZoom;
@@ -77,7 +77,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// Builds a fill render layer from a parsed <see cref="Fill.StyleLayer"/>, applying the initial
         /// zoom's uniforms. Returns <c>null</c> when the material set is unconfigured (the
         /// <see cref="Materials.MaterialFactory"/> warns and returns a null material) — the caller skips
-        /// the layer, exactly as the old <c>StyledLayerSet.Build</c> did.
+        /// the layer: <see cref="RenderLayerSet.Build"/> records it as <c>LayerSkipReason.MaterialUnconfigured</c>.
         /// </summary>
         public static FillRenderLayer TryCreate(
             Fill.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)
@@ -153,7 +153,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <para>No tile enters this calculation. The mesh's stream 1 carries world units rather than a 0..1
         /// tile fraction (<c>StyledFillTileBuilder.PatternCoord</c>), so a tile's own zoom — which differs
         /// from the display zoom under overzoom and under mixed-zoom cover, and which a per-layer uniform
-        /// cannot see — no longer enters the pattern's size at all.</para>
+        /// cannot see — does not enter the pattern's size at all.</para>
         /// </summary>
         private void PushPatternScale()
         {
@@ -175,10 +175,10 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <c>fill-pattern</c> ignores the call entirely — its uniforms are already the solid-fill identity.
         ///
         /// <para>A pattern layer that cannot resolve (no sheet yet, or a name absent from the sheet) binds a
-        /// ZERO-AREA <c>_PatternRect</c>, which the shader reads as "clip". That is the whole fix for the
-        /// black regions: per the Style Spec such a layer is not painted, and in particular does NOT fall
-        /// back to <c>fill-color</c>, whose spec default is opaque black — which is what these layers used to
-        /// render as, since a <c>fill-pattern</c> layer characteristically declares no <c>fill-color</c>.</para>
+        /// ZERO-AREA <c>_PatternRect</c>, which the shader reads as "clip". Per the Style Spec such a layer is
+        /// not painted, and in particular does NOT fall back to <c>fill-color</c>, whose spec default is opaque
+        /// black — a <c>fill-pattern</c> layer characteristically declares no <c>fill-color</c> of its own, so a
+        /// fallback would paint it black.</para>
         /// </summary>
         public void SetSprites(SpriteAtlasView atlas, Texture2D texture)
         {

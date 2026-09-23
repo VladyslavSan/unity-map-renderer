@@ -20,7 +20,7 @@ namespace MapRenderer.Core.Json
     /// <summary>
     /// A small, dependency-free recursive-descent JSON parser (clean-room; mirrors the posture of
     /// <c>Mvt/ProtobufReader.cs</c> — own it rather than add an external Core dependency). Produces a
-    /// <see cref="JsonValue"/> DOM. It is deliberately tolerant of <em>structure</em> beyond what the
+    /// <see cref="JsonValue"/> DOM. It is tolerant of <em>structure</em> beyond what the
     /// style model types (it preserves every key); it is strict about JSON <em>syntax</em>: malformed
     /// input throws <see cref="JsonParseException"/>, and trailing non-whitespace after the root value
     /// is rejected.

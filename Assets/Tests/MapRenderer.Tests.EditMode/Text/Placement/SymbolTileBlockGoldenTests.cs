@@ -93,10 +93,9 @@ namespace MapRenderer.Tests.Text.Placement
             return quads;
         }
 
-        // Migration bridge note (TestSymbolTileBuffer migration): AddPointSlot/AddCurvedSlot mirror the field set
-        // MakePoint/MakeCurved used to carry on a hand-built per-symbol managed carrier, now appended straight into
-        // a SymbolTileBuffer via TestSymbolTileBuffer — see that type's default-value contract doc for why every
-        // omitted parameter below is byte-identical to the carrier it replaces.
+        // AddPointSlot/AddCurvedSlot mirror the field set MakePoint/MakeCurved append straight into
+        // a SymbolTileBuffer via TestSymbolTileBuffer — see that type's default-value contract doc for why
+        // every omitted parameter below is byte-identical to the default.
         private static void AddPointSlot(SymbolTileBuffer buffer, SymbolStringTable stringTable,
             int featureIndex, int materialIndex, string text, string icon, int quadCount,
             SymbolPairRole pairRole = SymbolPairRole.None, int pairId = 0)
@@ -371,7 +370,7 @@ namespace MapRenderer.Tests.Text.Placement
 
         /// <summary>Committed golden — EMPTY until the orchestrator's first gate run. This fixture's exact
         /// column digests cannot be hand-derived (glyph UVs, zoom-interpolated TextSizePx, projected
-        /// doubles) — so the assertion below deliberately compares against a sentinel that CANNOT match,
+        /// doubles) — so the assertion below compares against a sentinel that CANNOT match,
         /// and prints <c>ColumnHashes.ToString</c>'s full per-column dump in the
         /// failure message. Paste that dump here (replacing the sentinel) to make this a real, committed,
         /// fixed-oracle golden. Once pasted, DO NOT re-bake a snapshot to go green on a later divergence —
@@ -388,14 +387,14 @@ namespace MapRenderer.Tests.Text.Placement
         /// <para><b>Moved a second time:</b> <c>Points</c> -1357632509 → -1461293497 — every other
         /// column is byte-identical (confirmed by diffing the failure output; the two strings first differ
         /// inside the <c>Points</c> field). Cause: <c>PointStageInput.FadeId</c> is folded by
-        /// <c>SymbolPlacementSystem.PointFadeId</c>, which used to hash <c>string.GetHashCode()</c> on the
-        /// symbol's raw <c>Text</c>/<c>IconImage</c> — RANDOMIZED PER PROCESS on .NET Core (the same literal
-        /// string hashed to three different values across three separate net10.0 process runs during this
-        /// change's review). It now folds
-        /// <see cref="MapRenderer.Core.Text.Placement.ShapedSymbol.TextId"/>/<c>IconImageId</c>, ids a
+        /// <c>SymbolPlacementSystem.PointFadeId</c>, which folds
+        /// <see cref="MapRenderer.Core.Text.Placement.ShapedSymbol.TextId"/>/<c>IconImageId</c> — ids a
         /// <see cref="MapRenderer.Core.Text.Placement.SymbolStringTable"/> assigns deterministically in
-        /// assignment order — so this move REMOVES a latent randomized-hash dependency rather than introducing
-        /// one. This new value is still a genuine constant, not a flake: the table computing it is local to the
+        /// assignment order — rather than hashing the symbol's raw <c>Text</c>/<c>IconImage</c> via
+        /// <c>string.GetHashCode()</c>, which is RANDOMIZED PER PROCESS on .NET Core (the same literal
+        /// string hashed to three different values across three separate net10.0 process runs during this
+        /// change's review). This move removes that latent randomized-hash dependency rather than
+        /// introducing one. This new value is still a genuine constant, not a flake: the table computing it is local to the
         /// ONE <c>StyledSymbolTileBuilder</c> this test's <c>BuildProducedFixture</c> constructs (no
         /// <c>stringTable</c> arg passed → a fresh, private table), so the ids — and the digest — are a
         /// deterministic function of this fixture's decode plus <c>Shape</c>'s single-threaded walk, never of

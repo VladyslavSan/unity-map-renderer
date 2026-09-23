@@ -33,9 +33,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         // TileMeshLayerProcessorPool.Rent(). Never invoked directly outside the pool's Rent() fallback.
         internal TileMeshLayerProcessor() { }
 
-        /// <summary>Re-initializes a pooled (or freshly-minted) instance to the same state the retired
-        /// constructor used to establish — every field <see cref="Release"/> reads, so a reused instance
-        /// never leaks a prior build's state into the next one.</summary>
+        /// <summary>Re-initializes a pooled (or freshly-minted) instance to a clean state — every field
+        /// <see cref="Release"/> reads, so a reused instance never leaks a prior build's state into the
+        /// next one.</summary>
         internal void Reset(ITileMeshRenderLayer layer, int materialIndex)
         {
             _layer         = layer;
@@ -62,15 +62,14 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         {
             // The source layer is resolved FIRST: it is both the selection input and the owner of the buffer
             // the ordinals index, so resolving it once is what makes "the geometry I borrow is the geometry
-            // my ordinals index" true by construction rather than by matching two lookups.
+            // my ordinals index" true automatically, rather than by matching two lookups.
             ITileLayer tileLayer = SourceLayerResolver.ResolveTileLayer(_layer.StyleLayer, tile);
             if (tileLayer != null)
             {
-                // perf/gc-elimination: a pooled worker pass (RunWorkerPass) hands a non-null Buffers, so
-                // selection is appended into its grow-only SelectedTileFeature[] instead of a fresh
-                // `new List<>()` per (tile × style-layer) — this was the single biggest managed allocator on
-                // the mesh-build path (~318 KB/tile-build). `null` (tests, non-pooled callers) keeps the
-                // original allocating behaviour verbatim, mirroring StyledFillTileBuilder.OrderBySortKey.
+                // A pooled worker pass (RunWorkerPass) hands a non-null Buffers, so selection is appended
+                // into its grow-only SelectedTileFeature[] instead of a fresh `new List<>()` per (tile ×
+                // style-layer) — the largest managed allocator on the mesh-build path. `null` (tests,
+                // non-pooled callers) takes the allocating path, mirroring StyledFillTileBuilder.OrderBySortKey.
                 // Read Features ONCE per layer (the accessor may be a lease/decorator, and re-reading it is
                 // exactly the "re-derive the buffer" shape RunWorkerPass_ObtainsGeometryWithoutReReadingThe-
                 // FeatureList forbids): the same list sizes the scratch buffer and drives the selection loop.
@@ -89,10 +88,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     selected = list;
                 }
 
-                // The "no selected features ⇒ do nothing" gate. It no longer
-                // avoids any materialization (the decode already did that, once, for every layer) — it stays
-                // because it is what keeps a filter that matches nothing from calling BuildGraphRequest at
-                // all.
+                // The "no selected features ⇒ do nothing" gate. It avoids no materialization (the decode
+                // already did that, once, for every layer); it keeps a filter that matches nothing from
+                // calling BuildGraphRequest at all.
                 if (selected.Count > 0)
                 {
                     // BORROWED from the decoded tile — never disposed here, and its Tile/Extent came from the

@@ -18,13 +18,10 @@ namespace MapRenderer.Core.Style
     }
 
     /// <summary>
-    /// A style source definition (Style Spec <c>sources[]</c>). Vector fields are typed first; the
-    /// rest of the object is retained as <see cref="Raw"/> for later source stages.
-    ///
-    /// Spec defaults (vector source, from the public MapLibre Style Spec "Sources" page):
-    /// <c>scheme</c> = "xyz", <c>minzoom</c> = 0, <c>maxzoom</c> = 22,
-    /// <c>bounds</c> = [-180, -85.051129, 180, 85.051129]. These are applied by
-    /// <see cref="StyleParser"/> when the corresponding key is absent.
+    /// A style source definition (Style Spec <c>sources[]</c>). Vector fields are typed; the whole object
+    /// stays in <see cref="Raw"/>. <see cref="StyleParser"/> applies the Style Spec "Sources" defaults for an
+    /// absent key: <c>scheme</c> = "xyz", <c>minzoom</c> = 0, <c>maxzoom</c> = 22,
+    /// <c>bounds</c> = [-180, -85.051129, 180, 85.051129].
     /// </summary>
     public sealed class SourceDefinition
     {

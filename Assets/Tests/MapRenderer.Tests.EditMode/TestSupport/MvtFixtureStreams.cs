@@ -18,10 +18,10 @@ namespace MapRenderer.Tests.TestSupport
     /// <c>MvtDecoder.Decode</c>. Reading the buffer those same oracles are checking would <b>disarm</b> them
     /// (arm A and arm B would become the same measurement), so arm A gets its own reader.</para>
     ///
-    /// <para>That is a strict improvement, not a workaround: the oracle no longer shares ANY code with the
-    /// decoder it audits. It is deliberately minimal — layer name, extent, per-feature geometry type and
-    /// geometry field, everything else skipped — and it reuses only <see cref="ProtobufReader"/>, the generic
-    /// varint primitive that the glyph decoder also uses and that is not MVT-specific.</para>
+    /// <para>That is a strict improvement, not a workaround: the oracle shares NO code with the decoder it
+    /// audits. It reads only layer name, extent, per-feature geometry type and geometry field, skipping
+    /// everything else, and it reuses only <see cref="ProtobufReader"/>, the generic varint primitive that
+    /// the glyph decoder also uses and that is not MVT-specific.</para>
     /// </summary>
     public static class MvtFixtureStreams
     {

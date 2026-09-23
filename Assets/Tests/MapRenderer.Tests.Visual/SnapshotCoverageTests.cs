@@ -174,7 +174,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// Creates a width×height frame, all background, then paints the rectangular
-        /// region [x0,x1) × [y0,y1) with the fill colour. Used to craft map-like synthetic frames.
+        /// region [x0,x1) × [y0,y1) with the fill colour. Crafts map-like synthetic frames.
         /// </summary>
         private static Frame PartialFillBuffer(
             int width, int height,

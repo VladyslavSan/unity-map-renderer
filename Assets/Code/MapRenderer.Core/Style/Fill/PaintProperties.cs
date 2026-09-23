@@ -10,9 +10,8 @@ namespace MapRenderer.Core.Style.Fill
     /// Each <c>fill-*</c> key is read from the layer's <c>paint</c> sub-tree (via
     /// <see cref="PropertyNames"/>) and collapsed into a single <see cref="StyleProperty{T}"/>:
     /// one parsed <see cref="Expressions.Expression"/>, one typed default, and a
-    /// <c>Value → T</c> projection. The old triple
-    /// (<c>XKind</c> + <c>PaintPropertyEvaluator X</c> + <c>DataDrivenPaintEvaluator DataDrivenX</c>)
-    /// is gone; <see cref="StyleProperty{T}.Kind"/> reads the expression's kind directly.
+    /// <c>Value → T</c> projection; <see cref="StyleProperty{T}.Kind"/> reads the expression's kind
+    /// directly, with no separate Kind/evaluator plumbing.
     ///
     /// Absent properties use the spec defaults; <see cref="IsInertFallback"/> is true when all are absent.
     /// Engine-free; clean-room (public Style Spec, no MapLibre source).
@@ -42,16 +41,15 @@ namespace MapRenderer.Core.Style.Fill
         public StyleProperty<Color> OutlineColor { get; init; }
 
         /// <summary>
-        /// fill-antialias: whether fill edges are anti-aliased. A JSON boolean, so a bool — it used to be
-        /// float-encoded only to feed the <c>_FillAntialias</c> uniform, which no pass reads.
+        /// fill-antialias: whether fill edges are anti-aliased. A bool, like its JSON type: the mesh build
+        /// consumes it, and no pass reads the <c>_FillAntialias</c> uniform.
         /// Constant or zoom-varying only. ABSENT, data-driven or malformed ⇒ the <c>antialiasDefault</c>
         /// passed to <see cref="Parse"/> (<c>MapViewConfig.FillAntialiasing</c>; the Style Spec's own default is true).
         /// </summary>
         public StyleProperty<bool> Antialias { get; init; }
 
         /// <summary>
-        /// fill-translate: pixel-space [x, y] translation offset. Default [0, 0].
-        /// Collapsed from the old TranslateX/Y/XKind/YKind quad into one <c>double2</c>.
+        /// fill-translate: pixel-space [x, y] translation offset. Default [0, 0], as one <c>double2</c>.
         /// Constant only.
         /// </summary>
         public StyleProperty<double2> Translate { get; init; }

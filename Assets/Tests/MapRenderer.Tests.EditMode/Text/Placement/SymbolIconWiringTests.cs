@@ -324,7 +324,7 @@ namespace MapRenderer.Tests.Text.Placement
             try
             {
                 // ── 1. Icon-bearing batch ──────────────────────────────────────────────────────────────
-                // Icons draw through the WORLD path — the icon quad no longer lands on
+                // Icons draw through the WORLD path — the icon quad does not land on
                 // system.IconMesh/renderLayer.IconPresenterVisible (the screen slot/presenter), so this
                 // reads the world surface instead (TryGetWorldSlotMesh/IsWorldSlotVisible).
                 var iconBuffer = MakeIcon(frame.SceneOriginRender);

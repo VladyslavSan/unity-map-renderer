@@ -69,7 +69,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// (see <see cref="IVisibleTileSelector"/>). Flows into the per-tick <see cref="ViewContext"/>.</summary>
             public double2 FramingViewportPx;
 
-            /// <summary>The active pixel↔ground projection (Web-Mercator today). Per-frame view context.</summary>
+            /// <summary>The active pixel↔ground projection (Web-Mercator or globe). Per-frame view context.</summary>
             public IProjection Projection;
 
             /// <summary>Per-frame mesh-upload budget — unlike the budgets below, 0 blocks consume rather than uncapping it.</summary>
@@ -126,7 +126,7 @@ namespace MapRenderer.Unity.Rendering.Tile
             /// <summary>Resumable per-mesh consume index, 0 until consume starts; mid-range means the tile is partially consumed.</summary>
             public int ConsumeCursor;
 
-            /// <summary>The decode handle from the fetch — null before completion and again once this record no longer owns it.</summary>
+            /// <summary>The decode handle from the fetch — null before completion, and again once this record stops owning it.</summary>
             public SharedDisposable<IDecodedTile> Decode;
         }
 
@@ -646,9 +646,9 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// <summary>Current deferred-release backlog depth (records awaiting <see cref="DrainReleaseQueue"/>).</summary>
         internal int ReleaseQueueDepth => _releaseQueue.Count;
 
-        /// <summary>Pull-based telemetry, computed on demand — never read by <see cref="Tick"/>'s request/release
-        /// decision. Returned by reference, no copy or boxing (<c>docs/telemetry-design.md</c>); still derives
-        /// two of its numbers once per Tick, whether or not anyone reads it.</summary>
+        /// <summary>Pull-based telemetry, refreshed at the end of every <see cref="Tick"/> whether or not anyone
+        /// reads it — never read by the request/release decision. Returned by reference, no copy or boxing
+        /// (<c>docs/telemetry-design.md</c>).</summary>
         internal ref readonly TileTelemetrySnapshot Telemetry => ref _telemetry;
 
         private TileTelemetrySnapshot _telemetry;
@@ -811,7 +811,8 @@ namespace MapRenderer.Unity.Rendering.Tile
         // ── The live loop ──────────────────────────────────────────────────────────────────────
 
         /// <summary>One frame of the tile loop — a thin shell over <see cref="TickCore"/> so telemetry
-        /// refreshes on every exit path (a dirty-frame-only update would freeze when the map goes still).</summary>
+        /// refreshes after every return from it, early returns included (a dirty-frame-only update would
+        /// freeze when the map goes still). A throw from <see cref="TickCore"/> skips the refresh.</summary>
         public void Tick(CameraProperties cam, TileSelectionConfig cfg)
         {
             TickCore(cam, cfg);
@@ -918,12 +919,12 @@ namespace MapRenderer.Unity.Rendering.Tile
 
         /// <summary>Zeroes the six per-tick counters — cover recomputes, builds started, tiles/vertices/meshes
         /// consumed, tiles released — at the top of <see cref="TickCore"/>. Five are read-only telemetry;
-        /// <see cref="TileBuildsStartedLastTick"/> also bounds <see cref="PumpPending"/>'s build cap, now over
+        /// <see cref="TileBuildsStartedLastTick"/> also bounds <see cref="PumpPending"/>'s build cap, over
         /// the whole Tick rather than just the pump — a stray charge before <c>PumpPending</c> fails safe
         /// (admits nothing) instead of silently doubling the cap, though no tooth tells which path charged it.</summary>
         private void ResetPerTickCounters()
         {
-            // A throw before PumpPending now clears the previous Tick's counts too, rather than retaining them.
+            // A throw before PumpPending still clears the previous Tick's counts, rather than retaining them.
             CoverRecomputesLastTick   = 0;
             TileBuildsStartedLastTick = 0;
             VerticesConsumedLastTick  = 0;
@@ -1351,7 +1352,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                         Processing.TilePrologueOutput output =
                             Processing.TileLayerProcessorRunner.RunWorkerPass(decode, in context, processors, token);
 
-                        // Fault domain 2: the mesh output is already built, so a symbol fault below can't strand it — skip once the lifetime token cancels.
+                        // The symbol fault domain: the mesh output is already built, so a symbol fault below can't
+                        // strand it. Skipped once the lifetime token cancels.
                         try
                         {
                             if (!token.IsCancellationRequested)
@@ -1569,7 +1571,7 @@ namespace MapRenderer.Unity.Rendering.Tile
 
             // Route release to the owning pipeline — a record on source B never touches A; the source-less pipeline is a no-op.
             _sources.ReleaseTile(key.Slot, key.Tile);
-            // No symbol-release callback — the subsystem's next CollectLoadedTileKeys pull no longer reports it, and reconcile fades the symbols.
+            // No symbol-release callback — the subsystem's next CollectLoadedTileKeys pull stops reporting it, and reconcile fades the symbols.
         }
 
         /// <summary>Drops <paramref name="key"/> from <see cref="_loaded"/> BEFORE tearing its record down —

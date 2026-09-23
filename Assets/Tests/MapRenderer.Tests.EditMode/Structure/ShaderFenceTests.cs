@@ -1075,7 +1075,7 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void FillExtrusionVerticalGradient_NotRendered_NoWallDarkeningFold()
         {
-            // fill-extrusion-vertical-gradient is deliberately NOT rendered: the maintainer abandoned the
+            // fill-extrusion-vertical-gradient is NOT rendered: the maintainer abandoned the
             // fake-AO wall-base darkening in favour of real ambient + shadows/SSAO (Core still PARSES the
             // property — this is a shader-side removal only). This is a regression tooth: the darkening must
             // stay gone and cannot creep back. Structural (headless cannot render fragments) — RED-verify by
@@ -1292,7 +1292,7 @@ namespace MapRenderer.Tests.Structure
         public void NoShaderFile_DefinesAFadeDiscardMacro()
         {
             FileAssert.DoesNotExist(Path.Combine(MapDir, "LayerFade.hlsl"), "Shaders/Map/LayerFade.hlsl defines a fragment-side fade threshold. Fade is a " +
-                "per-slot draw gate (ITileRenderBackend.SetLayerVisible) — see docs/tile-pipeline-design.md §7.5.");
+                "per-slot draw gate (ITileRenderBackend.SetLayerVisible) — see docs/tile-pipeline-design.md § \"The draw gate — a layer draws, or it is not submitted\".");
 
             foreach (string file in Directory.EnumerateFiles(
                          ShaderPropertyParser.ShadersDir, "*", SearchOption.AllDirectories)
@@ -1361,12 +1361,12 @@ namespace MapRenderer.Tests.Structure
         [Test]
         public void FillVertexModify_ContainsNoReturn()
         {
-            // Fill_VertexModify.hlsl's fill-translate guard used to be an early `return`. fill-translate is
-            // [0,0] on every shipped layer, so that branch is taken for essentially every vertex drawn —
-            // which made "below the return" a place where code looks correct, compiles, and never runs in
-            // production. The boundary band's displacement is exactly the code that would go there. The
-            // guard is an `if` block now, and this forbids the shape from returning; a forbidden-token
-            // check fails CLOSED, so it cannot pass by matching nothing.
+            // Fill_VertexModify.hlsl's fill-translate guard is an `if` block, not an early `return`.
+            // fill-translate is [0,0] on every shipped layer, so that branch is taken for essentially
+            // every vertex drawn — an early return there would make "below the return" a place where code
+            // looks correct, compiles, and never runs in production. The boundary band's displacement is
+            // exactly the code that would go there. This forbids the shape from returning; a
+            // forbidden-token check fails CLOSED, so it cannot pass by matching nothing.
             string code = ShaderPropertyParser.StripHlslComments(
                 File.ReadAllText(ShaderPropertyParser.MapShaderPath("Fill_VertexModify.hlsl"), Encoding.UTF8));
 
@@ -1859,7 +1859,7 @@ namespace MapRenderer.Tests.Structure
             // ── Clause 2: no source file under Core uses Unity.Collections in CODE.
             string coreRoot = Path.Combine(Application.dataPath, "Code", "MapRenderer.Core");
             string[] coreFiles = Directory.GetFiles(coreRoot, "*.cs", SearchOption.AllDirectories);
-            // Not a file-count floor: Core is a legacy assembly the roadmap is deliberately shrinking
+            // Not a file-count floor: Core is a legacy assembly the roadmap is shrinking
             // (ARCHITECTURE.md's module boundaries), so a threshold here would eventually fail a SUCCESSFUL migration and
             // invite lowering the number, which quietly weakens this fence. Non-vacuity only needs "the
             // scan actually visited files" — the Jobs positive control below already proves the matcher
@@ -1950,7 +1950,7 @@ namespace MapRenderer.Tests.Structure
 // hides real ones behind (by never rejoining them).
 //
 // Scope: only a citation that carries an actual `*.md` FILENAME is checked. A bare pointer with no
-// filename (`§4`, `design doc §6`, `S20 stage doc §6`) is deliberately out of scope — deciding which
+// filename (`§4`, `design doc §6`, `S20 stage doc §6`) is out of scope — deciding which
 // document "design doc" means is a judgment call, not a mechanical sweep, and is not this tooth's job.
 //
 // This tooth pins the CURRENT set of cited documents: renaming, moving, or deleting a `.md` file that
@@ -1976,7 +1976,7 @@ namespace MapRenderer.Tests.Structure
         {
             string repoRoot = ShaderPropertyParser.RepoRoot;
 
-            // The two lists are deliberately drawn from different populations. A citation resolves only
+            // The two lists are drawn from different populations. A citation resolves only
             // against COMMITTED documents — an untracked local .md exists on one machine and nowhere
             // else, which is the defect class this fence exists for. But the scan must read untracked
             // sources too, or it cannot see a phantom in the commit that introduces one.
@@ -2027,7 +2027,7 @@ namespace MapRenderer.Tests.Structure
                     // Exact basename match only — NOT a suffix check. A wrapped path split into a
                     // bare fragment must not then pass by matching as a suffix of a real name such as
                     // "meshing-design.md"; that hole sits directly in the path of the likeliest phantom.
-                    // This comment deliberately names no phantom filename: the scan below reads THIS
+                    // This comment names no phantom filename: the scan below reads THIS
                     // file too, so an illustrative fake name here would fail the fence it documents.
                     foreach (Match m in MdToken.Matches(block.ToString()))
                     {

@@ -20,20 +20,15 @@ namespace MapRenderer.Core.Style.Fill
         public const string FillPattern         = "fill-pattern";
 
         // ── Engine extensions (NOT MapLibre Style Spec) ───────────────────────────────────────────
-        // Prefixed `x-` so they can never collide with a key the spec adds later, and so a reader can tell
-        // spec from extension without consulting the spec. MapLibre itself ignores unknown keys, so a style
-        // carrying these still renders in stock MapLibre — just without the extension.
+        // Prefixed `x-` so they never collide with a future spec key. MapLibre ignores unknown keys, so a style
+        // that carries them still renders there, without the extension.
 
         /// <summary>
-        /// <c>x-fill-pattern-metres</c> — the pattern's TILING PERIOD in world units (Web-Mercator metres):
-        /// the world distance spanned by ONE full repetition of the sprite. Supplying it switches the layer to
-        /// world-absolute sizing, so the pattern scales with the map like terrain instead of holding a
-        /// constant screen size. At a period of 1, pattern UV advances by exactly 1 per world unit.
-        ///
-        /// <para>Deliberately ONE key rather than a mode plus a size: world sizing is meaningless without a
-        /// size, and a size is meaningless under screen sizing, so folding them together makes the invalid
-        /// combination unrepresentable. Absent (or non-numeric) ⇒
-        /// <see cref="FillPatternSizing.ScreenRelative"/>, the Style Spec's behaviour.</para>
+        /// <c>x-fill-pattern-metres</c> — the pattern's TILING PERIOD in Web-Mercator metres: the world
+        /// distance of ONE full repetition. Supplying it switches the layer to world-absolute sizing, so the
+        /// pattern scales with the map like terrain. It is ONE key, not a mode plus a size, so the invalid
+        /// combinations cannot be written. Absent or non-numeric ⇒
+        /// <see cref="FillPatternSizing.ScreenRelative"/>, the Style Spec's behaviour.
         /// </summary>
         public const string FillPatternMetres     = "x-fill-pattern-metres";
     }

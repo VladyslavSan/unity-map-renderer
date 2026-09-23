@@ -1,6 +1,5 @@
-// Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified double3 — this
-// file lives in MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header for the inline-qualification
-// trap this avoids).
+// TOP-LEVEL `using Unity.Mathematics;` + unqualified double3: an inline qualification hits a namespace
+// collision inside MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header).
 
 using System;
 using Unity.Mathematics;
@@ -8,29 +7,16 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// A stable CROSS-TILE identity for a point symbol — <c>(quantized world anchor, layer, text, icon
-    /// image)</c> — so the SAME symbol appearing in more than one loaded tile (a parent + its child during a
-    /// zoom transition) is recognised as one symbol (deduped, and carried through the fade so a tile swap is
-    /// a seamless no-op). <see cref="IconImage"/> extends the identity to icon symbols (whose
-    /// <see cref="Text"/> is always null) so two distinct co-located icons (same anchor cell + layer,
-    /// different sprite) stay distinct instead of colliding.
-    ///
-    /// <para><b>Why quantize, and to what.</b> The same geo feature is MVT-quantized to each tile's own extent
-    /// grid, so a parent (coarser) and child (finer) tile place its anchor a few metres apart. Snapping the
-    /// render-space (Mercator-metre) anchor to a grid of <c>quantizeMeters</c> collapses that difference to one
-    /// cell. <c>For</c> is a general primitive parameterised by <c>quantizeMeters</c>; its production callers
-    /// pass the FIXED <see cref="CanonicalGridMeters"/>. A fixed grid is correct because parent/child tile
-    /// OVERLAP does not happen today — the only real dup is the SAME feature in adjacent/overlapping tiles,
-    /// whose anchor is identical, so any small fixed grid collapses it; separating two genuinely distinct
-    /// symbols that are close on screen is the COLLISION pass's job, not this key's. When parent/child
-    /// overlap lands the grid goes back to a zoom-scaled value — pick the coarser band's grid +
-    /// finest-zoom-wins — a change localised to the caller's <c>quantizeMeters</c> input and
-    /// <see cref="CanonicalGridMeters"/>'s use.</para>
-    ///
-    /// <para><b>Boundary caveat.</b> Grid snapping misses when the two anchors straddle a cell edge; that yields
-    /// a rare one-frame double-symbol, not a persistent error (neighbour-cell matching is a future refinement).
-    /// Full <see cref="Text"/> equality (not a hash) is folded in so two different symbols sharing a cell never
-    /// merge.</para>
+    /// A stable CROSS-TILE identity for a point symbol — <c>(quantized world anchor, layer, text, icon image)</c>
+    /// — so the SAME symbol in more than one loaded tile is deduped as one and carried through the fade.
+    /// <see cref="IconImage"/> keeps two co-located icons with different sprites distinct (an icon's
+    /// <see cref="Text"/> is null). Full <see cref="Text"/> equality, not a hash, keeps two symbols that share a
+    /// cell apart; separating distinct symbols that are close on screen is the collision pass's job.
+    /// <para>Production dedups with <c>SymbolReconciler</c>'s all-integer <c>DedupKey</c>, which shares
+    /// <see cref="QuantizeAnchor"/> and has the same equality classes; <see cref="For"/> is the tests'
+    /// parity oracle for it.</para>
+    /// <para>Limitation: snapping misses when two anchors straddle a cell edge, which gives a rare one-frame
+    /// double symbol, not a persistent error.</para>
     /// </summary>
     public readonly struct CrossTileSymbolKey : IEquatable<CrossTileSymbolKey>
     {
@@ -50,26 +36,21 @@ namespace MapRenderer.Core.Text.Placement
             GridX = gridX; GridZ = gridZ; GridY = gridY; LayerId = layerId; Text = text; IconImage = iconImage;
         }
 
-        /// <summary>The single canonical dedup+fade grid (metres). The cross-tile dedup key
-        /// (<see cref="MapRenderer.Unity.Text.SymbolTileStore"/>) quantizes to this grid, so a point symbol's
-        /// dedup cell is a pure function of the tile set. Fixed (zoom-independent) because parent/child tile
-        /// overlap does not happen today: the only real dup is the SAME feature in adjacent/overlapping tiles,
-        /// whose anchorRender is identical, so any fixed grid collapses it; distinct-feature visual overlap is
-        /// the COLLISION pass's job, not the dedup's. 4 m, matching the fade grid — one tuning knob. When
-        /// parent/child overlap lands, go back to a zoom-scaled grid (pick the coarser band's grid +
-        /// finest-zoom-wins): change the store's grid input and this const's use, nothing downstream.</summary>
+        /// <summary>The single canonical dedup+fade grid, in metres. The production dedup key
+        /// (<c>SymbolReconciler</c>'s <c>DedupKey</c>) and the fade id quantize to it, so a symbol's dedup cell
+        /// is a pure function of the tile set. It is fixed, not zoom-scaled: the cover is a quadtree cut, so a parent
+        /// never overlaps its child, and the duplicates are edge/buffer copies between neighbouring tiles and
+        /// cross-source copies. 4 m, the same as the fade grid: one tuning knob. Seam: a cover that overlaps a
+        /// parent and its child needs a zoom-scaled grid (finest zoom wins); only this constant's use and the
+        /// store's grid input change.</summary>
         public const double CanonicalGridMeters = 4.0;
 
         /// <summary>
-        /// The identity of a point symbol whose render-space (pre-RTC Mercator) anchor is
-        /// <paramref name="anchorRender"/>, on layer <paramref name="layerId"/>, reading
-        /// <paramref name="text"/> (icon: <see cref="MapRenderer.Core.Style.Symbol.SymbolFeature.IconImage"/>
-        /// via <paramref name="iconImage"/>), snapped to a <paramref name="quantizeMeters"/> grid. All three
-        /// grid axes are quantized: on the Mercator plane render.y ≡ 0 for every surface symbol, so
-        /// <c>GridY</c> is inert there (the key partition is unchanged); on the globe two equator-mirrored
-        /// anchors (e.g. 30°N vs 30°S at the same longitude) share render X/Z but differ in Y — without the Y
-        /// axis they'd collide into one symbol. <paramref name="quantizeMeters"/> ≤ 0 falls back to a 1-metre
-        /// grid (a defensive default; callers pass a real display-zoom pixel size).
+        /// The identity of a point symbol with render-space (pre-RTC) anchor <paramref name="anchorRender"/>, layer
+        /// <paramref name="layerId"/>, <paramref name="text"/> and <paramref name="iconImage"/>, snapped to a
+        /// <paramref name="quantizeMeters"/> grid (≤ 0 falls back to 1 m). All three axes are quantized:
+        /// <c>GridY</c> is inert on the Mercator plane (render.y ≡ 0), but on the globe two equator-mirrored
+        /// anchors share render X/Z and differ only in Y.
         /// </summary>
         public static CrossTileSymbolKey For(
             in double3 anchorRender, int layerId, string text, string iconImage, double quantizeMeters)

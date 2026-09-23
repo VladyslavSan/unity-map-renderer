@@ -3,19 +3,13 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geometry
 {
     /// <summary>
-    /// Per-vertex output of the 3D ribbon builder (<c>RibbonJob</c>). The centerline is projected FIRST (to
-    /// origin-relative render space + a per-point surface up); the ribbon is then built in 3D, so every
-    /// field is final render-space data — no downstream reconstruction, no separate tangent frame, no
-    /// winding flip.
-    ///
-    /// <para>Winding is correct BY CONSTRUCTION: <see cref="Across"/> is derived as
-    /// <c>normalize(cross(along, up))</c> from the SAME <c>up</c> the centerline was projected with (one frame),
-    /// so the ribbon front-faces outward for every projection (planar or curved, either handedness). See
-    /// <c>GlobeLineWindingTests</c>.</para>
-    ///
-    /// Maps onto the existing 4-stream line mesh layout (see <c>StyledLineTileBuilder</c>):
-    ///   stream 0 = Position + <see cref="Up"/> (Normal) · stream 1 = <see cref="Across"/> (TexCoord0) ·
-    ///   stream 2 = (<see cref="Side"/>, <see cref="DistanceAlong"/>) · stream 3 = color + <see cref="WidthScale"/>.
+    /// Per-vertex output of the 3D ribbon builder (<c>RibbonJob</c>). The centerline is projected FIRST, so every
+    /// field is final render-space data: no downstream reconstruction, tangent frame, or winding flip.
+    /// <see cref="Across"/> is <c>normalize(cross(along, up))</c> from the SAME <c>up</c> the centerline was
+    /// projected with, so the ribbon front-faces outward for every projection (<c>GlobeLineWindingTests</c>).
+    /// <para>Line mesh streams (<c>StyledLineTileBuilder</c>): 0 = Position + <see cref="Up"/> (Normal);
+    /// 1 = <see cref="Across"/> (TexCoord0); 2 = (<see cref="Side"/>, <see cref="DistanceAlong"/>);
+    /// 3 = color + <see cref="WidthScale"/>.</para>
     /// </summary>
     public struct LineRibbonVertex
     {

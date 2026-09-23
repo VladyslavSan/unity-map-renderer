@@ -4,8 +4,7 @@ namespace MapRenderer.Unity.Rendering.Style
     /// An <see cref="IRenderLayer"/> whose draw can be gated by a fade amount — the layer kinds whose
     /// shaders declare <c>_Opacity</c>. A capability interface, not a member on
     /// <see cref="IRenderLayer"/>: the test doubles and the tombstone are excluded with no edit.
-    ///
-    /// <para><c>SymbolRenderLayer</c> deliberately does NOT implement this — see its own remark.</para>
+    /// <c>SymbolRenderLayer</c> does NOT implement this — see its own remark.
     /// </summary>
     internal interface IFadeableRenderLayer : IRenderLayer
     {
@@ -28,13 +27,12 @@ namespace MapRenderer.Unity.Rendering.Style
 
         /// <summary>
         /// True when this layer paints something the framebuffer can show — the predicate the per-slot draw
-        /// gate reads (<see cref="Backend.ITileRenderBackend.SetLayerVisible"/>, inverted at that call site).
-        /// It folds fade and the authored opacity together, so being out of zoom range and being authored
-        /// transparent gate the layer out the same way. A layer mid-fade still reads <c>true</c>: its draw
-        /// must still be submitted for there to be anything to blend. <see cref="BackgroundRenderLayer"/> is
-        /// the one implementer whose applier can be null (its base material may be unconfigured); it reads
-        /// <c>true</c> then, fail-open — the gate never retires a draw it cannot read. Every other
-        /// implementer's applier is never null.
+        /// gate reads (<see cref="Backend.ITileRenderBackend.SetLayerVisible"/>, inverted at that call
+        /// site). It folds fade and the authored opacity together, so being out of zoom range and being
+        /// authored transparent gate the layer out the same way. A layer mid-fade still reads <c>true</c>:
+        /// its draw must still be submitted for there to be anything to blend. Non-local invariant:
+        /// <see cref="BackgroundRenderLayer"/> is the one implementer whose applier can be null (base
+        /// material unconfigured); it reads <c>true</c> then, fail-open — the gate never retires a draw it cannot read.
         /// </summary>
         bool PaintsSomething { get; }
     }

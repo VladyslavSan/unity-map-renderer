@@ -4,7 +4,7 @@
 // and must never share a file with that pair's Is = UnityEngine.TestTools.Constraints.Is alias.
 //
 // Contents:
-//   MvtDecodeTagColumnHardeningTests  — MvtDecoder.FlattenFeatureColumn builds both tag-slice columns at the feature count by construction.
+//   MvtDecodeTagColumnHardeningTests  — MvtDecoder.FlattenFeatureColumn sizes both tag-slice columns to the feature count.
 //   MvtPropertyDecodeTests            — key table, value table and per-feature Properties/Id decoded correctly from the fixture and from synthetic tile bytes.
 //   MvtDecodePresizeTests             — the decoded value table is sized to the exact decoded count, no growth over-allocation.
 //   KeyBindingHoistTests              — FeatureSelector's per-layer bind step resolves a filter's constant-key names once per call, not once per feature.
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Mvt
     /// comment in <c>MvtDecoder.cs</c>).
     ///
     /// <para>A REAL mismatch is unreachable through <see cref="MvtDecoder.Decode"/> — <c>FlattenFeatureColumn</c>
-    /// builds both tag-slice columns at the feature count by construction — so (a) is pinned directly
+    /// sizes both tag-slice columns to the feature count — so (a) is pinned directly
     /// against the check (broadened to <c>internal</c> for exactly this), and (b) is pinned by scanning
     /// <c>MvtDecoder.cs</c>'s own source for the two calls' relative order, the same source-scan technique
     /// <c>Structure/NeutralGeometryPathTests</c> already uses for a fence a reflection-only assertion
@@ -216,7 +216,7 @@ namespace MapRenderer.Tests.Mvt
 
         /// <remarks>The sole guard of value-table count correctness this stage: <c>MvtDecodePresizeTests</c>
         /// dropped its own <c>Values</c> capacity arm, since <see cref="MvtLayer.Values"/> is a
-        /// <c>NativeArray</c> sized exactly to the decoded count by construction (no capacity to probe) —
+        /// <c>NativeArray</c> sized exactly to the decoded count (no capacity to probe) —
         /// see that file's recorded-limitation note.</remarks>
         [Test]
         public void Countries_ValueTable_HasExpectedCount()
@@ -641,14 +641,14 @@ namespace MapRenderer.Tests.Mvt
     /// The fixture-has-a-non-power-of-two guard keeps the tooth from passing vacuously on a layer whose count
     /// a doubling build would coincidentally land on.
     ///
-    /// <para><b>Recorded limitation — the <c>Values</c> arm is dropped, deliberately.</b> This stage moved
+    /// <para><b>Recorded limitation — the <c>Values</c> arm is dropped.</b> This stage moved
     /// <see cref="MvtLayer.Values"/> off <c>List&lt;MvtValue&gt;</c> onto <c>NativeArray&lt;MvtValueNative&gt;</c>,
-    /// sized to the exact decoded count by construction (no <c>Capacity</c> to over-allocate) — the
+    /// sized to the exact decoded count (no <c>Capacity</c> to over-allocate) — the
     /// "no growth over-allocation" property this file pins now belongs to the DECODE's transient
     /// <c>List&lt;MvtValueNative&gt;</c> scratch, which falls out of scope before this test can observe it.
     /// Value-table COUNT correctness (as opposed to allocation shape) is still pinned — by
     /// <c>MvtPropertyDecodeTests.Countries_ValueTable_HasExpectedCount</c> (914, via <c>.Length</c>) — so this
-    /// is a deliberate narrowing of what this file observes, not a silently weakened tooth.</para>
+    /// is a narrowing of what this file observes, not a silently weakened tooth.</para>
     /// </remarks>
     [TestFixture]
     public class MvtDecodePresizeTests

@@ -9,17 +9,16 @@ using MapRenderer.Core.Geo;
 namespace MapRenderer.Tests
 {
     /// <summary>
-    /// The tilt fixture's measurement oracle. Pure — no render. Every quantity here is obtained by
-    /// projecting KNOWN world points through the LIVE <see cref="Camera"/>, never by re-deriving a
-    /// projection matrix — <see cref="GroundRowSolver"/>'s stated principle ("a second implementation of the
-    /// projection inside the test is the thing most likely to be wrong"), applied forward.
+    /// The tilt fixture's measurement oracle. Pure — no render. Every quantity is obtained by projecting KNOWN
+    /// world points through the LIVE <see cref="Camera"/>, never by re-deriving a projection matrix (applying
+    /// <see cref="GroundRowSolver"/>'s principle forward).
     ///
-    /// <para>WHY THIS IS AN INDEPENDENT ORACLE AND NOT THE MECHANISM UNDER TEST. The mechanism under test is
-    /// how a styled or offset quantity becomes a WORLD displacement (the shader's extrusion, a future
-    /// tangent-plane symbol offset) — the projection itself is shared machinery, correct by the fact that the
-    /// whole renderer works. This class computes the intended world displacement on the CPU and projects it;
-    /// the render computes the displacement in the shader and projects it with the same matrix. A discrepancy
-    /// therefore isolates the displacement, not the projection.</para>
+    /// <para>Non-obvious why: this is an oracle, not the mechanism under test. The mechanism under test is how
+    /// a styled or offset quantity becomes a WORLD displacement (the shader's extrusion, a future
+    /// tangent-plane symbol offset); the projection itself is shared machinery, correct because the whole
+    /// renderer works. This class computes
+    /// the intended displacement on the CPU and projects it with the same matrix the render uses, so a
+    /// discrepancy isolates the displacement, not the projection.</para>
     /// </summary>
     internal static class GroundRuler
     {
@@ -48,12 +47,12 @@ namespace MapRenderer.Tests
             => math.normalize(ProjectPx(camera, worldTo) - ProjectPx(camera, worldFrom));
 
         /// <summary>Screen span, in px, of a world segment of length <paramref name="lengthMetres"/> centred on
-        /// <paramref name="centreWorld"/>, running along ground direction <paramref name="groundDirXZ"/> (world
-        /// XZ; need not be pre-normalised).
+        /// <paramref name="centreWorld"/>, along ground direction <paramref name="groundDirXZ"/> (world XZ;
+        /// need not be pre-normalised).
         ///
-        /// <para>SYMMETRIC ABOUT THE CENTRE ON PURPOSE: a one-sided probe travels to a different depth and
-        /// picks up its own foreshortening, which is the very defect these fixtures measure (see
-        /// <c>LineProbeSymmetrySnapshotTests</c>). Do not "simplify" this to a one-sided probe.</para>
+        /// <para>Non-obvious why: symmetric about the centre — a one-sided probe travels to a different depth
+        /// and picks up its own foreshortening, the very defect these fixtures measure (see
+        /// <c>LineProbeSymmetrySnapshotTests</c>). Do not simplify this to a one-sided probe.</para>
         /// </summary>
         public static double GroundSegmentSpanPx(
             Camera camera, double3 centreWorld, double2 groundDirXZ, double lengthMetres)
@@ -70,33 +69,30 @@ namespace MapRenderer.Tests
             => styledPx * metresPerDevicePixel;
 
         /// <summary>The closed-form screen span, AT THE LOOK-AT ONLY, of a world segment of
-        /// <paramref name="lengthMetres"/> lying along the tilt axis: <c>lengthMetres / mpp · cos(tilt)</c>.
-        /// Used ONLY to cross-check the projective ruler (<see cref="GroundSegmentSpanPx"/>) at the one point
-        /// a closed form is known; every consumer uses the projective ruler, which stays valid off-centre and
-        /// at other depths where this closed form does not.
+        /// <paramref name="lengthMetres"/> along the tilt axis: <c>lengthMetres / mpp · cos(tilt)</c>. Used
+        /// ONLY to cross-check the projective ruler (<see cref="GroundSegmentSpanPx"/>); every consumer uses
+        /// that ruler, which stays valid off-centre and at other depths where this closed form does not.
         ///
-        /// <para><b>THE BLIND SPOT, NAMED.</b> <c>mpp</c> is a per-FRAME constant — the ruler at the look-at
-        /// depth — so this form is wrong at any other depth, by the depth ratio. A fixture that anchors its
-        /// symbol at the look-at sees that error as identically zero and therefore cannot observe
-        /// depth-dependent behaviour at all. The depth-GENERAL sibling is
-        /// <see cref="ClosedFormPerpendicularSpanPx"/>; prefer it whenever the measurand is not at the
+        /// <para>Limitation no test can observe: <c>mpp</c> is a per-FRAME constant fixed at the look-at
+        /// depth, so this form is wrong at any other depth by the depth ratio — a fixture anchored at the
+        /// look-at sees that error as zero and cannot observe depth-dependent behaviour at all. Prefer the
+        /// depth-GENERAL <see cref="ClosedFormPerpendicularSpanPx"/> whenever the measurand is not at the
         /// look-at.</para></summary>
         public static double ClosedFormAcrossAzimuthSpanPx(
             double lengthMetres, double metresPerDevicePixel, Angle tilt)
             => lengthMetres / metresPerDevicePixel * tilt.Cos;
 
         /// <summary>The VIEW depth of <paramref name="worldPoint"/> — its distance along the camera's forward
-        /// axis, in world units (metres here). This is <c>WorldToScreenPoint(p).z</c>, which
-        /// <see cref="ProjectPx"/> already computes for its in-front assert and then throws away.
+        /// axis, in world units. This is <c>WorldToScreenPoint(p).z</c>, which <see cref="ProjectPx"/> already
+        /// computes for its in-front assert and then discards.
         ///
-        /// <para><b>NOT NDC depth.</b> <c>clip.z/clip.w</c> (what <c>SymbolProjectionJob</c> carries, purely
-        /// for sorting) is a non-linear, near/far-plane-dependent quantity and is NOT this. Every perspective
-        /// law in this family — the <c>1/w</c> divide, <see cref="ClosedFormPerpendicularSpanPx"/> — is stated
-        /// in terms of THIS depth.</para>
-        ///
-        /// <para>Cross-checked against the view matrix (<c>-(worldToCameraMatrix · p).z</c>, Unity's
-        /// right-handed view space looks down −z) so a disagreement between the two ways Unity can be asked
-        /// the same question fails loudly here rather than propagating into a ratio.</para></summary>
+        /// <para>Non-local invariant: this is NOT NDC depth (<c>clip.z/clip.w</c>, what
+        /// <c>SymbolProjectionJob</c> carries purely for sorting, is non-linear and near/far-dependent) —
+        /// every perspective law in this family, including <see cref="ClosedFormPerpendicularSpanPx"/>, is
+        /// stated in terms of THIS depth. Cross-checked against the view matrix
+        /// (<c>-(worldToCameraMatrix · p).z</c>, negated because Unity's right-handed view space looks down
+        /// −z) so a disagreement between the two ways Unity can be asked the same question fails loudly here
+        /// rather than propagating into a ratio.</para></summary>
         public static double ViewDepthMetres(Camera camera, double3 worldPoint)
         {
             var p = new Vector3((float)worldPoint.x, (float)worldPoint.y, (float)worldPoint.z);
@@ -114,20 +110,18 @@ namespace MapRenderer.Tests
         }
 
         /// <summary>The closed-form screen span, AT ANY DEPTH, of a world displacement of
-        /// <paramref name="lengthMetres"/> lying PERPENDICULAR to the camera's view axis, at view depth
-        /// <paramref name="viewDepthMetres"/>: <c>L·|P11|·H / (2w)</c>.
+        /// <paramref name="lengthMetres"/> PERPENDICULAR to the camera's view axis, at view depth
+        /// <paramref name="viewDepthMetres"/>: <c>L·|P11|·H / (2w)</c>. The depth-GENERAL sibling of
+        /// <see cref="ClosedFormAcrossAzimuthSpanPx"/> (look-at only): its terms are the raw projection
+        /// (<c>camera.projectionMatrix.m11</c>, <c>camera.pixelHeight</c>) and a measured view depth, so it
+        /// stays correct as a symbol recedes.
         ///
-        /// <para>The depth-GENERAL sibling of <see cref="ClosedFormAcrossAzimuthSpanPx"/> (which is
-        /// look-at-only — see the blind-spot note there). Its terms are the raw projection
-        /// (<c>camera.projectionMatrix.m11</c>, <c>camera.pixelHeight</c>) and a measured view depth; it
-        /// carries no per-frame ruler, so it stays correct as a symbol recedes.</para>
-        ///
-        /// <para>VALIDITY: exact for a displacement perpendicular to the view axis (both endpoints then share
-        /// one <c>w</c>, so the perspective divide is a single scale factor), and a small-span approximation
-        /// otherwise. <c>|P11|·H</c> is the vertical form; it equals <c>|P00|·W</c> identically
-        /// (<c>P00 = P11/aspect</c>, <c>aspect = W/H</c>), so it is also the correct factor for a HORIZONTAL
-        /// perpendicular displacement at any aspect. Cross-checked against the live projection at two depths
-        /// by the off-look-at fixture's oracle-acceptance tooth.</para></summary>
+        /// <para>Validity, a limitation no test can observe: exact for a displacement perpendicular to the
+        /// view axis (both endpoints then share one <c>w</c>, so the perspective divide is a single scale
+        /// factor), and a small-span approximation otherwise. <c>|P11|·H</c> equals <c>|P00|·W</c>
+        /// identically (<c>P00 = P11/aspect</c>, <c>aspect = W/H</c>), so it is also the correct factor for a
+        /// HORIZONTAL perpendicular displacement at any aspect. Cross-checked against the live projection at
+        /// two depths by the off-look-at fixture's oracle-acceptance tooth.</para></summary>
         public static double ClosedFormPerpendicularSpanPx(
             double lengthMetres, double viewDepthMetres, double absP11, double viewportHeightPx)
             => lengthMetres * absP11 * viewportHeightPx / (2.0 * viewDepthMetres);

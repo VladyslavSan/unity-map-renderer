@@ -151,7 +151,7 @@ namespace MapRenderer.Tests.Filters
             Assert.That(result.Count, Is.EqualTo(239), "!has NoSuchKey must return all 239 features");
         }
 
-        // ── $id filter — previously silent no-op, now live ──────────────────────────────────────
+        // ── $id filter — live ────────────────────────────────────────────────────────────────────
 
         [Test]
         public void Legacy_Eq_Id_182_Returns1_And_IsAruba()

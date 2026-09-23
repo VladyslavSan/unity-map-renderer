@@ -5,20 +5,17 @@ namespace MapRenderer.Unity.Rendering.Tile
     /// <summary>
     /// An opaque, equatable cache-key token identifying the active style — one component of
     /// <see cref="PreparedTileCache"/>'s composite key (alongside <c>TileId</c> and layerId). MapView
-    /// supplies it; the cache never interprets the string, only compares it — so prepared meshes under two
-    /// different tokens coexist: keying by content is COEXISTENCE, not a flush.
-    ///
-    /// The id is a digest of <c>styleId</c> PLUS the style document's CONTENT PLUS the layer
-    /// numbering <c>RenderLayerSet.Build</c> actually produced (<see cref="Map.MapView.SetStyle"/>,
-    /// <c>JsonCanonical.CacheKey</c>) — the numbering component matters because a <c>MapMaterialSet</c> field
-    /// Build reads is live-mutable and not part of the style document, so it can shift dense layer ids under
-    /// unchanged content. <c>JsonCanonical.CacheKey</c> is a 64-bit FNV-1a hash, not a cryptographic one — two
-    /// runs differing in ANY of these digest unequal for any pair this session will actually produce, which
-    /// is what lets the cache skip a separate purge condition; it is not a guarantee against a hash collision.
-    ///
-    /// Value-equality + a stable hash so a composite Dictionary key built from it is zero-boxing (mirrors
-    /// <c>TileManager.LoadedKey</c>/<c>SourceKey</c>). <c>null</c> normalises to <see cref="string.Empty"/> so
-    /// the token is always a valid, comparable key.
+    /// supplies it; the cache never interprets the string, only compares it, so prepared meshes under two
+    /// different tokens coexist rather than flush. The id is a digest of <c>styleId</c> plus the style
+    /// document's content plus the layer numbering <c>RenderLayerSet.Build</c> actually produced
+    /// (<see cref="Map.MapView.SetStyle"/>, <c>JsonCanonical.CacheKey</c>) — the numbering matters because
+    /// a <c>MapMaterialSet</c> field Build reads is live-mutable and can shift dense layer ids under
+    /// unchanged content. Non-local invariant: two runs that differ in ANY of these components digest
+    /// unequal for every pair a session actually produces, which lets the cache skip a separate purge
+    /// condition. <c>JsonCanonical.CacheKey</c> is a 64-bit FNV-1a hash, not a cryptographic one, so this
+    /// is not a guarantee against a hash collision.
+    /// Value-equality with a stable hash keeps a composite Dictionary key zero-boxing; <c>null</c>
+    /// normalises to <see cref="string.Empty"/>.
     /// </summary>
     internal readonly struct StyleToken : IEquatable<StyleToken>
     {

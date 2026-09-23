@@ -17,32 +17,23 @@ namespace MapRenderer.Core.GeoJson
     /// <summary>
     /// One parsed RFC 7946 feature, still geodetic. Multi* geometries are FLATTENED here, because
     /// <see cref="TileGeometryType"/> — like the MVT spec it mirrors — draws no Multi* distinction:
-    ///
     /// <list type="table">
-    /// <item><term>Point / MultiPoint</term><description><c>Point</c>; N paths of ONE coordinate each (the
-    /// shape production's MVT decoder, <c>MvtDecodeJob</c>, produces for a MoveTo with
-    /// count &gt; 1)</description></item>
+    /// <item><term>Point / MultiPoint</term><description><c>Point</c>; N paths of one coordinate each, the
+    /// shape <c>MvtDecodeJob</c> produces for a MoveTo with count &gt; 1</description></item>
     /// <item><term>LineString / MultiLineString</term><description><c>LineString</c>; N paths</description></item>
     /// <item><term>Polygon / MultiPolygon</term><description><c>Polygon</c>; rings concatenated, with
     /// <see cref="PolygonRingCounts"/> carrying the per-polygon grouping</description></item>
     /// </list>
-    ///
-    /// <para><b>Coordinates are geodetic and latitude-first</b> (<see cref="GeoCoordinate"/>). RFC 7946
-    /// §3.1.1 positions are longitude-first on the wire; the swap happens once, in
-    /// <see cref="GeoJsonParser"/>, and lon-first ordering never propagates past it.</para>
-    ///
-    /// <para><b>Ring winding encodes ROLE, not authorship.</b> The parser re-orients each polygon's rings so
-    /// the exterior and its holes have opposite shoelace signs, with the exterior landing CW-on-screen
-    /// (positive shoelace) once projected into tile space — see <see cref="GeoJsonParser"/>. RFC 7946
-    /// §3.1.6 gives role POSITIONALLY and explicitly tells parsers not to reject non-conforming winding, so
-    /// authored winding cannot be trusted; downstream (<c>RingAssemblyJob</c>) classifies by sign.</para>
-    ///
-    /// <para><b>It IS the evaluation surface</b> (<see cref="IFeature"/>), exactly as <c>MvtFeature</c> is
-    /// for the other format. <c>Id</c>/<c>Properties</c>/<c>GeometryType</c> already had the
-    /// interface's shape, so implementing it costs one forwarding method and saves the per-tile adapter a
-    /// decoded GeoJSON layer would otherwise allocate one of per feature. Slicing carries the parsed feature
-    /// BY REFERENCE into every tile it touches, so the filter and expression layers read the authored
-    /// properties themselves — never a copy that could drift.</para>
+    /// <para>The three paragraphs below are non-local invariants. Coordinates are geodetic and latitude-first
+    /// (<see cref="GeoCoordinate"/>): RFC 7946 §3.1.1 positions are longitude-first on the wire, and
+    /// <see cref="GeoJsonParser"/> swaps them once.</para>
+    /// <para>Ring winding encodes ROLE, not authorship. RFC 7946 §3.1.6 gives role by position and tells
+    /// parsers not to reject non-conforming winding, so the parser re-orients each polygon's rings: the
+    /// exterior and its holes get opposite shoelace signs, with the exterior CW-on-screen in tile space.
+    /// <c>RingAssemblyJob</c> classifies by sign.</para>
+    /// <para>It IS the evaluation surface (<see cref="IFeature"/>), as <c>MvtFeature</c> is for MVT, so no
+    /// per-feature adapter is allocated. Slicing carries the feature BY REFERENCE into every tile it touches,
+    /// so filters and expressions read the authored properties, never a copy that could drift.</para>
     /// </summary>
     public sealed class GeoJsonFeature : IFeature
     {

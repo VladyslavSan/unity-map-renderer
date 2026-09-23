@@ -70,7 +70,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// Builds a line render layer from a parsed <see cref="Line.StyleLayer"/>, applying the initial
         /// zoom's uniforms. Returns <c>null</c> when the material set is unconfigured (the
         /// <see cref="Materials.MaterialFactory"/> warns and returns a null material) — the caller skips
-        /// the layer, exactly as the old <c>StyledLayerSet.Build</c> did.
+        /// the layer: <see cref="RenderLayerSet.Build"/> records it as <c>LayerSkipReason.MaterialUnconfigured</c>.
         /// </summary>
         public static LineRenderLayer TryCreate(
             Line.StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex)

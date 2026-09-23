@@ -79,7 +79,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// an upper bound the selection (a filtered subset) can never exceed. Pair with <see cref="SelectionView"/>
         /// to hand the result back — never return this raw array to a caller.
         ///
-        /// <para><b>Distinct array from <see cref="OrderedFeaturesBuffer"/>, deliberately.</b>
+        /// <para><b>Distinct array from <see cref="OrderedFeaturesBuffer"/>.</b>
         /// <c>StyledFillTileBuilder.OrderBySortKey</c> reads a layer's selection (via <see cref="SelectionView"/>)
         /// element-by-element WHILE writing the reordered result into <see cref="OrderedFeaturesBuffer"/>; sharing
         /// one backing array between the two would have that write clobber a selection entry not yet read.</para>

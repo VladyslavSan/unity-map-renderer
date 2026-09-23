@@ -1,15 +1,11 @@
 // Unity EditMode only — SymbolGatherPlan / Unity.Collections. NOT registered in core-tests.csproj.
 //
-// The symbol unit tests' concise "tick these symbols" seam, living in the TEST assembly instead of on
-// SymbolPlacementSystem.
-//
-// It is NOT a second code path: it wraps a SymbolTileBuffer build buffer into a real SymbolGatherPlan and
-// calls the PRODUCTION entry, so a unit test written against this seam exercises the path that ships. The
-// convenience is the wrapping.
-//
-// The projection is an explicit parameter rather than read off the system: reaching it would mean adding an
-// accessor to SymbolPlacementSystem with no production caller. Callers already have the MapCamera they
-// built the system with.
+// Non-obvious why: this is the symbol unit tests' "tick these symbols" seam, living in the TEST assembly
+// instead of on SymbolPlacementSystem. It wraps a SymbolTileBuffer into a real SymbolGatherPlan and calls
+// the PRODUCTION entry, so a unit test written against it exercises the path that ships — the wrapping is
+// the only convenience, not a second code path. The projection is an explicit parameter rather than read
+// off the system, because that would mean adding an accessor to SymbolPlacementSystem with no production
+// caller; callers already have the MapCamera they built the system with.
 
 using System.Collections.Generic;
 using Unity.Collections;
@@ -27,16 +23,12 @@ namespace MapRenderer.Tests
     internal static class SymbolPlacementSystemTestExtensions
     {
         /// <summary>
-        /// Tick <paramref name="buffer"/> through the production <see cref="SymbolGatherPlan"/> entry,
-        /// building a throwaway plan for the call. Safe because <c>GatherIntoMirror</c> COPIES into the
-        /// native mirror — neither the plan's lists nor the store's baked blocks are needed once
-        /// <c>Tick</c> returns.
-        ///
-        /// <para>Allocates per call (the plan, the store, their native lists). Fine for a behavioural
-        /// test; NOT fine inside an <c>Is.Not.AllocatingGCMemory</c> region, and it defeats the gather
-        /// memo because each call presents a new plan identity. Both of those cases want the
+        /// Ticks <paramref name="buffer"/> through the production <see cref="SymbolGatherPlan"/> entry using a
+        /// throwaway plan — safe because <c>GatherIntoMirror</c> copies into the native mirror before <c>Tick</c>
+        /// returns. Allocates per call, so use the fixture-owned-plan
         /// <see cref="TickSymbols(SymbolPlacementSystem, in SceneFrame, TestSymbolPlan, SymbolTileBuffer, GlyphAtlasTexture, float, IReadOnlyList{SymbolRenderLayer}, Texture2D)"/>
-        /// overload with a fixture-owned plan.</para>
+        /// overload instead inside an <c>Is.Not.AllocatingGCMemory</c> region or wherever the gather memo needs a
+        /// stable plan identity.
         /// </summary>
         public static void TickSymbols(this SymbolPlacementSystem system, in SceneFrame frame,
             SymbolTileBuffer buffer, GlyphAtlasTexture atlas, IProjection projection,
@@ -61,24 +53,22 @@ namespace MapRenderer.Tests
 
         // ── Staged collision boxes ───────────────────────────────────────────────────────────────────
 
-        /// <summary>The last <c>Tick</c>'s staged collision boxes, valid over
-        /// <c>[0, SymbolPlacementSystem.LastBoxCount)</c>. Lives here, not on the system, for the same reason
-        /// the world-slot forwards below do: a "Test surface" DATA accessor is the shape the conventions bar
-        /// from a production class (<c>LastBoxCount</c> itself stays — it is a real N+1 of the counter
-        /// telemetry family, which is a different shape).
-        /// <para><b>Box ORDER is staging order, and collision does not disturb it</b> —
-        /// <c>CollisionJob</c> sorts the CANDIDATES and its grid stores absolute box
-        /// indices, so the box pool itself is never reordered. With a single curved symbol in the frame,
-        /// <c>StageCurvedAnchor</c> appends box <c>g</c> and quad <c>g</c> in the same loop iteration, so
-        /// <c>box[g]</c> pairs with that symbol's <c>vertices[4g … 4g+3]</c>. A caller relying on that pairing
-        /// must ASSERT it (box count == vertex count / 4), not assume it.</para></summary>
+        /// <summary>Non-local invariant: the last <c>Tick</c>'s staged collision boxes, valid over
+        /// <c>[0, SymbolPlacementSystem.LastBoxCount)</c> — lives here, not on the system, for the same
+        /// reason the world-slot forwards below do (a "Test surface" DATA accessor is the shape the
+        /// conventions bar from a production class; <c>LastBoxCount</c> stays there because it's a
+        /// counter-telemetry member, a different shape). Box ORDER is staging order and collision does not
+        /// disturb it — <c>CollisionJob</c> sorts the CANDIDATES and its grid stores absolute box indices, so
+        /// the pool itself is never reordered. With a single curved symbol, <c>StageCurvedAnchor</c> appends
+        /// box <c>g</c> and quad <c>g</c> in the same loop iteration, so <c>box[g]</c> pairs with
+        /// <c>vertices[4g … 4g+3]</c> — a caller relying on that pairing must ASSERT it (box count == vertex
+        /// count / 4), not assume it.</summary>
         public static NativeArray<SymbolBox> LastStagedBoxes(this SymbolPlacementSystem system)
             => system._stageBoxes.AsArray();
 
         // ── World-slot inspection ────────────────────────────────────────────────────────────────────
-        // One-line forwards to the system's WorldSymbolRenderer, which is broadened private -> internal.
-        // A "Test surface" member does not belong on the production class; this location is the sanctioned
-        // footprint.
+        // Non-obvious why: a "Test surface" DATA accessor does not belong on the production class, so these
+        // are one-line forwards to WorldSymbolRenderer, broadened private -> internal — the sanctioned footprint.
 
         /// <summary>The WORLD mesh bound to <c>(tileKey, slot, kind)</c>'s slot, or null if nothing has been
         /// emitted to it. Returns whatever the slot last built, regardless of current visibility — see

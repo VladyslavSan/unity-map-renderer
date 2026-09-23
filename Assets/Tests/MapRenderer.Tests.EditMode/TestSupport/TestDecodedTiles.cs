@@ -12,10 +12,10 @@ namespace MapRenderer.Tests
     /// Builds synthetic <see cref="InMemoryDecodedTile"/>s and keeps them alive until the test that made them
     /// ends.
     ///
-    /// <para><b>Why this exists.</b> A decoded tile now owns <c>Allocator.Persistent</c> buffers, so
-    /// the ~10 symbol/line fixture files that used to build a plain managed <c>ITileLayer</c> would each start
+    /// <para><b>Why this exists.</b> A decoded tile owns <c>Allocator.Persistent</c> buffers, so
+    /// the ~10 symbol/line fixture files, each built on a plain managed <c>ITileLayer</c>, would start
     /// leaking native memory unless every one of their ~60 helper call sites grew a <c>using</c>. Leak
-    /// detection is off in the batch gate, so those leaks would be <b>invisible</b> — precisely the failure
+    /// detection is off in the batch gate, so those leaks would be <b>invisible</b> — the failure
     /// class this helper exists to prevent. One tracked factory plus a one-line <c>[TearDown]</c> per fixture keeps the
     /// helpers <c>static</c> and the call sites unchanged, and makes the release a property of the fixture
     /// rather than of each author's memory.</para>

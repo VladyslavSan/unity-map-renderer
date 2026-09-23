@@ -13,27 +13,10 @@ namespace MapRenderer.Core.Geo
     }
 
     /// <summary>
-    /// A camera-orientation angle that enforces a <c>[lo, hi]</c> range at construction time.
-    /// Carries an <see cref="Angle"/> value together with the bounds and the enforcement strategy
-    /// (<see cref="AngleConstraint.Clamp"/> or <see cref="AngleConstraint.Wrap"/>); the stored
-    /// <see cref="Value"/> is <b>always already in-range</b> — there is no way to hold an
-    /// out-of-range value via the public factories.
-    ///
-    /// <para><b>Presets:</b>
-    /// <list type="bullet">
-    ///   <item><see cref="Heading"/> — <c>[0, 360)</c> Wrap.</item>
-    ///   <item><see cref="Tilt"/> — <c>[0, 90]</c> Clamp.</item>
-    ///   <item><see cref="Clamped"/> — arbitrary <c>[lo, hi]</c> Clamp (e.g. a runtime
-    ///     <c>maxPitch</c> limit in <c>ViewInput.ApplyTiltDelta</c>).</item>
-    /// </list>
-    /// </para>
-    ///
-    /// <para><b><c>default(ConstrainedAngle)</c>:</b> carries <c>0°</c> with a degenerate
-    /// <c>[0, 0]</c> range. Reads return <c>0°</c>, matching <c>default(double)</c>. Never rely
-    /// on a defaulted value re-clamping anything — always construct through a preset factory.</para>
-    ///
-    /// <para>Managed only (not Burst-safe due to the enum field). Engine-free; no
-    /// <c>UnityEngine</c> dependency.</para>
+    /// A camera-orientation angle that enforces a <c>[lo, hi]</c> range at construction time. The public
+    /// factories (<see cref="Heading"/>, <see cref="Tilt"/>, <see cref="Clamped"/>) always store an in-range
+    /// <see cref="Value"/>. Managed only, not Burst-safe (holds an enum field). <c>default</c> carries
+    /// <c>0°</c> with a degenerate <c>[0, 0]</c> range and re-clamps nothing, so always use a factory.
     /// </summary>
     public readonly struct ConstrainedAngle
     {

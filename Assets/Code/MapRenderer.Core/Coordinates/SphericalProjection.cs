@@ -38,9 +38,9 @@ namespace MapRenderer.Core.Geo
             double sinPhi = math.sin(phi), cosPhi = math.cos(phi);
             double sinLam = math.sin(lambda), cosLam = math.cos(lambda);
 
-            // Radial (geodetic) normal in ECEF — unit by construction (no normalize needed).
+            // Radial (geodetic) normal in ECEF — already unit length (sin²+cos²=1), no normalize needed.
             double upX = cosPhi * cosLam, upY = cosPhi * sinLam, upZ = sinPhi;
-            double rr  = Radius; // surface point (no elevation); elevated GeoCoordinate3D is a future path
+            double rr  = Radius; // surface point (no elevation)
 
             // Axis-swap ECEF (X,Y,Z) → render (X,Z,Y), matching Ecef.Forward. Built via the double3
             // constructor (no double3 arithmetic ops), matching Ecef.Forward and the core-tests shim.

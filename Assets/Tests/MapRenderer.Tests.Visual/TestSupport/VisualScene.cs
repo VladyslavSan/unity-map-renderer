@@ -132,7 +132,7 @@ namespace MapRenderer.Tests
         /// <c>RenderModeMaterialSelectionTests</c>; there is no separate config flag). Default
         /// <c>RenderMode.Lit</c>, the product default. Unlit is the arm that separates "the geometry is
         /// wrong" from "two materials shade the same colour differently": under it a colour is exactly its
-        /// own albedo, so two overlapping draws of one colour are byte-identical by construction.</summary>
+        /// own albedo, so two overlapping draws of one colour are byte-identical.</summary>
         /// <param name="mode">The render mode to load the committed material set for.</param>
         public VisualScene RenderMode(MapRenderer.Unity.Rendering.Materials.RenderMode mode)
         {
@@ -215,7 +215,7 @@ namespace MapRenderer.Tests
 
             // ── Lit-ambient recipe — REQUIRED: fill is URP Lit and renders near-black at ambient-only.
             // Ambient/light only (matches MapViewSnapshotTests / FillPaintSnapshotTests.cs:102-105) —
-            // deliberately NOT QualitySettings.SetQualityLevel: that call is TiltedGroundScene.Create's, whose
+            // NOT QualitySettings.SetQualityLevel: that call is TiltedGroundScene.Create's, whose
             // scenes render hand-built MeshRenderer geometry, never the tile backend; forcing quality level 0
             // can swap in a different (or absent) URP Render Pipeline Asset for the batched/Entities tile
             // path while leaving plain-MeshRenderer fixtures unaffected. ───────────────────────────────────

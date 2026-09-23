@@ -1,9 +1,7 @@
-// Unity EditMode only — the declarative visual-test authoring kit.
-// NOT registered in Tools/core-tests/core-tests.csproj (engine-bound: the composer this feeds drives a
-// real MapViewComponent).
-//
-// The extensible SOURCE half of the kit. Shaped so an MVT/URL source kind can slot in later (a new
-// VisualSource subclass) without touching VisualScene. Only the inline-geojson kind exists today.
+// Unity EditMode only — the declarative visual-test authoring kit. NOT registered in
+// Tools/core-tests/core-tests.csproj (engine-bound: the composer this feeds drives a real MapViewComponent).
+// Non-obvious why: this is the extensible SOURCE half of the kit, shaped so an MVT/URL source kind can slot
+// in later (a new VisualSource subclass) without touching VisualScene — only the inline-geojson kind exists today.
 
 #if UNITY_EDITOR
 namespace MapRenderer.Tests

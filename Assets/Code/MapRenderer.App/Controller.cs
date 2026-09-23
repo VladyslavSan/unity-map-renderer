@@ -122,7 +122,7 @@ namespace MapRenderer.App
             // division and its unusable-ratio fallback live in DeviceScaling.DeviceToLogicalPx, the same
             // definition MapCamera.ViewportLogicalPx frames from, so reconstruction and render cannot
             // diverge.
-            // The viewport is deliberately NOT MapCamera.ViewportPx: this component's own serialized Camera
+            // The viewport is NOT MapCamera.ViewportPx: this component's own serialized Camera
             // may be null (Map.Camera, already null-checked above, is a different reference), and that
             // Screen.width/height fallback has no counterpart on MapCamera, which wraps a non-null camera.
             double dpr = Map.Config.DevicePixelRatio;

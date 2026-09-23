@@ -1,15 +1,11 @@
 // Unity EditMode only — real GameObject/Transform. NOT registered in core-tests.csproj.
 //
-// Namespace is MapRenderer.Tests, not .Visual: C# resolves extension methods only through the call site's
-// ENCLOSING namespaces, and callers live in both MapRenderer.Tests and MapRenderer.Tests.Visual. The parent
-// namespace is the one both can see.
-//
-// Observability for the GameObject backend, living in the TEST assembly rather than on the production
-// class. These read the backend's `_items`/`_tree`, broadened private -> internal, which IS the sanctioned
-// footprint.
-//
-// Post-dispose access faults here rather than returning null / 0 / NaN: reading a torn-down backend is a
-// bug, not a case to accommodate.
+// Non-local invariant: namespace is MapRenderer.Tests, not .Visual, because C# resolves extension methods
+// only through the call site's enclosing namespaces, and callers live in both MapRenderer.Tests and
+// MapRenderer.Tests.Visual — the parent namespace is the one both can see. These extensions read the
+// GameObject backend's `_items`/`_tree`, broadened private -> internal, the sanctioned test-only footprint.
+// After dispose, DrawItemCount returns 0 and GetInstanceTranslation returns NaN, because _items is cleared.
+// ContainerCount, Root and Container throw, because DoDispose nulls _tree.
 
 using UnityEngine;
 using MapRenderer.Core.Geo;

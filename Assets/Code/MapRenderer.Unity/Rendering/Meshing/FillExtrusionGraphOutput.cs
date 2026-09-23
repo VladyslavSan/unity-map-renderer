@@ -29,9 +29,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// for the empty-input fast-out (mirrors <see cref="FillGraphOutput.IsCreated"/>'s own doc).</summary>
         public bool IsCreated;
 
-        // ── Scratch balance counters — internal (test-code-bloat rule; the test assemblies see internals).
-        // A separate pair from FillGraphOutput's own: the two graphs allocate different scratch, and a
-        // shared counter would conflate them. ──────────────────────────────────────────────────────────
+        // ── Scratch balance counters — internal (test-code-bloat rule). A separate pair from
+        // FillGraphOutput's own, since the two graphs allocate different scratch. ─────────────────────────
 
         private static long _buffersAllocated;
         private static long _bufferDisposeNodes;

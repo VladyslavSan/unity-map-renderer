@@ -18,13 +18,12 @@ namespace MapRenderer.Unity.Rendering.Materials
     {
         /// <summary>
         /// Creates a per-style-layer fill Material by cloning <paramref name="settings"/>'s base fill
-        /// material (a Material Variant in the Editor — see <see cref="MaterialExtensions.CloneWithParent"/>),
+        /// material (a Material Variant in the Editor — see <c>MaterialExtensions.CloneWithParent</c>),
         /// so the base asset is the single editable source of styling. The clone inherits the base's
-        /// import-baked keywords; <see cref="FillTweaker.ApplyPainterContract"/> then re-asserts the
-        /// code-owned render-state + color-identity contract.
-        ///
-        /// <para>Returns <c>null</c> (with a warning) when no config / base material is assigned — there is
-        /// no shader-name fallback; production wires a <see cref="MapMaterialSet"/>.</para>
+        /// import-baked keywords; <c>FillTweaker.ApplyPainterContract</c> then re-asserts the
+        /// code-owned render-state + color-identity contract. Returns <c>null</c> (with a warning) when no
+        /// config/base material is assigned — there is no shader-name fallback; production wires a
+        /// <see cref="MapMaterialSet"/>.
         /// </summary>
         public static Material CreateFillMaterial(MapMaterialSet settings)
         {
@@ -47,21 +46,15 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// </summary>
         public static void BindFillPaintToApplier(Fill.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
         {
-            // fill-color: Constant/Zoom rides the _BaseColor uniform; data-driven is baked per-feature into
-            // the COLOR stream by StyledFillTileBuilder, which leaves the vertex white for exactly this branch.
-            // The fragment multiplies uniform × vertex in rgb AND alpha, so writing both renders the colour squared.
+            // fill-color: Constant/Zoom rides _BaseColor, and StyledFillTileBuilder leaves the vertex white; data-driven
+            // bakes into the COLOR stream. The fragment multiplies uniform × vertex, so writing both squares the colour.
             if (!paint.Color.DependsOnFeature)
                 applier.BindColor(paint.Color, ShaderProperties.PropertyId.BaseColor);
 
-            // fill-opacity. Constant/Zoom rides the _Opacity uniform; data-driven is baked per-feature into
-            // the COLOR stream's alpha by StyledFillTileBuilder. In the baked case _Opacity MUST be
-            // pinned to 1: the fragment computes `alpha *= vColor.a * _Opacity`, so leaving the material's
-            // inherited value would multiply the opacity in twice. Same convention as data-driven line-width
-            // below (a constant base, evaluated value baked per-vertex) — except that opacity is unitless, so
-            // its base is a literal 1, while line-width's base is a px value and therefore carries the
-            // device-pixel ratio.
-            // The pin is a BINDING of the constant 1, not a direct SetFloat, so the layer-fade gate is the
-            // only writer of _Opacity.
+            // fill-opacity: Constant/Zoom rides the _Opacity uniform; data-driven bakes into the COLOR
+            // stream's alpha. Non-obvious why: _Opacity MUST pin to 1 (fragment computes
+            // alpha *= vColor.a * _Opacity) or the opacity multiplies in twice, and the pin binds the
+            // constant 1 rather than a direct SetFloat, so the layer-fade gate stays _Opacity's only writer.
             if (paint.Opacity.DependsOnFeature)
                 applier.BindOpacity(new StyleProperty<float>(1f), ShaderProperties.PropertyId.Opacity);
             else
@@ -75,9 +68,8 @@ namespace MapRenderer.Unity.Rendering.Materials
             // (docs/fill-parity-design.md). The property stays declared in the CBUFFER, which
             // MapFillUnlitMaterialTests pins.
 
-            // fill-translate: a px offset consumed through Fill_VertexModify's MapPixelsToWorld — the same
-            // device-px space line-translate lives in, so it takes the same conversion. It parses as
-            // always-Constant, so the per-frame applier cannot animate it.
+            // fill-translate: a px offset through Fill_VertexModify's MapPixelsToWorld, in line-translate's
+            // device-px space. It parses as always-Constant, so the per-frame applier cannot animate it.
             applier.BindDevicePixelVector(paint.Translate, ShaderProperties.Fill.PropertyId.FillTranslate);
 
             // fill-translate-anchor.
@@ -85,10 +77,9 @@ namespace MapRenderer.Unity.Rendering.Materials
                 applier.BindDiscreteFloat(paint.TranslateAnchor, ShaderProperties.Fill.PropertyId.FillTranslateAnchor);
 
             // fill-pattern: flag the layer, and start it UNRESOLVED (zero-area rect ⇒ the shader clips).
-            // The sprite sheet is fetched asynchronously and cannot exist yet at material-build time, so
-            // every pattern layer necessarily starts here; FillRenderLayer.SetSprites resolves it once the
-            // sheet lands. Painting nothing until then is the spec behaviour — a pattern layer must NOT fall
-            // back to fill-color, whose default is opaque black.
+            // Non-obvious why: the sprite sheet is fetched asynchronously and cannot exist yet at
+            // material-build time; FillRenderLayer.SetSprites resolves it once the sheet lands, and a
+            // pattern layer must NOT fall back to fill-color, whose spec default is opaque black.
             mat.SetFloat(ShaderProperties.Fill.PropertyId.FillPattern, paint.PatternName != null ? 1f : 0f);
             mat.SetVector(ShaderProperties.Fill.PropertyId.PatternRect, Vector4.zero);
         }
@@ -96,13 +87,10 @@ namespace MapRenderer.Unity.Rendering.Materials
         /// <summary>
         /// Creates a per-style-layer fill-extrusion Material by cloning
         /// <paramref name="settings"/>'s <see cref="MapMaterialSet.FillExtrusionMaterial"/> base (a dedicated
-        /// <c>Map/FillExtrusion</c> material). Applies
-        /// <see cref="FillExtrusionTweaker.ApplyElevatedContract"/> — the ELEVATED-3D contract (opaque,
-        /// depth-writing), NOT the flat painter contract the FILL/LINE materials use: buildings are the first
-        /// geometry that must occupy the depth buffer to occlude one another and their own walls.
-        ///
-        /// <para>Returns <c>null</c> (with a warning) when no config / base material is assigned — mirrors
-        /// <see cref="CreateFillMaterial"/> / the <c>SymbolIconWorld</c> optional-with-warn precedent.</para>
+        /// <c>Map/FillExtrusion</c> material), then applies <c>FillExtrusionTweaker.ApplyElevatedContract</c>:
+        /// opaque and depth-writing, not the flat painter contract FILL/LINE use, because buildings must
+        /// occlude one another and their own walls. Returns <c>null</c> (with a warning) when no
+        /// config/base material is assigned — mirrors <see cref="CreateFillMaterial"/>.
         /// </summary>
         public static Material CreateFillExtrusionMaterial(MapMaterialSet settings)
         {
@@ -122,19 +110,14 @@ namespace MapRenderer.Unity.Rendering.Materials
         }
 
         /// <summary>
-        /// Binds constant/zoom fill-extrusion paint properties from <paramref name="paint"/> to the dedicated
-        /// <c>Map/FillExtrusion</c> material built by <see cref="CreateFillExtrusionMaterial"/>, and to its
-        /// own shader properties.
-        ///
-        /// <para>Height/Base: Constant/Zoom → the <c>_ExtrusionHeight</c>/<c>_ExtrusionBase</c> uniforms the
-        /// VS lerps by; Feature/Composite → skipped here AND zeroed (defensive identity, same reasoning as
-        /// the pattern reset below) — <see cref="Meshing.StyledFillExtrusionTileBuilder"/> bakes the
-        /// evaluated value per-vertex instead, and the VS composes uniform+bake additively, so a stray
-        /// non-zero uniform under the baked path would double the elevation.</para>
-        ///
-        /// <para><c>fill-extrusion-color</c>'s alpha channel is NOT special-cased to 1 — matches
-        /// <see cref="BindFillPaintToApplier"/>'s reasoning (opacity multiplies the color's own alpha rather
-        /// than overriding it).</para>
+        /// Binds constant/zoom fill-extrusion paint properties from <paramref name="paint"/> to the
+        /// dedicated <c>Map/FillExtrusion</c> material built by <see cref="CreateFillExtrusionMaterial"/>.
+        /// Height/Base: Constant/Zoom rides the <c>_ExtrusionHeight</c>/<c>_ExtrusionBase</c> uniforms;
+        /// Feature/Composite is skipped here AND zeroed, because
+        /// <see cref="Meshing.StyledFillExtrusionTileBuilder"/> bakes the evaluated value per-vertex and the
+        /// VS composes uniform+bake additively — a stray non-zero uniform under the baked path would
+        /// double the elevation. <c>fill-extrusion-color</c>'s alpha is NOT special-cased to 1, matching
+        /// <see cref="BindFillPaintToApplier"/>.
         /// </summary>
         /// <param name="paint">The layer's parsed fill-extrusion paint properties.</param>
         /// <param name="applier">The layer's per-frame zoom→uniform applier; constant bindings apply
@@ -153,9 +136,8 @@ namespace MapRenderer.Unity.Rendering.Materials
             else
                 applier.BindOpacity(new StyleProperty<float>(1f), ShaderProperties.PropertyId.Opacity);
 
-            // fill-extrusion-height / fill-extrusion-base: Constant/Zoom rides the uniform; data-driven is
-            // baked per-vertex by the builder instead, and the uniform is pinned to 0 so the VS's additive
-            // `lerp(_ExtrusionBase + bakedBase, _ExtrusionHeight + bakedHeight, t)` does not double-count.
+            // fill-extrusion-height / fill-extrusion-base: Constant/Zoom rides the uniform; data-driven bakes
+            // per-vertex instead, pinning the uniform to 0 so the VS's additive lerp does not double-count.
             if (!paint.Height.DependsOnFeature)
                 applier.BindFloat(paint.Height, ShaderProperties.FillExtrusion.PropertyId.ExtrusionHeight);
             else
@@ -173,8 +155,7 @@ namespace MapRenderer.Unity.Rendering.Materials
                 applier.BindDiscreteFloat(paint.TranslateAnchor, ShaderProperties.FillExtrusion.PropertyId.FillExtrusionTranslateAnchor);
 
             // No Fill-pattern defensive reset here (unlike BindBackgroundPaintToApplier): Map/FillExtrusion
-            // is its OWN dedicated shader with its OWN CBUFFER — it declares no _FillPattern/_FillTranslate
-            // properties at all, so there is nothing inherited from a Fill Variant to clobber.
+            // has its own dedicated CBUFFER, with no _FillPattern/_FillTranslate to inherit from a Fill Variant.
         }
 
         /// <summary>Background material: a clone of the FILL base (the fill shader's flat lit path IS the
@@ -196,12 +177,11 @@ namespace MapRenderer.Unity.Rendering.Materials
         }
 
         /// <summary>
-        /// Binds constant/zoom background paint properties from <paramref name="paint"/> to the material.
-        /// A UNIFORM colour over WHITE vertex colours — the line-color pattern
-        /// (<see cref="BindLinePaintToApplier"/>), NOT the fill per-vertex bake (the quad's verts are white
-        /// — see <see cref="Style.BackgroundRenderLayer"/>). <c>DependsOnFeature</c> is a
-        /// malformed-style guard: background has no features, so a data-driven expression is spec-invalid —
-        /// fall to the material's inherited default rather than bind it.
+        /// Binds constant/zoom background paint properties from <paramref name="paint"/> to the material —
+        /// a UNIFORM colour over WHITE vertex colours (the line-color pattern), not the fill per-vertex
+        /// bake. <c>DependsOnFeature</c> is a malformed-style guard: background has no features, so a
+        /// data-driven expression is spec-invalid — fall to the material's inherited default rather than
+        /// bind it.
         /// </summary>
         public static void BindBackgroundPaintToApplier(Background.PaintProperties paint, Style.ZoomStyleApplier applier, Material mat)
         {
@@ -220,20 +200,19 @@ namespace MapRenderer.Unity.Rendering.Materials
 
             // Same defence for the pattern uniforms, and load-bearing here: a base .mat carrying
             // _FillPattern=1 would make the fill shader clip the ENTIRE background quad
-            // (background-pattern is not implemented — see Background.PaintProperties.PatternName).
+            // (background-pattern is not implemented).
             mat.SetFloat(ShaderProperties.Fill.PropertyId.FillPattern, 0f);
             mat.SetVector(ShaderProperties.Fill.PropertyId.PatternRect, Vector4.zero);
         }
 
         /// <summary>
         /// Creates a per-style-layer line Material by cloning <paramref name="settings"/>'s base line
-        /// material (a Material Variant in the Editor — see <see cref="MaterialExtensions.CloneWithParent"/>),
+        /// material (a Material Variant in the Editor — see <c>MaterialExtensions.CloneWithParent</c>),
         /// so the base asset is the single editable source of styling. The clone inherits the base's
-        /// import-baked keywords; <see cref="LineTweaker.ApplyPainterContract"/> then re-asserts the
-        /// code-owned render-state + color-identity contract.
-        ///
-        /// <para>Returns <c>null</c> (with a warning) when no config / base material is assigned — there is
-        /// no shader-name fallback; production wires a <see cref="MapMaterialSet"/>.</para>
+        /// import-baked keywords; <c>LineTweaker.ApplyPainterContract</c> then re-asserts the
+        /// code-owned render-state + color-identity contract. Returns <c>null</c> (with a warning) when no
+        /// config/base material is assigned — there is no shader-name fallback; production wires a
+        /// <see cref="MapMaterialSet"/>.
         /// </summary>
         public static Material CreateLineMaterial(MapMaterialSet settings)
         {
@@ -271,27 +250,18 @@ namespace MapRenderer.Unity.Rendering.Materials
                 applier.BindOpacity(new StyleProperty<float>(1f), ShaderProperties.PropertyId.Opacity);
 
             // ── The device-px family ──────────────────────────────────────────────────────────────
-            // Every line paint property below is a LOGICAL px value whose shader consumer measures against
-            // _ScreenParams — the PHYSICAL framebuffer — via MapPixelsToWorld. BindDevicePixelFloat is the
-            // one conversion; naming the space at the binding site stops a newly-added px property from
-            // inheriting the wrong basis.
-            //
-            // The conversion stays on the CPU: MapPixelsToWorld must keep returning metres per DEVICE pixel,
-            // because the AA straddle pad and the hairline floor derived from it are sampling-grid
-            // quantities (half a physical pixel is half a physical pixel at any density) and must NOT scale.
-            // Neither the WIDTH family nor line-dasharray rides on that measurement: both pair the device-px
-            // _Width bound here with the frame-constant _MapFrameMetersPerDevicePixel, which
-            // MapCamera.SyncToCamera measures off the live camera. Both halves carry the dpr, so it cancels
-            // and the rendered result is dpr-invariant — which is why a CPU-only round-trip cannot see a
-            // basis error here.
+            // Non-local invariant: every line paint property below is a LOGICAL px value the shader measures
+            // against the PHYSICAL framebuffer via MapPixelsToWorld. BindDevicePixelFloat is the one conversion;
+            // naming the space at the binding site stops a newly-added px property from inheriting the wrong
+            // basis. docs/device-pixel-ratio-design.md § "Rejected alternatives" says why the conversion stays
+            // on the CPU; § "The px-valued surface" says why a CPU-only round-trip cannot see a basis error here.
 
-            // line-width (in pixels per MapLibre spec).
-            // Convention (data-driven width): when Width depends on feature, the evaluated width is baked
-            // into WidthScale (stream 3) by StyledLineTileBuilder, and the shader computes
-            // _Width × WidthScale × pxToWorld — so the uniform carries the BASE only. Binding that base as a
-            // device-px constant of 1 makes _Width == dpr, i.e. widthWorld = dpr × bakedPx × pxToWorld.
-            // Scaling the mesh bake instead would put the ratio inside the geometry, where a live ratio
-            // change could not reach it and PreparedTileCache would serve it stale.
+            // line-width (in pixels per MapLibre spec). Non-obvious why: data-driven width bakes the
+            // evaluated value into WidthScale (stream 3) by StyledLineTileBuilder, and the shader computes
+            // _Width × WidthScale × pxToWorld, so the uniform carries the BASE only — binding it as a
+            // device-px constant of 1 makes _Width == dpr. Scaling the mesh bake instead would put the
+            // ratio inside the geometry, where a live ratio change could not reach it and
+            // PreparedTileCache would serve it stale.
             if (paint.Width.DependsOnFeature)
                 applier.BindDevicePixelFloat(new StyleProperty<float>(1f), ShaderProperties.Line.PropertyId.Width);
             else
@@ -300,9 +270,8 @@ namespace MapRenderer.Unity.Rendering.Materials
             // it does not go through the conversion.
             mat.SetFloat(ShaderProperties.Line.PropertyId.WidthIsPixels, 1f);
 
-            // line-blur (MapLibre paint, spec default 0) → _Blur: an OPT-IN soft edge (default 0 = hard).
-            // NOT antialiasing — edge AA was removed; the shader draws a hard edge and floors thin-line width.
-            // Device px: the ramp's upper edge is fwidth(side) × _Blur, a band exactly _Blur device px wide.
+            // line-blur (MapLibre paint, spec default 0) → _Blur: an OPT-IN soft edge, separate from the straddle AA
+            // (default 0 = no-op). Device px: the ramp's upper edge is fwidth(side) × _Blur.
             if (!paint.Blur.DependsOnFeature)
                 applier.BindDevicePixelFloat(paint.Blur, ShaderProperties.Line.PropertyId.Blur);
 
@@ -314,10 +283,8 @@ namespace MapRenderer.Unity.Rendering.Materials
             if (!paint.Offset.DependsOnFeature)
                 applier.BindDevicePixelFloat(paint.Offset, ShaderProperties.Line.PropertyId.LineOffset);
 
-            // line-translate: a px offset applied through the SAME MapPixelsToWorld call as the widths, so it
-            // sits in the identical device space. Parsed as always-Constant (the array components are
-            // scalars, not expressions), so moving it from a bind-time Evaluate(0.0) to the per-frame applier
-            // cannot animate it. Unity boundary cast (double2 → Vector4) happens inside the applier.
+            // line-translate: a px offset through the SAME MapPixelsToWorld call as the widths. Parsed as
+            // always-Constant, so it cannot animate; the double2 → Vector4 cast happens inside the applier.
             applier.BindDevicePixelVector(paint.Translate, ShaderProperties.Line.PropertyId.LineTranslate);
 
             // line-translate-anchor.

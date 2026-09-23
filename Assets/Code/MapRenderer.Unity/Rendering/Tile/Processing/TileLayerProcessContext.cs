@@ -15,16 +15,13 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <summary>The tile address being built.</summary>
         public TileId Tile { get; init; }
 
-        /// <summary>The evaluation zoom for THIS worker pass — the source differs by cadence, not a single
-        /// project-wide rule. The mesh pass (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) bakes at
-        /// the tile's INTEGER zoom (<c>id.Z</c>); a background tile's graph kick
-        /// (<c>TileManager.KickSourcelessBackground</c>, which has no worker pass) does the same. The symbol
-        /// pass (<see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/>) evaluates at the fractional
-        /// CAMERA zoom captured at build start, because symbol layout/paint is evaluated at display
-        /// zoom. BOTH meanings are kept: the shared decode feed
-        /// (<c>SharedDisposable{IDecodedTile}</c>) carries only <c>{bytes → IDecodedTile}</c>, no zoom, no context, so
-        /// sharing the decoded tile across cadences cannot conflate their zoom sources — reconciling the
-        /// two belongs to whatever merges the cadences themselves, not to the feed.</summary>
+        /// <summary>The evaluation zoom for THIS worker pass — the source differs by cadence. The mesh pass
+        /// (<see cref="TileLayerProcessorRunner.RunWorkerPass"/>) and a background tile's graph kick bake at
+        /// the tile's INTEGER zoom (<c>id.Z</c>); the symbol pass
+        /// (<see cref="TileLayerProcessorRunner.RunSymbolWorkerPass"/>) evaluates at the fractional CAMERA
+        /// zoom captured at build start, because symbol layout/paint is evaluated at display zoom. The
+        /// shared decode feed (<c>SharedDisposable{IDecodedTile}</c>) carries no zoom, so sharing the
+        /// decoded tile across cadences cannot conflate their zoom sources.</summary>
         public double Zoom { get; init; }
 
         /// <summary>The tile's SW-corner projected render origin — shared by the mesh bake and the
@@ -38,11 +35,11 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// off <c>MapViewConfig</c> each Tick. <c>default</c> ⇒ disabled ⇒ the whole buffer is drawn.</summary>
         public TileBufferClip BufferClip { get; init; }
 
-        /// <summary>This build's rented <see cref="TileBuildBuffers"/> (perf/gc-elimination) — populated by
+        /// <summary>This build's rented <see cref="TileBuildBuffers"/> — populated by
         /// <see cref="TileLayerProcessorRunner.RunWorkerPass"/> for the duration of its worker pass,
         /// <c>null</c> everywhere else (tests, the symbol cadence, any context built outside that entry). A
-        /// processor that reads a <c>null</c> Buffers must fall back to allocating its own, exactly
-        /// as it did before pooling existed — never assume this is non-null.</summary>
+        /// processor that reads a <c>null</c> Buffers must fall back to allocating its own — never assume
+        /// this is non-null.</summary>
         public TileBuildBuffers Buffers { get; init; }
     }
 }

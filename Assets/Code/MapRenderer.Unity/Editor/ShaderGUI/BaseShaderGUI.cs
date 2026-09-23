@@ -17,7 +17,7 @@ namespace MapRenderer.Unity.Editor
     /// geometry-specific foldout.
     ///
     /// <para>(Named <c>BaseShaderGUI</c> in our own namespace — distinct from URP's
-    /// <c>UnityEditor.BaseShaderGUI</c>, which is no longer referenced.) The shader-feature <b>keyword sync</b>
+    /// <c>UnityEditor.BaseShaderGUI</c>, which this file does not reference.) The shader-feature <b>keyword sync</b>
     /// lives here in the editor (full editing capability, incl. the editor-only
     /// <c>MaterialEditor.FixupEmissiveFlag</c>) — mirroring URP's <c>BaseShaderGUI.SetMaterialKeywords</c>;
     /// <see cref="ValidateMaterial"/> owns the surface-level set and <see cref="LitShaderGUI"/> adds the Lit

@@ -51,8 +51,8 @@ namespace MapRenderer.Jobs.Mvt
     ///
     /// <para><b>Batched, not scheduled.</b> This still runs via <c>RunByRef</c> on the calling thread — the
     /// call site is inside an <c>IWorkScheduler</c> worker body, where <c>Schedule</c> is illegal. Batching
-    /// one job over the layer's whole feature range removes the per-feature struct-copy-and-dispatch cost a
-    /// fresh job per feature used to pay; it still produces no <c>JobHandle</c> and gains no
+    /// one job over the layer's whole feature range removes the per-feature struct-copy-and-dispatch cost that
+    /// scheduling a fresh job per feature would pay; it still produces no <c>JobHandle</c> and gains no
     /// parallelism.</para>
     ///
     /// <para>Declared here rather than beside the rest of the VM in <c>MapRenderer.Jobs.Expressions</c>

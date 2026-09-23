@@ -97,7 +97,7 @@ namespace MapRenderer.Tests.Text.Placement
         // contract relies on (SymbolTileBlockBaker/TestSymbolPlan preserve list order per tile).
         // <paramref name="textOptional"/> stamps text-optional on the RIDER, and
         // <paramref name="textTranslatePx"/> pushes the text's box clear of the icon's so a blocker can
-        // address one half alone (at a shared anchor the two boxes overlap by construction).
+        // address one half alone (at a shared anchor the two boxes overlap).
         private static void AddPairSymbols(SymbolTileBuffer buffer, double3 sceneOriginRender,
             bool textOptional = false, float textTranslatePx = 0f)
         {
@@ -1410,7 +1410,7 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(SymbolPairRole.Owner, block.PairRoles[0], "resolved owner");
                 Assert.AreEqual(SymbolPairRole.Rider, block.PairRoles[1], "resolved rider (adjacent, matching PairId/TileKey/MaterialIndex)");
                 Assert.AreEqual(SymbolPairRole.None, block.PairRoles[2], "a plain point is unpaired");
-                Assert.AreEqual(SymbolPairRole.None, block.PairRoles[3], "a curved record is never a pair half (§10 fence)");
+                Assert.AreEqual(SymbolPairRole.None, block.PairRoles[3], "a curved record is never a pair half (road-shields-design.md § \"Symbol pairing\")");
             }
             finally { block.Dispose(); }
         }
@@ -1474,16 +1474,11 @@ namespace MapRenderer.Tests.Text.Placement
         // ── (G) Exception-safety: a bake that throws mid-fill (after every array was already allocated at its
         //    final size) must leak no NativeArray — Bake's catch disposes the partial block before rethrowing.
         //
-        //    4.4c VERIFY-ITEM: the pre-buffer injection was a fake IReadOnlyList<SymbolQuad>
-        //    that lied about its own Count (a two-pass CountSizes/Fill disagreement). Under ShapedSymbol's
-        //    (start,count) spans, CountSizes and Fill read the SAME span, so that two-pass disagreement is no
-        //    longer inducible through the (now-deleted) per-symbol-carrier→buffer conversion adapter (its
-        //    AppendQuads loop would throw INSIDE the conversion, before Bake ever runs — never exercising Bake's
-        //    own catch). The replacement injection
-        //    instead builds the buffer directly: a record whose QuadCount claims more quads than the pool
-        //    actually holds, so Fill's indexed pool read throws mid-bake — the same failure SHAPE (a throw after
-        //    every NativeArray is already allocated, mid second-pass fill), just relocated to where it can still
-        //    happen under the new representation. ──
+        //    Under ShapedSymbol's (start,count) spans, CountSizes and Fill read the SAME span, so a two-pass
+        //    CountSizes/Fill disagreement is not inducible from a lying source list. The injection instead
+        //    builds the buffer directly: a record whose QuadCount claims more quads than the pool actually
+        //    holds, so Fill's indexed pool read throws mid-bake — the same failure SHAPE (a throw after
+        //    every NativeArray is already allocated, mid second-pass fill). ──
         [Test]
         public void Bake_ThrowingSymbol_DisposesPartialBlock_NoLeak()
         {
@@ -1506,9 +1501,9 @@ namespace MapRenderer.Tests.Text.Placement
                 "a throwing bake must dispose its partially-allocated block — no leaked live block, no leaked NativeArray");
         }
 
-        // NOTE: there is deliberately NO "warm Bake allocates zero managed" tooth here. Bake mints a fresh
+        // NOTE: there is NO "warm Bake allocates zero managed" tooth here. Bake mints a fresh
         // `new SymbolTileBlock()` (a sealed CLASS) per tile by design — one block per tile commit — so a
-        // zero-managed-alloc claim over Bake is false by construction. The 3b per-build churn win lives entirely
+        // zero-managed-alloc claim over Bake is always false. The 3b per-build churn win lives entirely
         // in the REUSED buffer's append/Clear path; its zero-alloc tooth is SymbolTileBufferAllocTests
         // (core-tests-only — the EditMode byte meter can't resolve it; see that file's header).
     }
@@ -1697,7 +1692,7 @@ namespace MapRenderer.Tests.Text.Placement
             ShapedSymbol curved = symbols.Symbols[0];
             Assert.AreEqual(SymbolPlacement.LineCenter, curved.Placement);
             Assert.Greater(curved.PathCount, 0, "a curved label must carry a non-empty path");
-            // PathUp is always index-parallel to Path by construction (SymbolTileBuffer.AppendPath pads any
+            // PathUp is always index-parallel to Path (SymbolTileBuffer.AppendPath pads any
             // short/missing up-array with zero) — a genuinely dropped/short extractor assignment is instead
             // caught below by AssertUp's explicit "must not be the dropped-assignment zero" check.
 
@@ -1736,7 +1731,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(SymbolKind.Icon, icon.Kind);
             Assert.AreEqual(1, icon.GlyphCount, "an along-line icon is a ONE-glyph curved label");
             Assert.Greater(icon.PathCount, 0, "an along-line icon must carry a non-empty path");
-            // PathUp is always index-parallel to Path by construction (see the curved-text test's identical note).
+            // PathUp is always index-parallel to Path (see the curved-text test's identical note).
 
             AssertUp(ExpectedUpAtTilePoint(LineFrom), symbols.PathUp[icon.PathStart], "along-line icon PathUpRender[0] (start)");
             AssertUp(ExpectedUpAtTilePoint(LineTo), symbols.PathUp[icon.PathStart + icon.PathCount - 1], "along-line icon PathUpRender[last] (end)");

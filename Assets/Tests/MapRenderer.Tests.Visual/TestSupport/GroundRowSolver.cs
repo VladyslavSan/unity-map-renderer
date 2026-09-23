@@ -12,22 +12,21 @@ namespace MapRenderer.Tests
     internal static class GroundRowSolver
     {
         /// <summary>Solves, by bisection on the live camera, which point on the world line (0, 0, z) projects onto
-        /// <paramref name="targetScreenY"/>. Bisection rather than a closed form because it must not duplicate
-        /// Unity's live camera matrices and conventions — the projection is knowable, but a second implementation
-        /// of it inside the test is the thing most likely to be wrong.
+        /// <paramref name="targetScreenY"/>. Bisection avoids a second implementation of Unity's live camera
+        /// matrices, the thing most likely to be wrong.
         ///
-        /// <para>UNITS: <paramref name="targetScreenY"/> is a Unity SCREEN-Y, the space Camera.WorldToScreenPoint
-        /// returns — NOT a pixel index. Both spaces have a bottom-left origin and grow upward, so there is no flip;
-        /// they differ by exactly half a pixel, because pixel index j's CENTRE is at screen-y j + 0.5. Callers
-        /// measuring on SnapshotRenderer.Pixels (row 0 = bottom scanline) must add that 0.5 themselves.
-        /// Half a pixel is not a rounding detail here: at the tilted pose the two band edges sit at local scales
-        /// of 763 and 347 metres per screen pixel, so a uniform half-row error fabricates a 1.7 % asymmetry —
-        /// the same size and direction as the foreshortening defect these fixtures measure.</para>
+        /// <para>Non-obvious why: <paramref name="targetScreenY"/> is a Unity SCREEN-Y, not a pixel index
+        /// (both spaces share a bottom-left origin, so there is no flip) — the two differ by half a pixel,
+        /// since pixel index j's CENTRE sits at screen-y j + 0.5; a caller measuring on
+        /// <c>SnapshotRenderer.Pixels</c> must add that 0.5. At the tilted pose this is not a rounding
+        /// detail: the two band edges sit at 763 and 347 m/px, so a half-row error fabricates a 1.7%
+        /// asymmetry, the same size as the foreshortening defect these fixtures measure.</para>
         ///
-        /// <para>The bracket is a PAIR, not a symmetric ±: a target far from the look-at needs a wide bracket on
-        /// one side while the other must stay in front of the camera. At the tilted pose the camera plane
-        /// crosses the ground at z ≈ −165 501 m, and WorldToScreenPoint returns a mirrored, non-monotone y
-        /// beyond it, which would void the bisection silently.</para></summary>
+        /// <para>Limitation no test can observe: the bracket is a PAIR, not a symmetric ±, because a target
+        /// far from the look-at needs a wide bracket on one side while the other must stay in front of the
+        /// camera, and because <c>WorldToScreenPoint</c> returns a mirrored, non-monotone y once past the
+        /// camera plane (z ≈ −165 501 m at the tilted pose), which would void the bisection silently if the
+        /// bracket crossed it.</para></summary>
         internal static double SolveWorldZForRow(
             Camera camera, double targetScreenY, double loMetres, double hiMetres)
         {

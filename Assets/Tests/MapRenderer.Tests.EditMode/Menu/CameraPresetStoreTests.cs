@@ -82,7 +82,7 @@ namespace MapRenderer.Tests.EditMode.Menu
         /// <summary>Two stores on DIFFERENT key prefixes are fully isolated: clearing every slot of one leaves the
         /// other's saved presets intact. This is the guarantee that lets this suite use a test-only prefix without
         /// wiping the user's real presets under <see cref="CameraPresetStore.DefaultKeyPrefix"/> — the "presets keep
-        /// resetting" bug (the suite's ClearAll used to run over the production keys). Uses two synthetic prefixes,
+        /// resetting" bug: a suite's <c>ClearAll</c> running over the production keys unless scoped by prefix. Uses two synthetic prefixes,
         /// never the production one, so the tooth itself touches no real preset. A store that ignored its prefix
         /// argument (one fixed namespace) reds this: B's clear would wipe A's slot.</summary>
         [Test]

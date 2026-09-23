@@ -3,27 +3,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Unity.Rendering.Backend
 {
     /// <summary>
-    /// The per-frame scene frame the render backends place tiles relative to (Level-2 of the two-level
-    /// RTC — see <see cref="MapRenderer.Unity.View.FloatingOrigin"/>). It bundles the two projection-derived
-    /// quantities a backend's per-frame <c>Rebuild</c> needs so ONE camera-orbit pose works for BOTH the plane
-    /// and the globe: the look-at projected into render space, and the render→look-at-local-ENU rotation.
-    ///
-    /// <list type="bullet">
-    ///   <item><see cref="SceneOriginRender"/> = <c>projection.Project(lookAt)</c> — the render-space point the
-    ///     camera orbits (Mercator: <c>(mercX, 0, mercZ)</c>; globe: the look-at's ECEF).</item>
-    ///   <item><see cref="Rebase"/> = <c>transpose(projection.TangentBasisAt(lookAt))</c> — rotates a render
-    ///     delta into the look-at's local ENU frame; the same rotation is applied as every tile's orientation.
-    ///     Mercator's tangent basis is the identity, so <see cref="Rebase"/> is <c>float3x3.identity</c>.</item>
-    /// </list>
-    ///
-    /// <para>A backend places each tile at <c>FloatingOrigin.TileToSceneRebased(tileOriginRender,
-    /// SceneOriginRender, Rebase)</c> with orientation <c>Rebase</c>. For Mercator this reduces bit-for-bit to
-    /// a translation-only placement (identity rebase ⇒ identity rotation). Passed by <c>in</c>
-    /// (readonly struct &gt; 16 bytes) per the large-read-only-struct convention.</para>
-    ///
-    /// <para>A plain data carrier: <c>init</c>-only auto-properties, built with named members per the
-    /// data-carrier convention (<c>docs/conventions-short.md</c>). It carries no positional constructor, so a
-    /// reader never has to remember which of the two <c>double3</c>s comes first.</para>
+    /// The per-frame scene frame the render backends place tiles relative to — Level 2 of the two-level
+    /// RTC (<see cref="MapRenderer.Unity.View.FloatingOrigin"/>). Bundles <see cref="SceneOriginRender"/> and
+    /// <see cref="Rebase"/> so one camera-orbit pose works for both the plane and the globe. A backend places
+    /// each tile at <c>FloatingOrigin.TileToSceneRebased(tileOriginRender, SceneOriginRender, Rebase)</c>
+    /// with orientation <c>Rebase</c>; for Mercator this reduces to a translation-only placement.
     /// </summary>
     internal readonly struct SceneFrame
     {

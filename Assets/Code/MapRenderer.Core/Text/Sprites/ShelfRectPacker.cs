@@ -9,10 +9,10 @@ namespace MapRenderer.Core.Text.Sprites
     /// Deterministic next-fit-decreasing-height <b>shelf</b> rectangle packing. Knows nothing about sprites —
     /// it packs axis-aligned cells into the smallest power-of-two-widened sheet it can.
     ///
-    /// <para>Shelf packing is chosen over MaxRects/skyline deliberately: a few hundred cells that each grow a
-    /// couple of texels do not need the extra 3–5 % occupancy, and a shelf layout's disjointness is provable
-    /// by construction (cells within a shelf advance along x and never overlap; shelves stack along y and
-    /// never overlap). That provability is worth more here than density.</para>
+    /// <para>Shelf packing is chosen over MaxRects/skyline: a few hundred cells that each grow a
+    /// couple of texels do not need the extra 3–5 % occupancy, and a shelf layout's disjointness follows
+    /// directly from the rule (cells within a shelf advance along x and never overlap; shelves stack along y
+    /// and never overlap). That guarantee is worth more here than density.</para>
     ///
     /// <para><b>Determinism.</b> Cells are ordered by height desc, then width desc, then <i>input index</i>
     /// asc. The input-index tiebreak makes the order TOTAL, so the caller's own ordering (for sprites: the

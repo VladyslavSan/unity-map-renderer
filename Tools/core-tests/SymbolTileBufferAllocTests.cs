@@ -15,7 +15,7 @@ using MapRenderer.Core.Text.Placement;
 namespace MapRenderer.Tests.Text.Placement
 {
     /// <summary>
-    /// Symbol-label perf Phase 1 / Stage 1 (docs/symbol-label-perf-design.md §4, §5 B): a
+    /// Pooled symbol build buffer (docs/labels-and-symbols-design.md § "Tile lifecycle (the slow clock)"): a
     /// <see cref="SymbolTileBuffer"/> reused across builds (<c>SymbolSubsystem</c>'s pool: rent
     /// → <see cref="SymbolTileBuffer.Clear"/> → repopulate) must not measurably grow the managed
     /// heap once its pooled lists' backing capacity has stabilized — the entire point of replacing a fresh

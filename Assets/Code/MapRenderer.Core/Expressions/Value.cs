@@ -7,7 +7,7 @@ namespace MapRenderer.Core.Expressions
 {
     /// <summary>
     /// A runtime value in the expression type system — the thing expressions produce and consume. This is
-    /// deliberately separate from <see cref="MapRenderer.Core.Json.JsonValue"/> (the parse-time DOM):
+    /// separate from <see cref="MapRenderer.Core.Json.JsonValue"/> (the parse-time DOM):
     /// evaluation has its own union because <c>color</c> is a first-class runtime type (typeof→"color",
     /// to-rgba round-trips it, interpolation operates on it), which a JSON DOM has no notion of.
     ///

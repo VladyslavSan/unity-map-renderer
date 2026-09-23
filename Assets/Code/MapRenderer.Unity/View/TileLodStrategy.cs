@@ -6,7 +6,7 @@ namespace MapRenderer.Unity.View
     /// value here + a case where it's resolved when a new strategy lands.</summary>
     public enum TileLodMode
     {
-        /// <summary>Previous behaviour: uniform single-zoom cover (<see cref="FlatLodStrategy"/>).</summary>
+        /// <summary>Uniform single-zoom cover (<see cref="FlatLodStrategy"/>).</summary>
         Flat = 0,
 
         /// <summary>Screen-space LOD: near full-detail, far progressively coarser (<see cref="ScreenSpaceLodStrategy"/>).
@@ -22,10 +22,9 @@ namespace MapRenderer.Unity.View
     /// <summary>
     /// Per-tile detail policy for the frustum tile-cover traversal (planar + globe share it). The traversal
     /// handles VISIBILITY (frustum + occlusion) and the near-field detail cap; the strategy decides, for a
-    /// visible tile still below the target zoom, whether to <b>stop here</b> (emit this coarse tile) or
-    /// <b>subdivide</b> further. Swapping the strategy turns the same traversal into a flat single-zoom cover, a
-    /// screen-space LOD cover, etc. — so behaviours coexist and can be selected/compared at runtime rather than
-    /// one being hard-coded.
+    /// visible tile still below the target zoom, whether to STOP here (emit this coarse tile) or SUBDIVIDE
+    /// further. Swapping the strategy turns the same traversal into a flat single-zoom cover, a
+    /// screen-space LOD cover, etc.
     /// </summary>
     public interface ITileLodStrategy
     {
@@ -72,7 +71,7 @@ namespace MapRenderer.Unity.View
         public double TargetOnScreenPx { get; init; }
     }
 
-    /// <summary>Previous behaviour: never stop early, so every visible tile is subdivided to the target zoom —
+    /// <summary>Never stops early, so every visible tile is subdivided to the target zoom —
     /// a uniform single-zoom cover. Far tiles are full-resolution (and tiny on screen under tilt).</summary>
     public sealed class FlatLodStrategy : ITileLodStrategy
     {
@@ -81,20 +80,19 @@ namespace MapRenderer.Unity.View
     }
 
     /// <summary>Screen-space (distance-driven) LOD: stop once the tile's projected size drops to the target
-    /// on-screen tile size — i.e. when <c>GroundSize ≤ ScreenRatio·Distance</c>. Near the camera tiles reach the
-    /// target zoom (full detail); toward the horizon they stop progressively coarser. This is the DEFAULT and
-    /// the better-looking mode under tilt: the tile count still grows under tilt (globe z13 measured 24 → 112,
-    /// tilt 0 to 60) because the billboard approximation ignores foreshortening, but that growth buys more
-    /// detail toward the horizon than the coarser, cheaper <see cref="ProjectedAreaLodStrategy"/> alternative.
+    /// on-screen tile size — i.e. when <c>GroundSize ≤ ScreenRatio·Distance</c>. Near the camera tiles reach
+    /// the target zoom (full detail); toward the horizon they stop progressively coarser. This is the
+    /// DEFAULT and the better-looking mode under tilt: tile count still grows under tilt, because the
+    /// billboard approximation ignores foreshortening, but that growth buys more detail toward the horizon
+    /// than the coarser, cheaper <see cref="ProjectedAreaLodStrategy"/> alternative.
     ///
-    /// <para><b>Known drawback — LOD-churn white flash.</b> Because the emitted zoom is distance-driven, panning
-    /// toward the view vector continuously pulls far tiles nearer, so each crosses the threshold and its coarse
-    /// tile is swapped for four tiles one zoom finer. Under the current instant tile-atomic consume the coarse
-    /// tile leaves the cover before its finer replacements have fetched+built, so that patch flashes WHITE
-    /// for a frame or two. It is inherent to any screen-space LOD without tile RETENTION — the fix is in the
-    /// tile lifecycle (TileManager), not here: keep a parent tile drawable until its finer children are ready
-    /// (retain-until-replaced), or cross-fade. <see cref="FlatLodStrategy"/> (uniform zoom) doesn't churn, so it
-    /// doesn't flash.</para></summary>
+    /// <para>Known drawback — LOD-churn white flash: because the emitted zoom is distance-driven, panning
+    /// toward the view vector continuously pulls far tiles nearer, so each crosses the threshold and its
+    /// coarse tile is swapped for four finer tiles. Under instant tile-atomic consume the coarse tile
+    /// leaves the cover before its finer replacements have fetched+built, so that patch flashes WHITE for a
+    /// frame or two. It is inherent to any screen-space LOD without tile RETENTION — the fix belongs in the
+    /// tile lifecycle (TileManager), not here: retain a parent tile until its finer children are ready, or
+    /// cross-fade. <see cref="FlatLodStrategy"/> (uniform zoom) doesn't churn, so it doesn't flash.</para></summary>
     public sealed class ScreenSpaceLodStrategy : ITileLodStrategy
     {
         public string Name => "lod-screen";
@@ -107,8 +105,7 @@ namespace MapRenderer.Unity.View
 
     /// <summary>Projected-area LOD: stop once the tile's TRUE projected on-screen size (foreshortening
     /// included) drops to the target. Opt-in, not a fix for <see cref="ScreenSpaceLodStrategy"/> — the two
-    /// trade different things: this rule emits far fewer tiles under tilt (globe z13 measured 24 → 39, tilt 0
-    /// to 60, vs the default's 24 → 112) but "looks quite worse" under tilt (maintainer's own viewing), so it
+    /// trade different things: this rule emits far fewer tiles under tilt but looks visibly worse, so it
     /// costs visual quality to buy frame time.
     ///
     /// <para>The aggressiveness ctor parameter scales the whole threshold (1.0 = stop exactly at the target;

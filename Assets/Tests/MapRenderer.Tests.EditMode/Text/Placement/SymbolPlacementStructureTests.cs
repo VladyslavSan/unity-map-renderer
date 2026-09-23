@@ -246,8 +246,8 @@ namespace MapRenderer.Tests.Text.Placement
             AddSymbol(moved, 0, frame.SceneOriginRender, translate);
 
             // This symbol is a POINT (default Placement) — it draws through the world path.
-            // The screen-space translate no longer shows up as a delta on system.Mesh's Position (screen px);
-            // It is carried as an ADDITIVE, UNROTATED Offset delta instead (BillboardMath.BuildWorldQuad),
+            // The screen-space translate does not show up as a delta on system.Mesh's Position (screen px);
+            // it is carried as an ADDITIVE, UNROTATED Offset delta instead (BillboardMath.BuildWorldQuad),
             // with the SAME Y-negation as the glyph corner — so the sign convention differs from the
             // OLD path's raw screen-vertex delta (see BuildWorldQuad's doc for the derivation).
             using var system = new SymbolPlacementSystem(mapCamera,
@@ -425,7 +425,7 @@ namespace MapRenderer.Tests.Text.Placement
                 // The glyphs are DISTRIBUTED along the line, not stacked at one point: each glyph's world
                 // AnchorLocal (the Level-1 RTC bake) differs from its neighbours', so the 3D
                 // spread of all corners' AnchorLocal exceeds a small threshold (robust to the projected
-                // line's world orientation; the world path no longer has a single screen-px anchor to spread).
+                // line's world orientation; the world path has no single screen-px anchor to spread).
                 float3 minA = new float3(float.MaxValue), maxA = new float3(float.MinValue);
                 foreach (WorldBillboardVertex vv in v)
                 {

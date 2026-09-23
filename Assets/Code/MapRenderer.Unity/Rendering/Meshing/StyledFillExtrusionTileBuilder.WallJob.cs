@@ -18,10 +18,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// length is fixed by the input columns — there is no runtime-derived multiplier (unlike line's
         /// subdivision), so the always-bound-loops rule is already satisfied without one.</para>
         ///
-        /// <para><see cref="Up"/> is already unit BY CONSTRUCTION at the source — <c>WebMercatorProjection</c>
-        /// returns the literal constant <c>(0,1,0)</c>, <c>SphericalProjection</c>'s radial ECEF normal is
-        /// exactly unit (<c>SphericalProjection.cs</c>'s own comment: "unit by construction, no normalize
-        /// needed") — and <see cref="ProjectPointsJob{TProj}"/> passes it straight through
+        /// <para><see cref="Up"/> is already unit at the source — <c>WebMercatorProjection</c>
+        /// returns the literal constant <c>(0,1,0)</c>, and <c>SphericalProjection</c>'s radial ECEF normal is
+        /// unit length because sin²+cos²=1 — and <see cref="ProjectPointsJob{TProj}"/> passes it straight through
         /// (<c>Normals[index] = pp.Up</c>, no renormalization). This job still casts to <c>float3</c> then
         /// calls <c>math.normalize</c> on it — NOT because the value needs normalizing, but to guard the
         /// sub-ULP length error the <c>(float3)</c> narrowing can introduce into an otherwise-exact unit
@@ -44,7 +43,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             [ReadOnly] public NativeList<int>           RingFeatureIdx;  // flat, length = ringCount
             [ReadOnly] public NativeList<GeoCoordinate> Geo;             // per flat vertex — TileToGeoJob output
             [ReadOnly] public NativeList<double3>       World;           // per flat vertex, origin-relative
-            [ReadOnly] public NativeList<double3>       Up;              // per flat vertex, unit BY CONSTRUCTION at the source (see the type doc) — this job still normalizes it
+            [ReadOnly] public NativeList<double3>       Up;              // per flat vertex, already unit at the source (see the type doc) — this job still normalizes it
             [ReadOnly] public NativeArray<Vector4>       FeatureColors;
             [ReadOnly] public NativeArray<Vector2>       FeatureBake;
             public bool Globe;

@@ -3,20 +3,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geo
 {
     /// <summary>
-    /// A strongly-typed angle value, stored internally in <b>degrees</b> (the canonical unit
-    /// for all camera-orientation params in this project).
-    ///
-    /// <para>This is the project's <b>sole home of the degrees↔radians conversion</b>
-    /// (<c>* math.PI_DBL / 180.0</c>). Every trig site in camera code reads
-    /// <see cref="Sin"/>/<see cref="Cos"/> or <see cref="Radians"/> instead of repeating
-    /// the multiply. Degree storage guarantees <b>bitwise-exact integer-degree wraps</b>
-    /// (e.g. <c>370 % 360 == 10.0</c> exactly, no floating-point residual).</para>
-    ///
-    /// <para><b>Construction is always explicit:</b> use the static factories
-    /// <see cref="FromDegrees"/> / <see cref="FromRadians"/> — never a bare numeric literal
-    /// assigned to an <c>Angle</c> field. There is no implicit <c>double</c> conversion.</para>
-    ///
-    /// <para>Engine-free: only <c>Unity.Mathematics</c> <c>math.*</c> is used.</para>
+    /// A strongly-typed angle, stored in <b>degrees</b> — the canonical unit for camera-orientation
+    /// params — so an integer-degree value wraps bitwise-exact (<c>370 % 360 == 10.0</c>, no float
+    /// residual). This is the project's sole degrees↔radians conversion site: read <see cref="Sin"/>,
+    /// <see cref="Cos"/>, or <see cref="Radians"/> instead of repeating the multiply. Construction is
+    /// explicit, via <see cref="FromDegrees"/>/<see cref="FromRadians"/>; no implicit conversion exists.
     /// </summary>
     public readonly struct Angle
     {

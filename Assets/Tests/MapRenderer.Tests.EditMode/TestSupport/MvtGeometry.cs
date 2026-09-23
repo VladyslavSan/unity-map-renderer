@@ -9,7 +9,7 @@ namespace MapRenderer.Tests.TestSupport
     /// repeat-count = id &gt;&gt; 3; MoveTo=1, LineTo=2, ClosePath=7; parameters are zigzag-encoded
     /// deltas applied to a running cursor.
     ///
-    /// <para><b>Zero production callers</b>, and retained deliberately. Fill,
+    /// <para><b>Zero production callers</b>, kept for what follows. Fill,
     /// line and symbol obtain geometry from the shared <c>TileGeometryBuffers</c> that the Burst
     /// <c>MvtDecodeJob</c> fills. What keeps this type in Core is that it is the <b>measurement instrument</b>
     /// for that job: (a) the managed reference decoder <c>MvtDecodeJob</c> is checked against

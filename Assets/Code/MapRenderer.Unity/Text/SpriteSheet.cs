@@ -112,10 +112,10 @@ namespace MapRenderer.Unity.Text
                 // SymbolIconResamplingTests.IconInterior_TracksSubPixelPhaseSmoothly.
                 //
                 // What makes bilinear safe here is the ONE-TEXEL TRANSPARENT BORDER the repack above laid
-                // around every sprite — an edge tap now reaches into that border rather than into the sprite
+                // around every sprite — an edge tap reaches into that border rather than into the sprite
                 // packed next door, and the border is simultaneously what turns the silhouette into an alpha
                 // edge the filter can antialias (SymbolIconResamplingTests' bleed and silhouette teeth).
-                // There is no UV inset any more: IconQuadLayout draws the padded rect edge-to-edge and grows
+                // There is no UV inset: IconQuadLayout draws the padded rect edge-to-edge and grows
                 // the quad by the border, so the icon's ink keeps its nominal size.
                 //
                 // Still no mip chain (see the ctor above): mips on a PACKED atlas average neighbouring sprites
@@ -161,7 +161,7 @@ namespace MapRenderer.Unity.Text
 
         /// <summary>
         /// Writes a top-left-origin RGBA32 buffer into the <c>Color32[]</c> <c>SetPixels32</c> expects.
-        /// Deliberately NOT a row reversal: <c>SetPixels32</c> indexes <c>[y * width + x]</c> with <c>y</c>
+        /// NOT a row reversal: <c>SetPixels32</c> indexes <c>[y * width + x]</c> with <c>y</c>
         /// being the <c>GetPixel</c> y, so a straight row-order copy is exactly what makes
         /// <c>GetPixel(x,y)</c> read the top-left-origin <c>(x,y)</c> — the orientation contract. The single
         /// flip of the whole path lives in <see cref="PackTopLeftOrigin"/>, which is where

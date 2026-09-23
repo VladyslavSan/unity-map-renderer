@@ -6,11 +6,11 @@ using System;
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// One collision candidate spanning a CONTIGUOUS range of <see cref="SymbolBox"/>es —
-    /// all-or-nothing. A POINT symbol is a single-box candidate (its whole-symbol AABB); a CURVED along-line
-    /// symbol is an N-box candidate (one AABB per glyph). <c>CollisionJob</c> places a candidate iff EVERY
-    /// box in its range is free, and — if placed — reserves ALL of them; so a curved symbol drops entirely
-    /// when any one glyph collides, and blocks others across its whole run.
+    /// One collision candidate spanning a CONTIGUOUS range of <see cref="SymbolBox"/>es — all-or-nothing. A
+    /// POINT symbol is a single-box candidate (its whole-symbol AABB); a CURVED along-line symbol is an N-box
+    /// candidate (one AABB per glyph). <c>CollisionJob</c> places a candidate iff EVERY box in its range is
+    /// free, and — if placed — reserves ALL of them; so a curved symbol drops entirely when any one glyph
+    /// collides, and blocks others across its whole run.
     ///
     /// <para>Only the CANDIDATES are sorted into placement order; the flat <c>boxes[]</c> array stays put
     /// (the grid stores absolute box indices), so <see cref="BoxStart"/> keeps addressing the same boxes
@@ -55,7 +55,7 @@ namespace MapRenderer.Core.Text.Placement
         /// <c>SymbolPlacementSystem</c>'s dropped-halves map, keyed by <see cref="FadeId"/>) so the emit loop
         /// can skip the dropped half's quads, and the collision pass OVERWRITES it with this frame's verdict.
         /// The aliasing is safe because the emit loop reads the candidate BEFORE the collision job is
-        /// scheduled (R3's one-frame verdict carry — the same latency <see cref="WasPlacedLastFrame"/> rides).</summary>
+        /// scheduled (a one-frame verdict carry — the same latency <see cref="WasPlacedLastFrame"/> rides).</summary>
         public byte DroppedBoxMask;
 
         /// <summary>`symbol-sort-key` — greedy placement order. LOWER is placed FIRST (MapLibre priority).</summary>
@@ -99,11 +99,11 @@ namespace MapRenderer.Core.Text.Placement
         /// <summary>This candidate was a SURVIVOR last frame (looked up by <see cref="FadeId"/> against the
         /// placement system's kept-set). It biases <see cref="SymbolCollision.ComparePlacementOrder(in SymbolCandidate,in SymbolCandidate)"/>
         /// as a sticky-placement (hysteresis) tiebreak — at EQUAL <see cref="SortKey"/>, an incumbent places before
-        /// a newcomer, so the arbitrary <see cref="FeatureIndex"/>/<see cref="TileKey"/> tiebreak can no longer
-        /// flip a near-tied pair frame-to-frame (tile churn / reprojection) → no z-fighting-style flicker. It sits
+        /// a newcomer, so the arbitrary <see cref="FeatureIndex"/>/<see cref="TileKey"/> tiebreak cannot flip a
+        /// near-tied pair frame-to-frame (tile churn / reprojection) → no z-fighting-style flicker. It sits
         /// BELOW SortKey, so any strictly-higher-priority (lower-SortKey) newcomer still wins — incumbency never
-        /// blocks a genuinely higher-priority symbol. The placement layer sets this each frame (feedback of history
-        /// into collision — the one deliberately-relaxed spot of the "downstream of collision, never fed back" rule).</summary>
+        /// blocks a higher-priority symbol. The placement layer sets this each frame (feedback of history into
+        /// collision — the one relaxed spot of the "downstream of collision, never fed back" rule).</summary>
         public bool WasPlacedLastFrame;
 
         /// <summary>
@@ -113,8 +113,8 @@ namespace MapRenderer.Core.Text.Placement
         /// order the candidate ranges must TILE <c>[0, boxCount)</c> exactly: <c>candidates[0].BoxStart == 0</c>,
         /// each following <c>BoxStart == previous BoxStart + BoxCount</c>, all counts <c>&gt;= 0</c>, and the last
         /// range ending at <c>boxCount</c>. <see cref="CollisionGridSizing.NodeUpperBoundByCandidates"/> and
-        /// the collision job's per-reference insert assume exactly this; a violation means a candidate range is
-        /// out-of-range or overlaps another — the never-reproduced dense-scene node-pool overflow. Returns
+        /// the collision job's per-reference insert assume this; a violation means a candidate range is
+        /// out-of-range or overlaps another, which can overflow the collision grid's node pool. Returns
         /// <c>true</c> with the offending candidate index (or <paramref name="candidates"/><c>.Length</c> when the
         /// ranges under-cover) and the <see cref="BoxStart"/> it should have had; <c>false</c> when the invariant
         /// holds. Pure and allocation-free so a <c>[Conditional("UNITY_ASSERTIONS")]</c> caller can run it every

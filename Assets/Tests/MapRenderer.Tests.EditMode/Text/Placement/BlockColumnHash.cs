@@ -1,5 +1,5 @@
 // Unity EditMode only — SymbolTileBlock is Unity.Collections-side (NativeArray), reached here via
-// InternalsVisibleTo("MapRenderer.Tests.EditMode") from MapRenderer.Unity/AssemblyInfo.cs. Deliberately in
+// InternalsVisibleTo("MapRenderer.Tests.EditMode") from MapRenderer.Unity/AssemblyInfo.cs. It is in
 // THIS assembly, not MapRenderer.Tests.Shared — that assembly also links PlayMode, where the NativeArray
 // access this helper does is unwanted (presence-check-cannot-detect-misplacement: the wrong PLACE, not the
 // wrong content, is the risk).
@@ -26,7 +26,7 @@ namespace MapRenderer.Tests.Text.Placement
     /// differing index in the failure message — the shape a prod-vs-oracle compare needs to localize
     /// a divergence.</para>
     ///
-    /// <para><b>TextIds/IconImageIds are deliberately EXCLUDED from <see cref="Hash"/></b> and compared by
+    /// <para><b>TextIds/IconImageIds are EXCLUDED from <see cref="Hash"/></b> and compared by
     /// <see cref="AssertColumnsEqual"/> only via EQUIVALENCE CLASS, never raw id value: those two columns are
     /// bake-order ids from a caller-supplied <see cref="SymbolStringTable"/>, so two independently-captured
     /// blocks (a fresh intern table each) can assign the SAME string a DIFFERENT id without any real
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Text.Placement
     {
         /// <summary>One digest per hashed column (see the type doc for what "digest" buys you over a single
         /// combined value: <see cref="ToString"/> below names which column moved without a second run).
-        /// <c>TextIds</c>/<c>IconImageIds</c> are deliberately absent — see the type doc.</summary>
+        /// <c>TextIds</c>/<c>IconImageIds</c> are absent — see the type doc.</summary>
         internal readonly struct ColumnHashes
         {
             internal readonly int Kinds, Detail, WorldStart, WorldCount, RepAnchor, MaterialIndexes,

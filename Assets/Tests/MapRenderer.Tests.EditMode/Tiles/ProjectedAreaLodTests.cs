@@ -562,7 +562,7 @@ namespace MapRenderer.Tests.Tiles
             };
 
             List<TileId> listA = Build();
-            var          keysA = new double[1]; // deliberately under-sized — SortByPriority must grow it
+            var          keysA = new double[1]; // under-sized so SortByPriority must grow it
             TilePriority.SortByPriority(listA, ref keysA, in ctx);
 
             List<TileId> listB = Build();
@@ -662,7 +662,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// Tooth B. The default mode's cover grows under tilt (billboard approximation, no foreshortening) —
-        /// deliberately retained behaviour, not a defect: it is what buys the better-looking cover. See
+        /// retained behaviour, not a defect: it is what buys the better-looking cover. See
         /// <c>ProjectedAreaLodTests</c> for the opt-in mode that trades this growth for fewer tiles.
         /// </summary>
         [Test]

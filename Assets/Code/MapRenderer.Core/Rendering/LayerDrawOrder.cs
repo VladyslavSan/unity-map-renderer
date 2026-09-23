@@ -3,55 +3,25 @@ using System;
 namespace MapRenderer.Core.Rendering
 {
     /// <summary>
-    /// The ordering role of a material <b>within one declared layer's own queue band</b> — NOT a
-    /// cross-layer concept. <see cref="Above"/> draws on top of <see cref="Base"/> <i>of the same
-    /// layer</i>, and still strictly below every sub-slot of the NEXT layer's band. A symbol layer
-    /// maps icon = <see cref="Base"/>, text = <see cref="Above"/>, so the badge draws under the number
-    /// it frames; every other kind (fill, line, background) uses <see cref="Base"/> only.
-    ///
-    /// <para>Named <c>Above</c>, not <c>Overlay</c>: <c>Overlay</c> already names Unity's
-    /// <c>RenderQueue.Overlay</c> (4000) in this render-queue domain — the very pin the Unity-side
-    /// symbol render layer was freed from — so reusing it here for an unrelated, per-layer-relative
-    /// concept would collide.</para>
-    ///
-    /// <para>Values must stay contiguous from 0 — they are queue offsets, not flags
-    /// (<see cref="LayerDrawOrder.SubSlotsPerLayer"/> is pinned to equal the value count).</para>
+    /// The ordering role of a material WITHIN one declared layer's queue band, not across layers.
+    /// <see cref="Above"/> draws over <see cref="Base"/> of the same layer and below the NEXT layer's band.
+    /// A symbol layer maps icon = <see cref="Base"/> and text = <see cref="Above"/>; other kinds use
+    /// <see cref="Base"/> only. Not <c>Overlay</c>: that names Unity's <c>RenderQueue.Overlay</c>. Values
+    /// are contiguous queue offsets from 0; <see cref="LayerDrawOrder.SubSlotsPerLayer"/> equals their count.
     /// </summary>
     public enum LayerSubSlot { Base = 0, Above = 1 }
 
     /// <summary>
-    /// Painter's-algorithm draw-order assignment for coplanar flat layers (fills + lines).
-    ///
-    /// The style is an ordered list of layers composited bottom-to-top (MapLibre painter's algorithm).
-    /// Most map layers are coplanar on the ground plane, so Unity's automatic sort
-    /// (render queue → camera distance → depth buffer) z-fights and reorders them wrongly.
-    /// Rule (<c>ARCHITECTURE.md</c>, "Layer ordering &amp; draw submission"): <b>we own draw order; we
-    /// never rely on Unity's automatic sort.</b>
-    ///
-    /// This is the <b>interim integer-queue mechanism</b> named there: each declared layer
-    /// owns a contiguous <b>band</b> of <see cref="SubSlotsPerLayer"/> queue values
-    /// (<c>base + layerIndex * SubSlotsPerLayer + subSlot</c>), with ZWrite off, all layers inside ONE
-    /// transparent queue band. A symbol layer's icon sits at <see cref="LayerSubSlot.Base"/> and its text at
-    /// <see cref="LayerSubSlot.Above"/> so the badge never paints over its own number — every other kind
-    /// uses only <see cref="LayerSubSlot.Base"/>. The BatchRendererGroup /
-    /// custom URP ScriptableRenderPass target (which scales past the integer-queue trick) is a deferred
-    /// follow-up.
-    ///
-    /// Why a single transparent band for BOTH fills and lines (the keystone constraint):
-    ///   • Unity draws the entire opaque queue (&lt;2500) before the entire transparent queue (≥2501),
-    ///     regardless of the per-material queue offset. If fills stayed opaque and lines transparent,
-    ///     a fill declared ABOVE a line would still render UNDER it. MapLibre interleaves fill/line
-    ///     freely, so the ordering mechanism must keep them in one band where the per-index offset
-    ///     alone decides order.
-    ///   • URP excludes Queue≥2501 from the opaque depth/GBuffer prepasses and draws those materials
-    ///     via UniversalForward in the transparent phase. Within the transparent phase Unity's only
-    ///     remaining tiebreak is camera distance — which on a coplanar plane can only reorder tiles
-    ///     WITHIN one layer (disjoint regions, so the order does not matter), never across layers,
-    ///     because each declared layer gets a DISTINCT queue value.
-    ///
-    /// Engine-free: this is pure C# (no UnityEngine.Rendering reference). The caller passes the base
-    /// queue as an int (e.g. UnityEngine.Rendering.RenderQueue.Transparent = 3000) and assigns the
-    /// returned values to <c>material.renderQueue</c>.
+    /// Painter's-algorithm draw order for coplanar flat layers. Unity's automatic sort z-fights coplanar layers
+    /// and reorders them, so we own draw order (<c>ARCHITECTURE.md</c> § "Layer ordering &amp; draw
+    /// submission"). Each declared layer owns a band of <see cref="SubSlotsPerLayer"/> queue values
+    /// (<c>base + layerIndex * SubSlotsPerLayer + subSlot</c>), ZWrite off, all in the transparent range.
+    /// The caller assigns the returned values to <c>material.renderQueue</c>.
+    /// <para>Fills and lines share ONE transparent band; this is a non-local invariant. Unity draws the whole
+    /// opaque range (&lt;2500) before the whole transparent range (≥2501), so an opaque fill declared above a
+    /// transparent line would still draw under it. In the transparent phase the only other tiebreak is camera
+    /// distance, which reorders tiles within one layer, which cover disjoint regions, but never across
+    /// layers with distinct queues.</para>
     /// </summary>
     public static class LayerDrawOrder
     {
@@ -85,12 +55,9 @@ namespace MapRenderer.Core.Rendering
         public const int TransparentBandStart = 2501;
 
         /// <summary>
-        /// Render queue for a single declared layer's sub-slot — the one formula home for
-        /// <c>TransparentQueue + drawIndex * SubSlotsPerLayer + subSlot</c>. Callers assigning a single
-        /// layer's queue (rather than a whole-style batch via <see cref="ComputeQueues(int)"/>) use this
-        /// instead of re-deriving the offset inline. <paramref name="subSlot"/> defaults to
-        /// <see cref="LayerSubSlot.Base"/>, so every existing single-sub-slot call site stays
-        /// source-compatible.
+        /// Render queue for one declared layer's sub-slot: the one home of the formula
+        /// <c>TransparentQueue + drawIndex * SubSlotsPerLayer + subSlot</c>. A caller that sets a single layer's
+        /// queue uses this instead of re-deriving the offset; <see cref="ComputeQueues(int)"/> is the batch form.
         /// </summary>
         /// <exception cref="ArgumentOutOfRangeException">
         /// If <paramref name="drawIndex"/> is negative, or the resulting queue would exceed
@@ -102,17 +69,15 @@ namespace MapRenderer.Core.Rendering
                 throw new ArgumentOutOfRangeException(nameof(drawIndex),
                     drawIndex, "drawIndex must be non-negative.");
 
-            // A cast can produce a value the enum never declares; an undeclared sub-slot would land in the
-            // NEXT layer's band (`QueueFor(i, (LayerSubSlot)SubSlotsPerLayer)` == `QueueFor(i + 1, Base)`),
-            // silently breaking the disjoint-bands invariant this type exists to guarantee.
+            // A cast can produce an undeclared sub-slot, which lands in the NEXT layer's band and breaks disjoint
+            // bands: `QueueFor(i, (LayerSubSlot)SubSlotsPerLayer)` == `QueueFor(i + 1, Base)`.
             if ((uint)subSlot >= SubSlotsPerLayer)
                 throw new ArgumentOutOfRangeException(nameof(subSlot), subSlot,
                     $"sub-slot must be a declared {nameof(LayerSubSlot)} value (0..{SubSlotsPerLayer - 1}); " +
                     "an out-of-band sub-slot would spill into the next layer's queue band.");
 
-            // `long` throughout: `drawIndex * SubSlotsPerLayer` in int arithmetic overflows to negative for a
-            // large drawIndex, which would slip past the ceiling check below and return a NEGATIVE queue —
-            // exactly what this guard exists to prevent. Mirrors ComputeQueues' own widening.
+            // `long` throughout: in int arithmetic a large drawIndex overflows to negative, slips past the ceiling
+            // check below, and returns a NEGATIVE queue. Mirrors ComputeQueues' own widening.
             long queue = (long)TransparentQueue + (long)drawIndex * SubSlotsPerLayer + (int)subSlot;
             if (queue > QueueCeiling)
                 throw new ArgumentOutOfRangeException(nameof(drawIndex), drawIndex,
@@ -129,14 +94,11 @@ namespace MapRenderer.Core.Rendering
         public static int[] ComputeQueues(int layerCount) => ComputeQueues(layerCount, TransparentQueue);
 
         /// <summary>
-        /// Compute the per-layer render-queue values for <paramref name="layerCount"/> declared layers —
-        /// the <see cref="LayerSubSlot.Base"/> sub-slot of each (the batch form of <see cref="QueueFor"/>,
-        /// pinned no-drift against it — N3).
-        ///
-        /// Result <c>queues[i] == QueueFor(i, LayerSubSlot.Base) == baseQueue + i * SubSlotsPerLayer</c> —
-        /// strictly monotonic increasing with declared index, all distinct, so layer <c>i+1</c>'s whole band
-        /// always draws AFTER (on top of) layer <c>i</c>'s whole band. Index 0 is the bottom-most declared
-        /// layer; the highest index is drawn last (painter's algorithm).
+        /// Computes the <see cref="LayerSubSlot.Base"/> render queue of each of <paramref name="layerCount"/>
+        /// declared layers: the batch form of <see cref="QueueFor"/>, pinned against it by
+        /// <c>ComputeQueues_AgreesWith_QueueFor_BaseSubSlot</c>.
+        /// <c>queues[i] == baseQueue + i * SubSlotsPerLayer</c> increases strictly, so layer <c>i+1</c>'s whole
+        /// band draws on top of layer <c>i</c>'s. Index 0 is the bottom-most declared layer.
         /// </summary>
         /// <param name="layerCount">Number of declared layers (&gt;= 0).</param>
         /// <param name="baseQueue">
@@ -161,14 +123,9 @@ namespace MapRenderer.Core.Rendering
                     $"baseQueue must be in the transparent band (>= {TransparentBandStart}) so the " +
                     "painter's-algorithm ZWrite-off ordering is not pre-empted by the opaque phase.");
 
-            // Unity render queues are clamped to [0, 5000]; refuse to assign a value that would
-            // exceed the ceiling rather than silently saturate (which would collapse two sub-slots, or
-            // two layers, onto the same queue and break strict ordering). The check must cover the BAND'S
-            // TOP — the last layer's Above sub-slot — not just its Base: at base 3000, SubSlotsPerLayer=2,
-            // 1000 layers puts the last layer's Above slot at 3000 + 999*2 + 1 = 4999 (OK); 1001 would need
-            // 3000 + 1000*2 + 1 = 5001 (throws). Getting this wrong the obvious way
-            // (checking only baseQueue + (layerCount-1)*SubSlotsPerLayer, the Base slot) would let the last
-            // layer's Above slot silently saturate — exactly the collapse this guard exists to prevent.
+            // Unity clamps render queues to [0, 5000]; saturating would collapse two sub-slots or layers onto one
+            // queue, so this throws instead. It checks the band's TOP (the last layer's Above slot), not its Base:
+            // at base 3000, 1000 layers top out at 4999 and 1001 layers need 5001.
             if (layerCount > 0 &&
                 (long)baseQueue + (long)layerCount * SubSlotsPerLayer - 1 > QueueCeiling)
                 throw new ArgumentOutOfRangeException(nameof(layerCount), layerCount,

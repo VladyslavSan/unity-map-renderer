@@ -122,8 +122,8 @@ namespace MapRenderer.App
                  "the tile without a re-fetch (the zoom-out-then-in fix). These do NOT render.")]
         public int SymbolCachedTiles;
 
-        [Tooltip("§1.5 tile-coverage pre-cull: labels classified Drop (tile steadily below the on-screen " +
-                 "coverage threshold; D1 keeps them resident but masked out of placement). Tune SymbolTileCoverageCull.")]
+        [Tooltip("Tile-coverage pre-cull: labels classified Drop (tile steadily below the on-screen " +
+                 "coverage threshold; kept resident but masked out of placement). Tune SymbolTileCoverageCull.")]
         public int SymbolCoverageDropped;
 
         [Header("Symbol labels — PLACEMENT (published by SymbolPlacementSystem)")]
@@ -134,8 +134,8 @@ namespace MapRenderer.App
                  "collided — the trimmed tilted-view horizon pile-up). Watch this to tune the cull radius.")]
         public int SymbolDistanceCulled;
 
-        [Tooltip("§1.5 companion: labels whose tile just crossed below coverage and finished fading out this " +
-                 "Tick (they faded, not popped) — the transient tail of the coverage drop.")]
+        [Tooltip("Tile-coverage pre-cull companion: labels whose tile just crossed below coverage and finished " +
+                 "fading out this Tick (they faded, not popped) — the transient tail of the coverage drop.")]
         public int SymbolCoverageFading;
 
         [Tooltip("Symbols skipped last Tick because their layer is out of the live zoom's [minzoom, maxzoom) — " +
@@ -162,9 +162,9 @@ namespace MapRenderer.App
         [Tooltip("R1: cumulative heavy rebuilds of the native label mirror (never bumped on a memo hit).")]
         public int SymbolMirrorRebuilds;
 
-        [Tooltip("Heavy mirror rebuilds per second, averaged over the last sampling window — how often the winner " +
-                 "set actually changes. Near the frame rate means the set churns every frame and the gather memo " +
-                 "cannot help; near zero means it is hitting. See docs/symbol-label-perf-design.md §10.4.")]
+        [Tooltip("Heavy mirror rebuilds per second over the last sampling window — how often the winner set changes. " +
+                 "Near the frame rate, the set churns every frame and the gather memo cannot help; near zero, it hits. " +
+                 "See docs/symbol-label-perf-design.md § \"The memo is structurally dead under continuous motion\".")]
         public double SymbolMirrorRebuildsPerSecond;
 
         // Rate sampling: a per-frame delta would read 0 or ~60 with nothing in between, so accumulate over a

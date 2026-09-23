@@ -20,7 +20,7 @@ namespace MapRenderer.Core.Lifetime
     /// fires on the single transition to zero, so an extra release is inert in release builds, while an
     /// <see cref="Acquire"/> after the count has hit zero resurrects a freed value. Both are contract
     /// violations, caught by <see cref="Debug"/> assertions in DEBUG/Editor builds and prevented in production
-    /// by a single-release-site discipline. Deliberately NOT <see cref="IDisposable"/>: the operation is
+    /// by a single-release-site discipline. Not <see cref="IDisposable"/>: the operation is
     /// <see cref="Release"/>, so <c>using</c> can not single-owner-free a shared value. Sibling of
     /// <see cref="VerifiedDisposable"/> — a refcount instead of a one-shot bool — sharing its
     /// <see cref="VerifiedDisposable.LeakReporter"/> channel.</para>

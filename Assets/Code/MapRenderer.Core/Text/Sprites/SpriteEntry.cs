@@ -1,6 +1,4 @@
-// Engine-free: no UnityEngine dependency.
-// Construction convention: object initializer with named members.
-// NOT a blittable job type: this is a parse-time name-keyed lookup value living inside
+// Engine-free. NOT a blittable job type: this is a parse-time name-keyed lookup value living inside
 // MapRenderer.Core.Text.Sprites.SpriteIndex's managed Dictionary — it never crosses into a
 // NativeArray/Burst job, so it carries no BLITTABLE-field constraint (contrast GlyphAtlasEntry).
 

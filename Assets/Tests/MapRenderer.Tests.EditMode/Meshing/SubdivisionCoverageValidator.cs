@@ -39,7 +39,7 @@ namespace MapRenderer.Tests
         {
             public readonly int SubTriangles, EarcutTriangles, MaxDepthReached;
             public readonly bool BudgetFired;
-            public readonly int TJunctions; // raw count — reported, NOT gated (meaningless by construction)
+            public readonly int TJunctions; // raw count — reported, NOT gated (meaningless as a threshold)
             public readonly double MaxGapMeters, MaxGapFracTile, MeanGapMeters;
             public readonly int[] GapBuckets; // <1,<10,<100,<1k,<10k,>=10k meters
             public readonly int DegenerateTris, FlippedTris;

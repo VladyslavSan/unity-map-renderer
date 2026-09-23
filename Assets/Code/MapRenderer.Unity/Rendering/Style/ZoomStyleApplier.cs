@@ -56,7 +56,7 @@ namespace MapRenderer.Unity.Rendering.Style
             public double StartSeconds;             // armed-at + delay
             public double DurationSeconds;
             public bool Discrete;                   // switch at StartSeconds instead of interpolating
-            public bool PushEveryFrame;              // settled behaviour: today's zoom-dependent / always
+            public bool PushEveryFrame;              // settled behaviour: zoom-dependent / always pushed
             public T LastPushed;                     // the value pushed on the previous ApplyZoom
             public bool ScaledByFade;                // multiply by the layer fade at the SetFloat
         }
@@ -132,7 +132,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// re-target". Without it a layer built out of range would fade down from 1 over the transition
         /// instead of starting hidden. Must run BEFORE the paint is bound (see <see cref="BindOpacity"/>).
         /// <see cref="RenderLayerSet.Build"/> seeds its own ease from the SAME
-        /// <c>StyleLayer.IsVisibleAtZoom(initialZoom)</c> predicate, so the two agree by construction.
+        /// <c>StyleLayer.IsVisibleAtZoom(initialZoom)</c> predicate, so the two always agree.
         /// </summary>
         /// <param name="value">0 (absent) to 1 (fully drawn).</param>
         internal void SeedFade(float value)
@@ -256,7 +256,7 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <summary>
-        /// Add-or-retarget one binding. Not armed (or the id is new): behaves exactly as today —
+        /// Add-or-retarget one binding. Not armed (or the id is new): a plain bind —
         /// queue Zoom-kind, push Constant-kind once. Armed and the id exists: swap in the new
         /// <paramref name="prop"/> as <c>Target</c>, keep (or snapshot) the old value as <c>Origin</c>,
         /// and arm the ease window — <see cref="ApplyZoom"/> does the rest.
@@ -293,9 +293,9 @@ namespace MapRenderer.Unity.Rendering.Style
             var b = list[i];
             if (_pendingTransition.IsInstant)
             {
-                // Degenerates to today's code: set Target, leave Origin null, and — if not pushed
-                // every frame — write the value immediately. Arms nothing (criteria 3/4 need
-                // TransitioningCount == 0 after an instant restyle).
+                // Degenerates to a plain bind: set Target, leave Origin null, and — if not pushed
+                // every frame — write the value immediately. Arms nothing (an instant restyle
+                // must leave TransitioningCount == 0).
                 b.Target = prop;
                 b.Origin = null;
                 b.Discrete = discrete;
@@ -426,7 +426,7 @@ namespace MapRenderer.Unity.Rendering.Style
         // delay ends and settles immediately — it has nothing left to interpolate, so there is no
         // reason to keep it "transitioning" for the rest of the duration window. A continuous binding
         // still needs the separate `t <= 0` arm below: even at elapsed == 0 exactly, Mix(A, B, 0) is
-        // not bit-exactly A (tooth #3).
+        // not bit-exactly A (StyleTransitionTests.Transition_Endpoints_AreExact).
 
         private static float EvalFloat(ref Binding<float> b, double zoom, double now)
         {

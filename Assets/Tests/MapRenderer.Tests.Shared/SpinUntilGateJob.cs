@@ -57,8 +57,8 @@ namespace MapRenderer.Tests
     internal static class DelayGateJobInstrument
     {
         /// <summary>Blocks the calling thread until <paramref name="started"/>[0] is non-zero, so a caller
-        /// only asserts "still spinning" once the job has causally started, and "ran ≥1 iteration" becomes
-        /// true by construction rather than a timing guess.</summary>
+        /// only asserts "still spinning" once the job has causally started, and "ran ≥1 iteration" is
+        /// guaranteed rather than a timing guess.</summary>
         internal static void WaitForStart(NativeArray<int> started, int timeoutMs = 5000)
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();

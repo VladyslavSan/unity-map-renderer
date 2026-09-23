@@ -39,7 +39,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// Builds an <see cref="MvtLayer"/> of <paramref name="count"/> point features and NO adopted
-        /// <see cref="MvtLayer.Geometry"/> (stays <c>default</c>/<c>IsCreated == false</c>) — deliberately, so
+        /// <see cref="MvtLayer.Geometry"/> (stays <c>default</c>/<c>IsCreated == false</c>), so
         /// <c>ProcessOnWorker</c>'s <c>geometry.IsCreated</c> gate skips <c>BuildGraphRequest</c> entirely and only the
         /// selection step (this tooth's fence) runs, not the fill/line geometry pipeline (measured
         /// elsewhere, and already zero-alloc).

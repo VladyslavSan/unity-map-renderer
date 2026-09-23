@@ -3,19 +3,13 @@
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// Resolves the Style Spec's <c>auto</c>
-    /// <see cref="AlignmentMode"/> default for BOTH the rotation-alignment keys
-    /// (<see cref="Resolve"/>) and the pitch-alignment keys (<see cref="ResolvePitch"/>) against the owning
-    /// symbol layer's <c>symbol-placement</c>. <c>Resolve</c>: <c>auto</c> resolves to
-    /// <see cref="AlignmentMode.Map"/> under <see cref="SymbolPlacement.Line"/> /
-    /// <see cref="SymbolPlacement.LineCenter"/>, and to <see cref="AlignmentMode.Viewport"/> under
-    /// <see cref="SymbolPlacement.Point"/>. <see cref="AlignmentMode.Map"/>/<see cref="AlignmentMode.Viewport"/>
-    /// pass through unchanged regardless of placement (an explicit style choice is never overridden).
-    ///
+    /// Resolves the Style Spec's <c>auto</c> <see cref="AlignmentMode"/> for the rotation-alignment keys
+    /// (<see cref="Resolve"/>) and the pitch-alignment keys (<see cref="ResolvePitch"/>) against the layer's
+    /// <c>symbol-placement</c>: <c>auto</c> is <see cref="AlignmentMode.Map"/> under line placements and
+    /// <see cref="AlignmentMode.Viewport"/> under point placement. An explicit value always passes through.
     /// <para>Not cosmetic: <c>waterway_line_label</c>, <c>water_name_line_label</c> and
-    /// <c>road_one_way_arrow*</c> all leave <c>text-rotation-alignment</c>/<c>icon-rotation-alignment</c>
-    /// unset (Auto). If Auto resolved to Viewport under line placement, those layers would flip from their
-    /// intended curved/along-line look to upright/screen-aligned — this resolver is what keeps them curved.</para>
+    /// <c>road_one_way_arrow*</c> leave rotation-alignment unset, and this resolver keeps them curved along the
+    /// line instead of upright.</para>
     /// </summary>
     public static class AlignmentResolution
     {
@@ -27,25 +21,15 @@ namespace MapRenderer.Core.Text
             return placement == SymbolPlacement.Point ? AlignmentMode.Viewport : AlignmentMode.Map;
         }
 
-        /// <summary>Resolves a <c>*-pitch-alignment</c> value. The spec's <c>auto</c> wording for
-        /// pitch-alignment is "matches <c>*-rotation-alignment</c>" — read against a rotation value that is
-        /// itself <c>auto</c>, that is circular, so the only non-circular reading (and this repo's stated
-        /// position, <see cref="AlignmentMode"/>) is the RESOLVED rotation alignment: an explicit
-        /// <paramref name="pitchMode"/> always wins; an auto <paramref name="pitchMode"/> defers to
-        /// <see cref="Resolve"/> on <paramref name="rotationMode"/>/<paramref name="placement"/> — never the
-        /// raw, possibly-still-auto <paramref name="rotationMode"/>. The placement rule therefore lives in
-        /// exactly one place (<see cref="Resolve"/>); this method never re-tests <paramref name="placement"/>
-        /// itself. The return value is never <see cref="AlignmentMode.Auto"/>.
-        ///
-        /// <para><b>WIRED.</b> <c>SymbolFeatureExtractor.Extract</c> calls this once per symbol
-        /// layer for each of the text and icon key pairs, and stamps the RESOLVED value onto the emitted
-        /// <c>SymbolFeature</c>; it travels to <c>CurvedStageInput.PitchAlignment</c>, where
-        /// <see cref="AlignmentMode.Map"/> selects the world-metre arc walk in
-        /// <c>SymbolStagingMath.StageCurved</c>.</para>
-        ///
-        /// <para><b>The CURVED (along-line) arm only.</b> The point arm does not consume this yet — there is
-        /// no pitch-alignment field on <c>PointStageInput</c> — so a map-pitched POINT symbol still billboards.
-        /// That is a scope fence, not an oversight.</para></summary>
+        /// <summary>Resolves a <c>*-pitch-alignment</c> value; the result is never <see cref="AlignmentMode.Auto"/>.
+        /// The spec's <c>auto</c> "matches <c>*-rotation-alignment</c>" is circular when rotation is also
+        /// <c>auto</c>, so it reads as the RESOLVED rotation alignment (<see cref="AlignmentMode"/>). An explicit
+        /// <paramref name="pitchMode"/> wins; <c>auto</c> defers to <see cref="Resolve"/>, so the placement rule
+        /// lives in one place.
+        /// <para><c>SymbolFeatureExtractor.Extract</c> stamps the result on each <c>SymbolFeature</c>; through
+        /// <c>CurvedStageInput.PitchAlignment</c>, <see cref="AlignmentMode.Map"/> selects the world-metre arc walk
+        /// in <c>SymbolStagingMath.StageCurved</c>. Only that curved arm reads it: <c>PointStageInput</c> has no
+        /// pitch-alignment field, so a map-pitched POINT symbol still billboards.</para></summary>
         public static AlignmentMode ResolvePitch(AlignmentMode pitchMode, AlignmentMode rotationMode, SymbolPlacement placement)
         {
             if (pitchMode != AlignmentMode.Auto) return pitchMode;

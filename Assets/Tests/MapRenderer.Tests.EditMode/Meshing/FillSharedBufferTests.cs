@@ -8,7 +8,7 @@
 //   EarcutEarTestScanBoundTests      — Acceptance teeth for the bounding-box index over the ear-clip scan (see docs/mesh-triangulation-robustness-design.md): the scan must visit a small, machine-independent number of candidates (T2.1), and the index arm must be…
 //   EarcutTests                      — EditMode tests for EarcutJobPolygonRunner, the driver for EarcutJob (Unity EditMode only — NativeArray/Burst; not registered in Tools/core-tests).
 //   FillMeshBuildBuffersPoolTests    — perf/gc-elimination: StyledFillTileBuilder.WriteMeshData runs FillMeshGraph.Schedule (there is no synchronous FillMeshPipeline.Schedule), which itself allocates schedule-time managed…
-//   FillMeshGraphAllocationTests     — FillMeshPipeline.Schedule (the synchronous entry point this tooth used to drive) is retired — the graph (FillMeshGraph.Schedule + Handle.Complete()) is the only mesher left, so this measures schedule-time…
+//   FillMeshGraphAllocationTests     — FillMeshPipeline.Schedule is retired — the graph (FillMeshGraph.Schedule + Handle.Complete()) is the only mesher left, so this measures schedule-time…
 //   FillMeshPipelineBoundsTests      — Exact sizing pre-count + its never-fired capacity backstop.
 //   FillSharedBufferTests            — fill reads a buffer it shares with other layers, and joins its per-feature side arrays by the source-layer ordinal rather than by its own selected-list position.
 //   FillSortKeyAndOpacityTests       — the two build-time fill behaviours that show up in the MESH rather than in a uniform: fill-sort-key ordering and data-driven fill-opacity.
@@ -1141,7 +1141,7 @@ namespace MapRenderer.Tests.Meshing
         /// every fill layer of a real style. The test above — the only fixture in the repo with a genuinely
         /// permuted, subsetted visit order — ran with <c>clip: default</c>, i.e. DISABLED, so
         /// <c>RingClipJob</c>'s <c>int ri = RingVisitOrder[k];</c> indirection was observed by nothing: every
-        /// other clip fixture supplies an identity order, under which <c>ri == k</c> holds by construction.
+        /// other clip fixture supplies an identity order, under which <c>ri == k</c> holds trivially.
         /// Collapsing it to <c>int ri = k;</c> passed the entire 2279-test gate.</para>
         ///
         /// <para>Traced discriminator: this fixture's visit order is <c>[5, 2, 1]</c>. Under <c>ri = k</c> the
@@ -1303,10 +1303,8 @@ namespace MapRenderer.Tests.Meshing
         /// 30638 to 29982 vertices on the flat path and from 164535 to 137379 on the globe path. Every
         /// corpus-scale fill oracle in the repo is either a differential between two arms that would BOTH be
         /// injected (cache vs fresh, sync vs async, view vs direct) or drives <c>FillMeshGraph.Schedule</c>
-        /// (there is no synchronous <c>FillMeshPipeline.Schedule</c>
-        /// this paragraph originally named) with an identity visit order, bypassing this code entirely. So
-        /// this was a genuine blind surface,
-        /// not a redundant one.</para>
+        /// (there is no synchronous <c>FillMeshPipeline.Schedule</c>) with an identity visit order,
+        /// bypassing this code entirely. So this was a genuine blind surface, not a redundant one.</para>
         ///
         /// <para>The oracle is <b>covered area</b>, derived from the fixture's own geometry rather than
         /// transcribed from the pipeline: a 3000-unit square with a 1000-unit square hole covers exactly
@@ -1699,7 +1697,7 @@ namespace MapRenderer.Tests.Meshing
         [Test]
         public void SortKey_HigherKeyIsEmittedLast_SoItDrawsOnTop()
         {
-            // Declared order is deliberately the REVERSE of the sort order, so passing requires an actual
+            // Declared order is the REVERSE of the sort order, so passing requires an actual
             // sort — not merely preserving input order.
             var features = new List<IFeature>
             {
@@ -1844,10 +1842,10 @@ namespace MapRenderer.Tests.Meshing
         }
 
         /// <summary>
-        /// T5 — the fill ordinal join survives a geometry-less feature. The builder used to skip a
-        /// Polygon whose command stream was null, so such a feature took no position in the list handed to
-        /// the materializer; now it occupies an ordinal (there is no interface member left to test it by, and
-        /// the materializer treats a null stream as zero commands). It contributes no ring, so
+        /// T5 — the fill ordinal join survives a geometry-less feature. The builder does not skip a
+        /// Polygon whose command stream is null: it occupies an ordinal in the list handed to the
+        /// materializer (there is no interface member left to test it by, and the materializer treats a
+        /// null stream as zero commands). It contributes no ring, so
         /// <c>VertexFeatureIdx</c> never names it — but the per-feature colour list is built in the SAME loop
         /// and must stay index-aligned, or every feature after the gap paints its neighbour's colour.
         /// </summary>
@@ -1899,7 +1897,7 @@ namespace MapRenderer.Tests.Meshing
             var alphas = new HashSet<float>();
             foreach (Color c in mesh.colors) alphas.Add(Mathf.Round(c.a * 100f) / 100f);
 
-            // A data-driven fill-opacity used to silently revert to the default: every vertex would
+            // If a data-driven fill-opacity silently reverted to the default, every vertex would
             // carry alpha 1 and this set would be {1.00}.
             CollectionAssert.AreEquivalent(new[] { 0.25f, 0.75f }, alphas,
                 "each feature's evaluated fill-opacity must be baked into its vertices' alpha. " +
@@ -2650,7 +2648,7 @@ namespace MapRenderer.Tests.Meshing
     /// corpus</b>. Fill has a tooth (<c>FillSharedBufferTests.PatternCoords_…NotA4096Literal</c>) and the
     /// producer seam has one (<c>TileGeometryMaterializerSeamTests</c>), but neither one's fixture reaches
     /// line's call site. So the discriminator here is the fixture's extent — <b>not</b> 4096 — and if it
-    /// were ever changed back to 4096 this tooth would be vacuous by construction. That is the whole
+    /// were ever changed back to 4096 this tooth would be trivially vacuous. That is the whole
     /// point.</para>
     ///
     /// <para><b>Why it lands here.</b> The buffer is the sole authority for both <c>Tile</c>
@@ -3304,7 +3302,7 @@ namespace MapRenderer.Tests.Meshing
         // ── Tooth (e): the vertex ceiling binds and settles as zero-vertex ───────────────────────────
 
         /// <summary>
-        /// (e) A synthetic ring whose ribbon vertex count exceeds a deliberately tiny
+        /// (e) A synthetic ring whose ribbon vertex count exceeds a tiny
         /// <see cref="LayerInput.MaxOutputVertices"/> (passed explicitly, never the production
         /// constant) trips <see cref="LineGraphCounts.ErrorLineVertexCapacity"/> and the graph produces NO
         /// vertices for it — the always-bound-loops backstop.

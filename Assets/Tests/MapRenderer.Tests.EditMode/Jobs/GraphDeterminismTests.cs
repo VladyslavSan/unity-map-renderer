@@ -254,18 +254,14 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The two store teeth, rehomed to the decoded layer. The claims are unchanged — a source-layer is
-    /// materialized <b>once</b> (T4c) and what a consumer reads is genuinely <b>borrowed</b>, so it can be run
-    /// over twice and left intact (T2) — but their subject moved: the memo that used to live in
-    /// <c>TileGeometryStore</c> is now the decoded LAYER's own field, so "the store memoizes" becomes
-    /// "the layer holds one buffer" and "the store's Dispose frees what it lent" becomes "the TILE's Dispose
-    /// does".
+    /// The two store teeth, tested on the decoded layer. A source-layer is materialized <b>once</b>
+    /// (T4c) and what a consumer reads is genuinely <b>borrowed</b>, so it can be read twice and left
+    /// intact (T2). The memo is the decoded LAYER's own field: the layer holds one buffer, and the
+    /// TILE's Dispose frees what it lent.
     ///
-    /// <para>Deleting these with the store would have retired two live guarantees. Restated, the first is
-    /// strictly harder to satisfy accidentally: a store could be memoized correctly and still be one of
-    /// several, whereas a layer's buffer is singular by construction — so what the first test now
-    /// discriminates is a re-materializing <c>Geometry</c> getter, the one remaining way to reintroduce
-    /// N-decodes-per-source-layer.</para>
+    /// <para>A layer's buffer is singular — unlike a store, which could be memoized correctly and
+    /// still be one of several — so what the first test discriminates is a re-materializing
+    /// <c>Geometry</c> getter, the one remaining way to reintroduce N-decodes-per-source-layer.</para>
     /// </summary>
     [TestFixture]
     public class DecodedLayerGeometryTests
@@ -471,15 +467,15 @@ namespace MapRenderer.Tests.Jobs
     /// address its own decode was given, over real multi-layer fixtures at two tiles differing in z, x AND
     /// y.</para>
     ///
-    /// <para><b>Why the shape mattered.</b> The buffer's tile used to come from
-    /// <c>TileGeometryStore.GetOrMaterialize(tileLayer, tile)</c> — a caller-supplied second copy, so a store
-    /// could be handed one tile's layers and another tile's id with nothing in the type system able to tell.
-    /// The id now enters through <c>ITileDecoder.Decode(TileId, byte[])</c>, where it enters the pipeline once.</para>
+    /// <para><b>Why the shape matters.</b> A caller-supplied second copy of the tile id would let a
+    /// store be handed one tile's layers and another tile's id with nothing in the type system able to
+    /// tell. The id enters through <c>ITileDecoder.Decode(TileId, byte[])</c>, where it enters the
+    /// pipeline once.</para>
     /// </summary>
     [TestFixture]
     public class DecodedTileOwnershipTests
     {
-        // ── B1 — by construction: the mispairing shape does not exist in any signature ────────────────
+        // ── B1 — structural: the mispairing shape does not exist in any signature ──────────────────────
 
         [Test]
         public void NoProductionSignature_TakesBothATileGeometryBuffersAndATileId()
@@ -678,7 +674,7 @@ namespace MapRenderer.Tests.Jobs
                     PolyOuterRingIdx = polyOuterIdx, PolyHoleListStart = polyHoleStart, PolyHoleCount = polyHoleCount,
                     HoleRingIdxs = holeRingIdxs, PolyCountArr = polyCountArr, HoleCountArr = holeCountArr,
                     RingOffsets = ringOffsets,
-                    MaxPolygons = 1, // deliberately smaller than the handed polygon count (2)
+                    MaxPolygons = 1, // smaller than the handed polygon count (2)
                     MaxHoles = 10,
                     Buffers = buffers,
                     Counts = counts, Error = error,
@@ -834,7 +830,7 @@ namespace MapRenderer.Tests.Jobs
                     PolyOuterRingIdx = polyOuterIdx, PolyHoleListStart = polyHoleStart, PolyHoleCount = polyHoleCount,
                     HoleRingIdxs = holeRingIdxs, PolyCountArr = polyCountArr, HoleCountArr = holeCountArr,
                     RingOffsets = ringOffsets,
-                    MaxPolygons = 1, // deliberately smaller than the handed polygon count (2)
+                    MaxPolygons = 1, // smaller than the handed polygon count (2)
                     MaxHoles = 10,
                     Buffers = buffers,
                     Counts = counts, Error = error,
@@ -938,9 +934,9 @@ namespace MapRenderer.Tests.Jobs
     /// answer where it was) and <b>T4</b> (the sliced layer's ordinal domain — one slot per feature, and the
     /// slots ADDRESS the buffer).
     ///
-    /// <para><b>Why T2 needs a hand-encoded MVT tile.</b> The resolver used to short-circuit an empty
-    /// <c>source-layer</c> to null; that short-circuit is gone and each tile answers for its own format. Over any
-    /// real MVT fixture the replacement guard is INERT — <c>GetLayer("")</c> compares against layer names and
+    /// <para><b>Why T2 needs a hand-encoded MVT tile.</b> The resolver does not short-circuit an empty
+    /// <c>source-layer</c> to null; each tile answers for its own format. Over any
+    /// real MVT fixture the guard is INERT — <c>GetLayer("")</c> compares against layer names and
     /// no real layer is named <c>""</c>, so the arm passes with or without it. The discriminating input is a
     /// layer whose <c>name</c> field is ABSENT, which decodes to a <b>null</b> name and which a style layer
     /// with no <c>source-layer</c> (also null) would therefore match.</para>
@@ -1044,7 +1040,7 @@ namespace MapRenderer.Tests.Jobs
         {
             using IDecodedTile tile = TwoRectangleDecoder().Decode(WorldTile, null);
 
-            // Fetched by the layer's OWN name deliberately: it is the one argument a name-matching tile
+            // Fetched by the layer's OWN name: it is the one argument a name-matching tile
             // would also answer, so each arm below fails on its own claim rather than on this precondition.
             ITileLayer sole = tile.GetLayer(GeoJsonTileLayer.WellKnownName);
             Assert.IsNotNull(sole, "precondition: the fixture must slice to a layer at all");
@@ -1064,8 +1060,8 @@ namespace MapRenderer.Tests.Jobs
         /// <summary>
         /// <b>T2 arm A</b> — the recorded bug, at the production seam: a spec-conformant geojson style layer
         /// omits <c>source-layer</c>, and <see cref="SourceLayerResolver.ResolveTileLayer"/> must still
-        /// resolve it. The resolver used to short-circuit a null/empty <c>source-layer</c> to null, so
-        /// such a layer selected zero features and rendered NOTHING, silently.
+        /// resolve it. A resolver that short-circuits a null/empty <c>source-layer</c> to null makes
+        /// such a layer select zero features and render NOTHING, silently.
         /// </summary>
         [Test]
         public void T2A_AStyleLayerWithNoSourceLayer_ResolvesAGeoJsonTilesSoleLayer()
@@ -1507,8 +1503,8 @@ namespace MapRenderer.Tests.Jobs
             Assert.AreEqual(defaultPass.FullColumnDigest, zeroPass.FullColumnDigest,
                 $"[proj={projection.GetType().Name}] default-worker-count and zero-worker-count schedules of " +
                 "the SAME graph over the SAME corpus produced different bytes — a race, not merely a batching " +
-                "difference (§1: every node's bytes are a pure function of its own input, independent of which " +
-                "worker runs it or how many run at once).");
+                "difference (job-scheduling-design.md § \"Safety — making the Editor's check sufficient\": every node's " +
+                "bytes are a pure function of its own input, independent of which worker runs it or how many run at once).");
 
             // Assertion 2 — the frozen fill-parity goldens, at their real reach, from the default-worker pass.
             string expectedGolden = curved
@@ -2395,7 +2391,7 @@ namespace MapRenderer.Tests.Jobs
             uint[] stream = MvtCommandStream.Feature(
                 MvtCommandStream.Ring(100, 100, 200, 100, 200, 200, 100, 200));
 
-            // 2a: the flattened INPUT buffers are borrowed, not owned by the materializer, precisely so this
+            // 2a: the flattened INPUT buffers are borrowed, not owned by the materializer, so this
             // still works — a materializer that consumed/disposed its input on the first call would fault
             // reading it on the second. `flat` outlives both `Materialize()` calls, disposed once at the end.
             var materializer = MakeMaterializer(
@@ -2487,7 +2483,7 @@ namespace MapRenderer.Tests.Jobs
         /// T6 — the kind column is filled from <b>each feature's own declared kind</b>, never a literal.
         /// This is the surviving half of the retired parallel-list desync guard (T9): with one feature
         /// list instead of two positionally-joined columns there is nothing left to desync, so that guard is
-        /// retired <b>by construction</b> rather than weakened. What still needs an observer is the remaining landmine —
+        /// structurally unnecessary, not merely weakened. What still needs an observer is the remaining landmine —
         /// a materializer that wrote a constant <c>Polygon</c> would make every consumer's ring gate
         /// inert, and every downstream stage would keep passing.
         /// </summary>
@@ -2570,8 +2566,8 @@ namespace MapRenderer.Tests.Jobs
         // ── Fixture helpers ────────────────────────────────────────────────────────────────────────
 
         /// <summary>The materializer takes (tile, extent, kinds, commands) rather than a feature
-        /// list — the sidecar interface it used to downcast through is gone. This adapter keeps the fixtures
-        /// authored as features, which is still the readable shape, and splits the two columns here.
+        /// list. This adapter keeps the fixtures authored as features, which is still the readable
+        /// shape, and splits the two columns here.
         /// 2a: flattens the split columns via <see cref="MvtGeometryMaterializerTestFactory"/> and
         /// materializes once — the shape almost every test in this file wants.</summary>
         private static TileGeometryBuffers MaterializeFeatures(
@@ -2648,7 +2644,7 @@ namespace MapRenderer.Tests.Jobs
         /// A hand-encoded MVT layer of four features, the first TWO of which produce no rings, decoded by the
         /// real <see cref="MvtDecoder"/>.
         ///
-        /// <para><b>Two ring-less shapes, deliberately, because they are not equally defensible.</b>
+        /// <para><b>Two ring-less shapes, because they are not equally defensible.</b>
         /// Ordinal 1 carries a <c>geometry</c> field that is <b>present and empty</b> — unambiguously
         /// spec-conformant (MVT 2.1 §4.2 requires the field; it says nothing about a minimum length), and it
         /// reaches the materializer as <c>new uint[0]</c>. Ordinal 0 <b>omits the field entirely</b>, which
@@ -3201,7 +3197,7 @@ namespace MapRenderer.Tests.Jobs
                 Vertices = vertices,
                 RingOffsets = ringOffsetsList.AsDeferredJobArray(), // captured while the list is still empty
                 RingFeatureIdx = ringFeatureIdx,
-                RingCount = -1, // deliberately wrong sentinel: proves the bool steers away from this field
+                RingCount = -1, // wrong sentinel: proves the bool steers away from this field
                 RingCountFromOffsetsLength = true,
                 FeatureGeometryType = featureKinds,
                 OutPolyOuterRingIdx = polyOuterIdx, OutPolyHoleListStart = polyHoleStart, OutPolyHoleCount = polyHoleCount,
@@ -3279,9 +3275,9 @@ namespace MapRenderer.Tests.Jobs
                     // Exactly the feature set fill hands the materializer today, and exactly the set the shared buffer’s
                     // ring visit order will name: the layer's Polygon features, in layer order.
                     // The LAYER's own buffer — the whole layer, exactly what every consumer
-                    // borrows. (This used to re-materialize the polygon subset; the ring→feature attribution
-                    // this tooth measures is per-feature and unaffected by the wider feature set, and the
-                    // kind column keeps the non-polygon features out of the ring assembly.)
+                    // borrows. The ring→feature attribution this tooth measures is per-feature and
+                    // unaffected by the wider feature set: the kind column keeps the non-polygon
+                    // features out of the ring assembly.
                     bool anyPolygon = false;
                     foreach (IFeature f in layer.Features)
                         if (f.GeometryType == TileGeometryType.Polygon) { anyPolygon = true; break; }
@@ -3416,11 +3412,11 @@ namespace MapRenderer.Tests.Jobs
     /// <para><b>Why the job needs its own gate.</b> The assembler classifies purely by signed area, and a
     /// LineString ring is the same shape of data as a polygon ring — so an ungated job reads a road as a
     /// spurious exterior (or, worse, as a hole of the polygon before it) and corrupts the triangulation
-    /// silently. The only guard used to be the caller choosing what to hand the materializer. Since the
-    /// geometry buffer is shared across consumers, that caller-side filter now decides which ring INDICES go
-    /// into an int array — bookkeeping-shaped code in a loop whose obvious purpose is "compute a draw order",
-    /// and therefore much easier to lose than a filter that reads "select my features". Two independent
-    /// guards; this file observes the Burst one in isolation.</para>
+    /// silently. A caller-side filter is the other guard: because the geometry buffer is shared across
+    /// consumers, it decides which ring INDICES go into an int array — bookkeeping-shaped code in a
+    /// loop whose obvious purpose is "compute a draw order", and therefore much easier to lose than a
+    /// filter that reads "select my features". Two independent guards; this file observes the Burst
+    /// one in isolation.</para>
     /// </summary>
     [TestFixture]
     public class RingAssemblyKindGateTests

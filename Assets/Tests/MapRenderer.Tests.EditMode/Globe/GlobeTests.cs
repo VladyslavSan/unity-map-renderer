@@ -650,12 +650,11 @@ namespace MapRenderer.Tests.Globe
         /// while there is still something to do about it.
         /// <b>What it will NOT catch: interior growth under ~25 500 vertices passes silently.</b> That is the
         /// cost of 95% over a tighter 90%, stated so the number does not read as arbitrary and so the next
-        /// reader moves it deliberately or not at all.</para>
+        /// reader moves it knowingly or not at all.</para>
         ///
         /// <para>Getting 164 535 down is separate work — this fence only stops it
-        /// getting worse. The claim used to live as prose in <c>DefaultMaxInteriorVertices</c>' own doc
-        /// ("never reached in production"), where it was already 18% from false and nothing was measuring
-        /// it.</para>
+        /// getting worse. <c>DefaultMaxInteriorVertices</c>' own doc cites this tooth as what keeps the
+        /// headroom claim visible.</para>
         /// </summary>
         [Test]
         public void TheCurvedArmsInteriorKeepsHeadroomUnderItsBudget()
@@ -799,7 +798,7 @@ namespace MapRenderer.Tests.Globe
             {
                 // vertex sharing: the budget counts EMITTED vertices (idx.Length, one
                 // OutIndices.Add per Emit call) — v (OutVerts, the unique count) is always <= idx.Length, so
-                // asserting on v no longer pins the bound that actually exists: sharing made it strictly
+                // asserting on v does not pin the bound that actually exists: sharing makes it strictly
                 // easier to pass without the budget doing any more work. Assert on idx.Length instead.
                 Assert.Less(idx.Length, 20000, "the vertex budget must prevent the low-zoom subdivision explosion");
             }

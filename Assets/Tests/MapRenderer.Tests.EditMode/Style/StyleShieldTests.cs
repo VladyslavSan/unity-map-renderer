@@ -222,7 +222,7 @@ namespace MapRenderer.Tests.Style
                 "are y-UP, as TextQuadLayout bakes them)");
         }
 
-        // ══ T4 — the maintainer's artefact: liberty's city dot no longer outlives its own name ════════════
+        // ══ T4 — the maintainer's artefact: liberty's city dot does not outlive its own name ════════════════
         // "dots are still visible without text." liberty sets icon-allow-overlap: true on the dot and leaves
         // the text at the default false. Un-paired, the two are independent candidates and the dot's
         // allow-overlap buys it an unconditional place while the name is culled. Paired, the candidate's
@@ -1301,7 +1301,7 @@ namespace MapRenderer.Tests.Style
             var ownerInput = StageInputFor(icon, SymbolKind.Icon, new float2(-10, -10), new float2(10, 10), new float2(1000, 1000), TextQuadLayout.OneEm);
             ownerInput.FadeId = 42L;
             var riderInput = StageInputFor(text, SymbolKind.Text, new float2(-6, -6), new float2(6, 6), new float2(1000, 1000), text.TextSizePx > 0f ? text.TextSizePx : TextQuadLayout.OneEm);
-            riderInput.FadeId = 999L; // deliberately DIFFERENT — must never leak into the pair's one FadeId
+            riderInput.FadeId = 999L; // DIFFERENT from the owner's — must never leak into the pair's one FadeId
 
             var boxes = new SymbolBox[8];
             var quads = new PlacedQuad[8];
@@ -1350,8 +1350,8 @@ namespace MapRenderer.Tests.Style
 
         // ── Shared harness (C3/C4/C5) ─────────────────────────────────────────────────────────────────────
         // The REAL extractor → REAL StagePointPair → REAL CollisionJob, with the rider translated clear of
-        // the owner so a blocker can address exactly ONE half's box (a centred pair's boxes overlap by
-        // construction — the reason the mask is consulted inside test-all-then-insert rather than by
+        // the owner so a blocker can address exactly ONE half's box (a centred pair's boxes overlap —
+        // the reason the mask is consulted inside test-all-then-insert rather than by
         // un-pairing). Two low-priority PROBES, one over each half and both disjoint from the blocker, then
         // report which boxes the pair actually RESERVED: a probe that places proves its half's box was never
         // inserted.
@@ -1886,7 +1886,7 @@ namespace MapRenderer.Tests.Style
         // seam, so all four comparisons are exercised only through `p.x`: a predicate that tested `p.x` twice,
         // or that used `p.y <= extent`, passes every one of them. This is the transposed fixture — a vertical
         // road across a HORIZONTAL seam between z1 (0,0) and (0,1) — so the y comparisons carry the assertion.
-        // Deliberately only the one discriminating claim; the x teeth already cover the shared machinery.
+        // Only the one discriminating claim; the x teeth already cover the shared machinery.
         [Test]
         public void SeamAnchorClip_TwoTilesStackedVertically_EmitEachWorldPositionExactlyOnce(
             [Values(SeamArm.AlongLineIcon, SeamArm.CurvedText)] SeamArm arm)

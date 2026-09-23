@@ -11,17 +11,15 @@ using MapRenderer.Unity.Rendering.Style;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// The per-tile graph-arm build (job-scheduling-design.md) — every tile's owner from
-    /// measure to consume. <see cref="TilePrologueOutput"/> is the hand-off into it: its dense
-    /// <c>ILayerMeshBuild[]</c>, one per the kick's <c>ITileMeshRenderLayer</c>s, becomes this graph's own
-    /// <see cref="_layers"/> ALIAS — not a copy — the moment <see cref="ScheduleMeasure"/> is called. This
-    /// type dispatches nothing per kind any more: every layer is an <see cref="ILayerMeshBuild"/>, which owns
-    /// its own kind's request columns, measure output and — once the write step has run — its own
-    /// <see cref="MeshWriteOutput"/>. The ownership unit — buffers, the handle of the last job referencing
-    /// them, and the inputs keeping them alive — is one indivisible whole, released in that order:
-    /// <c>Complete()</c> the handle, then read or upload, then dispose the buffers, then release the input.
-    ///
-    /// <para>One <see cref="Mesh.MeshDataArray"/> per layer, exact-sized to its vertex/index count.</para>
+    /// The per-tile graph-arm build (job-scheduling-design.md) — every tile's owner from measure to
+    /// consume. <see cref="TilePrologueOutput"/> is the hand-off into it: its dense <c>ILayerMeshBuild[]</c>
+    /// becomes this graph's own <see cref="_layers"/> ALIAS — not a copy — the moment
+    /// <see cref="ScheduleMeasure"/> is called. This type dispatches nothing per kind: every layer is an
+    /// <see cref="ILayerMeshBuild"/>, which owns its own kind's request columns, measure output and its
+    /// own <see cref="MeshWriteOutput"/>. Non-local invariant: the ownership unit — buffers, the handle of
+    /// the last job referencing them, and the inputs keeping them alive — releases in ONE order:
+    /// <c>Complete()</c> the handle, then read or upload, then dispose the buffers, then release the
+    /// input. One <see cref="Mesh.MeshDataArray"/> per layer, exact-sized to its vertex/index count.
     /// </summary>
     internal sealed class TileBuildGraph
     {
@@ -39,15 +37,13 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// per-layer BORROWED contract can support without double-freeing it once per layer.</summary>
         private TileGeometryBuffers _ownedGeometry;
 
-        /// <summary>The consumer-kind sibling of <see cref="_ownedGeometry"/>: a SOURCE tile's every
-        /// layer's own request input borrows its geometry straight from the decoded tile this
-        /// reference keeps alive, rather than from a buffer this graph mints itself
-        /// (job-scheduling-design.md). Transferred to this graph the moment
-        /// <see cref="ScheduleMeasureFromDecode"/> is called — including on that call's own throw path —
-        /// and released exactly once, LAST in
-        /// <see cref="Dispose"/> (after every layer and after <see cref="_ownedGeometry"/>): the layers'
-        /// borrowed reads must be done, and the borrowed buffer they read already disposed as belonging to
-        /// THIS graph, before the reference that ultimately backs it is dropped.</summary>
+        /// <summary>The consumer-kind sibling of <see cref="_ownedGeometry"/>: a SOURCE tile's every layer's
+        /// own request input borrows its geometry straight from the decoded tile this reference keeps
+        /// alive, rather than from a buffer this graph mints itself. Transferred to this graph the moment
+        /// <see cref="ScheduleMeasureFromDecode"/> is called, including on that call's own throw path.
+        /// Non-local invariant: released exactly once, LAST in <see cref="Dispose"/> (after every layer
+        /// and after <see cref="_ownedGeometry"/>). Every layer is disposed first, so no layer still reads
+        /// the decoded tile when the reference that backs it is released.</summary>
         private SharedDisposable<IDecodedTile> _decode;
 
         /// <summary>The terminal handle for whichever step is currently in flight — the measure graphs'
@@ -86,11 +82,9 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         /// <summary>Schedules the measure graph for every requested layer. Returns UNCOMPLETED; the caller
         /// polls <see cref="IsStepComplete"/> or calls <see cref="Complete"/> before calling
-        /// <see cref="CompleteMeasureAndScheduleWrite"/>.
-        ///
-        /// <para><b>Exception safety.</b> A throw partway through disposes every already-scheduled layer's
-        /// build AND every not-yet-reached one — ownership transfers the moment the caller hands over
-        /// <paramref name="layers"/>, not incrementally per element.</para>
+        /// <see cref="CompleteMeasureAndScheduleWrite"/>. Non-local invariant: a throw partway through
+        /// disposes every already-scheduled layer's build AND every not-yet-reached one — ownership
+        /// transfers the moment the caller hands over <paramref name="layers"/>, not incrementally per element.
         /// </summary>
         /// <param name="layers">One build per background layer, in SLOT order — this graph ALIASES the
         /// array, it does not copy it. A <c>null</c> element is a layer with nothing to build. Every
@@ -120,12 +114,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             }
         }
 
-        /// <summary>The consumer-kind sibling of <see cref="ScheduleMeasure"/> — a distinct NAME rather than
-        /// an overload distinguished only by this parameter's type, deliberately: <c>ScheduleMeasure(layers,
-        /// default)</c> is ambiguous (CS0121) between <c>TileGeometryBuffers</c> and
-        /// <c>SharedDisposable{IDecodedTile}</c> — the compiler cannot pick an arm from a bare <c>default</c>
-        /// literal. A SOURCE tile's layers
-        /// borrow their geometry from a decoded tile instead of a buffer this graph mints itself.
+        /// <summary>The consumer-kind sibling of <see cref="ScheduleMeasure"/> — a distinct NAME because
+        /// <c>ScheduleMeasure(layers, default)</c> is ambiguous (CS0121) between <c>TileGeometryBuffers</c>
+        /// and <c>SharedDisposable{IDecodedTile}</c>. A SOURCE tile's layers borrow their geometry from a
+        /// decoded tile instead of a buffer this graph mints itself. Non-local invariant:
         /// <paramref name="decode"/> is transferred on entry, including on this call's own throw path (the
         /// catch releases it after <see cref="ScheduleLayers"/> has freed what it built) — the caller must
         /// not release it too.</summary>
@@ -152,18 +144,13 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// <summary>The scheduling loop shared by <see cref="ScheduleMeasure"/> and
         /// <see cref="ScheduleMeasureFromDecode"/> — schedules every non-null layer's own measure graph.
         /// This type dispatches nothing per kind: each <see cref="ILayerMeshBuild"/> knows its own kind's
-        /// graph.
-        ///
-        /// <para><b>Exception safety.</b> Every layer is this graph's to free from the moment
-        /// <paramref name="layers"/> is handed over — including the ones past a mid-loop throw, which were
-        /// never reached: a build's own <see cref="ILayerMeshBuild.Dispose"/> is safe to call on an instance
-        /// whose <see cref="ILayerMeshBuild.ScheduleMeasure"/> was never invoked (its measure/write fields
-        /// stay at their un-created default, so only the request columns it already owns from
-        /// construction are freed). This collapses what used to be TWO loops (graph outputs, then request
-        /// columns) into ONE — not because of any "complete everything before freeing anything" rule, but
-        /// because each build's in-flight jobs read only its own owned columns plus the shared borrowed
-        /// geometry/decode reference, which the caller's own catch frees strictly AFTER this loop
-        /// returns.</para>
+        /// graph. Non-local invariant: on a throw, every layer is this graph's to free from the moment
+        /// <paramref name="layers"/> is handed over, including ones past the throw that were never reached
+        /// — a build's own <see cref="ILayerMeshBuild.Dispose"/> is safe on an instance whose
+        /// <see cref="ILayerMeshBuild.ScheduleMeasure"/> was never invoked (only the request columns it
+        /// already owns from construction are freed). This is safe as ONE loop because each build's
+        /// in-flight jobs read only its own owned columns plus the shared borrowed geometry/decode
+        /// reference, which the caller's own catch frees strictly AFTER this loop returns.
         /// </summary>
         private static JobHandle ScheduleLayers(ILayerMeshBuild[] layers, JobHandle deps)
         {
@@ -225,16 +212,12 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         }
 
         /// <summary>Completes the write jobs and takes every layer's <see cref="MeshDataPayload"/>, in dense
-        /// SLOT order (one exact-sized array — the count is already known from
-        /// <see cref="MeshWriteOutput.IsCreated"/>).
-        ///
-        /// <para><b>Idempotent</b> — a repeat call returns the SAME array instance rather than throwing. This
-        /// graph, not the caller, owns that array from the first call on: a caller may resume a budget-bound
-        /// partial consume against it across Ticks without holding its own copy, and a caller whose earlier
-        /// consume attempt threw before it could store anything simply calls again and gets back the one
-        /// array with whatever slots that attempt already nulled — the tile recovers instead of throwing
-        /// forever (the defect this replaced: a caller-held copy lost on a throw left <see cref="_payloadsTaken"/>
-        /// permanently set with nothing to show for it).</para></summary>
+        /// SLOT order (one exact-sized array). Non-local invariant, idempotent: a repeat call returns the
+        /// SAME array instance rather than throwing — this graph, not the caller, owns it from the first
+        /// call on. A caller may resume a budget-bound partial consume across Ticks without holding its
+        /// own copy, and a caller whose earlier consume attempt threw before storing anything simply calls
+        /// again and gets back the one array with whatever slots that attempt already nulled — the tile
+        /// recovers instead of throwing forever.</summary>
         internal MeshDataPayload[] CompleteWriteAndTakePayloads()
         {
             if (!_writeScheduled)
@@ -242,13 +225,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                     "CompleteWriteAndTakePayloads called before CompleteMeasureAndScheduleWrite — no layer " +
                     "has a write step to complete, so this would silently return an empty array and settle " +
                     "the tile with no mesh.");
-            // Idempotent by design, NOT a throw. A caller can lose its reference to the returned array —
-            // the pump takes it into a local LoadedTile copy and only writes that copy back AFTER
-            // ConsumeMeshBuild returns, so a throw from consume (a backend AddLayer, a mesh apply) discards
-            // it. Under the old throw-on-second-call contract that tile then threw on every later Tick,
-            // forever, and its MeshDataArrays leaked because only the discarded local referenced them.
-            // Returning the cached array instead lets the caller resume, mirroring how the (since-retired)
-            // seam arm let a caller resume by re-reading GetResult().Payloads.
+            // Idempotent by design, NOT a throw: a caller can lose its reference to the returned array (the
+            // pump takes it into a local LoadedTile copy and only writes that back AFTER ConsumeMeshBuild
+            // returns, so a throw from consume discards it). Returning the cached array lets the caller
+            // resume. A throw here would fail that tile on every later Tick and leak its MeshDataArrays.
             if (_payloadsTaken) return _takenPayloads;
             _payloadsTaken = true;
 
@@ -270,11 +250,10 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         /// <summary><c>Handle.Complete()</c>, then free every owned container: each non-null layer's own
         /// build (measure output, write output and request columns, all in one <see cref="Dispose"/> call)
-        /// and this graph's own owned input. Idempotent —
-        /// a second call is a no-op, guarding the <see cref="DebugLiveCount"/> invariant this type's pen
-        /// callers rely on (mirrors <c>MeshDataPayload.Dispose</c>'s own idempotency, which exists for the
-        /// identical reason: a caller's unconditional sweep may legitimately re-Dispose an already-consumed
-        /// instance).</summary>
+        /// and this graph's own owned input. Idempotent — a second call is a no-op, guarding the
+        /// <see cref="DebugLiveCount"/> invariant this type's pen callers rely on. The payload sweep never
+        /// re-disposes a consumed payload: the consume loop nulls each slot of the same array right after
+        /// its <c>Dispose</c>.</summary>
         internal void Dispose()
         {
             if (_disposed) return;

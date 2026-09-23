@@ -135,7 +135,7 @@ namespace MapRenderer.Tests.Visual
                 Assert.That(mean[0], Is.GreaterThan(mean[1]).And.GreaterThan(mean[2]),
                     $"Top layer (red fill) must dominate the composite (meanRGB=" +
                     $"({mean[0]:F3},{mean[1]:F3},{mean[2]:F3})). A blue/green-dominant region means the fill " +
-                    "quads did not render (the §7.11 winding bug) or painter order is wrong.");
+                    "quads did not render (a winding bug — docs/coordinates-and-projections.md § \"Handedness, winding & why the ECEF reflection is load-bearing\") or painter order is wrong.");
 
                 // ── No-z-fighting tooth: a clean composite has low colour variance. ──
                 // A coplanar ZWrite-On approach would speckle between the saturated layer colours

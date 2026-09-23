@@ -164,7 +164,7 @@ namespace MapRenderer.Jobs.Symbols
                     if (anchorCount > 0) CopyView(block.Anchors, anchorStartSrc, dstAnchors, mAnchor, anchorCount);
                     mAnchor += anchorCount;
 
-                    // No count > 0 guard here, deliberately (mirrors :1135): fadeCount = anchorCount + 1 >= 1 always.
+                    // No count > 0 guard here: fadeCount = anchorCount + 1 >= 1 always.
                     int fadeStartSrc = block.CurvedAnchorFadeStart[detail], fadeCount = anchorCount + 1;
                     int fadeStart = mFade;
                     CopyView(block.AnchorFadeIds, fadeStartSrc, dstFades, mFade, fadeCount);
@@ -192,8 +192,8 @@ namespace MapRenderer.Jobs.Symbols
 
         // Element-wise stand-in for NativeArray<T>.Copy over a non-owning UnsafeList view (a view has no
         // NativeArray to hand NativeArray<T>.Copy) — same source/dest/start/count contract, called only where
-        // the caller already checked count > 0 (Quads/Glyphs/Anchors/WorldPoints) or where the source is known
-        // non-empty by construction (AnchorFadeIds' fadeCount = anchorCount + 1 >= 1, no guard — see call site).
+        // the caller already checked count > 0 (Quads/Glyphs/Anchors/WorldPoints) or where the source is always
+        // non-empty (AnchorFadeIds' fadeCount = anchorCount + 1 >= 1, no guard needed — see call site).
         // By VALUE, not `in`: UnsafeList<T> is not a readonly struct and its `this[int]` getter isn't
         // readonly-annotated, so `in` would force a defensive copy per element in this hot per-winner loop —
         // the repo's `in ⟺ readonly struct` gate (docs/conventions-short.md).

@@ -42,16 +42,16 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// signed area and fill's degenerate-area filter would drop it. The two consumers read the same
     /// unfiltered buffer through different filters; that is the point of the buffer being unfiltered.</para>
     ///
-    /// <para>ONE code path for every projection. Winding is correct BY CONSTRUCTION — <c>across</c> is tied to the
+    /// <para>ONE code path for every projection. Winding is always correct — <c>across</c> is tied to the
     /// same <c>up</c> the centerline was projected with (one frame), so there is no per-projection winding flip,
     /// no separate tangent-basis second frame, and no curvature/handedness branch. This line ordering
     /// (Subdivide → Project → Triangulate) mirrors the fill one; see <c>GlobeLineWindingTests</c>.</para>
     ///
     /// Production reaches the graph asynchronously through <see cref="ScheduleWrite"/>, driven by
-    /// <c>TileBuildGraph</c>. (Vestige sweep: the synchronous, main-thread convenience over the graph that
-    /// used to live here — schedule <c>LineMeshGraph</c>, complete it right here, then write into a
-    /// caller-allocated <c>Mesh.MeshData</c> — had zero production callers and moved verbatim to a
-    /// test-assembly caller (reached via <c>InternalsVisibleTo</c>).)
+    /// <c>TileBuildGraph</c>. The synchronous, main-thread convenience over the graph — schedule
+    /// <c>LineMeshGraph</c>, complete it right here, then write into a caller-allocated
+    /// <c>Mesh.MeshData</c> — has zero production callers and lives in a test-assembly caller
+    /// (reached via <c>InternalsVisibleTo</c>).
     ///
     /// Stream layout (4 streams, matching Unity's max-4-stream cap):
     ///   Stream 0 — Position (Float32x3) + Normal (Float32x3, surface up; +Y for Mercator) interleaved via <see cref="LinePositionNormal"/>.

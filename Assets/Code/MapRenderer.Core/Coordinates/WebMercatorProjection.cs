@@ -15,8 +15,9 @@ namespace MapRenderer.Core.Geo
     /// <c>Mouse.current.position</c>. Bearing (heading) rotates the pixel offset into (east, north)
     /// Mercator axes: <c>east = sx·cosH + sy·sinH</c>, <c>north = −sx·sinH + sy·cosH</c>.</para>
     ///
-    /// <para><b>Overhead-correct:</b> <see cref="ScreenToGround"/> is exact for <c>tilt=0</c>;
-    /// the tilted ray-cast is a future internal upgrade of the same method, not a new interface member.</para>
+    /// <para><b>Overhead-only:</b> <see cref="ScreenToGround"/> ignores tilt, so it is exact only at
+    /// <c>tilt=0</c>. Under tilt it returns the overhead answer, not the ground point the pixel's ray hits.
+    /// <see cref="SphericalProjection"/> ray-casts instead.</para>
     /// </summary>
     public readonly struct WebMercatorProjection : IProjection
     {

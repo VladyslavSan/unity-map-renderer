@@ -11,9 +11,9 @@ namespace MapRenderer.Core.Text.Placement
     /// <summary>
     /// The arc-walk geometry of curved along-line text: pure, allocation-free static functions over
     /// caller-owned spans. Blittable-shaped (spans of value types, no class state) so the same math drives
-    /// both <see cref="SymbolStagingMath"/>'s per-frame walk AND a future Burst staging job — one source of
-    /// truth, no divergence. The caller owns the cumulative-length buffer and the resumable cursor as plain
-    /// locals, threaded across calls by <c>ref</c>.
+    /// <see cref="SymbolStagingMath"/>'s per-frame walk both managed and inside the Burst <c>StageJob</c> —
+    /// one source of truth, no divergence. The caller owns the cumulative-length buffer and the resumable
+    /// cursor as plain locals, threaded across calls by <c>ref</c>.
     /// </summary>
     public static class PolylineArcMath
     {
@@ -29,12 +29,12 @@ namespace MapRenderer.Core.Text.Placement
         }
 
         /// <summary>
-        /// W1 — the <c>double3</c> WORLD sibling of <see cref="BuildCumulative"/>: fills
+        /// The <c>double3</c> WORLD sibling of <see cref="BuildCumulative"/>: fills
         /// <paramref name="cumulative"/>[0..count) with the arc length in METRES at each vertex and returns
         /// the total (0 for &lt; 2 points). Feeds the map-pitched arc walk, where a glyph advance is a fixed
         /// world length rather than a fixed screen length.
         ///
-        /// <para><paramref name="count"/> is the SCREEN path length, deliberately: the two spans are
+        /// <para><paramref name="count"/> is the SCREEN path length: the two spans are
         /// index-aligned 1:1 (the stage job slices both at the same <c>(off, wc)</c>), so one count governs
         /// both and a <c>(seg, t)</c> resolved against this table indexes the screen path correctly.</para>
         ///
@@ -80,7 +80,7 @@ namespace MapRenderer.Core.Text.Placement
             if (count == 1) { point = points[0]; tangentRadians = 0f; return; }
 
             // Endpoint cases stay a DIRECT assignment (not a lerp(x,y,t=0|1) reconstruction, which is NOT
-            // IEEE bit-identical to x/y themselves) — Stage AC's SegmentAt extraction must not downgrade
+            // IEEE bit-identical to x/y themselves) — the SegmentAt extraction must not downgrade
             // this from byte-identical to within-tolerance (see SegmentAt's own doc).
             if (arc <= 0f)
             {
@@ -123,7 +123,7 @@ namespace MapRenderer.Core.Text.Placement
             t = segLen > 0f ? (arc - segStart) / segLen : 0f;
         }
 
-        /// <summary>Stage AC (curved-world): the <c>double3</c> WORLD analogue of a single <see cref="At"/>
+        /// <summary>The <c>double3</c> WORLD analogue of a single <see cref="At"/>
         /// sample, given an ALREADY-RESOLVED <c>(seg,t)</c> from <see cref="SegmentAt"/> (the caller reuses the
         /// SAME index it computed against the SCREEN path — this never re-walks). <paramref name="dir"/> is the
         /// first non-degenerate segment direction from <paramref name="seg"/> (the <c>double3</c> analogue of

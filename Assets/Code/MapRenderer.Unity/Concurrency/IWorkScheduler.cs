@@ -3,12 +3,9 @@ namespace MapRenderer.Unity.Concurrency
     /// <summary>Execution policy for off-main CPU work that is a plain C# closure. ThreadPool reproduces
     /// the <c>UniTask.RunOnThreadPool</c> parallelism of desktop/editor; Inline runs the body
     /// synchronously on the calling thread — the WebGL policy (<c>docs/web-target.md</c>), where a
-    /// dispatched worker never runs.
-    ///
-    /// <para><b>A bridge for the managed bodies that remain.</b> <see cref="Schedule{T}"/> takes a managed
-    /// <see cref="System.Func{T,TResult}"/> closure, the shape a native/Burst rewrite eliminates. A body
-    /// that can be nativized should be, so routing a new site through here is the fallback, not the
-    /// default move.</para></summary>
+    /// dispatched worker never runs. <see cref="Schedule{T}"/> takes a managed
+    /// <see cref="System.Func{T,TResult}"/> closure — the fallback for a body that can't yet be
+    /// nativized, not the default move.</summary>
     internal interface IWorkScheduler
     {
         /// <summary>Runs <paramref name="body"/> under this policy and hands back a pollable handle.

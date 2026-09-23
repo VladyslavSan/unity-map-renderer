@@ -209,7 +209,7 @@ namespace MapRenderer.Tests.GeoJsons
         // ── T5b: the y-flip anchor, which goes through neither identity ────────────────────────────
 
         /// <summary>
-        /// T5b. A round trip passes by construction if the forward and inverse formulas share a sign error,
+        /// T5b. A round trip passes trivially if the forward and inverse formulas share a sign error,
         /// so this asserts SEMANTICS instead: northern latitudes are in the northern tile row, eastern
         /// longitudes in the eastern column. The values are non-zero and non-symmetric — a sign flip at a
         /// symmetric value is invisible.
@@ -777,7 +777,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// <summary>
         /// T7c. If a polygon's exterior clips away, its holes must go too: a surviving orphan would become
         /// the feature's FIRST ring downstream, establish the exterior sign itself, and render as an
-        /// inverted patch. The fixture is deliberately MALFORMED — polygon 2's hole does not lie inside its
+        /// inverted patch. The fixture is MALFORMED — polygon 2's hole does not lie inside its
         /// exterior — because that is the only way the case can arise, and the failure is silent-wrong.
         ///
         /// <para><b>Non-vacuity:</b> asserting the ring COUNT alone would pass an implementation that
@@ -882,7 +882,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// truncates it — the "close, not bit-equal" failure the window's own XML rules out. At 1000 and
         /// 4095 it is 15.625 and 63.984375, and any such formula reds.</para>
         ///
-        /// <para><i>What this tooth deliberately does NOT claim:</i> it cannot discriminate the ASSOCIATION
+        /// <para><i>What this tooth does NOT claim:</i> it cannot discriminate the ASSOCIATION
         /// of the three factors, and no choice of extent would let it. <c>ReferenceExtent</c> is 4096, so
         /// dividing by it is an exact binary scaling and <c>b·e/R</c>, <c>b·(e/R)</c> and <c>(b/R)·e</c> are
         /// bit-identical for every finite input. That half of the bit-equality is structural, not
@@ -1387,7 +1387,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// <c>x = 0</c> for its eastern neighbour. That is what makes the two tiles agree about where their
         /// common edge is, and it is the property seam-matched stroke and symbol geometry will rest on.
         ///
-        /// <para><b>Discriminating by construction:</b> the test computes the interpolation the clipper
+        /// <para><b>Discriminating interpolation from assignment:</b> the test computes the interpolation the clipper
         /// would otherwise emit and asserts it MISSES the boundary — here by one ulp, leaving the vertex just
         /// inside the western tile and (in the eastern frame, where the same absolute error is enormous in
         /// ulps) just outside the eastern one. A fixture where interpolation and assignment agree would make
@@ -1440,7 +1440,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// T14. A segment meeting the window exactly at a CORNER is put there by two half-planes at the same
         /// parameter, so BOTH of its coordinates must be assigned. Recording only the first plane tried
         /// leaves the other interpolated: on these fixtures that lands the vertex off the corner — outside
-        /// the window on entry, inside it on exit — which is precisely the disagreement the assignment
+        /// the window on entry, inside it on exit — which is the disagreement the assignment
         /// exists to remove.
         /// </summary>
         [Test]

@@ -5,8 +5,8 @@ namespace MapRenderer.Core.Lifetime
     /// <summary>
     /// Template-method <see cref="IDisposable"/> base: one idempotency guard, one
     /// <see cref="ThrowIfDisposed"/>, and a (DEBUG/Editor-only) leaked-without-Dispose finalizer warning —
-    /// de-duplicating the <c>_disposed</c> field / guard / <see cref="GC.SuppressFinalize"/> boilerplate every
-    /// concrete disposable class in this codebase used to hand-roll.
+    /// avoiding the <c>_disposed</c> field / guard / <see cref="GC.SuppressFinalize"/> boilerplate a
+    /// hand-rolled concrete disposable class would otherwise duplicate.
     ///
     /// <para>Derived types implement <see cref="DoDispose"/> instead of <c>Dispose()</c> — the base's
     /// <see cref="Dispose"/> is sealed (non-virtual) and guarantees <see cref="DoDispose"/> runs AT MOST ONCE,

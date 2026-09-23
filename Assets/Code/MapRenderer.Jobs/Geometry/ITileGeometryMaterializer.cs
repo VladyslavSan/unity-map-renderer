@@ -3,7 +3,8 @@ namespace MapRenderer.Jobs.Geometry
     /// <summary>
     /// Waist 1's producer seam: the one way a source format reaches the tile-geometry pipeline. An
     /// implementation captures its own format-specific payload (MVT command streams, sliced GeoJSON paths, …)
-    /// at construction and turns it into a <see cref="TileGeometryBuffers"/>.
+    /// at construction and turns it into a <see cref="TileGeometryBuffers"/>. Non-local invariant: every
+    /// producer must hold the contract below.
     ///
     /// <para><b>Managed-side polymorphism only.</b> <see cref="Materialize"/> is called once per (layer, tile),
     /// on the calling thread, <i>before</i> any job is scheduled; the implementation then runs whatever

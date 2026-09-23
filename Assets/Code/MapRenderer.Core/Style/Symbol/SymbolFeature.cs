@@ -23,20 +23,22 @@ namespace MapRenderer.Core.Style.Symbol
 
         /// <summary>The unit surface normal at <see cref="AnchorRender"/>, from
         /// <see cref="MapRenderer.Core.Geo.IProjection.ProjectPoint"/>'s <c>Up</c> — same render space
-        /// (pre-RTC) as <see cref="AnchorRender"/>. WRITTEN by P2; not yet consumed by any renderer.</summary>
+        /// (pre-RTC) as <see cref="AnchorRender"/>. It reaches the vertex stream through
+        /// <c>CandidateEmit.SurfaceUp</c>, but no shader reads it: a point symbol is never map-pitched.</summary>
         public double3 UpRender { get; init; }
 
         /// <summary><c>symbol-placement</c>. Default <see cref="Text.SymbolPlacement.Point"/>.</summary>
         public SymbolPlacement Placement { get; init; }
 
         /// <summary>The line's vertices in render space, PRE-RTC (only for <see cref="Text.SymbolPlacement.Line"/>
-        /// / <see cref="Text.SymbolPlacement.LineCenter"/>; null for point symbols). Curved along-line text (#5)
+        /// / <see cref="Text.SymbolPlacement.LineCenter"/>; null for point symbols). Curved along-line text
         /// walks the per-frame projection of this path.</summary>
         public double3[] PathRender { get; init; }
 
-        /// <summary>P2: index-parallel to <see cref="PathRender"/> (same length, same vertices) — each
+        /// <summary>Index-parallel to <see cref="PathRender"/> (same length, same vertices) — each
         /// entry is that vertex's unit surface normal from <see cref="MapRenderer.Core.Geo.IProjection.ProjectPoint"/>.
-        /// Null for point symbols. Not yet consumed by any renderer.</summary>
+        /// Null for point symbols. <c>SymbolStagingMath.StageCurved</c> samples it per glyph for the
+        /// map-pitched glyph box, and the shader's map-pitch branch reads it.</summary>
         public double3[] PathUpRender { get; init; }
 
         /// <summary>The along-line anchors, computed ONCE at build time in tile space
@@ -118,15 +120,14 @@ namespace MapRenderer.Core.Style.Symbol
         public AlignmentMode PitchAlignment { get; init; }
 
         /// <summary>
-        /// Distinguishes a text symbol from an icon symbol. Default <see cref="SymbolKind.Text"/>, so a
-        /// symbol that never sets it is text. An icon symbol reuses this same carrier's
-        /// text-named fields for its icon-* counterparts rather than duplicating a parallel set:
-        /// <see cref="AnchorRender"/> (icon-anchor point), <see cref="Placement"/> (always
-        /// <see cref="SymbolPlacement.Point"/> — icons are point-placement only), <see cref="SortKey"/>
-        /// (<c>symbol-sort-key</c>, shared with text), <see cref="PaddingPx"/> (<c>icon-padding</c>),
-        /// <see cref="AllowOverlap"/>/<see cref="IgnorePlacement"/> (<c>icon-allow-overlap</c>/<c>icon-ignore-placement</c>),
-        /// <see cref="RotationAlignment"/> (<c>icon-rotation-alignment</c>), <see cref="Paint"/>.Opacity
-        /// (<c>icon-opacity</c>). <see cref="Text"/> stays null on an icon symbol.
+        /// Distinguishes a text symbol from an icon symbol. Default <see cref="SymbolKind.Text"/>. An icon symbol
+        /// reuses the text-named fields for its icon-* counterparts, a non-local invariant:
+        /// <see cref="AnchorRender"/> (icon-anchor), <see cref="Placement"/> (always
+        /// <see cref="SymbolPlacement.Point"/>), <see cref="SortKey"/> (<c>symbol-sort-key</c>, shared),
+        /// <see cref="PaddingPx"/> (<c>icon-padding</c>), <see cref="AllowOverlap"/>/<see cref="IgnorePlacement"/>
+        /// (<c>icon-allow-overlap</c>/<c>icon-ignore-placement</c>), <see cref="RotationAlignment"/>
+        /// (<c>icon-rotation-alignment</c>), <see cref="Paint"/>.Opacity (<c>icon-opacity</c>).
+        /// <see cref="Text"/> stays null on an icon symbol.
         /// </summary>
         public SymbolKind Kind { get; init; }
 

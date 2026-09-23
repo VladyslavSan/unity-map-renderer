@@ -1,19 +1,18 @@
-// Engine-free: no UnityEngine dependency.
-// BLITTABLE: this struct crosses into the Jobs boundary as a NativeArray<PlacedQuad> element (mirrors the
-// Core-defines-the-struct/Jobs-creates-the-NativeArray pattern LineRibbonVertex/GlyphAtlasEntry already use).
-// Keep it to blittable fields only.
+// Engine-free, BLITTABLE — this struct crosses into the Jobs boundary as a NativeArray<PlacedQuad> element
+// (mirrors the Core-defines-the-struct/Jobs-creates-the-NativeArray pattern LineRibbonVertex/GlyphAtlasEntry
+// use). Keep it to blittable fields only.
 
 using Unity.Mathematics;
 
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// One symbol-local <see cref="SymbolQuad"/> paired with the per-LABEL placement values it needs to
+    /// One symbol-local <see cref="SymbolQuad"/> paired with the per-symbol placement values it needs to
     /// become 4 <c>WorldBillboardVertex</c>s (<see cref="MapRenderer.Core.Text.Placement.BillboardMath.BuildWorldQuad"/>).
-    /// The per-frame stage/emit path expands each surviving symbol's <see cref="SymbolQuad"/> list into a flat
-    /// <c>NativeArray&lt;PlacedQuad&gt;</c> (one entry per glyph quad, anchor/size/color repeated across every
-    /// quad of the same symbol) so the Burst stage/emit jobs stay a simple per-element map — no per-symbol
-    /// indirection.
+    /// The per-frame stage/emit path expands each surviving symbol's quads into a flat
+    /// <c>NativeArray&lt;PlacedQuad&gt;</c>, one entry per glyph quad, with anchor/size/color repeated across
+    /// every quad of the same symbol, so the Burst stage/emit jobs stay a simple per-element map with no
+    /// per-symbol indirection.
     /// </summary>
     public struct PlacedQuad
     {
@@ -21,14 +20,13 @@ namespace MapRenderer.Core.Text.Placement
         public SymbolQuad Quad;
 
         /// <summary>The symbol's projected anchor, in logical screen pixels (<see cref="SymbolScreenProjection.TryProjectAnchor"/>).
-        /// Write-only-dead in production (the screen render path has been removed).</summary>
+        /// Write-only in production — no current reader.</summary>
         public float2 AnchorScreenPx;
 
         /// <summary>`text-size` in pixels — scales the baked quad by <c>TextSizePx / TextQuadLayout.OneEm</c>.</summary>
         public float TextSizePx;
 
-        /// <summary>NDC depth carried through from staging. Write-only-dead in production after the screen
-        /// render path's removal (its only reader).</summary>
+        /// <summary>NDC depth carried through from staging. Write-only in production — no current reader.</summary>
         public float Depth;
 
         /// <summary>Per-symbol vertex color (<see cref="SymbolPaint.TextColor"/> × <see cref="SymbolPaint.Opacity"/>).</summary>
@@ -55,7 +53,7 @@ namespace MapRenderer.Core.Text.Placement
         /// sampled from the world polyline's per-vertex ups at the SAME <c>(segment, t)</c>
         /// <see cref="AnchorLocal"/> was sampled at (<see cref="PolylineArcMath.SampleUp"/>). Default
         /// <see cref="float3.zero"/> for a point symbol (which carries its anchor's up on
-        /// <see cref="CandidateEmit.SurfaceUp"/> instead). Written, but not yet read by any shader.</summary>
+        /// <see cref="CandidateEmit.SurfaceUp"/> instead).</summary>
         public float3 SurfaceUp;
     }
 }

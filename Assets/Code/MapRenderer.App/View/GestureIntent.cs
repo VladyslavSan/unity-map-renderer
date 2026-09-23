@@ -25,27 +25,11 @@ namespace MapRenderer.App.View
     }
 
     /// <summary>
-    /// A <b>device-agnostic</b>, allocation-free intent value that describes what the user wants the
-    /// camera to do. Sources (mouse/keyboard, touch, test driver) translate device events into
-    /// <see cref="GestureIntent"/> values and pass them to
-    /// <see cref="ViewInput.Apply(in GestureIntent, in ViewContext)"/>; the mapping lives entirely in
-    /// <see cref="ViewInput"/>, not in the source.
-    ///
-    /// <para><b>Encoding:</b> a discriminated-union-style <c>readonly struct</c> — one
-    /// <see cref="Kind"/> discriminant plus the union of all payloads. Use the factory methods
-    /// (<see cref="ZoomAt"/>, <see cref="Pan"/>, <see cref="HeadingBy"/>, <see cref="TiltBy"/>)
-    /// so the correct fields are always set.</para>
-    ///
-    /// <para><b>Per-gesture config</b> (zoom clamps, <c>maxPitch</c>) rides on the payload so the
-    /// source can hand algorithm knobs to the mapping without polluting the shared
-    /// <see cref="ViewContext"/> carrier (which holds only the per-frame camera/viewport/projection).</para>
-    ///
-    /// <para><b>Sensitivity</b> (px→degrees, scroll→levels) is applied by the source <i>before</i>
-    /// building the intent; the seam receives device-independent magnitudes, so different sources
-    /// (mouse, touch) can use their own feel without changing the mapping.</para>
-    ///
-    /// <para>No <c>UnityEngine</c>, <c>Mouse</c>, <c>Keyboard</c>, <c>Touch</c>, <c>Touchscreen</c>,
-    /// or <c>Vector2</c> reference appears anywhere in this type.</para>
+    /// A device-agnostic, allocation-free value for what the user wants the camera to do. Each source (mouse,
+    /// touch, test driver) applies its own sensitivity, builds one, and passes it to
+    /// <see cref="ViewInput.Apply(in GestureIntent, in ViewContext)"/>, which owns the mapping. One
+    /// <see cref="Kind"/> plus the union of all payloads; the factory methods set the right fields. Per-gesture
+    /// config (zoom clamps, <c>maxPitch</c>) rides on the payload, so <see cref="ViewContext"/> stays per-frame.
     /// </summary>
     public readonly struct GestureIntent
     {

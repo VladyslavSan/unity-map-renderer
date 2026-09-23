@@ -15,11 +15,10 @@ namespace MapRenderer.Unity.Rendering.Source
     internal static class SpriteSourceFactory
     {
         // Process-wide "warn once" latch. INTERNAL rather than private so a test can clear it in setup:
-        // This is reachable from far more styles now (the sprite fetch is no longer gated on a style having
-        // symbol layers — fill-pattern resolves against the same sheet), so whether the latch is still unset
-        // by the time any one test runs now depends on test ORDER. Broadening private → internal is the
-        // conventions' sanctioned test footprint; the alternative was a test that passes or fails according
-        // to what ran before it.
+        // the sprite fetch is not gated on a style having symbol layers (fill-pattern resolves against the
+        // same sheet), so this is reachable from many styles, and whether the latch is still unset by the
+        // time any one test runs depends on test ORDER. Broadening private → internal is the conventions'
+        // sanctioned test footprint; without it a test passes or fails according to what ran before it.
         internal static bool WarnedMissingUrl;
 
         /// <summary>

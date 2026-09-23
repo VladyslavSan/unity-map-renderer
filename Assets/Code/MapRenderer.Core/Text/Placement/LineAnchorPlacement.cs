@@ -14,8 +14,8 @@ namespace MapRenderer.Core.Text.Placement
     /// build time, in TILE space (projection-agnostic, zoom-invariant) — the MapLibre <c>getAnchors</c>
     /// analogue. Anchors are returned as stable <see cref="LineAnchor"/> topology (segment + t), so the number
     /// of anchors and their world positions are FIXED for the tile's lifetime: the per-frame placement pass
-    /// projects the line and lays glyphs out around each anchor's projected position, and the anchors no longer
-    /// slide or pop as the camera zooms (the old fixed screen-px-from-start walk did both).
+    /// projects the line and lays glyphs out around each anchor's projected position, and the anchors do not
+    /// slide or pop as the camera zooms.
     /// </summary>
     public static class LineAnchorPlacement
     {

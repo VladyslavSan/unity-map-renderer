@@ -352,7 +352,7 @@ namespace MapRenderer.Unity.Text
         private SymbolTileBuffer RentBuffer() => _bufferPool.Count > 0 ? _bufferPool.Pop() : new SymbolTileBuffer();
 
         /// <summary>Clears and returns a scratch buffer to <c>_bufferPool</c>; null is ignored.</summary>
-        /// <param name="buffer">The buffer to recycle — must no longer be referenced by any in-flight build.</param>
+        /// <param name="buffer">The buffer to recycle — must not be referenced by any in-flight build.</param>
         private void ReturnBuffer(SymbolTileBuffer buffer)
         {
             if (buffer == null) return;
@@ -1018,7 +1018,7 @@ namespace MapRenderer.Unity.Text
             _store.Clear();
         }
 
-        /// <summary>Drops coverage-fade deadlines whose grace window has elapsed. A purged tile is no longer
+        /// <summary>Drops coverage-fade deadlines whose grace window has elapsed. A purged tile stops being
         /// forced-fading; if it is still below threshold with no live deadline, <c>ClassifyActive</c> drops it
         /// outright — grace exceeds the fade, so by expiry it has already faded to invisible (never a pop).</summary>
         private void PurgeExpiredCoverageDeadlines(double now)
@@ -1054,7 +1054,7 @@ namespace MapRenderer.Unity.Text
         protected override void DoDispose()
         {
             // Teardown runs the SAME inline-drain protocol as a restyle — cancel, drain to terminal, release both
-            // snapshots' pins, THEN Clear (ordering between the two is no longer load-bearing — SharedDisposable
+            // snapshots' pins, THEN Clear (ordering between the two is not load-bearing — SharedDisposable
             // makes both idempotent). A test tearing down while GateForTest is held MUST open the gate first, or
             // DrainInFlightReconcile hangs.
             _buildCts.Cancel();   // stop any in-flight build + the reconcile token before glyph/atlas state is disposed

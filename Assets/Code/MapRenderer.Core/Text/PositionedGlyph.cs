@@ -1,9 +1,7 @@
-// Engine-free: no UnityEngine dependency.
-// Construction convention: object initializer with named members.
-// BLITTABLE: this struct crosses into the Burst jobs as a NativeArray<PositionedGlyph> element
-// at the MapRenderer.Jobs boundary (the same Core-defines-the-struct/Jobs-creates-the-NativeArray
-// pattern LineRibbonVertex/GeoCoordinate/GlyphAtlasEntry already use) — keep it to blittable scalar
-// fields only: no byte[], no string, no reference types.
+// Engine-free, BLITTABLE — this struct crosses into Burst jobs as a NativeArray<PositionedGlyph> element at the
+// MapRenderer.Jobs boundary (the same Core-defines-the-struct/Jobs-creates-the-NativeArray pattern
+// LineRibbonVertex/GeoCoordinate/GlyphAtlasEntry use) — keep to blittable scalar fields only: no byte[], no
+// string, no reference types.
 
 namespace MapRenderer.Core.Text
 {

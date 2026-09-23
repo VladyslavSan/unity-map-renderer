@@ -59,7 +59,7 @@ namespace MapRenderer.Jobs.Symbols
                 // Place if it ignores collision, OR none of its REQUIRED boxes overlaps an already-placed
                 // blocker. Test ALL boxes first (all-or-nothing) — no box is inserted until the whole candidate
                 // wins. This SHAPE is load-bearing for the per-box optional mask too: a centred pair's two
-                // boxes overlap by construction, so testing one half before inserting the other would make the
+                // boxes always overlap, so testing one half before inserting the other would make the
                 // pair block itself.
                 bool place = c.AllowOverlap;
                 byte dropped = 0;

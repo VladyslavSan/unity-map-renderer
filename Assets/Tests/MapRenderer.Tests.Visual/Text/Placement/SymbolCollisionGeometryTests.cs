@@ -47,7 +47,7 @@ namespace MapRenderer.Tests.Visual
     //     two staging branches are selected by one predicate). It also observes the ruler conjunct (measured by
     //     injection I6). It does NOT pin the ŷ SIGN: this box is an AABB, and a ŷ flip only permutes the corners
     //     of a y-symmetric cell — injection I2 flipped the sign in production and left the whole suite green.
-    //     T10 (in MapPitchedWorldArcStagingTests, on a deliberately off-centre cell) is the sign's sole
+    //     T10 (in MapPitchedWorldArcStagingTests, on an off-centre cell) is the sign's sole
     //     observer.
     //
     // NO METRE LITERALS in the tilt-0 harness: every world length is a multiple of `scene.MetresPerDevicePixel`,
@@ -96,7 +96,7 @@ namespace MapRenderer.Tests.Visual
         /// <para><b>The anti-per-symbol-constant precondition.</b> Within <c>RecedingNear</c> alone the
         /// reconstructed quad's screen height must vary by ≥ 4 px between its first and last glyph. A box
         /// scaled by ONE constant per symbol — the model <c>CrossNear</c>/<c>CrossFar</c> cannot
-        /// refute because they are iso-depth by construction — is then provably unable to clear the 0.5 px
+        /// refute because they are iso-depth inherently — is then provably unable to clear the 0.5 px
         /// bound.</para>
         /// </summary>
         [Test]
@@ -235,7 +235,7 @@ namespace MapRenderer.Tests.Visual
         /// is strictly larger — so <b>T2 is not the depth discriminator; T1 is</b>. T2's job is that the
         /// projected box is not too SMALL, and that the mesh-derived oracle T1 leans on lands where the
         /// GPU put ink. It reaches both receding depths because containment, unlike a ratio, does not need a
-        /// resolvable run width — which is precisely the limit T1b measured and recorded
+        /// resolvable run width — which is the limit T1b measured and recorded
         /// (<c>RecedingFar</c>'s runs are 1–2 px).</para>
         /// </summary>
         [Test]
@@ -263,7 +263,7 @@ namespace MapRenderer.Tests.Visual
                 // The runs come out ordered by increasing ink-buffer ROW; the boxes are in glyph order along
                 // the road, which for an up-screen symbol is the reverse. Pair them by sorting the BOXES by
                 // their own centre row — the box-side analogue of MapPitchedGlyphSizeTests' OrderedByScreenRow,
-                // and deliberately NOT a search for "whichever box contains this run" (which could not fail).
+                // and NOT a search for "whichever box contains this run" (which could not fail).
                 int[] order = BoxesByCentreRow(boxes, size);
 
                 for (int i = 0; i < runs.Length; i++)
@@ -369,7 +369,7 @@ namespace MapRenderer.Tests.Visual
         /// the cell's corners, so a ŷ flip merely PERMUTES that set whenever the cell is symmetric about its
         /// anchor in y, and an AABB is invariant under permutation — and curved glyph cells are centred on
         /// the path. Injection I2 flipped the sign in production and left the ENTIRE suite green, this tooth
-        /// included. <b>T10</b> (<c>MapPitchedWorldArcStagingTests</c>, on a deliberately off-centre cell)
+        /// included. <b>T10</b> (<c>MapPitchedWorldArcStagingTests</c>, on an off-centre cell)
         /// is the sign's sole observer; the 22.56 px flipped-ŷ separation the size teeth report is an
         /// ink-CENTROID reading and does not carry over to an AABB.</para>
         /// </summary>

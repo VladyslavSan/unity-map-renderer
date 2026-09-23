@@ -4,15 +4,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geo
 {
     /// <summary>
-    /// Web Mercator (EPSG:3857). SPHERICAL projection (radius R = WGS84 semi-major axis) applied to
-    /// WGS84 geodetic lon/lat — eccentricity is intentionally ignored. Units: meters.
-    ///
-    /// <para><b>Single source of the Mercator forward formula.</b> The literal
-    /// <c>math.log(math.tan(π/4 + lat/2))</c> appears ONLY in <see cref="Forward(GeoCoordinate3D)"/>.
-    /// All other callers delegate to it.</para>
-    ///
-    /// <para><b>Render-space axis convention:</b> east=+X, altitude=+Y, north=+Z.
-    /// <c>Forward</c> returns <c>double3(mercX, altitude, mercY)</c>.</para>
+    /// Web Mercator (EPSG:3857): a SPHERICAL projection (radius R = WGS84 semi-major axis) applied to
+    /// WGS84 geodetic lon/lat — eccentricity is ignored. Units: metres. The Mercator forward literal
+    /// <c>math.log(math.tan(π/4 + lat/2))</c> appears only in <see cref="Forward(GeoCoordinate3D)"/>; every
+    /// other caller delegates to it. Render-space axes: east=+X, altitude=+Y, north=+Z —
+    /// <see cref="Forward(GeoCoordinate3D)"/> returns <c>double3(mercX, altitude, mercY)</c>.
     /// </summary>
     public static class WebMercator
     {
@@ -42,15 +38,10 @@ namespace MapRenderer.Core.Geo
         // ── Forward projection (the single source of the Mercator literal) ────────────────────────
 
         /// <summary>
-        /// Projects a geodetic point to render-space coordinates.
-        /// Render axes: east=+X, altitude=+Y, north=+Z.
-        /// Returns <c>double3(mercX, altitude, mercY)</c>.
-        ///
-        /// <para>This is the ONLY method in the codebase that may contain the Mercator forward
-        /// literal <c>math.log(math.tan(π/4 + lat/2))</c> (T2 structural test).</para>
-        ///
-        /// <para>Uses <c>Unity.Mathematics.math</c> — Burst intrinsifies log/tan/sin/cos/sqrt,
-        /// so this is safe to call from Burst jobs.</para>
+        /// Projects a geodetic point to render-space coordinates: east=+X, altitude=+Y, north=+Z, returned as
+        /// <c>double3(mercX, altitude, mercY)</c>. The only method that may contain the Mercator forward literal
+        /// <c>math.log(math.tan(π/4 + lat/2))</c>. Uses <c>Unity.Mathematics.math</c>, which
+        /// Burst intrinsifies (log/tan/sin/cos/sqrt), so this is safe to call from Burst jobs.
         /// </summary>
         public static double3 Forward(GeoCoordinate3D geo)
         {

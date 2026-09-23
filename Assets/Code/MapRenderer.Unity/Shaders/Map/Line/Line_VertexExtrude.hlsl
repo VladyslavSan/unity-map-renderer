@@ -119,8 +119,8 @@ float3 Line_VertexExtrude(
     //   line-translate                     → its own per-axis MapPixelsToWorld calls. Different direction.
     //
     // ONE probe serves all of ruler (1) — fewer than the two the AA-on path took before, and they cannot
-    // drift apart. This is NOT the §2.4 cancellation returning: that one shared a ruler between the width
-    // and the pad, and it is the WIDTH that is now on the other ruler.
+    // drift apart. This is NOT the width/pad cancellation returning: that one shared a ruler between the
+    // width and the pad, and it is the WIDTH that is now on the other ruler.
     float metresPerDevicePx = MapPixelsToWorld(centerWS, unitDir_WS);
 
     // px→world scale ALONG THE ACROSS-DIRECTION, for the width-family properties below. Non-pixel widths are
@@ -129,8 +129,8 @@ float3 Line_VertexExtrude(
     // A FRAME CONSTANT, not a per-vertex probe: `line-width: N px` fixes a WORLD width once, and the
     // perspective divide alone decides what that renders as at any depth. No depth term, no direction, no
     // sign, identical at every vertex — so any interpolant of a quantity derived from it is exact. Full
-    // derivation, and why four stages of per-vertex compensation were reverted, in
-    // docs/line-rendering-design.md §1.
+    // derivation in docs/line-rendering-design.md § "The width model"; why per-vertex compensation is rejected
+    // in docs/line-rendering-design.md § "Rejected: holding the rendered width constant in device pixels".
     //
     // SCOPE: a unit CONVERSION for the width family (width / gap / line-offset), a literal 1.0 when the
     // width is already world metres. It is NOT a metres-per-pixel scale — anything that genuinely wants a
@@ -307,7 +307,8 @@ float3 Line_VertexExtrude(
             // offset in-surface, leaving a purely azimuthal residual: meridian convergence over the vertex's
             // angular distance from the look-at point, ~dLon*sin(lat). That is exactly 0 for Mercator
             // (identity rebase) and ~0 near screen centre, growing only toward the limb of a zoomed-out
-            // globe. Trading it away costs 8 B on every line vertex — see the design doc's §4.1.
+            // globe. Trading it away costs 8 B on every line vertex — see
+            // docs/line-translate-parity-design.md § "The east/north frame for the "map" anchor".
             float3 eastRefWS   = float3(1.0, 0.0, 0.0);
             float3 eastInPlane = eastRefWS - upWS * dot(upWS, eastRefWS);
             float  eastLen     = length(eastInPlane);

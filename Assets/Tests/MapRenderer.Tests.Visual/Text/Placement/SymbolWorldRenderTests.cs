@@ -538,8 +538,8 @@ namespace MapRenderer.Tests.Text.Placement
                 "stream-0 offset/stride bug that put POSITION on an all-zero neighbor would slip past an " +
                 "all-zero baseline, but real nonzero position data (this render) runs it through TransformObjectToHClip.");
 
-            Assert.That(nonzeroCentroidRow, Is.EqualTo(zeroCentroidRow).Within(3f), "ink centroid row must match (RTC cancellation, §3.4).");
-            Assert.That(nonzeroCentroidCol, Is.EqualTo(zeroCentroidCol).Within(3f), "ink centroid col must match (RTC cancellation, §3.4).");
+            Assert.That(nonzeroCentroidRow, Is.EqualTo(zeroCentroidRow).Within(3f), "ink centroid row must match (RTC cancellation, docs/coordinates-and-projections.md § \"Render space & precision\").");
+            Assert.That(nonzeroCentroidCol, Is.EqualTo(zeroCentroidCol).Within(3f), "ink centroid col must match (RTC cancellation, docs/coordinates-and-projections.md § \"Render space & precision\").");
 
             float changedFraction = WorldSymbolInkAnalysis.ChangedPixelFraction(zeroPixels, nonzeroPixels, Size, Size);
             Assert.Less(changedFraction, 0.03f, $"changed-pixel fraction ({changedFraction:P1}) must stay tiny — same real-world point, different tile bake.");

@@ -3,9 +3,9 @@
 // registered in core-tests.csproj (MeshDataPayload/Mesh.MeshDataArray are Unity types).
 //
 // perf/gc-elimination: TileMeshLayerProcessor and MeshDataPayload — the
-// per-dense-layer kick-time objects — used to be `new`d fresh on every AllocateForKick/Complete() call
-// (~208 alloc events / ~16.5 KB per tile-build on a liberty-shaped style). They are now rented from
-// TileMeshLayerProcessorPool/MeshDataPayloadPool (ConcurrentBag-backed, mirroring TileBuildBuffersPool —
+// per-dense-layer kick-time objects — are rented from TileMeshLayerProcessorPool/MeshDataPayloadPool,
+// rather than `new`d fresh on every AllocateForKick/Complete() call (~208 alloc events / ~16.5 KB per
+// tile-build on a liberty-shaped style). The pools are ConcurrentBag-backed, mirroring TileBuildBuffersPool —
 // both objects cross the main/worker thread boundary between allocation and release, which is what rules
 // out UnityEngine.Pool here).
 

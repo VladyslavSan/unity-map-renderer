@@ -12,11 +12,11 @@ using MapRenderer.Core.Expressions;
 namespace MapRenderer.Tests.Expressions
 {
     /// <summary>
-    /// H4 — <see cref="FunctionExpression.Evaluate"/> used to allocate a fresh <c>new Value[]</c> for its
-    /// evaluated arguments on every call, the hottest managed allocation during feature selection (features ×
-    /// filter-nodes, per tile, off-main). It now rents a per-thread buffer from
-    /// <see cref="EvalArgBuffers"/>. This tooth pins that the steady-state evaluation of an operator tree
-    /// allocates nothing.
+    /// H4 — <see cref="FunctionExpression.Evaluate"/> rents a per-thread buffer from
+    /// <see cref="EvalArgBuffers"/> for its evaluated arguments instead of allocating a fresh
+    /// <c>new Value[]</c> on every call — the hottest managed allocation during feature selection
+    /// (features × filter-nodes, per tile, off-main). This tooth pins that the steady-state evaluation
+    /// of an operator tree allocates nothing.
     /// </summary>
     /// <remarks>
     /// The fixture is a NESTED pure-arithmetic tree so evaluation is re-entrant — the outer <c>+</c> node's

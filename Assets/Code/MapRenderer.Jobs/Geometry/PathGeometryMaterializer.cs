@@ -22,7 +22,7 @@ namespace MapRenderer.Jobs.Geometry
     /// <c>[−b, extent + b]</c>, Y-down</b> — never geodetic, never projected. Ring assembly's and earcut's
     /// thresholds are calibrated to tile-integer magnitude; degrees are a different scale entirely.
     /// <c>b</c> is the producer's buffer: a tile's own square is <c>[0, extent]</c>, but every buffered
-    /// producer overruns it deliberately, MVT wire geometry included, so a fence written as
+    /// producer overruns it, MVT wire geometry included, so a fence written as
     /// <c>[0, extent]</c> would declare conforming input out of contract.</para>
     ///
     /// <para><b>Ownership transfers on return</b> (interface contract). Nothing is cached: each call mints a
@@ -77,7 +77,7 @@ namespace MapRenderer.Jobs.Geometry
                 return default;
 
             // The kind column is a SECOND list joined to `features` by position, so a length mismatch would
-            // fault the write loop below. Validated BEFORE Allocate, deliberately: after it, four
+            // fault the write loop below. Validated BEFORE Allocate: after it, four
             // Allocator.Persistent arrays exist and a throw here would strand them with no caller able to
             // dispose them — the one exit path the "caller disposes on every exit path" contract cannot
             // cover. Checked by reading the code rather than by arguing reachability, the same standard

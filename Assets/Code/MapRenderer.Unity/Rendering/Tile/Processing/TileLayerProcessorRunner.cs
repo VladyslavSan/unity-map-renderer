@@ -10,35 +10,28 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// The dense fan-out boundary for one tile worker pass — two disjoint entries, one per cadence:
     /// <see cref="RunWorkerPass"/> (mesh, per-(tile, source) build task) and <see cref="RunSymbolWorkerPass"/>
     /// (symbol, per queued bytes push). A background tile has no worker pass — it schedules its measure
-    /// graph directly (<c>TileManager.KickSourcelessBackground</c>). The runner itself stays
-    /// stateless — no <see cref="IDecodedTile"/> cache, no refcount here — retention lives in the
+    /// graph directly (<c>TileManager.KickSourcelessBackground</c>). Stateless: no
+    /// <see cref="IDecodedTile"/> cache, refcount, budget, or source abstraction — retention lives in the
     /// caller-owned <see cref="SharedDisposable{T}"/>, which the mesh cadence reads through instead of
     /// decoding for itself.
-    ///
-    /// Stateless: no decoded-tile retention, cache, refcount, budget, or source abstraction.
     /// </summary>
     internal static class TileLayerProcessorRunner
     {
         /// <summary>Worker-thread entry point: read the already-decoded tile off the handle, run every
-        /// <paramref name="processors"/> entry in order, then settle every one of them exactly once.
-        /// Fault policy: a processor exception aborts the REMAINING invocations
-        /// for this pass, but every processor — invoked or not — is still <c>Release</c>d, returning it to its
-        /// pool. Does NOT release <paramref name="decode"/> — the runner does not own the reference; the
-        /// caller does.
+        /// <paramref name="processors"/> entry in order, then settle every one of them exactly once. Fault
+        /// policy: a processor exception aborts the REMAINING invocations for this pass, but every
+        /// processor — invoked or not — is still <c>Release</c>d, returning it to its pool. Does NOT
+        /// release <paramref name="decode"/> — the caller owns that reference.
         ///
-        /// <para>Teardown cancellation (constraint 1, no new disposal path): if <paramref name="token"/> is
-        /// already cancelled, the processing block above is skipped entirely — a build queued in the
-        /// ThreadPool but not yet started never touches <c>decode.Value</c>, which matters because
-        /// <see cref="SharedDisposable{T}"/> is undefended by design and its buffers may be racing teardown.
-        /// A build already mid-pass aborts at the next per-iteration check. Either way control falls straight
-        /// through to the unconditional settle loop below, which returns every processor's own slot as
-        /// <c>null</c> when it never built a request: there is no kick-allocated array to wrap zero-vertex,
-        /// so a graph-arm processor with nothing to settle leaves its slot empty. The task still Succeeds
-        /// either way, so
-        /// <see cref="TilePrologueOutput.Dispose"/> — called from the pen-drain funnel
-        /// (<c>PendingDisposalQueue.DrainCompleted</c>) exactly once per prologue — is what frees whatever a
-        /// released-before-consumed tile's requests still hold. No Canceled status, no second disposal
-        /// path.</para></summary>
+        /// <para>Non-local invariant: if <paramref name="token"/> is already cancelled, the processing block
+        /// is skipped entirely, so a build queued but not yet started never touches <c>decode.Value</c> —
+        /// <see cref="SharedDisposable{T}"/> guards a late read only with a DEBUG assertion, and its buffers
+        /// may be racing teardown. A build already mid-pass aborts at the next per-iteration check. Either
+        /// way, control falls through to the unconditional settle loop, which leaves a processor's slot
+        /// <c>null</c> when it built nothing. The task still Succeeds either way, so
+        /// <see cref="TilePrologueOutput.Dispose"/> (called once per prologue from the pen-drain funnel) is
+        /// what frees whatever a released-before-consumed tile's requests still hold — no Canceled status,
+        /// no second disposal path.</para></summary>
         /// <param name="decode">The caller-owned shared decode lease this pass reads (never released here).</param>
         /// <param name="context">Per-tile projection/origin/zoom context, unchanged by cancellation.</param>
         /// <param name="processors">One this-source processor per dense layer id, in SLOT order.</param>
@@ -50,17 +43,15 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         {
             int count = processors.Length;
 
-            // perf/gc-elimination: rent THIS build's buffers once, for its whole worker pass — every layer/
-            // feature this pass processes reuses the same instance (sequential within a build) — and return it
-            // unconditionally so a faulted or cancelled build still gives it back (never stranded, never leaked
-            // to a build that never returns it). Two RunWorkerPass calls never share one instance: each runs on
-            // its own ThreadPool task and rents its OWN buffers from the thread-safe pool.
+            // Rent THIS build's buffers once, for its whole worker pass, and return them unconditionally so
+            // a faulted or cancelled build still gives them back. Two RunWorkerPass calls never share one
+            // instance — each rents its OWN buffers from the thread-safe pool.
             TileBuildBuffers buffers = TileBuildBuffersPool.Rent();
             try
             {
                 // Only the Buffers field differs from the caller's context — copied field-for-field rather
-                // than mutating `context` (a `readonly struct` taken `in`), and rather than `with` (C# 9's
-                // record-only form; this project's language version does not extend it to plain structs).
+                // than mutating `context` (a readonly struct taken `in`) or using `with` (this project's
+                // language version does not allow it on plain structs).
                 var passContext = new TileLayerProcessContext
                 {
                     Tile             = context.Tile,
@@ -75,69 +66,56 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
                 {
                     try
                     {
-                        // No pass-scoped store. The decoded tile owns one buffer per source-layer,
-                        // minted once inside the decode, so a source-layer named by N style layers — across BOTH
-                        // cadences of this kick, not just this pass — is materialized once. Lifetime is the caller's
-                        // REFERENCE, not this method.
+                        // No pass-scoped store: the decoded tile owns one buffer per source-layer, minted once
+                        // inside the decode, so a source-layer named by N style layers is materialized once.
                         IDecodedTile tile = decode.Value;
                         for (int i = 0; i < count; i++)
                         {
-                            // Teardown cancellation: abort the remaining layers of a build already mid-pass
-                            // (real multi-layer covers). Falls through to the settle loop below, same as the
-                            // top-of-function skip.
+                            // Teardown cancellation: abort the remaining layers of a build already mid-pass,
+                            // falling through to the settle loop below, same as the top-of-function skip.
                             if (token.IsCancellationRequested) break;
 
                             ITileMeshLayerProcessor processor = processors[i];
 
-                            // This pass only choreographs WorkerOnly. Running a WorkerThenMain processor here
-                            // would silently execute a phase this runner has no main-thread tail for — treat it as
-                            // a programming error inside the SAME settlement boundary as any other fault (still
-                            // caught below, still settled in the loop after).
+                            // This pass only choreographs WorkerOnly. A WorkerThenMain processor here would
+                            // silently run a phase with no main-thread tail, so it is a programming error,
+                            // caught inside the SAME settlement boundary as any other fault.
                             if (processor.Phase != LayerPhase.WorkerOnly)
                                 throw new System.NotSupportedException(
-                                    $"{processor.Phase} is not supported by A1's worker pass (reserved for A3).");
+                                    $"{processor.Phase} is not supported by the mesh worker pass (reserved for the symbol worker pass).");
 
                             processor.ProcessOnWorker(tile, in passContext);
                         }
                     }
                     catch (System.Exception ex)
                     {
-                        // A processor exception or an unsupported phase aborts the remaining invocations for this
-                        // pass. Fall through so EVERY processor still
-                        // settles below — Release()d, returning it to its pool, whatever graph request it
-                        // already built (or none) left in its own slot.
-                        //
-                        // The LOG is not decoration. An out-of-range ordinal lands here, and so would a
-                        // processor read against a decoded tile's NativeArray after its buffers were
-                        // freed — SharedDisposable is undefended by design (no throw on a released `Value`), so
-                        // that fault now surfaces from Unity's own NativeContainer safety checks rather than a lease
-                        // guard, but the settle-everything-and-log posture is unchanged. (A malformed tile's decode
-                        // fault never reaches here either: the decode happens in the source's GetTile task and faults
-                        // THAT, so nothing is ever minted and this pass never runs for it.) The symbol cadence already
-                        // logs (SymbolSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff); this is the same
-                        // shape, so the two cadences agree. Control flow is UNCHANGED: settle-everything below,
-                        // exactly as before.
+                        // A processor exception or an unsupported phase aborts the remaining invocations for
+                        // this pass; every processor still settles below. The LOG is not decoration: an
+                        // out-of-range ordinal lands here, and so would a processor reading a decoded tile's
+                        // NativeArray after its buffers were freed. SharedDisposable.Value catches a late read
+                        // only with a DEBUG assertion, and Unity's NativeContainer safety checks catch the
+                        // array read; a release player has neither. A malformed tile's decode fault
+                        // never reaches here — it happens in the source's GetTile task instead. The symbol
+                        // cadence logs the same way (SymbolSubsystem.SymbolTileWorkerPass.RunWorkerAndHandoff),
+                        // so the two cadences agree.
                         UnityEngine.Debug.LogWarning(
                             $"[TileLayerProcessorRunner] mesh worker pass failed for tile {context.Tile}: {ex.Message}");
                     }
                 }
 
-                // Settle every processor exactly once, in dense order, regardless of how far the loop
-                // above got. Every processor's slot is filled by TryTakeGraphRequest — the graph is the only
-                // mesher, so there is no second source to wrap into the same slot.
+                // Settle every processor exactly once, in dense order, regardless of how far the loop above
+                // got. TryTakeGraphRequest fills each slot; the graph is the only mesher.
                 var layers = new ILayerMeshBuild[count];
                 for (int i = 0; i < count; i++)
                 {
                     if (processors[i].TryTakeGraphRequest(out ILayerMeshBuild build))
                         layers[i] = build;
 
-                    // Per-processor guard (reconciliation refinement #1): UNREACHABLE in production — the real
-                    // adapter's Release() only returns itself to its pool and cannot throw. It exists so a
-                    // hypothetical contract-violating throw from one processor's Release() does not strand its
-                    // SIBLINGS' pool returns (each still settles). Residual risk if it ever did fire: only the
-                    // throwing processor's own return to its pool is skipped — a bounded leak of ONE pooled
-                    // instance, never a crash. The slot keeps whatever TryTakeGraphRequest already gave it (or
-                    // default).
+                    // Per-processor guard: UNREACHABLE in production (Release() only returns itself to its
+                    // pool and cannot throw) — it exists so a hypothetical contract-violating throw from one
+                    // processor's Release() does not strand its SIBLINGS' pool returns. Residual risk if it
+                    // ever fired: a bounded leak of ONE pooled instance, never a crash; the slot keeps
+                    // whatever TryTakeGraphRequest already gave it.
                     try { processors[i].Release(); }
                     catch { /* keep whatever the slot already holds; the processor's own pool-return is skipped */ }
                 }
@@ -145,48 +123,40 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             }
             finally
             {
-                // Runs on every exit — success, an aborted pass, or (in principle) a throw that unwinds past
-                // the settle loop above — so a build never strands its rented buffers: the NEXT Rent() would
-                // otherwise starve the pool into minting a fresh instance forever instead of reusing this one.
+                // Runs on every exit, so a build never strands its rented buffers. A stranded instance
+                // would starve the pool into minting fresh instances forever.
                 TileBuildBuffersPool.Return(buffers);
             }
         }
 
-        /// <summary>The symbol cadence's worker-pass entry — read the
-        /// shared decode (decoding it if this is the first cadence to arrive), then invoke every
+        /// <summary>The symbol cadence's worker-pass entry — read the already-decoded tile off the handle,
+        /// then invoke every
         /// <see cref="ITileWorkerThenMainLayerProcessor"/> entry's <see cref="ITileLayerProcessor.ProcessOnWorker"/>
-        /// in dense (declared) order against that same decoded <see cref="IDecodedTile"/> reference — the
-        /// SAME one the mesh pass reads via <paramref name="decode"/>, so there is no second decode.
-        ///
-        /// <para>Unlike <see cref="RunWorkerPass"/> this entry runs NO settlement loop and invokes NO tail —
-        /// there is no kick-allocated native memory to strand (symbol
-        /// holds only managed state), and the main-thread tail is by definition the caller's step, run after
-        /// this method returns. A processor exception PROPAGATES to the caller — swallowing it here would
-        /// let a subsequent tail run over an
-        /// empty/partial extraction and commit an empty symbol list, an observable behaviour change from the
-        /// fault → no-store-commit path. Does NOT release <paramref name="decode"/> — the caller owns the
-        /// reference.</para>
+        /// in dense order against the SAME decoded <see cref="IDecodedTile"/> reference the mesh pass reads
+        /// via <paramref name="decode"/>, so there is no second decode. Non-local invariant: unlike
+        /// <see cref="RunWorkerPass"/> this entry runs NO settlement loop and invokes NO tail (symbol holds
+        /// only managed state, and the main-thread tail is the caller's own step after this returns). A
+        /// processor exception PROPAGATES to the caller — swallowing it here would let a subsequent tail
+        /// commit an empty symbol list over a partial extraction. Does NOT release <paramref name="decode"/>
+        /// — the caller owns the reference.
         /// </summary>
         internal static void RunSymbolWorkerPass(
             SharedDisposable<IDecodedTile> decode, in TileLayerProcessContext context, ITileWorkerThenMainLayerProcessor[] processors)
         {
-            // No pass-scoped store. The buffers belong to the decoded tile, and the lifetime
-            // argument moved with them — to the caller's REFERENCE, which is live on BOTH routes into this
-            // method: the un-parked kick lambda holds the transferred one, and the parked-sprite PumpBuilds
-            // dispatch holds the one the park acquired. That is what makes the mesh and symbol passes of one
-            // kick share a single decode — and makes the PARKED symbol pass share it too, so the
-            // tile is decoded exactly once no matter which route runs.
+            // No pass-scoped store: the buffers belong to the decoded tile, retained by the caller's
+            // REFERENCE. That reference is live on BOTH routes into this method (the un-parked kick lambda's
+            // own reference, and the one the parked-sprite PumpBuilds dispatch acquired), so the tile is
+            // decoded exactly once no matter which route runs.
             IDecodedTile tile = decode.Value;
             for (int i = 0; i < processors.Length; i++)
             {
                 ITileWorkerThenMainLayerProcessor processor = processors[i];
 
                 // The symbol pass exists to feed main-thread tails — a WorkerOnly processor here is the
-                // mirrored programming error of the mesh pass's guard (a WorkerThenMain processor with no
-                // tail to run there).
+                // mirrored programming error of the mesh pass's guard.
                 if (processor.Phase != LayerPhase.WorkerThenMain)
                     throw new System.NotSupportedException(
-                        $"{processor.Phase} is not supported by A3's symbol worker pass (only WorkerThenMain processors have a tail this pass feeds).");
+                        $"{processor.Phase} is not supported by the symbol worker pass (only WorkerThenMain processors have a tail this pass feeds).");
 
                 processor.ProcessOnWorker(tile, in context);
             }

@@ -64,8 +64,8 @@ namespace MapRenderer.Tests
         internal IDecodedTile TileOfDecode(int index) { lock (_gate) return _decoded[index]; }
 
         /// <summary>The managed threads on which the tile's LAYERS were read, in call order, across every
-        /// decoded tile. A layer read happens inside a worker pass's extract, so this is the instrument for
-        /// "which thread did the extract run on" now that the decode no longer discriminates.</summary>
+        /// decoded tile. A layer read happens inside a worker pass's extract, and the decode step itself does
+        /// not discriminate by thread, so this is the instrument for "which thread did the extract run on".</summary>
         internal IReadOnlyList<int> LayerReadThreadIds
         {
             get

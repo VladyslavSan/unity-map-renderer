@@ -54,8 +54,8 @@ namespace MapRenderer.Jobs.Mvt
         /// with <paramref name="featureGeometryTypes"/>. Its length is this materializer's feature count.
         /// BORROWED, same lifetime contract as <paramref name="commands"/>.</param>
         /// <param name="featureLengths">Per-feature command-word count. A zero length is legal — zero
-        /// commands, the flat-buffer equivalent of the old "null <c>uint[]</c> element". BORROWED, same
-        /// lifetime contract as <paramref name="commands"/>.</param>
+        /// commands, so the feature emits no rings. BORROWED, same lifetime contract as
+        /// <paramref name="commands"/>.</param>
         public MvtGeometryMaterializer(
             TileId tile, double extent,
             IReadOnlyList<TileGeometryType> featureGeometryTypes,
@@ -128,7 +128,7 @@ namespace MapRenderer.Jobs.Mvt
             // against the buffer lengths — see TileGeometryBuffers.RingCount.
             //
             // The buffer is already minted when these run, so the throw would strand it. The path is
-            // unreachable by construction, hence no behavioural test can force it — the catch is there so the
+            // structurally unreachable, hence no behavioural test can force it — the catch is there so the
             // "owner on every exit path" contract holds by reading the code, not by arguing reachability.
             try
             {

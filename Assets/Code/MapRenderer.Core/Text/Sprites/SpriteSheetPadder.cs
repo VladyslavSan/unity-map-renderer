@@ -25,12 +25,11 @@ namespace MapRenderer.Core.Text.Sprites
     /// <para><b>Fallback, and what it actually costs.</b> If the cells cannot fit inside
     /// <see cref="MaxSheetDimension"/>, or the sheet has no packable sprite at all, <see cref="Plan"/> returns
     /// the SOURCE sheet unchanged: source size, the source index (every <c>Padding == 0</c>), and one identity
-    /// blit. Icons still draw — <c>SpriteSheet</c> logs a warning rather than throwing — but this is NOT
-    /// "exactly as they did before this stage". With the half-texel UV inset retired there is deliberately
-    /// only ONE sampling path, so a <c>Padding == 0</c> sprite is drawn edge-to-edge; on an unpadded,
-    /// abutting, full-bleed sheet a bilinear edge tap then reaches into the sprite packed next door and
-    /// <b>neighbour bleed returns</b> — worse than the pre-stage inset, not equal to it. That is the accepted
-    /// price of one sampling path (two would be exactly how this bug class comes back); the fallback is a
+    /// blit. Icons still draw — <c>SpriteSheet</c> logs a warning rather than throwing — but neighbour-sprite
+    /// isolation is not guaranteed. There is only ONE sampling path (no half-texel UV inset), so a
+    /// <c>Padding == 0</c> sprite is drawn edge-to-edge; on an unpadded, abutting, full-bleed sheet a bilinear
+    /// edge tap then reaches into the sprite packed next door and <b>neighbour bleed appears</b>. That is the
+    /// accepted price of one sampling path (a second path is how this bug class reopens); the fallback is a
     /// degraded mode, not a free one.</para>
     /// </summary>
     public static class SpriteSheetPadder
@@ -145,7 +144,7 @@ namespace MapRenderer.Core.Text.Sprites
 
         /// <summary>
         /// Whether <paramref name="entry"/>'s rect is a real, in-bounds block of the source sheet. The
-        /// reach tests widen to <c>long</c> deliberately: <c>X + Width</c> in 32-bit signed arithmetic WRAPS
+        /// reach tests widen to <c>long</c>: <c>X + Width</c> in 32-bit signed arithmetic WRAPS
         /// for a malformed index (<c>x: 2147483647, width: 1</c> lands on <c>int.MinValue</c>, which passes
         /// <c>&lt;= sourceSize.x</c>), and such an entry would then be packed, blitted from a negative byte
         /// offset, and throw out of the <c>SpriteSheet</c> constructor — taking the whole texture and

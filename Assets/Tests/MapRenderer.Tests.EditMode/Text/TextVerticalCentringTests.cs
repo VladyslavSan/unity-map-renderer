@@ -191,8 +191,8 @@ namespace MapRenderer.Tests.Text
     /// <summary>
     /// A curved (along-line) text cell is centred VERTICALLY on the path, by the same optical
     /// (cap-band) metric a centred point symbol uses (<c>docs/road-shields-design.md</c>). The
-    /// curved producer used to leave every cell baseline-relative, so a road symbol rendered a fixed offset
-    /// above/below the road it was drawn along — at every tilt, tilt 0 included.
+    /// curved producer that instead left every cell baseline-relative would render a road symbol at a fixed
+    /// offset above/below the road it is drawn along — at every tilt, tilt 0 included.
     ///
     /// <para><b>Oracle hygiene.</b> No tooth here takes <c>TextQuadLayout.OpticalCentreBelowReferencePx</c>
     /// as its expected value — that is the code under test, and an oracle derived from it is vacuous.
@@ -566,7 +566,7 @@ namespace MapRenderer.Tests.Text
 
             var cache = new GlyphCache();
             cache.Store("LatinFont", latin.RangeStart, latin);
-            // Deliberately: no cache entry for "ArabicFont" at range 0 — fallback has nothing to offer here.
+            // No cache entry for "ArabicFont" at range 0 — fallback has nothing to offer here.
 
             var stack = new FontStack { Names = new[] { "LatinFont", "ArabicFont" } };
             var resolver = new FontStackResolver(stack, cache);
@@ -704,7 +704,7 @@ namespace MapRenderer.Tests.Text
         }
 
         // =========================================================================================
-        // A glyph that no longer fits the CURRENT page now opens a NEW page instead of being
+        // A glyph that does not fit the CURRENT page opens a NEW page instead of being
         // dropped — this is the multi-page capacity behaviour M-T2 pins end-to-end (layout/vertex/render);
         // this test is the atlas-level slice of it.
         // =========================================================================================
@@ -879,7 +879,7 @@ namespace MapRenderer.Tests.Text
         public void Append_SameCodepointFromTwoFonts_KeepsThemApart()
         {
             SdfGlyph regular = LoadLatinStack().Glyphs[66u]; // 'B'
-            // A second face's 'B': same codepoint, deliberately different metrics so a collision is visible
+            // A second face's 'B': same codepoint, with different metrics, so a collision is visible
             // as a WRONG entry rather than merely a missing one.
             SdfGlyph italic = new SdfGlyph
             {
@@ -1902,7 +1902,7 @@ namespace MapRenderer.Tests.Text
         // =========================================================================================
         // 2b. A coverage bitmap's reconstructed iso crossing SHIFTS as the sampling grid coarsens --
         //     the scale-dependence a real SDF does not have. Uses a coarser step (4, vs 2 for the real
-        //     scanline above) deliberately: a hard, zero-width transition carries no gradient at all
+        //     scanline above): a hard, zero-width transition carries no gradient at all
         //     between its two flat plateaus, so a coarse-enough sample set slides the interpolated
         //     crossing toward whichever bracket it lands in; step=2 on THIS array only drifts ~0.25px
         //     (an alignment coincidence, not evidence the check is toothless -- the graded-value guard
@@ -3401,7 +3401,7 @@ namespace MapRenderer.Tests.Text
         // so this is a live hazard, and its symptom is silent — every centred symbol would sit one baked px
         // low with a fully green suite. This re-derives the constant from a baseline-resting reference
         // glyph's OWN metrics: for such a glyph the ink bottom IS the baseline, so its distance below the
-        // line's reference origin is (bare height - Top). A digit is used deliberately — a descender ('g')
+        // line's reference origin is (bare height - Top). A digit is used because a descender ('g')
         // or an above-baseline mark does not rest on the baseline and measures 30/32 or 19/23 instead.
         // =========================================================================================
         [Test]

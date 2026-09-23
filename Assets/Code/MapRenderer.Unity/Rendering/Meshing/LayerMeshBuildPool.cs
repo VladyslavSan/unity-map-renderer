@@ -4,15 +4,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
 {
     /// <summary>
     /// Thread-safe rent/return pool of one <see cref="ILayerMeshBuild"/>-implementing type — one closed
-    /// generic per kind (<c>LayerMeshBuildPool&lt;FillLayerBuild&gt;</c>,
-    /// <c>LayerMeshBuildPool&lt;FillExtrusionLayerBuild&gt;</c>, <c>LayerMeshBuildPool&lt;LineLayerBuild&gt;</c>)
-    /// backed by independent static state, since a generic type's static fields are per-closed-type. Rent
-    /// happens on the worker thread (a render layer's <c>BuildGraphRequest</c> inside
-    /// <c>ProcessOnWorker</c>) or the main thread (<c>TileManager.KickSourcelessBackground</c>, and
-    /// <c>ProcessOnWorker</c> itself under the WebGL <c>InlineWorkScheduler</c> policy); Return happens from
-    /// <see cref="ILayerMeshBuild.Dispose"/>, last, on whichever thread disposes. <see cref="ConcurrentBag{T}"/>
-    /// makes both ends safe on any thread, main included — see <c>MeshDataPayloadPool</c>'s own doc for the
-    /// fuller thread-safety argument; it is not restated here.
+    /// generic per kind, backed by independent static state (a generic type's static fields are
+    /// per-closed-type). Rent happens on the worker or main thread; Return happens from
+    /// <see cref="ILayerMeshBuild.Dispose"/>, last, on whichever thread disposes. Non-local invariant:
+    /// <see cref="ConcurrentBag{T}"/> makes both ends safe on any thread, main included — see
+    /// <c>MeshDataPayloadPool</c>'s own doc for the fuller thread-safety argument.
     /// </summary>
     internal static class LayerMeshBuildPool<T> where T : class, ILayerMeshBuild, new()
     {

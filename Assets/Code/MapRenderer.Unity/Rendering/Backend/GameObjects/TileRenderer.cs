@@ -20,8 +20,8 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
     /// Unlike the instanced backends (<see cref="Backend.BRG.TileRenderer"/>, <see cref="Backend.Entities.TileRenderer"/>) it
     /// registers no batches and uploads no per-instance buffers — it leans on Unity's stock renderer. The
     /// per-GameObject advantage is debuggability: every tile / layer is a node in the scene Hierarchy,
-    /// selectable and toggle-able in the Inspector. (This is the path the project began on; retired in S53c
-    /// once the Entities Hierarchy covered the same debug need, and restored here as an explicit opt-in.)
+    /// selectable and toggle-able in the Inspector — an explicit opt-in; for the Entities backend the
+    /// Entities Hierarchy covers the same debug need.
     ///
     /// Hierarchy: backend root → per-tile container (<c>"Tile z/x/y"</c>, carries the floating-origin
     /// transform) → per-layer child (<c>"water"</c>, <c>"road-primary"</c>, …, identity local transform).
@@ -69,7 +69,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         // slot's children are drawn. Absent or short ⇒ visible, identically in all three backends.
         private readonly List<bool> _layerVisible = new List<bool>();
         // internal (not private): the test assembly's GameObjectTileRendererTestExtensions reads these
-        // for observability that used to sit on this class as public members.
+        // for observability, kept off the public surface.
         internal readonly Dictionary<int, ItemRec> _items = new Dictionary<int, ItemRec>();
 
         // The shared root → per-tile-container tree (Backend.SceneTileTree) — this backend owns the
@@ -93,7 +93,7 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
         private readonly ObjectPool<MeshNode> _layerPool;
 
         /// <summary>A layer child's per-node settings, applied once at CREATION (not per rent): DontSave keeps
-        /// this runtime-built object out of the saved scene. The shadow flags are deliberately NOT here — a
+        /// this runtime-built object out of the saved scene. The shadow flags are NOT here — a
         /// pooled node outlives one layer's tenancy and can serve a different slot next rent, so
         /// <see cref="AddTileLayer"/> binds them per rent alongside mesh and material. MeshNode decides none
         /// of it — see its header.</summary>
@@ -168,20 +168,18 @@ namespace MapRenderer.Unity.Rendering.Backend.GameObjects
                 maxSize: 1024);
         }
 
-        // Draw-item / container / root observability used to live here, under a "Test / debug observability"
-        // banner — DrawItemCount, ContainerCount, Root, Container and GetInstanceTranslation, none with a
-        // production caller. They are now extension methods in the test assembly
-        // (GameObjectTileRendererTestExtensions), reading _items/_tree via InternalsVisibleTo — the footprint
-        // the conventions sanction for test-only surface. Their post-dispose leniency (null / 0 / NaN) went
-        // with them: it existed only so a test could read a torn-down backend, which is a thing that should
-        // not happen rather than a thing to accommodate.
+        // Draw-item / container / root observability — DrawItemCount, ContainerCount, Root, Container and
+        // GetInstanceTranslation — has no production caller. It lives as extension methods in the test
+        // assembly (GameObjectTileRendererTestExtensions), reading _items/_tree via InternalsVisibleTo — the
+        // footprint the conventions sanction for test-only surface. They add no post-dispose guard: reading a
+        // torn-down backend is a bug, not a case to accommodate.
 
         /// <summary>
         /// XZ scene-space bounding box covering all live tile containers (each container's position, plus
         /// <paramref name="tileSizeWorld"/> for the tile's mesh extent beyond its origin). Returns
         /// <c>default</c> when empty. Mirrors <see cref="Entities.TileRenderer.ComputeSceneBounds"/>.
-        /// <see cref="ITileRenderBackend"/> surface, so it stays here — but it no longer answers after
-        /// disposal; <see cref="SceneTileTree"/> throws, which is the contract.
+        /// It is <see cref="ITileRenderBackend"/> surface, so it stays here. It does not answer after
+        /// disposal: <c>DoDispose</c> nulls the tree, so a call throws, which is the contract.
         /// </summary>
         public Bounds ComputeSceneBounds(float tileSizeWorld) => _tree.ComputeSceneBounds(tileSizeWorld);
 

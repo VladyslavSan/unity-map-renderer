@@ -5,15 +5,14 @@ namespace MapRenderer.Tests
     /// <summary>
     /// Root of the test fixture hierarchy: a per-test <c>[SetUp]</c>/<c>[TearDown]</c> pair that calls the
     /// overridable <see cref="OnSetUp"/>/<see cref="OnTearDown"/> hooks, plus a per-test
-    /// <see cref="ObjectDisposalBag"/> every fixture reaches through <see cref="Track{T}"/>. The hooks are
-    /// protected because NUnit never invokes a PRIVATE attributed method on an abstract base (measured on
-    /// standalone NUnit 3.14 and Unity's vendored 3.5.0.0), and non-virtual so a subclass cannot shadow or
-    /// skip them. This file compiles for EditMode AND PlayMode, so it must never reference
-    /// <c>UnityEditor</c>.
+    /// <see cref="ObjectDisposalBag"/> every fixture reaches through <see cref="Track{T}"/>. This file
+    /// compiles for EditMode AND PlayMode, so it must never reference <c>UnityEditor</c>.
     ///
-    /// <para>The bag destroys its objects AFTER <see cref="OnTearDown"/> runs. A test that needs a
-    /// narrower lifetime (two builds that must never coexist) declares its own <c>ObjectDisposalBag</c> in
-    /// its own brace block.</para>
+    /// <para>Non-local invariant: the hooks are protected (NUnit never invokes a PRIVATE attributed method
+    /// on an abstract base — measured on standalone NUnit 3.14 and Unity's vendored 3.5.0.0) and
+    /// non-virtual, so a subclass cannot shadow or skip them; the bag destroys its
+    /// objects AFTER <see cref="OnTearDown"/> runs, so a test that needs a narrower lifetime declares its
+    /// own <c>ObjectDisposalBag</c> in its own brace block.</para>
     /// </summary>
     public abstract class BaseTestFixture
     {

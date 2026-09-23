@@ -113,7 +113,7 @@ namespace MapRenderer.Unity.Text.Placement
                 AtlasKind = symbol.Kind == SymbolKind.Icon ? SymbolKind.Icon : SymbolKind.Text,
                 IconRotateRadians = symbol.IconRotateRadians,
                 // The resolved pitch alignment — StageCurved's world-arc predicate. MetresPerLogicalPixel
-                // is deliberately absent: it is this frame's camera ruler, patched per frame by
+                // is absent: it is this frame's camera ruler, patched per frame by
                 // StageJob, not a stable baked field.
                 PitchAlignment = symbol.PitchAlignment,
             };

@@ -11,7 +11,7 @@ namespace MapRenderer.Jobs.Tiles
 {
     /// <summary>
     /// The second production <see cref="ITileLayer"/> — one GeoJSON dataset's geometry as it falls inside one
-    /// tile. Everything a consumer reads off it is the same shape <c>MvtLayer</c> presents, deliberately: a
+    /// tile. Everything a consumer reads off it is the same shape <c>MvtLayer</c> presents: a
     /// GeoJSON tile must be indistinguishable downstream from an MVT one.
     ///
     /// <para><b>The parsed feature IS the evaluation surface.</b> <see cref="Features"/> holds the
@@ -91,8 +91,8 @@ namespace MapRenderer.Jobs.Tiles
         ///
         /// <para>This is conformance, not tolerance: the Style Spec says <c>source-layer</c> is required for
         /// vector sources and unused for geojson ones, so a geojson tile has nothing to match a name against.
-        /// It is also where the accommodation for an absent <c>source-layer</c> now lives —
-        /// <c>SourceLayerResolver</c> no longer short-circuits on one, so each tile answers for its own
+        /// It is also where the accommodation for an absent <c>source-layer</c> lives:
+        /// <c>SourceLayerResolver</c> does not short-circuit on one, so each tile answers for its own
         /// format (<c>MvtTile.GetLayer</c> keeps returning null for an empty name).</para>
         ///
         /// <para>Consequence, stated: a style layer naming a bogus <c>source-layer</c> over a geojson source
@@ -115,16 +115,16 @@ namespace MapRenderer.Jobs.Tiles
     /// kind it serves.</para>
     ///
     /// <para>Slicing is a pure function of (dataset, tile, options), so two decodes of the same tile produce
-    /// identical results — the exact analogue of re-decoding from retained bytes. Under the reference count
-    /// that no longer happens in production (a tile decodes once), but the property is what makes a second
-    /// <c>GetTile</c> for the same tile well defined.</para>
+    /// identical results — the exact analogue of re-decoding from retained bytes. Under the reference count a
+    /// production tile decodes once, but the property is what makes a second <c>GetTile</c> for the same tile
+    /// well defined.</para>
     ///
     /// <para><b>ONE decoder serves every tile of the source, and the lease's lock is per HANDLE</b>, so two
     /// pool threads can be inside <see cref="Decode"/> at once. That is safe and must stay safe: the dataset
     /// and the options are immutable after construction, every list and array here is allocated per call,
     /// and nothing this reaches holds mutable static state. MVT gets the same property for free by minting a
-    /// decoder per encoding; this one has it by construction, which means a future edit that memoized
-    /// anything onto a field would break it silently.</para>
+    /// decoder per encoding; this one has it only because its state is immutable, so an edit that
+    /// memoized anything onto a field would break it silently.</para>
     ///
     /// <para><b>THE NAMED FENCE.</b> The paths handed to <see cref="PathGeometryMaterializer"/> are
     /// tile-local <c>double2</c> in <c>[−b, extent+b]</c>, Y-down, quantized to integers — never geodetic,

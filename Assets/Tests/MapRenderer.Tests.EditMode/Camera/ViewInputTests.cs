@@ -311,8 +311,7 @@ namespace MapRenderer.Tests.Cameras
         [Test]
         public void Apply_ZoomAtAnchor_OffCentre_PinsGround()
         {
-            // Port of the anchored-zoom invariant (formerly in ApplyZoom_PositiveScroll_ZoomsIn_AndClamps)
-            // now exercised via ViewInput.Apply.  B-ZOOMPIN.
+            // The anchored-zoom invariant, exercised via ViewInput.Apply.  B-ZOOMPIN.
             var v2   = Cam(0, 45.0, 4.0);
             var view = MakeView(v2);
             double2 P = new double2(1400.0, 800.0);

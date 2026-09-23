@@ -62,9 +62,9 @@ namespace MapRenderer.Tests.GeoJsons
                 "Polygon", $"[{GeoJsonTestFixtures.RectangleRing(nw.x, se.y, se.x, nw.y)}]"));
         }
 
-        /// <summary>A one-source, one-fill-layer style over inline geojson. The style layer deliberately
-        /// declares NO <c>source-layer</c> — that is what the Style Spec says for a geojson source, and it is
-        /// the exact shape that used to select zero features.</summary>
+        /// <summary>A one-source, one-fill-layer style over inline geojson. The style layer declares NO
+        /// <c>source-layer</c> — that is what the Style Spec says for a geojson source. A wrong
+        /// source-layer resolution selects zero features here.</summary>
         private static string StyleWithInlineData(string dataJson) => $@"{{
             ""version"": 8,
             ""sources"": {{ ""geo"": {{ ""type"": ""geojson"", ""data"": {dataJson} }} }},
@@ -512,7 +512,7 @@ namespace MapRenderer.Tests.GeoJsons
         // ── T3C · the key's OTHER identity field: the source type ─────────────────────────────────────
 
         /// <summary>Two definitions equal on every key field except <c>type</c>. Constructed directly rather
-        /// than parsed, because the point is to hold the other six fields EQUAL by construction — a style
+        /// than parsed, because the point is to hold the other six fields EQUAL — a style
         /// document reaching this shape has to carry each type's keys on the other type's source, which is
         /// possible but obscures what the arm is about.</summary>
         private static SourceDefinition DefTyped(SourceType type) => new SourceDefinition
@@ -724,15 +724,11 @@ namespace MapRenderer.Tests.GeoJsons
         /// <summary>
         /// <b>T5 (the decisive arm), INVERTED — <c>GetTile</c> SLICES, and slices OFF THE MAIN THREAD.</b>
         ///
-        /// <para>This tooth used to assert the opposite: that <c>GetTile</c> completed without slicing and
-        /// the fault surfaced only at the first <c>GetOrDecode()</c>. Laziness was load-bearing under the
-        /// scoped lease because <c>TileManager.Tick</c> calls <c>GetTile</c> for every cover tile while only
-        /// a subset ever opened a scope, so a pre-built tile on the others would have been freed by nothing.
-        /// The reference count removed that premise — every drop path is an owner now — so the source slices
-        /// eagerly like the MVT one.</para>
+        /// <para><c>GetTile</c> slices eagerly, like the MVT source: every drop path owns a reference
+        /// under the reference-count model, so a pre-built tile is never freed by nothing.</para>
         ///
-        /// <para><b>What laziness also bought for free, and now has to be arranged deliberately:</b> the
-        /// slice ran inside the kick's pool lambda, so it was never main-thread work. Eagerly slicing inside
+        /// <para><b>Eager slicing stays off the main thread:</b> the
+        /// slice runs inside the kick's pool lambda, so it is never main-thread work. Eagerly slicing inside
         /// <c>Tick</c> would put a full slice on the frame thread for EVERY cover tile — the exact defect
         /// this asserts against, and the reason the source routes through
         /// <c>TileDecodeDispatch.DecodeAsync</c> rather than calling its decoder inline. A main-thread-only
@@ -940,12 +936,9 @@ namespace MapRenderer.Tests.GeoJsons
         /// every tile in the cover and each one then faults its own <c>GetTile</c> task — loud, but at the
         /// wrong place and N times, with the wiring site that chose the options nowhere in the report.</para>
         ///
-        /// <para><b>The tolerance arm is newer than the extent one, and its lateness had a reason.</b> A
-        /// non-zero <c>SimplifyTolerance</c> is unimplemented, so it is exactly as unusable as a zero extent,
-        /// yet it used to be admitted here on purpose: the fault it produced at the first slice was the
-        /// instrument <c>T5_GetTile_DoesNotSlice_…</c> used to observe that the source had not sliced. That
-        /// tooth is retired — the source decodes eagerly and <c>T5_GetTile_SlicesOffTheMainThread</c>
-        /// replaced it — so the carve-out serves nothing and this arm closes it.</para>
+        /// <para><b>The tolerance arm rejects at construction too, alongside the extent one.</b> A
+        /// non-zero <c>SimplifyTolerance</c> is unimplemented, so it is exactly as unusable as a zero
+        /// extent, and admitting it here would defer the same fault to every tile's own decode.</para>
         /// </summary>
         [Test]
         public void TheSource_RejectsUnusableOptions_AtConstruction()

@@ -4,11 +4,11 @@
 namespace MapRenderer.Unity.View
 {
     /// <summary>
-    /// A pull-based snapshot of runtime tile/render telemetry — <see cref="Tile.TileManager.CaptureTelemetry"/>
-    /// computes one of these on demand (never published per-tick). Every field is an instantaneous
-    /// <b>level</b> (a count or a zoom number at the instant of capture) — never a duration or a per-tick
-    /// rate (those are <c>*LastTick</c> territory). A plain data carrier: <c>init</c>-only, engine-free,
-    /// so it compiles in the fast <c>dotnet</c> core-tests project and the Unity runner alike.
+    /// A pull-based snapshot of runtime tile/render telemetry — <see cref="Tile.TileManager.Tick"/> stores the
+    /// one <c>CaptureTelemetry</c> builds on every call, and readers pull it by reference. Every field is an
+    /// instantaneous <b>level</b> (a count or a zoom number at the instant of capture) — never a duration or a
+    /// per-tick rate (those are <c>*LastTick</c> territory). A plain data carrier: <c>init</c>-only,
+    /// engine-free, so it compiles in the fast <c>dotnet</c> core-tests project and the Unity runner alike.
     /// </summary>
     public readonly struct TileTelemetrySnapshot
     {

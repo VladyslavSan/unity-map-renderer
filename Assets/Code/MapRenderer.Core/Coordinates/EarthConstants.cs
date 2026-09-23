@@ -2,16 +2,9 @@ namespace MapRenderer.Core.Geo
 {
     /// <summary>
     /// Pure-geodetic WGS-84 constants — the single source of truth for numbers that belong to
-    /// the Earth's shape, independent of any projection.
-    ///
-    /// <para><b>Honesty boundary:</b> this class holds ONLY universal geodetic numbers. Projection-
-    /// and tiling-specific constants (WorldExtent, MaxLatitude, TilePixelSize) live on
-    /// <see cref="WebMercator"/>, NOT here.</para>
-    ///
-    /// <para><b>No-derivation rule for circumference:</b> <see cref="EquatorialCircumferenceMetres"/>
-    /// is kept as a LITERAL (not derived as 2π·A) because the literal matches the published
-    /// IAU/WGS-84 value used by pinned camera tests — deriving would change it and break those
-    /// tests.</para>
+    /// the Earth's shape, independent of any projection. Holds ONLY universal geodetic numbers;
+    /// projection- and tiling-specific constants (WorldExtent, MaxLatitude, TilePixelSize) live on
+    /// <see cref="WebMercator"/>, not here.
     /// </summary>
     public static class EarthConstants
     {

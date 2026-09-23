@@ -142,14 +142,14 @@ namespace MapRenderer.Tests.Visual
         /// <c>span(θ,L)/span(0,L) = cosθ / (1 − (L/2d)²sin²θ)</c> (d = orbit radius =
         /// <c>|CameraRelativePosition|</c>) — i.e. the closed form is exact only as L→0, and the gap from
         /// cosθ grows as L². At L=120·mpp that gap measures 1.24% — OUTSIDE this file's 1% bound, wider than
-        /// this design originally assumed — so L moved to <see cref="T1SpanMultiplier"/>=30·mpp (~0.08%
+        /// this design assumed — so L moved to <see cref="T1SpanMultiplier"/>=30·mpp (~0.08%
         /// measured), not the tolerance.</para>
         ///
         /// <para>Proves: the deviation from cosθ shrinks (roughly quarters per halving of L) as L shrinks —
         /// the falsifiable difference between diagnosing a real second-order term and tuning until green.
         /// Does NOT by itself prove foreshortening exists (a flat 0% at every L would also "converge" in the
         /// sense of not growing) — <see cref="Ruler_ForeshortensByCosTilt_AlongTheTiltAxis"/> is the
-        /// DISCRIMINATOR for that, and it is a SEPARATE method precisely so this one's failure cannot hide
+        /// DISCRIMINATOR for that, and it is a SEPARATE method so this one's failure cannot hide
         /// it.</para>
         /// </summary>
         [Test]
@@ -359,7 +359,7 @@ namespace MapRenderer.Tests.Visual
                 "T2 precondition: _DashCount must be 0 — a dash boundary would be summed as a ribbon edge.");
             Assert.That(mat.GetFloat(ShaderProperties.Line.PropertyId.WidthIsPixels), Is.EqualTo(0f),
                 "T2 precondition: _WidthIsPixels must be 0 — the styled-PIXEL width model is deliberately " +
-                "OUT of this tooth; it uses world metres so §3.2's no-literal rule is meaningful.");
+                "OUT of this tooth; it uses world metres so the no-literal rule is meaningful.");
             Assert.That(mat.IsKeywordEnabled("_EDGE_ANTIALIASING_OFF"), Is.False,
                 "T2 precondition: the AA straddle must be live.");
             Assert.That(mat.IsKeywordEnabled("_HAIRLINE_SOLID_CORE"), Is.False,
@@ -405,7 +405,7 @@ namespace MapRenderer.Tests.Visual
         /// <b>T2.</b> Proves: a rendered band's apparent extent equals the projection of its intended WORLD
         /// extent under tilt, and the coverage-integral measurement is calibrated against the ruler.
         ///
-        /// <para>Does NOT prove the styled-PIXEL width model — deliberately excluded by using world metres.
+        /// <para>Does NOT prove the styled-PIXEL width model — excluded by using world metres.
         /// Nothing at depths other than the look-at row. Nothing about a spherical projection: this scene is
         /// Web-Mercator and the ground is the plane y = 0.</para>
         /// </summary>
@@ -719,8 +719,8 @@ namespace MapRenderer.Tests.Visual
 
                 // (a) precondition. 0 ⇒ the symbol is culled under tilt → escalate.
                 Assert.That(r55.QuadCount, Is.EqualTo(1),
-                    "T4 (a): the label must not be culled at 55° — LastQuadCount == 0 here means §9 fork 1 " +
-                    "applies (STOP and report; do not lower the tilt or hand-build the mesh unreported).");
+                    "T4 (a): the label must not be culled at 55° — LastQuadCount == 0 here means the symbol " +
+                    "is culled under tilt (STOP and report; do not lower the tilt or hand-build the mesh unreported).");
                 double centreDistPx = math.length(
                     r55.AnchorScreenPx - new double2(SymbolFrameCentrePx, SymbolFrameCentrePx));
                 Assert.That(centreDistPx, Is.LessThan(8.0),
@@ -767,7 +767,7 @@ namespace MapRenderer.Tests.Visual
     // reading, and the DPR tooth, with their RED verifications. M13 still PRINTS the whole table; its
     // `far measured/oracle` row reads ≈ 1.00.
     //
-    // ANTI-TEETH, deliberately absent (writing any of them would be a defect):
+    // ANTI-TEETH, intentionally absent (writing any of them would be a defect):
     //   • any tooth asserting far/near spacing ≈ 1.0 — that PINS the old defect;
     //   • any tooth whose expected value is derived from the near symbol's MEASURED spacing scaled by anything —
     //     that re-imports the self-referential-oracle failure.
@@ -996,7 +996,7 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para>The look-at is NOT special to M6's argument: the walk-invariance that makes this
         /// model-independent is a property of a CONSTANT-VIEW-DEPTH (cross-azimuth) line, which
-        /// <c>CrossFar</c> is by construction. So this survives the fix unchanged, exactly as M6 does.</para>
+        /// <c>CrossFar</c> is inherently. So this survives the fix unchanged, exactly as M6 does.</para>
         ///
         /// <para>RED-verify: same injection as M6, applied to the far arm.</para>
         /// </summary>
@@ -1115,7 +1115,7 @@ namespace MapRenderer.Tests.Visual
         /// the disjoint row band its own projected anchor defines — so the geometry the mesh readback measured
         /// is the geometry that reaches the screen, at both depths.
         ///
-        /// <para>Does NOT measure spacing from ink, deliberately: an ink-width reading conflates the CPU's
+        /// <para>Does NOT measure spacing from ink: an ink-width reading conflates the CPU's
         /// glyph spacing with the shader's screen-px glyph SIZE, which is how a screen-ruler model reads as
         /// correct.</para>
         ///
@@ -1243,7 +1243,7 @@ namespace MapRenderer.Tests.Visual
         /// reachable by exactly the edit this doc invites (re-tuning <c>TargetDepthRatio</c>), so the failure
         /// must be loud. Clamping to 1 instead would keep the tooth alive but reduce it to "any ink at all",
         /// which is a different and much weaker claim than the one documented above; better to stop and make
-        /// the maintainer choose a floor deliberately.</para></summary>
+        /// the maintainer choose a floor explicitly.</para></summary>
         private static int FarInkFloor(OffLookAtSymbolScene f)
         {
             int floor = (int)(InkFloor / (f.AchievedDepthRatio * f.AchievedDepthRatio));
@@ -1305,7 +1305,7 @@ namespace MapRenderer.Tests.Visual
         /// were aimed, so a later stage touching either has a two-depth reference.
         ///
         /// <para>Does NOT prove anything about spacing (a point symbol has one quad) or about ink — the point
-        /// symbols are deliberately excluded from the rendered frame.</para>
+        /// symbols are excluded from the rendered frame.</para>
         ///
         /// <para>RED-verify: offset one intended point anchor by <c>20·mpp</c> ⇒ fails by ~20 px (near) or
         /// ~10 px (far).</para>
@@ -1342,7 +1342,7 @@ namespace MapRenderer.Tests.Visual
         /// look-at, a screen-constant ruler and the world-welded ("X px TOP-DOWN") model coincide EXACTLY, so
         /// this reads ≈ 1.00 under BOTH — which is why a fixture anchored here discriminates nothing.</para>
         ///
-        /// <para><b>It asserts NOTHING about the far symbol — deliberately, and still.</b> The far assertion
+        /// <para><b>It asserts NOTHING about the far symbol — intentionally, and still.</b> The far assertion
         /// ("far/near screen spacing == 0.500") is T1 in <c>MapPitchedWorldArcLayoutTests</c>, RED-verified
         /// there against the pre-fix production code. What this tooth does instead is PRINT the full per-gap
         /// table for all six symbols and the four headline ratios, so the evidence is reproducible from the

@@ -29,7 +29,7 @@ namespace MapRenderer.Tests.Geometry
         public void Subdivide_InfiniteTolerance_ReturnsPathValueUnchanged()
         {
             var path = new List<double2> { new double2(0, 0), new double2(3, 7), new double2(10, 10) };
-            // Arbitrary — and deliberately NOT unit vectors, since the ∞ early-out must never read them.
+            // Arbitrary — and NOT unit vectors, since the ∞ early-out must never read them.
             var ups = new List<double3> { new double3(1, 2, 3), new double3(-9, 0, 4), new double3(5, 5, 5) };
 
             List<double2> dense = LineCurvatureSubdivision.Subdivide(path, ups, double.PositiveInfinity);

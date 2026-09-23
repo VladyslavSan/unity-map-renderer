@@ -1,7 +1,5 @@
-// Engine-free: no UnityEngine dependency.
-// Blittable (double-only backing fields) — usable as NativeArray<T> element type and Burst job struct field.
-// Construction convention: object initializer with named members — `new GeoCoordinate { Latitude = …,
-// Longitude = … }` — NOT a positional ctor (self-documenting, order-proof).
+// Engine-free, blittable (double-only fields, usable as NativeArray<T>/Burst job struct types). Construct
+// via object initializer (`new GeoCoordinate { Latitude = …, Longitude = … }`), not a positional ctor.
 
 using System;
 
@@ -28,12 +26,7 @@ namespace MapRenderer.Core.Geo
 
     /// <summary>
     /// A WGS-84 geodetic point with altitude (latitude, longitude in degrees; altitude in metres above datum).
-    /// <para>Order: (Latitude, Longitude, Altitude) — latitude first.</para>
-    /// <para>Construct via object initializer:
-    /// <c>new GeoCoordinate3D { Latitude = 52.52, Longitude = 13.40, Altitude = 0.0 }</c>.</para>
-    /// <para>Blittable: only <c>double</c> backing fields; usable as <c>NativeArray&lt;GeoCoordinate3D&gt;</c>
-    /// element type and as a Burst job struct field.</para>
-    /// <para><c>Altitude</c> is metres above the WGS-84 ellipsoid datum (reserved for terrain; pass 0).</para>
+    /// Order: (Latitude, Longitude, Altitude) — latitude first.
     /// </summary>
     [Serializable]
     public readonly struct GeoCoordinate3D

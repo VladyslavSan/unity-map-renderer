@@ -29,8 +29,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         internal const double Extent = 4096.0;
 
         // The full-tile-extent ring in tile-local units: (0,0)→(4096,0)→(4096,4096)→(0,4096), one closed
-        // 4-point ring, ONE feature. Order and count are load-bearing (they are the triangulated quad);
-        // TileBackgroundQuadProjectionTests pins both against the retired MVT encoding this replaced.
+        // 4-point ring, ONE feature. Order and count are load-bearing (they are the triangulated quad).
         // Hoisted static — no per-tile allocation.
         // internal (not private): TileBackgroundQuadProjectionTests materializes these EXACT corners and
         // compares the result against the retired MVT command stream — a changed corner order, count or
@@ -52,7 +51,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
 
         internal static readonly TileGeometryType[] FullExtentRingKinds = { TileGeometryType.Polygon };
 
-        // Constant white — vertex colour is white by construction; the background colour comes from the
+        // Constant white — vertex colour is always white; the background colour comes from the
         // material uniform (_BaseColor/_Opacity), bound by MaterialFactory.BindBackgroundPaintToApplier
         // over the fill-base clone. Color.white.linear == white, and the background's opacity never
         // depends on a feature, so nothing is lost by not evaluating a paint here.
@@ -95,8 +94,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
             // past TempJob's 4-frame lifetime check either way.
             visitOrder = new NativeArray<int>(
                 geometry.RingCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
-            // One white vertex colour — native now that WriteGeometry takes a NativeArray<Vector4> (Rank 3).
-            // One element, indexed by the quad's single feature ordinal 0.
+            // One white vertex colour, indexed by the quad's single feature ordinal 0.
             featureColors = new NativeArray<Vector4>(1, Allocator.Persistent);
 
             featureColors[0] = new Vector4(1f, 1f, 1f, 1f);

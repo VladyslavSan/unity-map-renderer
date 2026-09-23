@@ -226,8 +226,8 @@ namespace MapRenderer.Unity.Rendering.Backend
 
         /// <summary>Destroys the root (and with it every LIVE container and its callers' children), then the
         /// pool's detached containers. Runs at most once — <see cref="VerifiedDisposable"/> owns the
-        /// idempotency guard that this used to hand-roll as <c>if (_root == null) return</c>, and adds the
-        /// Editor-only finalizer that reports a tree dropped without Dispose.</summary>
+        /// idempotency guard, and adds the Editor-only finalizer that reports a tree dropped without
+        /// Dispose.</summary>
         protected override void DoDispose()
         {
             _nodes.Clear();

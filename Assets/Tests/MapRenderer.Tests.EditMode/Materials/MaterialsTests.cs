@@ -188,7 +188,7 @@ namespace MapRenderer.Tests.Materials
     //   the CBUFFER; HasProperty stayed true, opacity was silently pinned to 1. Check (b) is what catches it.)
     // T2 (shared-vertex-layout structural): FillUnlit's forward Attributes semantics must be a SUBSET of what
     //   StyledFillTileBuilder actually emits (its FillVertexDescriptors array) — the load-bearing invariant
-    //   that there is one mesh, one vertex layout, consumed by both the Lit and Unlit twins by construction.
+    //   that there is one mesh, one vertex layout, consumed by both the Lit and Unlit twins.
     // T3 (no-lighting structural): Fill_UnlitForwardPass.hlsl must reference none of SAMPLE_GI /
     //   UniversalFragmentPBR / OUTPUT_SH4 — the textual proof that the fragment dropped lighting rather than
     //   merely gating it behind an always-off keyword.
@@ -324,7 +324,7 @@ namespace MapRenderer.Tests.Materials
     // T2 (shared-vertex-layout structural): FillExtrusionUnlit's forward Attributes semantics must be a SUBSET
     //   of what StyledFillExtrusionTileBuilder actually emits (its VertexDescriptors array,
     //   StyledFillExtrusionTileBuilder.cs:114-121) — the load-bearing invariant that there is one mesh, one
-    //   vertex layout, consumed by both the Lit and Unlit twins by construction.
+    //   vertex layout, consumed by both the Lit and Unlit twins.
     // T3 (no-lighting structural): FillExtrusion_UnlitForwardPass.hlsl must reference none of SAMPLE_GI /
     //   UniversalFragmentPBR / OUTPUT_SH4 — the textual proof that the fragment dropped lighting rather than
     //   merely gating it behind an always-off keyword.
@@ -409,7 +409,7 @@ namespace MapRenderer.Tests.Materials
         {
             // The mesh-emitted semantic set — StyledFillExtrusionTileBuilder's VertexDescriptors
             // (StyledFillExtrusionTileBuilder.cs:114-121): Position, Normal, Tangent, Color, TexCoord3,
-            // TexCoord4. UNLIKE Fill's builder, TEXCOORD0-2 are deliberately NOT supplied (that file's own
+            // TexCoord4. UNLIKE Fill's builder, TEXCOORD0-2 are NOT supplied (that file's own
             // comment) — the unlit forward pass must not require them either.
             var emittedByBuilder = new HashSet<string>(System.StringComparer.Ordinal)
             {
@@ -541,7 +541,7 @@ namespace MapRenderer.Tests.Materials
     //   every line pass (Lit and Unlit) shares, defined once in Line_VertexExtrude.hlsl (reused VERBATIM) — so
     //   this asserts THAT struct's semantics are a SUBSET of what StyledLineTileBuilder actually emits
     //   (LineVertexDescriptors, StyledLineTileBuilder.cs) — the load-bearing invariant that there is one mesh,
-    //   one vertex layout, consumed by both twins by construction. UNLIKE Fill/FillExtrusion, the line builder
+    //   one vertex layout, consumed by both twins. UNLIKE Fill/FillExtrusion, the line builder
     //   never emits TANGENT.
     // T3 (no-lighting structural): Line_UnlitForwardPass.hlsl must reference none of SAMPLE_GI /
     //   UniversalFragmentPBR / OUTPUT_SH4 — the textual proof that the fragment dropped lighting rather than
@@ -1139,12 +1139,12 @@ namespace MapRenderer.Tests.Materials
             // not FLIP any feature keyword — the runtime clone relies on the import-baked state, so a
             // derivation that disagreed with the asset would change how production renders.
             //
-            // Asserted as before == after rather than against a hardcoded expected set. It used to assert
-            // "empty", which was true only while the base happened to be opaque with no maps; when the base
-            // legitimately became transparent (fills need _SURFACE_TYPE_TRANSPARENT or URP's OutputAlpha
-            // discards the fragment alpha), that spelling failed even though the invariant it was named for
-            // still held. Comparing to the asset's own state expresses the intent and survives the base's
-            // look changing again.
+            // Asserted as before == after rather than against a hardcoded expected set: a fixed set like
+            // "empty" holds only while the base happens to be opaque with no maps, and breaks the moment
+            // the base legitimately becomes transparent (fills need _SURFACE_TYPE_TRANSPARENT or URP's
+            // OutputAlpha discards the fragment alpha) even though the underlying invariant still holds.
+            // Comparing to the asset's own state expresses the intent and survives the base's look
+            // changing again.
             //
             // Uses the committed .mat rather than `new Material(shader)`, whose float/texture defaults are
             // import-state-dependent (a fresh material's `= "white"` 2D defaults read as non-null textures
@@ -1200,7 +1200,7 @@ namespace MapRenderer.Tests.Materials
     // data-driven bakes into the stream. `ConstantFillColor_EffectiveColor_MatchesAuthored` below is fill's
     // row of the shared tooth.
     //
-    // The fixture colour is deliberately MID-TONE. Squaring is invisible at white and near-maximal at mid-grey,
+    // The fixture colour is MID-TONE. Squaring is invisible at white and near-maximal at mid-grey,
     // which is how this survived — every colour fixture that could have caught it was near-white.
     [TestFixture]
     public class PaintColorSingleApplyTests : BaseTestFixture
@@ -1555,9 +1555,9 @@ namespace MapRenderer.Tests.Materials
 
         /// <summary>
         /// fill's own wrinkle: a CONSTANT fill-color's alpha rides <c>_BaseColor.a</c>, and a data-driven
-        /// fill-opacity is baked into the SAME stream a constant colour would have used. This is where the
-        /// product <c>FillSortKeyAndOpacityTests.DataDrivenOpacity_IsTheStreamsOnlyAlphaCarrier</c> used to
-        /// assert on one carrier now lives — see that test for the mirror.
+        /// fill-opacity is baked into the SAME stream a constant colour would have used. This test is the
+        /// mirror of <c>FillSortKeyAndOpacityTests.DataDrivenOpacity_IsTheStreamsOnlyAlphaCarrier</c> —
+        /// see that test for the other carrier.
         /// </summary>
         [Test]
         public void ConstantFillColorAlpha_IsNotAppliedTwice()
@@ -1592,8 +1592,8 @@ namespace MapRenderer.Tests.Materials
         /// <c>Line_LitInput</c> feeds <c>_BaseColor.a</c> through <c>AlphaModulate</c>, which premultiplies the
         /// albedo only when <c>_ALPHAPREMULTIPLY_ON</c> is set. A cloned line material must not carry it, or
         /// the alpha the Lit fragment now re-applies would darken the albedo a second time.
-        /// <c>LineTweaker.ApplyPainterContract</c> sets straight-alpha blend factors but deliberately does not
-        /// sync keywords, so this is a property of the committed base <c>.mat</c> — read it, don't assume it.
+        /// <c>LineTweaker.ApplyPainterContract</c> sets straight-alpha blend factors but does not sync
+        /// keywords, so this is a property of the committed base <c>.mat</c> — read it, don't assume it.
         /// </summary>
         [Test]
         public void ClonedLineMaterial_HasNoAlphaPremultiplyKeyword()

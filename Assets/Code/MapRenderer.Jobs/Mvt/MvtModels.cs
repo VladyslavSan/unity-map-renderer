@@ -28,11 +28,11 @@ namespace MapRenderer.Jobs.Mvt
 
         /// <summary>
         /// Feature id decoded from MVT Feature field 1 (uint64 varint), or <see cref="Value.Null"/> when
-        /// field 1 was absent. Note: id=0 is a valid feature id per the MVT spec — an absent id is
+        /// field 1 was absent. id=0 is a valid feature id per the MVT spec — an absent id is
         /// <see cref="Value.Null"/>, never a zero <see cref="Value.Number"/>.
         ///
-        /// Precision note: uint64 values larger than 2^53 lose precision when narrowed to the
-        /// <c>double</c> a <see cref="Value.Number"/> stores — accepted, since every real consumer already
+        /// Precision: uint64 values larger than 2^53 lose precision when narrowed to the
+        /// <c>double</c> a <see cref="Value.Number"/> stores — accepted, since every real consumer
         /// reads the id as a double.
         /// </summary>
         public Value Id { get; init; } = Value.Null;
@@ -49,7 +49,7 @@ namespace MapRenderer.Jobs.Mvt
         /// store is the <see cref="EmptyPropertyStore"/>).</summary>
         public IReadOnlyDictionary<string, Value> Properties => Store.AsDictionary();
 
-        // ── IFeature — the retired MvtFeatureAdapter's semantics, folded verbatim ────────────────────
+        // ── IFeature implementation ─────────────────────────────────────────────────────────────────
 
         TileGeometryType IFeature.GeometryType => GeometryType;
 
@@ -87,7 +87,7 @@ namespace MapRenderer.Jobs.Mvt
         /// <c>AdoptDerivedLists</c> mode, which no consumer borrows — see that type's doc.)</para>
         ///
         /// <para><c>default</c> (<c>IsCreated == false</c>) for a layer with no features, allocating
-        /// nothing — the same "empty layer allocated nothing" result every consumer already handles.</para>
+        /// nothing — the same "empty layer allocated nothing" result every consumer handles.</para>
         ///
         /// <para><b>Set once, through <see cref="AdoptGeometry"/></b>, which is what makes
         /// <c>FeatureCount == Features.Count</c> structural. Three consumers size their per-feature columns
@@ -104,8 +104,8 @@ namespace MapRenderer.Jobs.Mvt
         /// ordinal-indexed consumer would then commit — so both fail loudly, before either can happen.
         /// <para>A <c>default</c> buffer (<c>IsCreated == false</c>) is legal: the materializer returns one
         /// for a feature-less layer, and its zero count matches an empty <see cref="Features"/>.</para>
-        /// <para>The two guards themselves live once, in <see cref="LayerGeometryAdoption"/> — the second
-        /// <see cref="ITileLayer"/> now exists, and an invariant three ordinal-indexed consumers rely on must
+        /// <para>The two guards themselves live once, in <see cref="LayerGeometryAdoption"/>: with two
+        /// <see cref="ITileLayer"/> implementations, an invariant three ordinal-indexed consumers rely on must
         /// have one statement rather than two that can drift.</para></summary>
         internal void AdoptGeometry(TileGeometryBuffers geometry)
         {
@@ -125,7 +125,7 @@ namespace MapRenderer.Jobs.Mvt
         /// <para><b>BORROWED by every store/resolver in this layer.</b> A reader must never dispose it, never
         /// mutate it, and never retain it past the decode's scope; the layer frees it in <see cref="Dispose"/>,
         /// which <see cref="MvtTile.Dispose"/> drives. Reading through a store after that point is a
-        /// use-after-free on this buffer — the same borrowed-lifetime contract <see cref="Geometry"/> already
+        /// use-after-free on this buffer — the same borrowed-lifetime contract <see cref="Geometry"/>
         /// carries.</para>
         ///
         /// <para>For a feature-less (or tag-less) layer this is a <b>zero-length</b> buffer, not
@@ -220,7 +220,7 @@ namespace MapRenderer.Jobs.Mvt
 
         /// <summary>Layer value table (MVT Layer field 4): decoded variant values in declaration order, one
         /// shared <c>Allocator.Persistent</c> buffer per layer — mirrors <see cref="FeatureTagWords"/>'s
-        /// ownership idiom exactly. String, float, double, int, uint, sint, bool variants are all mapped to
+        /// ownership idiom. String, float, double, int, uint, sint, bool variants are all mapped to
         /// the blittable <see cref="MvtValueNative"/> (String → a <see cref="ValueStrings"/> index; numerics
         /// → Number; bool → Bool) — reconstituted to the shared expression <see cref="Value"/> at the read
         /// boundary via <see cref="MvtValueNative.ToValue"/>.
@@ -286,12 +286,11 @@ namespace MapRenderer.Jobs.Mvt
         /// <c>name</c> field is required, and this decoder accepts its absence rather than rejecting the
         /// layer).
         ///
-        /// <para>The guard exists because <c>SourceLayerResolver</c> no longer short-circuits on an empty
-        /// <c>source-layer</c>: that accommodation moved into the tiles, so that a GeoJSON tile can answer
+        /// <para>The guard exists because <c>SourceLayerResolver</c> does not short-circuit on an empty
+        /// <c>source-layer</c>: that accommodation lives in the tiles, so a GeoJSON tile can answer
         /// "my sole layer" (the Style Spec says <c>source-layer</c> is unused for geojson sources) while an
-        /// MVT tile keeps answering exactly what it answered before. Without it, a background or raster style
-        /// layer — which carries no <c>source-layer</c> at all — could select a nameless vector layer's
-        /// features.</para></summary>
+        /// MVT tile matches by name only. Without the guard, a background or raster style layer — which
+        /// carries no <c>source-layer</c> at all — could select a nameless vector layer's features.</para></summary>
         public MvtLayer GetLayer(string name)
         {
             if (string.IsNullOrEmpty(name)) return null;

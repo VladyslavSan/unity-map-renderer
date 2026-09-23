@@ -12,14 +12,11 @@ namespace MapRenderer.Core.Expressions
         public IFeature Feature { get; }
 
         /// <summary>
-        /// The string→id key hoist's resolved <c>slot→key-index</c> map for THIS call's compiled filter, or
-        /// <c>null</c>. Per-<c>SelectFeatures</c>-call and thread-local by construction — never written onto
-        /// the shared expression node or the cross-thread-published decoded tile (the exact race
-        /// <c>MvtLayerPropertyResolver</c>'s own doc forbids) — so a null binding always means "use the
-        /// string path", never "not yet resolved". <c>Ops.FeatureKeyExpression</c> is the sole reader; a
-        /// slot index is meaningless against any binding other than the one built for the SAME compiled
-        /// filter's key layout, so this field must never be threaded into an unrelated expression's
-        /// evaluation (e.g. a <c>StyleProperty</c> paint expression) — no call site does that this stage.
+        /// The key hoist's resolved <c>slot→key-index</c> map for THIS call's compiled filter, or <c>null</c>.
+        /// It is per-<c>SelectFeatures</c>-call and thread-local, never stored on the shared expression node or
+        /// the cross-thread decoded tile (the race <c>MvtLayerPropertyResolver</c> forbids), so <c>null</c> means
+        /// "use the string path". <c>Ops.FeatureKeyExpression</c> is the sole reader: a slot index means nothing
+        /// outside this filter's key layout, so never pass it into another expression's evaluation.
         /// </summary>
         public int[] KeyBinding { get; }
 

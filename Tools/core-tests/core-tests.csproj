@@ -83,7 +83,7 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Coordinates/Ecef.cs" />
 
     <!-- S06: tile cover / floating-origin / input math. UMR-173 moved the whole View tree out of Core
-         (it was never pinned there — see ARCHITECTURE.md §2); every file below is still engine-free, so
+         (it was never pinned there — see ARCHITECTURE.md § "Module boundaries"); every file below is still engine-free, so
          the fast loop keeps compiling them from their new MapRenderer.Unity/App homes unchanged — same
          precedent as the MapRenderer.Unity/Text files above. -->
     <!-- S71: visible-tile-selection seam + default viewport-corner impl (replaces TileCover) -->
@@ -300,7 +300,7 @@
     <!-- Reader cutover (labels-async-reconcile stage 4.2): SymbolTileStore / SymbolSnapshot /
          SymbolReconciler now read the native SymbolTileBlock (Unity.Collections) directly instead of
          a managed per-label carrier list, which this shim project cannot compile (no NativeArray shim). Per
-         ARCHITECTURE.md §2 / AGENTS.md §4b this is the sanctioned "6 files move from the 0.1s loop to EditMode"
+         ARCHITECTURE.md § "Module boundaries" / AGENTS.md § "Fast Core tests (no Unity)" this is the sanctioned "6 files move from the 0.1s loop to EditMode"
          cost — a RELOCATION, not a retired oracle: SymbolTileStore.cs, SymbolSnapshot.cs,
          SymbolReconciler.cs, SymbolTileStoreTests.cs, SymbolReconcilerTests.cs,
          SymbolDedupZoomInvarianceTests.cs all moved out; they still run, just in the Unity EditMode runner
@@ -378,7 +378,8 @@
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteEntry.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteIndex.cs" />
 
-    <!-- Padded sprite repack (docs/labels-and-symbols-design.md §5.2.1): rect planning + pixel composition,
+    <!-- Padded sprite repack (docs/labels-and-symbols-design.md § "Sampling the sheet — bilinear + a one-texel
+         padded repack"): rect planning + pixel composition,
          both engine-free (the composer works over RGBA32 byte arrays, not Texture2D). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpriteBlit.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Sprites/SpritePadPlan.cs" />
@@ -401,16 +402,16 @@
     <!-- The skirt's carrier chain, extraction → builder → collision box (engine-free; shared verbatim). -->
     <!-- P2 REQUIRED-1: the Up carrier chain (Block A), driven through real extraction + build (engine-free). -->
 
-    <!-- Road shields (docs/road-shields-design.md): G1-G6 acceptance teeth. T10/T11 are [UnityTest]-only,
-         NOT added here (Text/SymbolReconcileAsyncTests.cs — the merged home of the former
-         SymbolSpriteReadinessTests.cs —, TestSupport/GatedSpriteSource.cs). -->
+    <!-- Road shields (docs/road-shields-design.md): acceptance teeth for D1–D4, D6 and D8–D10. T10/T11 are
+         [UnityTest]-only, NOT added here (class SymbolSpriteReadinessTests in
+         Text/SymbolReconcileAsyncTests.cs, TestSupport/GatedSpriteSource.cs). -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/AlignmentResolution.cs" />
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Style/SymbolTestFixtures.cs" />
     <!-- Pitch-alignment epic, P1: icon-pitch-alignment parse + AlignmentResolution.ResolvePitch. -->
 
     <!-- P-A (non-centred icon+text pairing): the pairing predicate's teeth — engine-free. -->
 
-    <!-- Road shields §10 (symbol pairing, D8-D11): the pair resolver — engine-free. -->
+    <!-- Road shields (docs/road-shields-design.md § "Symbol pairing", D8-D11): the pair resolver — engine-free. -->
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/SymbolPairRole.cs" />
     <Compile Include="../../Assets/Code/MapRenderer.Core/Text/Placement/SymbolPairing.cs" />
 
@@ -429,7 +430,7 @@
 
     <!-- S19 Slice 1: layout tests (shared verbatim) -->
     <!-- S19 Slice 2: anchor/offset/justify tests (shared verbatim) -->
-    <!-- Stage 4 (§11 G8/D12): vertical-centring teeth (shared verbatim) -->
+    <!-- Road shields D12 (docs/road-shields-design.md § "Text vertical centring"): vertical-centring teeth (shared verbatim) -->
     <Compile Include="../../Assets/Tests/MapRenderer.Tests.EditMode/Text/TextVerticalCentringTests.cs" />
     <!-- S19 Slice 3: word-wrap tests (shared verbatim) -->
     <!-- S19 Slice 4: RTL layout tests (shared verbatim) -->

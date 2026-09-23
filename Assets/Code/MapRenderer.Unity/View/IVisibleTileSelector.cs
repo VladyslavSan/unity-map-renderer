@@ -8,21 +8,18 @@ namespace MapRenderer.Unity.View
 {
     /// <summary>
     /// The algorithm-agnostic <b>seam</b> every consumer talks to for "which tiles does the camera see".
-    /// One call per frame; the concrete algorithm lives behind it (<see cref="FrustumTileSelector"/> is
-    /// the default; a distance-based-LOD impl is a drop-in replacement).
-    ///
-    /// <para><b>What keeps it generic (do not change these properties):</b></para>
+    /// One call per frame; the concrete algorithm lives behind it (<see cref="FrustumTileSelector"/> is the
+    /// default; a distance-based-LOD impl is a drop-in replacement). Non-local invariant — what keeps it
+    /// generic, do not change:
     /// <list type="bullet">
-    ///   <item>The method takes only a per-frame <see cref="ViewContext"/> and the reuse buffer — and
-    ///     <b>no algorithm knob</b> (no pad, no min/max zoom, no <c>out selectionZoom</c>). Tuning constants
-    ///     belong on the concrete impl's constructor, never on this seam or on <see cref="ViewContext"/>.</item>
-    ///   <item>The returned set <b>MAY span multiple zoom levels</b> (each <see cref="TileId"/> carries its
-    ///     own <c>Z</c>). The seam <b>never exposes a single selection-zoom for the whole set</b> — that
-    ///     property is what makes a mixed-zoom (distance-LOD) impl a drop-in replacement. The default impl
-    ///     selects one integer zoom internally; that is not surfaced here.</item>
-    ///   <item>No fallback-provenance on the interface. The seam returns <i>just the set</i>; the consumer
-    ///     owns how to transition between sets, including which parent/child a downgraded tile came
-    ///     from.</item>
+    ///   <item>No algorithm knob on the method (no pad, no min/max zoom, no <c>out selectionZoom</c>) —
+    ///     tuning constants belong on the concrete impl's constructor, never here or on
+    ///     <see cref="ViewContext"/>.</item>
+    ///   <item>The returned set MAY span multiple zoom levels (each <see cref="TileId"/> carries its own
+    ///     <c>Z</c>); the seam never exposes a single selection-zoom for the whole set, which is what makes
+    ///     a mixed-zoom (distance-LOD) impl a drop-in replacement.</item>
+    ///   <item>No fallback-provenance on the interface — the seam returns just the set; the consumer owns
+    ///     how to transition between sets, including which parent/child a downgraded tile came from.</item>
     /// </list>
     /// </summary>
     public interface IVisibleTileSelector

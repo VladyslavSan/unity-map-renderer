@@ -4,16 +4,12 @@ namespace MapRenderer.Unity.Rendering.Style
 {
     /// <summary>
     /// Thread-safe rent/return pool of <see cref="MeshDataPayload"/> instances. A payload is minted inside
-    /// <c>TileMeshLayerProcessor.Complete</c> on whichever thread runs the settle loop inside
-    /// <c>TileLayerProcessorRunner.RunWorkerPass</c> — a ThreadPool worker under
-    /// <c>ThreadPoolWorkScheduler</c>, or the MAIN THREAD itself under <c>InlineWorkScheduler</c> (the WebGL
-    /// policy) — and returned to the pool from <see cref="MeshDataPayload.Dispose"/> on the MAIN THREAD
-    /// (<c>TileManager.ConsumeMeshBuild</c>). So the mint-to-return handoff crosses a thread boundary under
-    /// ThreadPool but not under Inline (both ends land on main there) — <see cref="ConcurrentBag{T}"/> makes
-    /// it safe either way, not just the crossing case: <see cref="Rent"/> atomically removes an instance
-    /// before handing it out, so no two renters, on any thread (main included), can ever observe the same
-    /// reference at once. Mirrors <c>TileBuildBuffersPool</c>'s shape exactly; see its doc comment for the
-    /// fuller rationale.
+    /// <c>TileMeshLayerProcessor.Complete</c> on whichever thread runs the settle loop — a ThreadPool
+    /// worker, or the MAIN THREAD under <c>InlineWorkScheduler</c> (WebGL) — and returned from
+    /// <see cref="MeshDataPayload.Dispose"/> on the MAIN THREAD. Non-local invariant:
+    /// <see cref="ConcurrentBag{T}"/> makes both ends safe on any thread: <see cref="Rent"/> atomically
+    /// removes an instance before handing it out, so no two renters can ever observe the same reference.
+    /// Mirrors <c>TileBuildBuffersPool</c>'s shape; see its doc comment for the fuller rationale.
     /// </summary>
     internal static class MeshDataPayloadPool
     {

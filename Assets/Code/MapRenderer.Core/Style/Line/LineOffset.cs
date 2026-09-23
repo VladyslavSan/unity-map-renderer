@@ -3,63 +3,21 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.Line
 {
     /// <summary>
-    /// <c>line-offset</c> — engine-free CPU helpers for the perpendicular ribbon shift.
-    ///
-    /// The offset is applied in shader space: the vertex shader already extrudes each ribbon
-    /// vertex along the per-vertex extrusion normal by ±½·widthM. To shift the band center by
-    /// <c>offsetM</c> without changing its thickness, we add <c>offsetM</c> in the SAME normal
-    /// direction — but multiplied by the vertex's <em>side</em> value (∈{+1,−1}) so that BOTH
-    /// vertices of a station shift by the same world vector:
-    ///
-    ///     displacement = normal × side × offsetM
-    ///
-    /// The extrusion normal already encodes direction (it flips between left/right vertices).
-    /// Multiplying by side aligns the displacement so both sides move in the same direction —
-    /// shifting the band center to offsetM while leaving the half-width unchanged.
-    ///
-    /// HLSL mirror: MapLineForwardPass.hlsl.
-    ///   offsetWS += unitDir_WS * input.sideAndDist.x * (miter * offsetM);
-    /// Keep both in sync on any arithmetic change.
-    ///
-    /// Round join/cap limitation: fan vertices have per-vertex varying normals with a single
-    /// side sign per half-fan, so <c>Displace</c> with fan normals produces a non-uniform shift.
-    /// This is the documented MapLibre-parity limitation for round joins at large offset.
-    /// The band-center shift on fans is bounded (fan rim normals stay unit-length; the inner fan
-    /// vertex is bounded at miterLimit) and does not produce NaN (the fan pivot has normal=0 →
-    /// zero displacement).
-    ///
-    /// Large-offset sharp-corner limitation: the RAW miter factor (1/cos(θ/2)) → ∞ as θ → 180°,
-    /// and the displacement magnitude is <c>miter × offsetM</c>. With an UNBOUNDED limit a tight
-    /// hairpin at large offset therefore blows up. Production does not run unbounded: at
-    /// <c>MiterLimit = 2</c> the miter join falls back to bevel and the bevel/round concave vertex is
-    /// saturated at the limit, so the emitted magnitude is at most <c>2 × |offsetM|</c>. This matches
-    /// MapLibre's known limitation; no geometric solver is built.
-    ///
-    /// Engine-free: no UnityEngine references. Runs in both dotnet core-tests and Unity EditMode.
-    /// Clean-room: offset semantics from the public MapLibre Style Spec. No MapLibre source read.
+    /// <c>line-offset</c> — engine-free CPU helpers for the perpendicular ribbon shift. The vertex shader
+    /// extrudes each vertex along its extrusion normal by ±½·widthM. The offset adds <c>offsetM</c> along the
+    /// same normal times the vertex's side (±1), so both vertices of a station move by one world vector and the
+    /// half-width is unchanged: <c>displacement = normal × side × offsetM</c>. HLSL mirror:
+    /// <c>Line_VertexExtrude.hlsl</c>; keep both in sync on any arithmetic change.
+    /// <para>Two limitations. A round-join fan has one side sign per half-fan, so <see cref="Displace"/> shifts
+    /// it non-uniformly; the shift stays bounded and NaN-free (the fan pivot has normal 0). On a sharp corner
+    /// the raw miter factor (1/cos(θ/2)) → ∞ as θ → 180°, but <c>line-miter-limit</c> (default 2) bounds the
+    /// displacement at <c>miterLimit × |offsetM|</c>. No geometric offset solver exists.</para>
     /// </summary>
     public static class LineOffset
     {
         // ── Core displacement helper ──────────────────────────────────────────────────────────
-        //
-        // Computes the perpendicular displacement for a single ribbon vertex.
-        //
-        // Parameters:
-        //   normal   — per-vertex extrusion normal (2D projection of RibbonJob's LineRibbonVertex.Across).
-        //              For straight segments / miter joins / the bevel-or-round inner vertex:
-        //              |normal| = miter factor (≥1, saturated at miterLimit for the inner vertex).
-        //              For unit-normal vertices (bevel/round outer, segment ends): |normal| = 1.
-        //   side     — signed side value ∈{+1,−1} (from LineRibbonVertex.Side).
-        //   offsetM  — perpendicular shift in world meters (same space as the normal).
-        //
-        // Returns: displacement vector to be ADDED to the vertex's position in mesh build space.
-        //
-        // Shader mirror:  unitDir_WS * input.sideAndDist.x * (miter * offsetM)
-        // CPU equivalent: normal        * side               * offsetM
-        //
-        // The miter factor is already baked into |normal|, so this mirrors the HLSL exactly
-        // when the caller uses LineRibbonVertex.Across (not the re-normalised unitDir_WS).
-        // For unit-normal vertices the miter factor is 1 — also identical.
+        // normal = the 2D extrusion normal (LineRibbonVertex.Across); |normal| already carries the miter factor,
+        // so with Across (not the re-normalised unitDir_WS) this matches the HLSL `unitDir_WS * side * miter` term.
 
         /// <summary>
         /// Returns the perpendicular world-space displacement for a vertex with the given
@@ -73,19 +31,8 @@ namespace MapRenderer.Core.Style.Line
         }
 
         // ── Zoom-coupled px→m conversion ─────────────────────────────────────────────────────
-        //
-        // Mirror of the width px→m conversion in Shaders/Map/Line/Line_VertexExtrude.hlsl:
-        //   widthWorld = _Width * ((_WidthIsPixels > 0.5) ? pxToWorld : 1)
-        //
-        // NOTE the asymmetry: on the GPU `pxToWorld` is MEASURED per-vertex through the projection
-        // matrix, so it varies with depth and direction under tilt. This CPU mirror takes a single
-        // zoom-derived scalar, which agrees with the
-        // GPU at the view centre and drifts from it toward the edges of a tilted frame. That is fine for
-        // what it is used for — the RATIO between two zooms.
-        //
-        // Offset and width must share the same conversion path, so that offsetM(z1)/offsetM(z2) ==
-        // widthM(z1)/widthM(z2) at two zooms (both linear in metersPerPixel when widthIsPixels=true,
-        // constant otherwise).
+        // Mirrors the width px→m conversion in Line_VertexExtrude.hlsl, where `pxToWorld` is a frame constant
+        // (1 for a world-unit width). Offset and width share it, so offsetM(z1)/offsetM(z2) == widthM(z1)/widthM(z2).
 
         /// <summary>
         /// Converts an offset from its source unit to world meters, mirroring the

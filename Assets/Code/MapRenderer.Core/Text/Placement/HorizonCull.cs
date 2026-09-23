@@ -1,26 +1,23 @@
-// Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified double3/float3x3 —
-// this file lives in MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header for the inline-
-// qualification trap this avoids).
+// TOP-LEVEL `using Unity.Mathematics;` + unqualified double3/float3x3: an inline qualification hits a
+// namespace collision inside MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header).
 
 using Unity.Mathematics;
 
 namespace MapRenderer.Core.Text.Placement
 {
     /// <summary>
-    /// S3: the globe far-side horizon cull, a fourth <c>GatherSymbolPoints</c> fade-out trigger (peer of the
+    /// The globe far-side horizon cull, a fourth <c>GatherSymbolPoints</c> fade-out trigger (peer of the
     /// tile/distance/departing culls) — a symbol anchor hidden behind the earth's own bulk must FADE OUT, not pop,
     /// so it is a gather-time predicate, never a hard drop inside <c>SymbolProjectionJob</c>.
     /// </summary>
     public static class HorizonCull
     {
         /// <summary>
-        /// True when <paramref name="repAnchorRender"/> is hidden behind the globe's own bulk — on the far side
-        /// of the horizon plane from the camera: <c>dot(P − centre, cam − centre) &lt; radius²</c>. A polar-plane
-        /// test, EXACT for on-surface points (globe symbol anchors), not an occlusion volume (a point strictly
-        /// inside the sphere on the near side reads visible). Mirrors the <c>rad = 0</c> case of
-        /// <c>FrustumTileSelector</c>'s tile occlusion algebra
-        /// (<c>FrustumTileSelector.cs:186-188</c>: <c>centreDot = dot(c - occCentre, camVec)</c>,
-        /// <c>camVec = pos - occCentre</c>, cull iff <c>centreDot + rad·dc &lt; r²</c>).
+        /// True when <paramref name="repAnchorRender"/> is on the far side of the horizon plane from the camera:
+        /// <c>dot(P − centre, cam − centre) &lt; radius²</c>. A polar-plane test, EXACT for on-surface points, not
+        /// an occlusion volume (a point inside the sphere on the near side reads visible). It is the
+        /// <c>rad = 0</c> case of <c>FrustumTileSelector.TileVisible</c>'s occlusion test
+        /// (cull iff <c>centreDot + rad·dc &lt; r²</c>).
         /// </summary>
         /// <param name="repAnchorRender">The symbol's representative anchor, PRE-RTC render space (the space
         /// <c>projection.Project(geo)</c> emits) — <c>SymbolBatch.RepAnchor</c>.</param>

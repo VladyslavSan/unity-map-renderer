@@ -6,41 +6,18 @@ using MapRenderer.Unity.View.Camera;
 namespace MapRenderer.App.View
 {
     /// <summary>
-    /// Pure (engine-free, allocation-free) input → <see cref="CameraPropertiesUpdate"/> patch helpers.
-    /// Engine-free so the pan/zoom/tilt logic is unit-testable headless; reading
-    /// <c>UnityEngine.Input</c> in <c>Update()</c> directly would have zero test coverage.
-    ///
-    /// <para><b>Patch producers.</b> Each method takes the current <see cref="CameraProperties"/> and
-    /// returns a <see cref="CameraPropertiesUpdate"/> patch that sets only the fields it changes; the rest
-    /// stay null. The caller merges the returned patch directly, with no parallel mutation path.</para>
-    ///
-    /// <para><b>Interaction-point-aware.</b> All gesture methods take an <see cref="IProjection"/>
-    /// and operate on absolute screen positions (cursor + grabbed ground point), so the ground point under
-    /// the cursor is pinned during the gesture. The projection layer owns all Mercator constants.</para>
-    ///
-    /// Conventions:
-    ///   - <b>Zoom</b> to cursor: the earth point under the cursor stays pinned after zooming.
-    ///     Patch carries Zoom + Longitude + Latitude (the new look-at that satisfies the pin invariant).
-    ///     Zoom is clamped to [minZoom, maxZoom].
-    ///   - <b>Pan</b> (anchored): the grabbed ground point at drag-start stays glued to the cursor.
-    ///     Returns a Longitude + Latitude patch. The grabbed point is captured once by the caller
-    ///     (<c>projection.ScreenToGround(P_start, vp, cam)</c>) and supplied every frame.
-    ///   - <b>Heading/tilt</b>: degree deltas (already scaled by source sensitivity) map to separate
-    ///     heading-only or tilt-only patches. <see cref="ApplyHeadingDelta"/> and
-    ///     <see cref="ApplyTiltDelta"/> are independent; each leaves the other angle null.
-    ///     The unified <see cref="Apply(in GestureIntent, in ViewContext)"/> dispatch routes any
-    ///     <see cref="GestureIntent"/> to the appropriate helper.
+    /// Engine-free, allocation-free input → <see cref="CameraPropertiesUpdate"/> patch producers, so the gesture
+    /// logic is unit-testable headless. Each patch sets only the fields it changes; the rest stay null.
+    /// Zoom and pan pin a ground point under the cursor through an <see cref="IProjection"/>: zoom keeps the
+    /// point under the cursor and clamps to [minZoom, maxZoom]; pan keeps the drag-start ground point (captured
+    /// once by the caller) under the cursor. Heading and tilt patches are independent of each other.
     /// </summary>
     public static class ViewInput
     {
         /// <summary>
-        /// Single device-agnostic dispatch: maps a <see cref="GestureIntent"/> to a
-        /// <see cref="CameraPropertiesUpdate"/> patch, reading the per-frame camera, viewport,
-        /// and projection from <paramref name="view"/>.
-        ///
-        /// <para>Sources (mouse, keyboard, touch, test driver) build a <see cref="GestureIntent"/>
-        /// and call this method; the mapping lives here, not in the source. Only the fields relevant
-        /// to the gesture are set on the returned patch (the rest stay <c>null</c>).</para>
+        /// The single device-agnostic dispatch: maps a <see cref="GestureIntent"/> to a
+        /// <see cref="CameraPropertiesUpdate"/> patch, with the per-frame camera, viewport and projection from
+        /// <paramref name="view"/>. Every input source calls it, so the mapping lives here, not in the source.
         /// </summary>
         public static CameraPropertiesUpdate Apply(in GestureIntent intent, in ViewContext view)
             => intent.Kind switch

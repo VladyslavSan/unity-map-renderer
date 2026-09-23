@@ -10,19 +10,14 @@ using MapRenderer.Unity.Text.Placement;
 namespace MapRenderer.Unity.Text
 {
     /// <summary>
-    /// The IMMUTABLE main-thread snapshot the off-main
-    /// <see cref="SymbolReconciler"/> reads. Captured on a SCHEDULE frame by
-    /// <see cref="SymbolTileStore.CaptureSnapshot"/> (main thread), it holds each collected tile's baked
-    /// native block + whether the tile is departing. The worker reads these <b>off-thread</b>; each slice's
-    /// own <see cref="SharedDisposable{T}"/> reference (see <see cref="SymbolSnapshot.Add"/>) keeps every
-    /// referenced <see cref="TileSlice.Block"/> alive until the snapshot leaves service, so the off-thread reads
-    /// are never a use-after-free (`docs/labels-async-reconcile-design.md`, the input-snapshot and
-    /// native-block lifetime contract).
-    ///
-    /// <para><b>Reused, alloc-light.</b> <see cref="Slices"/> is reused across captures — <see cref="Clear"/>
-    /// releases and resets the count (so a disposed block is never held past a capture), <see cref="Add"/> fills
-    /// a pooled <see cref="TileSlice"/> in place. Off the per-frame path (capture happens only on a tile-event
-    /// frame), but kept low-alloc anyway.</para>
+    /// The IMMUTABLE main-thread snapshot the off-main <see cref="SymbolReconciler"/> reads. Captured on a
+    /// SCHEDULE frame by <see cref="SymbolTileStore.CaptureSnapshot"/> (main thread), it holds each
+    /// collected tile's baked native block + whether the tile is departing. Non-local invariant: each
+    /// slice's own <see cref="SharedDisposable{T}"/> reference keeps every referenced
+    /// <see cref="TileSlice.Block"/> alive until the snapshot leaves service, so the worker's off-thread
+    /// reads are never a use-after-free (`docs/labels-async-reconcile-design.md`). Reused, alloc-light:
+    /// <see cref="Slices"/> is reused across captures — <see cref="Clear"/> releases and resets the count,
+    /// <see cref="Add"/> fills a pooled <see cref="TileSlice"/> in place.
     /// </summary>
     internal sealed class SymbolSnapshot
     {
@@ -84,15 +79,12 @@ namespace MapRenderer.Unity.Text
     }
 
     /// <summary>
-    /// The off-main reconcile OUTPUT — the deduped winner set the main
-    /// thread consumes (coverage-classify → <c>SymbolGatherPlan.Build</c>) once picked up. All lists are
-    /// reused; the double-buffer swaps this whole object front/back so a completed worker fills the BACK
-    /// result while the main thread reads the stable FRONT (`docs/labels-async-reconcile-design.md`). Byte-identical (order + membership + the plan
-    /// arrays) to the store's inline <c>CollectInto</c>.
-    ///
-    /// <para>Winner identity is purely <c>(BlockId[i], LocalIndex[i])</c> — there is no managed symbol list
-    /// to hand back. <see cref="MapRenderer.Unity.Text.Placement.SymbolGatherPlan.Build"/> is the sole
-    /// production reader and only needs <c>BlockId.Count</c>.</para>
+    /// The off-main reconcile OUTPUT — the deduped winner set the main thread consumes (coverage-classify
+    /// → <c>SymbolGatherPlan.Build</c>) once picked up. All lists are reused; the double-buffer swaps this
+    /// whole object front/back so a completed worker fills the BACK result while the main thread reads the
+    /// stable FRONT (`docs/labels-async-reconcile-design.md`). Byte-identical (order + membership + the
+    /// plan arrays) to the store's inline <c>CollectInto</c>. Winner identity is purely
+    /// <c>(BlockId[i], LocalIndex[i])</c> — there is no managed symbol list to hand back.
     /// </summary>
     internal sealed class SymbolReconcileResult
     {
@@ -100,14 +92,14 @@ namespace MapRenderer.Unity.Text
         public readonly List<int> BlockId = new List<int>();
         /// <summary>Per-symbol raw symbol index within its tile's block (null-slot-safe).</summary>
         public readonly List<int> LocalIndex = new List<int>();
-        /// <summary>Per-symbol departing flag (0 active, 1 departing) — Blocker 2's positional-count materialization.</summary>
+        /// <summary>Per-symbol departing flag (0 active, 1 departing), materialized positionally.</summary>
         public readonly List<byte> IsDeparting = new List<byte>();
         /// <summary>One block per scanned tile, in blockId order (active tiles first, then departing).</summary>
         public readonly List<SymbolTileBlock> OrderedBlocks = new List<SymbolTileBlock>();
         /// <summary>Count of ACTIVE winners written first; every symbol at index ≥ this is departing.</summary>
         public int ActiveCount;
 
-        /// <summary>#3b: clear ALL FOUR lists AND reset <see cref="ActiveCount"/> — the reconciler calls this
+        /// <summary>Clears ALL FOUR lists AND resets <see cref="ActiveCount"/> — the reconciler calls this
         /// FIRST every run so a reused result never leaks a prior run's symbols (the SHRINK correctness core).</summary>
         public void Clear()
         {

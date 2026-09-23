@@ -21,7 +21,7 @@ namespace MapRenderer.Core.Text.Sprites
     ///
     /// <para><b>Coordinate space</b> is the sprite JSON's: top-left origin, row-major, 4 bytes per texel in
     /// R,G,B,A order. Both buffers are in it; the row flip that reconciles this with Unity's bottom-left
-    /// <c>GetPixel</c> convention lives in <c>SpriteSheet</c>'s pack/unpack helpers, deliberately OUTSIDE
+    /// <c>GetPixel</c> convention lives in <c>SpriteSheet</c>'s pack/unpack helpers, OUTSIDE
     /// this type, so the plan's rects mean exactly one thing here.</para>
     /// </summary>
     public static class SpriteSheetComposer

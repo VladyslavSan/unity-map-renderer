@@ -216,9 +216,8 @@ namespace MapRenderer.Tests.Style
         /// data-driven halo cannot suppress it. RED-verify: hoist all four binds back under one
         /// <c>try</c>/<c>catch (ArgumentException)</c> and evaluate the halo first — the swallowed exception
         /// then skips the text-color bind too, leaving the uniform white while the vertex is already white
-        /// (invisible text). The property this tooth guards no longer has a mechanism that can break it —
-        /// each bind sits behind its own guard — but the recipe above still fires the assert below if
-        /// something re-couples them.</summary>
+        /// (invisible text). Each bind sits behind its own guard, so nothing can break this property today —
+        /// but the recipe above still fires the assert below if something re-couples them.</summary>
         [Test]
         public void DataDrivenHalo_DoesNotSwallowTheConstantTextColorBind()
         {
@@ -267,9 +266,9 @@ namespace MapRenderer.Tests.Style
 
             Assert.IsTrue(SymbolTextColorCarrier.RidesUniform(constant), "Constant must ride the uniform.");
             Assert.IsFalse(SymbolTextColorCarrier.RidesUniform(zoom),
-                "Zoom must NOT ride the uniform — it stays on the vertex-bake carrier by the SSOT §6 decision; " +
-                "the restyle gate reads this same predicate, so widening it here would silently free a key " +
-                "the in-place path cannot re-bake.");
+                "Zoom must NOT ride the uniform — it stays on the vertex-bake carrier (labels-and-symbols-design.md " +
+                "§ \"…except one colour uniform, for the restyle ease\"); the restyle gate reads this same predicate, " +
+                "so widening it here would silently free a key the in-place path cannot re-bake.");
             Assert.IsFalse(SymbolTextColorCarrier.RidesUniform(feature), "Feature must not ride the uniform.");
             Assert.IsFalse(SymbolTextColorCarrier.RidesUniform(composite), "Composite must not ride the uniform.");
         }
@@ -709,7 +708,7 @@ namespace MapRenderer.Tests.Style
             var oldStyle = FillStyle(@"""fill-color"": [""rgba"",102,153,204,1], ""fill-antialias"": true");
             var newStyle = FillStyle(@"""fill-color"": [""rgba"",102,153,204,1], ""fill-antialias"": false");
             Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
-                "fill-antialias selects a meshing path (SSOT §1.1) — it must stay inside the signature.");
+                "fill-antialias selects a meshing path (fill-parity-design.md § \"`fill-antialias`\") — it must stay inside the signature.");
         }
 
         // ── 17. A data-driven paint change takes the rebuild path ────────────────────────────
@@ -827,7 +826,7 @@ namespace MapRenderer.Tests.Style
                 "every symbol layer would keep the previous style's halo forever.");
         }
 
-        /// <summary><b>T2e.</b> A text-halo-width change — a key deliberately NOT freed — must still
+        /// <summary><b>T2e.</b> A text-halo-width change — a key NOT freed — must still
         /// refuse, guarding against a future "make the gate pass" by adding keys.</summary>
         [Test]
         public void SymbolLayer_HaloWidthChange_IsRefused()

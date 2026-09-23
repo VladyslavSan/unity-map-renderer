@@ -115,10 +115,10 @@ CBUFFER_END
 // which the perspective divide renders it wider near and thinner far. Measured against the reference at max
 // pitch: ~54 px near vs ~16 px at the horizon, a ratio of ~3.375 — exactly the depth ratio. Four stages of
 // per-vertex machinery existed to defeat that divide; all are reverted (branch
-// archive/line-width-compensation). See docs/line-rendering-design.md §1.
+// archive/line-width-compensation). See docs/line-rendering-design.md § "The width model".
 //
-// The one legitimate per-vertex user of MapPixelsToWorld is the AA pad: half a device pixel genuinely IS a
-// screen quantity at that vertex. line-translate is also per-vertex, in its own axis.
+// The per-vertex users of MapPixelsToWorld are the sampling-grid quantities: the AA pad, the min-width floor
+// and (via the pad) the SolidCore floor. line-translate is also per-vertex, in its own axes.
 //
 // UNSET it reads 0, and the two consumers fail differently, on purpose:
 //   - DASHES: the divisor is 0, so the guard sets dashU = 0 — a UNIFORM HALF-COVERAGE line
@@ -129,7 +129,7 @@ CBUFFER_END
 //     in some other subsystem and sends the search there. It did exactly that in S116. Line_VertexExtrude
 //     therefore guards the width at > 1e-9 and falls back to the per-vertex MapPixelsToWorld, which renders
 //     a plausibly-SIZED line. That fallback is a diagnostic backstop, NOT the width model — see
-//     docs/line-rendering-design.md §1.
+//     docs/line-rendering-design.md § "The width model".
 // Do not unify the two: each fail-safe is chosen for its own consumer's worst case.
 //
 // LIMITATION, stated: Shader.SetGlobalFloat is PROCESS state, and this is a whole-process singleton for a

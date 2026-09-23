@@ -15,7 +15,7 @@ namespace MapRenderer.Unity.Rendering.Style
     {
         /// <summary>
         /// A key is listed only when it is BOTH bound to a uniform AND re-bound on restyle — NOT an iff:
-        /// <c>text-halo-width</c>/<c>-blur</c> are deliberately withheld, and could not be listed anyway —
+        /// <c>text-halo-width</c>/<c>-blur</c> are withheld, and could not be listed anyway —
         /// they ride the vertex stream per feature, which the in-place path never re-bakes.
         /// Every key here is free at any non-data-driven kind (<see cref="IsFreeAtKind"/>'s default arm)
         /// EXCEPT the two symbol colours, whose arm defers to

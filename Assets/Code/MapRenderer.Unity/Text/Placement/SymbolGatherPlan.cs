@@ -23,9 +23,8 @@ namespace MapRenderer.Unity.Text.Placement
     /// decision, materialized as a per-symbol MASK rather than a physical compaction: EVERY collected winner
     /// stays resident in the plan (and the native mirror <see cref="SymbolPlacementSystem"/> builds from it) —
     /// <see cref="WinnerCount"/> counts them all — and a Dropped symbol is hard-skipped downstream
-    /// (<see cref="SymbolPlacementSystem.GatherSymbolPoints"/>). This retires the old lockstep block-id/local-index
-    /// permute (<c>SymbolTileCoverageFilter.FilterActive</c>'s compaction moved elements + kept the plan arrays in
-    /// sync by permuting them in lockstep); a masking classify (<c>ClassifyActive</c>) moves nothing.</para>
+    /// (<see cref="SymbolPlacementSystem.GatherSymbolPoints"/>). A masking classify (<c>ClassifyActive</c>)
+    /// moves nothing, so no parallel plan array has to be permuted in lockstep with a compaction.</para>
     ///
     /// <para><b>Reuse / lifetime.</b> Subsystem-owned, reused every frame (<see cref="Build"/> clears + refills
     /// the native lists in place — alloc-free once warm). The lists are <see cref="Allocator.Persistent"/>,
@@ -36,7 +35,7 @@ namespace MapRenderer.Unity.Text.Placement
     {
         internal NativeList<int>  BlockId;         // index into Blocks[]
         internal NativeList<int>  LocalIndex;      // raw symbol index within that block (null-slot-safe)
-        internal NativeList<byte> Departing;       // per-symbol: the store's IsDeparting flag (Blocker 2)
+        internal NativeList<byte> Departing;       // per-symbol: the store's IsDeparting flag
         internal NativeList<byte> CoverageFading;  // per-symbol: SymbolTileCoverageFilter classified this winner Fade
         // Per-symbol Drop decision (SymbolTileCoverageFilter.ClassifyActive) — the winner STAYS RESIDENT
         // (WinnerCount counts it) instead of being compacted out; GatherIntoMirror stamps it onto the native
@@ -71,12 +70,10 @@ namespace MapRenderer.Unity.Text.Placement
         }
 
         /// <summary>Refill this plan in place from the collected winner arrays — NO compaction/filtering
-        /// happens upstream any more, so <paramref name="blockId"/>/<paramref name="localIndex"/> hold EVERY
+        /// happens upstream, so <paramref name="blockId"/>/<paramref name="localIndex"/> hold EVERY
         /// winner (Keep + Fade + Drop + departing); <see cref="WinnerCount"/> counts all of them (Drops stay
-        /// resident, masked downstream). Winner identity is <c>(BlockId, LocalIndex)</c> — the reader cutover
-        /// (4.2) dropped the parallel managed symbol list <c>CollectInto</c> used to fill alongside them (nothing
-        /// downstream of this method ever dereferenced it). <paramref name="isDeparting"/> is the store's
-        /// per-symbol <c>IsDeparting</c> flag (Blocker 2 — replaces the old <c>i &gt;= activeCount</c> derivation);
+        /// resident, masked downstream). Winner identity is <c>(BlockId, LocalIndex)</c>.
+        /// <paramref name="isDeparting"/> is the store's per-symbol <c>IsDeparting</c> flag;
         /// <paramref name="decisions"/> is <c>SymbolTileCoverageFilter.ClassifyActive</c>'s per-symbol Keep/Fade/Drop
         /// decision; <paramref name="orderedBlocks"/> is the store's block list <paramref name="blockId"/> indexes.</summary>
         /// <param name="winnerSetVersion">The caller's front-set version, stamped onto <see cref="WinnerSetVersion"/>

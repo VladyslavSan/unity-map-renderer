@@ -179,10 +179,9 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
 
         // Read-only queries over this class's state that only tests ask for — DrawItemCount, HasBuffer,
         // FloatsPerInstance, MetadataEntryCount, GetInstanceTranslation, GetInstancePropValue,
-        // GetPropSoaOffset, GetEmittedRenderQueues — used to sit here under a "Test observability" banner
-        // with zero production callers. They now live in the test assembly; see BrgTileRendererTestExtensions.
-        // CullingCallCount stays a field above because this class WRITES it, and ComputeEmitOrder stays
-        // because Rebuild calls it.
+        // GetPropSoaOffset, GetEmittedRenderQueues — live in the test assembly; see
+        // BrgTileRendererTestExtensions. CullingCallCount stays a field above because this class WRITES
+        // it, and ComputeEmitOrder stays because Rebuild calls it.
 
         /// <summary>
         /// Returns the XZ scene-space bounding box that covers all registered tile instances.
@@ -565,7 +564,7 @@ namespace MapRenderer.Unity.Rendering.Backend.BRG
             // behaviour rather than cleanly.
             for (int r = 0; r < rangeCount; r++) drawCommandsPtr->drawRanges[r] = _drawRanges[r];
 
-            // Fill exactly `emitted` contiguous commands — no holes, by construction. _emitList[e] is
+            // Fill exactly `emitted` contiguous commands — no holes. _emitList[e] is
             // the packed instance-buffer slot (Rebuild packed instance i at sorted index i).
             for (int e = 0; e < emitted; e++)
             {

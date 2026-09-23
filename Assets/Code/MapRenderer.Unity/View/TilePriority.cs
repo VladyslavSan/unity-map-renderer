@@ -123,7 +123,7 @@ namespace MapRenderer.Unity.View
         /// relative to <paramref name="origin"/> — the same construction
         /// <see cref="FrustumTileSelector"/>'s <c>RenderPoint</c> uses for a tile corner, at the centre
         /// instead (priority ranks by "where the middle of the tile is", not its nearest edge — unlike the
-        /// selector's near-distance LOD metric, which deliberately reads the nearest point).</summary>
+        /// selector's near-distance LOD metric, which reads the nearest point).</summary>
         private static double3 RenderCenter(TileId t, IProjection proj, double3 origin, float3x3 basis)
         {
             double2 ll = t.ToLonLat(0.5, 0.5, 1.0);

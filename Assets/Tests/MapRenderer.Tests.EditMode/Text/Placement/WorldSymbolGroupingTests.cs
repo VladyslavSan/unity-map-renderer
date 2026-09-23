@@ -257,9 +257,9 @@ namespace MapRenderer.Tests.Text.Placement
                 Assert.AreEqual(0, system.WorldSymbolTileCount(), "ZERO live tile containers once every tile has gone idle.");
 
                 // These nodes are RECYCLED, not destroyed — they park under an INACTIVE pool node that hangs
-                // off the tree root. So `== null` would fail a working pool, and reachability from the root no
-                // longer discriminates either (the pool node is under the root too). What separates parked
-                // from live is precisely that: a parked node is not active in the hierarchy. This still
+                // off the tree root. So `== null` would fail a working pool, and reachability from the root
+                // does not discriminate either (the pool node is under the root too). What separates parked
+                // from live is that a parked node is not active in the hierarchy. This still
                 // catches the original ReleaseChild defect — an orphan left under its live container would
                 // remain ACTIVE.
                 Assert.IsFalse(layerNode.gameObject.activeInHierarchy,

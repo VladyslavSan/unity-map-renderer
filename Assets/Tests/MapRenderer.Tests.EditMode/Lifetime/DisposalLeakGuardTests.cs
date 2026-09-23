@@ -8,12 +8,12 @@
 // The NativeArray leak guard is NON-VACUOUS:
 //   - MeshDataPayload.DebugLiveAllocCount tracks live allocations.
 //   - A positive counter after a full cycle means NativeArrays were produced but not Disposed.
-//   - A deliberately-leaked NativeArray MUST produce a non-zero counter (positive control).
+//   - An intentionally-leaked NativeArray MUST produce a non-zero counter (positive control).
 //
 // Meaningful assertions:
 //   - Mesh delta: zero orphaned Mesh after load+release.
 //   - NativeArray balance: DebugLiveAllocCount == 0 after every load+release cycle.
-//   - Positive control: a deliberately-leaked LayerMeshData produces DebugLiveAllocCount > 0.
+//   - Positive control: an intentionally-leaked LayerMeshData produces DebugLiveAllocCount > 0.
 //   - Race path: mid-flight-released tile's NativeArrays are disposed via PendingDisposalQueue.
 //
 // This test is Unity-only (uses MonoBehaviour, Object.FindObjectsOfTypeAll, Mesh creation,
@@ -276,16 +276,14 @@ namespace MapRenderer.Tests.Lifetime
         /// PumpPending snapshot (foreach over _loaded) excludes the released tile, so
         /// ConsumeMeshBuild is never called for it — no Mesh is created.
         ///
-        /// <para><b>Before/after.</b> Before: mid-flight by
-        /// TIMING — a kick-count loop, then pan, racing however fast the seam's managed build happened to
-        /// run. After: DETERMINISTIC. Source tiles now reach the graph's MEASURE step too (via the
-        /// prologue-complete hand-off), so <see cref="TileManager.GraphDepsForTest"/> — the same
-        /// production-legitimate deps-parameter seam for background tiles — can hold a
+        /// <para><b>The race is driven deterministically.</b> Source tiles reach the graph's MEASURE
+        /// step too (via the prologue-complete hand-off), so <see cref="TileManager.GraphDepsForTest"/>
+        /// — the same production-legitimate deps-parameter seam for background tiles — can hold a
         /// SOURCE tile's measure step genuinely in-flight. The drive pumps <c>LateUpdate()</c> ONLY (no
         /// <c>Await</c> — it would <c>Complete()</c> the held graph and burn the whole spin bound, NIT 3)
         /// until <c>GraphMeasureInFlight &gt;= 1</c>, asserted as the drive precondition, THEN pans. Because
         /// the gate is still closed at that point, the graph provably cannot have completed — the positive
-        /// control below is now guaranteed by construction, not a coin flip against machine speed.</para>
+        /// control below is guaranteed, not a coin flip against machine speed.</para>
         /// </summary>
         [Test]
         public void ReleaseMidFlight_NoOrphanedMesh()
@@ -400,7 +398,7 @@ namespace MapRenderer.Tests.Lifetime
         /// Non-vacuous positive control: allocate a <see cref="StyledFillTileBuilder.LayerMeshData"/>
         /// (backed by NativeArrays) via <see cref="StyledFillTileBuilder.BuildMeshData"/> and do NOT
         /// dispose it. Asserts <see cref="MeshDataPayload.DebugLiveAllocCount"/> is
-        /// non-zero, proving the counter has teeth — a deliberately-leaked NativeArray is detected.
+        /// non-zero, proving the counter has teeth — an intentionally-leaked NativeArray is detected.
         ///
         /// The payload is disposed at test end so it does not pollute subsequent tests.
         /// </summary>
@@ -424,7 +422,7 @@ namespace MapRenderer.Tests.Lifetime
 
             long countBefore = MeshDataPayload.DebugLiveAllocCount;
 
-            // Allocate a tracked writable array + write real geometry — deliberately do NOT apply/dispose.
+            // Allocate a tracked writable array + write real geometry — do NOT apply/dispose it.
             var mda = MeshDataPayload.AllocateTracked(1);
             TileGeometryBuffers geometry = mvtLayer.Geometry; // BORROWED — the tile owns it
             int vc; Bounds b;
@@ -544,7 +542,6 @@ namespace MapRenderer.Tests.Lifetime
         /// The deterministic, single-threaded regression tooth for the <c>TileManager.cs</c> fix found
         /// while pooling <see cref="MeshDataPayload"/>. Pooling means <see cref="MeshDataPayload.Dispose"/>
         /// hands its instance back to a shared <see cref="MeshDataPayloadPool"/> the moment it runs — so once
-        /// <c>ConsumeMeshBuild</c>'s per-payload loop disposes a slot, that slot's OLD reference is no longer
         /// <c>ConsumeMeshBuild</c>'s per-payload loop disposes a slot, that slot's OLD reference is no longer
         /// safe for anything to touch again: a subsequent <c>Rent()</c> (by this test, standing in for a
         /// concurrent build) can receive and <c>Reset()</c> it before <c>DisposeWholePayloads</c>'s later
@@ -677,15 +674,12 @@ namespace MapRenderer.Tests.Lifetime
         /// nothing consumed) must have every native resource it holds disposed via the pen after the held
         /// step completes.
         ///
-        /// <para><b>Before/after.</b> Before: mid-flight by
-        /// TIMING (kick-count loop then pan), and the single non-vacuity reading was
-        /// <c>MeshDataPayload.DebugLiveAllocCount</c> — bumped synchronously at kick under the OLD seam
-        /// model. After: DETERMINISTIC, via the same <c>GraphDepsForTest</c> gate as
+        /// <para><b>The race is driven deterministically,</b> via the same <c>GraphDepsForTest</c> gate as
         /// <see cref="ReleaseMidFlight_NoOrphanedMesh"/> (see that tooth's doc for why source tiles can be
-        /// held this way now). The single-counter reading no longer works UNCHANGED: a fill layer allocates
-        /// NO <c>MeshDataArray</c> at kick any more (it is the graph arm), so for a fill-only
-        /// style <c>MeshDataPayload.DebugLiveAllocCount</c> alone would sit at baseline throughout and the
-        /// old assertion would be vacuously true for the wrong reason. The non-vacuity reading is now the
+        /// held this way). A single <c>MeshDataPayload.DebugLiveAllocCount</c> reading is not enough: a
+        /// fill layer allocates NO <c>MeshDataArray</c> at kick (it is the graph arm), so for a fill-only
+        /// style that counter alone sits at baseline throughout and an assertion on it would be vacuously
+        /// true for the wrong reason. The non-vacuity reading is the
         /// SUM of three deltas — <c>MeshDataPayload.DebugLiveAllocCount</c>, <c>FillGraphOutput.DebugLiveCount</c>,
         /// <c>TileBuildGraph.DebugLiveCount</c> — read causally (while the gate is still closed, not
         /// hopefully after a race), and all three must return to baseline once the pen drains.</para>

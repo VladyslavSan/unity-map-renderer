@@ -75,15 +75,14 @@ namespace MapRenderer.Tests.DataSources
             => new TileResponse(new byte[] { seed, (byte)(seed + 1), (byte)(seed + 2) }, TileEncoding.Mvt);
 
         // -----------------------------------------------------------------------------------------
-        // T1 — the ordering invariant the removed hop used to protect (moved from DataSourceTests.cs).
+        // T1 — the ordering invariant that holds with no thread-pool hop in TileScheduler.
         // -----------------------------------------------------------------------------------------
 
         /// <summary>
         /// When a source returns an already-completed UniTask (UniTask.FromResult), the sync-completion
-        /// path must NOT leave a stale in-flight entry after Request() returns. Pinned by construction
-        /// BEFORE the hop is removed — green today and green after is the point: it proves the ordering
-        /// invariant survives the change. Passing alone proves nothing without the reverse-injection
-        /// RED-verify.
+        /// path must NOT leave a stale in-flight entry after Request() returns. The ordering invariant
+        /// holds with no thread-pool hop present. Passing alone proves nothing without the
+        /// reverse-injection RED-verify.
         /// </summary>
         [Test]
         public async Task SyncCompletingSource_NoStaleInFlightEntry()
@@ -198,8 +197,8 @@ namespace MapRenderer.Tests.DataSources
         /// <summary>
         /// <c>FileDataSource.cs</c>'s <c>await UniTask.SwitchToThreadPool();</c> is a genuine offload
         /// (blocking <c>File.ReadAllBytes</c>), not an ordering guard, and stays — but only inside
-        /// <c>#if !UNITY_WEBGL || UNITY_EDITOR</c>, or a WebGL player hangs on it exactly like
-        /// <see cref="TileScheduler"/> used to. Keyed on the CALL STATEMENT, never the bare token —
+        /// <c>#if !UNITY_WEBGL || UNITY_EDITOR</c>, or a WebGL player hangs on it — the same hazard
+        /// <see cref="TileScheduler"/>'s own hop no longer carries. Keyed on the CALL STATEMENT, never the bare token —
         /// the file names <c>SwitchToThreadPool</c> in prose too (its rewritten class doc explains the
         /// guard, which naturally names what is being guarded), so a token-count assertion would fail on
         /// this plan's own edit. Index-ordering, not mere presence: three unordered greps would pass on a

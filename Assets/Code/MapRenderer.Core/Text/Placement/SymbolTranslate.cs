@@ -1,6 +1,6 @@
-// Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2 —
-// this file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to a
-// (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the sibling
+// Engine-free. TOP-LEVEL `using Unity.Mathematics;` + unqualified float2 — this file lives in
+// MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float2` would bind to a (nonexistent)
+// `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234). See the sibling
 // SymbolScreenProjection header comment for the full explanation of the namespace-collision trap.
 
 using Unity.Mathematics;

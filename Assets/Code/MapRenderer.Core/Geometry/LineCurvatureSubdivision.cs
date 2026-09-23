@@ -6,16 +6,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Geometry
 {
     /// <summary>
-    /// S4: the shared projection-subdivision POLICY — how many equal sub-segments a tile-local centerline
-    /// segment needs so its projected arc stays under a projection's <c>MaxRefineAngleRad</c> tolerance — plus
-    /// the managed densifier built on it. <see cref="SegmentSteps"/> is the one piece two callers share:
-    /// <c>MapRenderer.Unity.Text.SymbolFeatureExtractor</c> (over managed
-    /// <c>IReadOnlyList&lt;double2&gt;</c>) and the mesh line builder (<c>StyledLineTileBuilder.SubdivideCenterline</c>,
-    /// over <c>NativeList&lt;double2&gt;</c> — welded to <c>Unity.Collections</c>, so it cannot live here).
-    /// Each caller keeps its own container-specific densification loop; only the curvature math is unified
-    /// (duplicating THAT would be the real smell — "unify, don't propagate smell").
-    /// <para>A ∞ tolerance (flat/Mercator projection) always yields 1 step per segment, so subdivision is the
-    /// degenerate no-op case of the SAME code — no capability flag, no branch on projection kind.</para>
+    /// The shared projection-subdivision POLICY: how many equal sub-segments a tile-local centerline segment
+    /// needs so its projected arc stays under a projection's <c>MaxRefineAngleRad</c>, plus a managed densifier.
+    /// <see cref="SegmentSteps"/> is shared by <c>MapRenderer.Unity.Text.SymbolFeatureExtractor</c> and the
+    /// Burst <c>SubdivideJob</c>; each keeps its own densification loop. An ∞ tolerance (flat Mercator) yields
+    /// 1 step per segment: the no-op case of the same code, with no branch on projection kind.
     /// </summary>
     public static class LineCurvatureSubdivision
     {
@@ -30,30 +25,22 @@ namespace MapRenderer.Core.Geometry
         public static int SegmentSteps(double3 upA, double3 upB, double maxRefineAngleRad)
         {
             double ang = math.acos(math.clamp(math.dot(upA, upB), -1.0, 1.0));
-            // Clamp in DOUBLE space before the int cast: for a pathologically small maxRefineAngleRad,
-            // ang/maxRefineAngleRad can exceed int range, and (int) of an out-of-range double is
-            // implementation-defined (x64 CVTTSD2SI yields int.MinValue "integer indefinite"; ARM64 FCVTZS
-            // saturates to int.MaxValue instead) — casting first made the `< 1` guard fire on x64 and silently
-            // return 1 (NO subdivision) for the segment that needed the MOST, defeating the cap it was meant
-            // to enforce. Clamping the double first makes the cast always land in [1, MaxCurveSegments].
+            // Clamp in DOUBLE space before the int cast. For a tiny maxRefineAngleRad the ratio can exceed int
+            // range, and an out-of-range (int) cast is platform-defined (x64 gives int.MinValue, ARM64 saturates):
+            // casting first would return 1 on x64 for the segment that needs the most steps.
             return (int)math.clamp(math.ceil(ang / maxRefineAngleRad), 1.0, MaxCurveSegments);
         }
 
         /// <summary>
         /// Densifies tile-local <paramref name="tilePath"/> so each segment's projected arc stays under
-        /// <paramref name="maxRefineAngleRad"/>, per-point surface normals <paramref name="ups"/> (same count
-        /// and order as <paramref name="tilePath"/>) driving the split metric. Each segment is split into
-        /// <see cref="SegmentSteps"/> equal parts by LINEAR interpolation in tile space — collinear on the
-        /// original chord, so the tile-local cumulative arc length at every ORIGINAL vertex is unchanged (the
-        /// S4 byte-identity spine: an inserted split point never moves an anchor's arc-length position, only
-        /// refines which segment it falls in).
-        /// <para>∞-tolerance early-out: returns <paramref name="tilePath"/> unchanged, with no <paramref
-        /// name="ups"/> reads. This is a general safety net for any direct caller of <see cref="Subdivide"/>
-        /// (pinned by S4-T1) — it is NOT the live Mercator no-op guarantee: the wired caller
-        /// (<c>SymbolFeatureExtractor.Extract</c>) checks <c>IsPositiveInfinity</c> itself and bypasses
-        /// <see cref="Subdivide"/> entirely on that path, passing the original list straight through. Do not
-        /// describe this early-out as "the" Mercator guard; it is a second, currently-unexercised-in-production
-        /// backstop.</para>
+        /// <paramref name="maxRefineAngleRad"/>; per-point surface normals <paramref name="ups"/> (same count and
+        /// order) drive the split metric. Each segment splits into <see cref="SegmentSteps"/> equal parts by
+        /// LINEAR interpolation in tile space, collinear on the original chord, so the cumulative arc length at
+        /// every ORIGINAL vertex is unchanged and no anchor moves along the line.
+        /// <para>An ∞ tolerance returns <paramref name="tilePath"/> unchanged and reads no <paramref name="ups"/>
+        /// (pinned by <c>Subdivide_InfiniteTolerance_ReturnsPathValueUnchanged</c>). This is a backstop for a
+        /// direct caller, not the live Mercator guard: <c>SymbolFeatureExtractor.Extract</c> checks
+        /// <c>IsPositiveInfinity</c> itself and never calls <see cref="Subdivide"/> on that path.</para>
         /// </summary>
         public static List<double2> Subdivide(
             IReadOnlyList<double2> tilePath, IReadOnlyList<double3> ups, double maxRefineAngleRad)

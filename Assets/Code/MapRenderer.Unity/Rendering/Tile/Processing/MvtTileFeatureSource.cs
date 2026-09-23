@@ -11,15 +11,15 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// <summary>
     /// The MVT implementation of the raised <see cref="ITileFeatureSource"/> seam —
     /// byte-fetch (<see cref="IDataSource"/>), scheduling/caching (<see cref="TileScheduler"/>/
-    /// <see cref="TileCache"/>), and <see cref="ITileDecoder"/> resolution all live HERE now, encapsulated
+    /// <see cref="TileCache"/>), and <see cref="ITileDecoder"/> resolution all live HERE, encapsulated
     /// behind <see cref="GetTile"/>; the coordinator (<c>TileManager</c>) never names any of them. Wraps the
     /// <see cref="TileScheduler"/> unchanged — this is a boundary seam, not a fetch-behaviour change.
     ///
     /// <para><see cref="GetTile"/> fetches, then DECODES — once, on the pool, through
     /// <see cref="TileDecodeDispatch.DecodeAsync"/> — and hands back a <see cref="SharedDisposable{T}"/>
-    /// carrying the caller's one reference. The lazy handle it used to mint is gone: a decode that only
-    /// happens when somebody reads is a decode whose drop paths free nothing, which is the leak the
-    /// reference count replaces.</para>
+    /// carrying the caller's one reference. There is no lazy handle: a decode that only happened when
+    /// somebody read it would have drop paths that free nothing — the leak the reference count exists to
+    /// prevent.</para>
     ///
     /// Internal (not public): constructed only from <c>MapView.BuildSourceSpecs</c> (the one production site
     /// that names this type) and from the test assembly via <c>InternalsVisibleTo</c>.
@@ -37,8 +37,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// to apply itself before the raise.</param>
         /// <param name="workScheduler">The execution policy the decode hop runs under — see
         /// <see cref="TileDecodeDispatch.DecodeAsync"/>.</param>
-        /// <param name="cacheCapacity">LRU capacity for the internal <see cref="TileCache"/> — moved here from
-        /// the old <c>TileManager.SetSources</c>'s <c>new TileCache(capacity: 256)</c>.</param>
+        /// <param name="cacheCapacity">LRU capacity for the internal <see cref="TileCache"/>.</param>
         /// <param name="ownsByteSource">Whether this source disposes <paramref name="byteSource"/>.</param>
         public MvtTileFeatureSource(IDataSource byteSource, IWorkScheduler workScheduler,
             int cacheCapacity = 256, bool ownsByteSource = true)
@@ -56,7 +55,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
         /// real invariant the drain-spin needs is completion staying OFF the PlayerLoop (see
         /// <see cref="TileDecodeDispatch"/>'s class doc), which <see cref="TileDecodeDispatch.DecodeAsync"/>
         /// supplies on the <c>HasData</c> path and synchronous/inline completion supplies otherwise — not
-        /// the fetch scheduler ending on a thread-pool hop, which it no longer does.</summary>
+        /// the fetch scheduler ending on a thread-pool hop, which does not happen here.</summary>
         public async UniTask<SharedDisposable<IDecodedTile>> GetTile(TileId id, CancellationToken ct = default)
         {
             TileResponse resp = await _scheduler.Request(id, ct);

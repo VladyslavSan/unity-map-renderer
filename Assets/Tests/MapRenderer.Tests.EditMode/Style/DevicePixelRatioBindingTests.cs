@@ -12,7 +12,7 @@
 // that lands as "the uniform doubles at dpr 2", because their shader consumers measure the physical
 // framebuffer. For text-size / text-padding / icon-padding it does NOT: their consumers already divide by
 // the LOGICAL viewport, so the value must stay untouched and the device footprint doubles anyway. A row
-// asserting "padding is scaled" would be WRONG, and is deliberately absent.
+// asserting "padding is scaled" would be WRONG, so there is no such row.
 //
 // These uniform readbacks pin the REGRESSION (a property silently dropping out of the conversion); they
 // cannot judge whether "device" was the right space for it — only the rendered ratios in

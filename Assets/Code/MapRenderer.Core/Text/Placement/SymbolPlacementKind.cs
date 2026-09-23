@@ -10,14 +10,13 @@ namespace MapRenderer.Core.Text.Placement
     /// FROM (which atlas). This one is Point vs Curved — how the symbol is PLACED. A symbol is independently
     /// one of each, so the two must not be merged or named alike.</para>
     ///
-    /// <para><b>Why it is top-level.</b> It began as <c>SymbolBatch.Kind</c>, nested inside the
-    /// per-frame oracle. Production does not build that batch — the block baker and the gather job do — yet
-    /// both had to reach through the oracle's type name for the discriminator, which is what kept the oracle
-    /// in the production assemblies. The enum is the part production genuinely shares; the batch is not.</para>
+    /// <para><b>Top-level, not nested in <c>SymbolBatch</c>.</b> The block baker and the gather job both need
+    /// the discriminator, and production does not build that batch. Only the enum is shared production code, so
+    /// nesting it would tie production to the oracle's type name.</para>
     ///
-    /// <para><b>Backing storage is deliberately still <c>byte</c></b> in the block and the mirror
-    /// (<c>Kinds</c>, <c>MKinds</c>): those are Burst-facing <c>NativeArray</c>s and retyping them is a
-    /// separate decision about job signatures, not part of promoting the enum. Cast at the comparison.</para>
+    /// <para>Backing storage is <c>byte</c> in the block and the mirror (<c>Kinds</c>, <c>MKinds</c>): those
+    /// are Burst-facing <c>NativeArray</c>s, and their element type is a decision about job signatures. Cast at
+    /// the comparison.</para>
     /// </summary>
     public enum SymbolPlacementKind : byte
     {

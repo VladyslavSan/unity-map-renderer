@@ -13,7 +13,7 @@ namespace MapRenderer.Core.Text.Placement
     /// <para><b>Bijection within a lifetime.</b> Backed by a <see cref="System.StringComparer.Ordinal"/>
     /// <see cref="Dictionary{TKey,TValue}"/> with a monotonic counter from <c>1</c> (<c>0</c> reserved for
     /// <c>null</c>): a new string always takes a fresh id, an existing string always returns its stored id, and
-    /// ORDINAL comparison ⇒ <c>id-equality ⟺ ordinal-string-equality</c> — exactly matching
+    /// ORDINAL comparison ⇒ <c>id-equality ⟺ ordinal-string-equality</c> — matching
     /// <c>CrossTileSymbolKey.Equals</c>'s <c>Text == other.Text</c> ordinal semantics. This bijection is the
     /// property the dedup partition-preservation rests on (different string ⇒ different id).</para>
     ///
@@ -21,7 +21,7 @@ namespace MapRenderer.Core.Text.Placement
     /// the SetStyle boundary) by the store, populated on the MAIN thread only — by
     /// <c>StyledSymbolTileBuilder.Shape</c>'s per-symbol emit (the SHAPE-time tail), which stamps
     /// <see cref="MapRenderer.Core.Text.Placement.ShapedSymbol.TextId"/>/<c>IconImageId</c> before the symbol
-    /// ever reaches <c>SymbolTileBlockBaker.Bake</c> (which now only copies those ids into the block's
+    /// ever reaches <c>SymbolTileBlockBaker.Bake</c> (which only copies those ids into the block's
     /// columns). Ids are stable for a style's whole life and never reused within it; a restyle renumbers
     /// (harmless — ids feed only equality/hashing, never a snapshot). The per-frame <c>CollectInto</c> reads
     /// only the frozen per-entry id arrays, never this table, so it needs no locking.</para>

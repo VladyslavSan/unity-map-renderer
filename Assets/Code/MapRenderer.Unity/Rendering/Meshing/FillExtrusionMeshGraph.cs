@@ -161,7 +161,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
             // On the chain, not parallel to it, and on BOTH arms: an arm-dependent sizing path is exactly
             // what would let one arm drift. On the select arm flatTile.Length == totalVerts by RingSelectJob's
-            // verbatim-copy contract, so this node computes the number the main thread used to.
+            // verbatim-copy contract, so this node, not the main thread, computes that number.
             JobHandle sized = new ProjectionColumnSizingJob
             {
                 SourceTileCoords = flatTile, OutGeo = geo, OutWorld = world, OutUp = up,

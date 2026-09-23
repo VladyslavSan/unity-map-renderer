@@ -83,7 +83,7 @@ namespace MapRenderer.Unity.Rendering.Tile
         /// The "nothing would change" predicate of <see cref="Rebuild"/> — true iff calling it with the
         /// same arguments would keep every pipeline and add none: same count, same order, and for each
         /// real slot <c>SourceId</c>/resolved <c>DefKey</c>/<c>MinZoom</c>/<c>MaxZoom</c> all equal.
-        /// Kept in step with <see cref="Rebuild"/> deliberately — placed directly above it so the two
+        /// Kept in step with <see cref="Rebuild"/> — placed directly above it so the two
         /// read together.
         ///
         /// <para>Compares the RESOLVED specs, not the raw style JSON <c>sources</c> object: a <c>url</c>
@@ -160,7 +160,8 @@ namespace MapRenderer.Unity.Rendering.Tile
                 if (oldBackground != null) keptOld.Add(oldBackground);
             }
 
-            // Pipeline-teardown removed sources: dispose the feature source — fetch, scheduler and cache all live inside it now.
+            // Pipeline-teardown removed sources: dispose the feature source — fetch, scheduler and cache all
+            // live inside it.
             for (int i = 0; i < _pipelines.Count; i++)
             {
                 var p = _pipelines[i];

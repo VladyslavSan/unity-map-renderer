@@ -36,9 +36,8 @@ namespace MapRenderer.Unity.Text.Placement
     {
         // Every array below is allocated at its EXACT final size: SymbolTileBlockBaker counts each pool
         // in a first pass (CountSizes) with the same per-symbol arithmetic the fill pass then uses, so each
-        // array's own Length IS its element count. There are deliberately no `XXXCount` companion fields —
-        // eight of them existed, duplicated Length exactly, and had zero production readers (BlockView
-        // omits pool counts by design: the gather indexes only by a winner's LocalIndex/Detail/*Start). A
+        // array's own Length IS its element count. There are no `XXXCount` companion fields: BlockView
+        // omits pool counts, because the gather indexes only by a winner's LocalIndex/Detail/*Start. A
         // count that can disagree with Length is a bug waiting to happen; Length cannot disagree with itself.
 
         // ── per-symbol columns, RAW list order (dense — one slot per source symbol) ──
@@ -48,20 +47,16 @@ namespace MapRenderer.Unity.Text.Placement
         internal NativeArray<int>     WorldStart;  // start of this symbol's world points in WorldPoints
         internal NativeArray<int>     WorldCount;  // 1 (point anchor) or path length (curved)
         internal NativeArray<double3> RepAnchor;   // the distance-cull point (RepresentativeAnchor)
-        // Native-representation migration: per-symbol column in RAW order, mirroring the symbol's MaterialIndex —
-        // baked so the off-main reconciler can read it from the block instead of dereferencing the managed source
-        // symbol.
+        // Per-symbol column in RAW order, mirroring the symbol's MaterialIndex — baked so the off-main
+        // reconciler can read it from the block instead of dereferencing the managed source symbol.
         internal NativeArray<int>     MaterialIndexes;
-        // Native-representation migration: the RESOLVED pair role per raw slot (None/Owner/Rider), baked from the
-        // SAME SymbolPairing resolution the reconciler used to run over the tile list — so the reconciler reads the
-        // baked role instead of re-resolving (byte-identical because two computations over the same immutable list
-        // agree). None for every curved symbol — a curved symbol is never paired.
+        // The RESOLVED pair role per raw slot (None/Owner/Rider), baked from SymbolPairing over the tile list,
+        // so the reconciler reads the baked role instead of re-resolving. None for every curved symbol — a
+        // curved symbol is never paired.
         internal NativeArray<SymbolPairRole> PairRoles;
-        // Native-representation migration (additive): the interned text/icon ids in RAW order — same intern table
-        // (SymbolStringTable) the store's CompleteBuild feeds, so TextIds[i] == Intern(symbol.Text) (0 for null
-        // Text; likewise IconImageIds[i] == Intern(symbol.IconImage)). Baked so the off-main dedup can
-        // key on the block's int columns instead of the entry's parallel int[] arrays. Additive stage: WRITTEN by
-        // the bake (identical ids to the store's own arrays — idempotent interning), not consumed by any reader yet.
+        // The interned text/icon ids in RAW order (SymbolStringTable), so TextIds[i] == Intern(symbol.Text)
+        // (0 for null Text; likewise IconImageIds[i] == Intern(symbol.IconImage)). Baked so the off-main
+        // dedup keys on the block's int columns.
         internal NativeArray<int>     TextIds;
         internal NativeArray<int>     IconImageIds;
 

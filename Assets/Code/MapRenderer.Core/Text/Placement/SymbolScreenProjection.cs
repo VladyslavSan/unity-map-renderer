@@ -1,8 +1,7 @@
-// Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified float4x4 —
-// this file lives in MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float4x4` would bind
-// to a (nonexistent) `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234) since the
-// leading `Unity` segment resolves against the CURRENT namespace first. See the namespace-collision
-// trap in GlyphAtlasTexture.cs.
+// Engine-free. TOP-LEVEL `using Unity.Mathematics;` + unqualified float4x4 — this file lives in
+// MapRenderer.Core.Text.Placement; an inline `Unity.Mathematics.float4x4` would bind to a (nonexistent)
+// `MapRenderer.Core.Text.Placement.Unity.Mathematics` namespace (CS0234) since the leading `Unity` segment
+// resolves against the CURRENT namespace first. See the namespace-collision trap in GlyphAtlasTexture.cs.
 
 using Unity.Mathematics;
 
@@ -29,8 +28,8 @@ namespace MapRenderer.Core.Text.Placement
         /// <para>Lives here, not on a caller, because BOTH consumers of a projected point need the same
         /// threshold: <c>SymbolStagingMath.StageCurved</c> bounds a path VERTEX (a blow-up there would explode
         /// the arc walk), and <see cref="SymbolBox.TryBuildProjectedWorldGlyph"/> bounds a projected CORNER (a
-        /// blow-up there would make the collision AABB unbounded, where the pre-W3 screen box was bounded by
-        /// construction). Two copies of one threshold is how they drift apart.</para></summary>
+        /// blow-up there would make the collision AABB unbounded, where <see cref="SymbolBox.BuildRotatedGlyph"/>'s
+        /// screen box is bounded by the cell). Two copies of one threshold is how they drift apart.</para></summary>
         internal const float MaxProjectedPx = 1e5f;
 
         /// <summary>

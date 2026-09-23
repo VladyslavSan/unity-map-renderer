@@ -11,20 +11,18 @@ namespace MapRenderer.Unity.Rendering.Tile
     internal static class UniTaskParkExtensions
     {
         /// <summary>Blocks the calling thread until <paramref name="task"/> completes, parking on a kernel
-        /// event instead of polling. Valid ONLY for a task completing OFF the PlayerLoop: its continuation
-        /// then fires ThreadPool-side, sets the event, and this wakes with no PlayerLoop dependency to
-        /// deadlock on. Observes no result — the caller keeps the single <c>Status</c>/<c>GetResult()</c>
-        /// read, so faults surface exactly where they did before. Returns false on timeout; never reports
-        /// success falsely.
-        ///
-        /// <para><b>Call at most once on a still-pending task.</b> Registering the continuation consumes the
-        /// underlying source's single continuation slot (a <c>Preserve()</c>d task memoizes its RESULT for
-        /// repeat awaits, but still delegates a PENDING registration to that one-slot source). Re-parking a
-        /// task that this returned <c>false</c> for — it is still pending — throws
-        /// <c>InvalidOperationException("Already continuation registered")</c>. A completed task is safe to
-        /// re-check (the <c>IsCompleted</c> short-circuit fires first). So a <c>false</c> return means a hang:
-        /// the caller must surface it, not retry the same pending task — see
-        /// <see cref="TileManager.AwaitInFlightMeshBuilds"/>, which throws on it.</para></summary>
+        /// event instead of polling. Valid ONLY for a task completing OFF the PlayerLoop: a
+        /// PlayerLoop-completing task deadlocks here, because this blocks the thread that would run its
+        /// continuation. Observes no
+        /// result — the caller keeps the single <c>Status</c>/<c>GetResult()</c> read. Returns false on
+        /// timeout; never reports success falsely. Non-local invariant: call at most once on a still-pending
+        /// task. Registering the continuation consumes the underlying source's single continuation slot.
+        /// <c>Preserve()</c> does not make re-parking safe: a preserved task memoizes its result, but still
+        /// delegates a pending registration to that one slot. Re-parking a still-pending task throws
+        /// <c>InvalidOperationException("Already continuation registered")</c>. A completed task is safe
+        /// to re-check: the <c>IsCompleted</c> short-circuit fires first. A <c>false</c> return means a
+        /// hang the caller must surface, not retry — see
+        /// <see cref="TileManager.AwaitInFlightMeshBuilds"/>, which throws on it.</summary>
         /// <param name="task">The task to wait on; must complete off the PlayerLoop.</param>
         /// <param name="timeoutMs">The maximum time to wait, in milliseconds.</param>
         /// <returns>True if the task completed within <paramref name="timeoutMs"/>; false on timeout.</returns>
@@ -36,9 +34,9 @@ namespace MapRenderer.Unity.Rendering.Tile
             awaiter.UnsafeOnCompleted(done.Set);
             bool ok = done.Wait(timeoutMs);
             // Dispose ONLY on success: on timeout the continuation is still registered and will call
-            // done.Set() later. Disposing here would make that late Set() throw ObjectDisposedException on
-            // a ThreadPool thread -- an unobserved exception that can crash the batch run. Leak on timeout;
-            // the finalizer reclaims it, and a timeout hit means the caller is already failing.
+            // done.Set() later. Set() on a disposed event throws an unobserved ObjectDisposedException on a
+            // ThreadPool thread, which can crash the batch run. Leak on timeout; the finalizer reclaims it,
+            // and a timeout already fails the caller.
             if (ok) done.Dispose();
             return ok;
         }

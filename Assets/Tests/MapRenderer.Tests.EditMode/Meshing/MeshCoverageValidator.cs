@@ -13,7 +13,7 @@ namespace MapRenderer.Tests
     /// ~zero area but is visible, so an area check alone would pass a torn mesh.
     ///
     /// Invariants (see docs/mesh-triangulation-robustness-design.md):
-    ///   • ForceClips == 0        — the triangulator never gave up and emitted garbage;
+    ///   • ForceClips == 0        — the triangulator made no clean drop (it dropped no locus it could not ear-clip);
     ///   • WindingFlips == 0      — no inverted (folded) triangle;
     ///   • AreaRelError small     — Σ tri area ≈ Σ(outer − holes);
     ///   • MismatchPct small      — rasterised coverage matches the even-odd source fill, so no phantom holes

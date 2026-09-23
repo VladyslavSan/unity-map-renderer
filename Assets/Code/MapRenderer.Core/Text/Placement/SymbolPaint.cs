@@ -1,6 +1,4 @@
-// Engine-free: no UnityEngine dependency.
-// Construction convention: object initializer with named members.
-// C# LangVersion 9 (Unity): NO parameterless struct ctor override (that needs C# 10) — prefer
+// Engine-free. C# LangVersion 9 (Unity): NO parameterless struct ctor override (that needs C# 10) — prefer
 // `Default` for construction (mirrors TextLayoutOptions.Default's documented mitigation).
 
 using Unity.Mathematics;
@@ -13,7 +11,7 @@ namespace MapRenderer.Core.Text.Placement
     /// RGBA (0..1); the linear conversion happens later, at bake (<c>SymbolPlacementSystem.LinearColor</c>).
     ///
     /// <para>All five are evaluated PER FEATURE by <c>SymbolFeatureExtractor</c> and feed the billboard
-    /// vertex streams — the halo trio on a second copy of the label's glyphs, so the shader has no halo term
+    /// vertex streams — the halo trio on a second copy of the symbol's glyphs, so the shader has no halo term
     /// of its own. <see cref="TextColor"/> and <see cref="HaloColor"/> carry white RGB when their expression
     /// is CONSTANT: that kind rides a per-layer uniform instead (<c>SymbolRenderLayer.BindTextPaint</c>) so a
     /// restyle can ease it. Their ALPHA and <see cref="Opacity"/> always ride the stream.</para>

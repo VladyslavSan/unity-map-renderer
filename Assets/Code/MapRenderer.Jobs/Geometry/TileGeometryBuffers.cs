@@ -7,9 +7,10 @@ using MapRenderer.Core.Tiles;
 namespace MapRenderer.Jobs.Geometry
 {
     /// <summary>
-    /// Waist 1 of the tile-geometry IR: one tile's decoded rings, as blittable native buffers the Burst
-    /// stages consume (<c>MvtDecodeJob</c> → <c>RingClipJob</c> → <c>RingAssemblyJob</c> →
-    /// <c>EarcutJob</c>).
+    /// Waist 1 of the tile-geometry IR (<c>docs/tile-geometry-ir-design.md</c>): one tile's decoded rings, as
+    /// blittable native buffers the Burst stages consume (<c>MvtDecodeJob</c> → <c>RingClipJob</c> →
+    /// <c>RingAssemblyJob</c> → <c>EarcutJob</c>). Non-local invariant: every producer and consumer holds the
+    /// contract below.
     ///
     /// <para><b>THE NAMED FENCE — coordinate space (producer declaration).</b> <see cref="Vertices"/> is
     /// <b>tile-local <c>double2</c> in <c>[0, Extent]</c>, always</b>: origin top-left, <b>Y-down</b>.
@@ -18,11 +19,11 @@ namespace MapRenderer.Jobs.Geometry
     /// to remember: there is no coordinate-space tag, no geodetic overload, and this buffer is never reused
     /// to hold geo coordinates. Waist 2 —
     /// <c>TileToGeoJob</c> → <c>ProjectPointsJob&lt;TProj&gt;</c> — keeps its own
-    /// <c>NativeArray&lt;GeoCoordinate&gt;</c> and stays exactly where it is.</para>
+    /// <c>NativeArray&lt;GeoCoordinate&gt;</c>.</para>
     ///
     /// <para><b>Winding is NOT part of this contract.</b> A producer may fill
-    /// <see cref="Vertices"/> with rings of either orientation. The pipeline is winding-agnostic by
-    /// construction: <c>RingAssemblyJob</c> derives the exterior sign from the data <i>per feature</i> and
+    /// <see cref="Vertices"/> with rings of either orientation. The pipeline is winding-agnostic:
+    /// <c>RingAssemblyJob</c> derives the exterior sign from the data <i>per feature</i> and
     /// classifies holes as the opposite sign, so nothing downstream requires or checks a fixed input winding,
     /// and the decoder performs no rewind. (The "canonical CCW" rule in
     /// <c>docs/coordinates-and-projections.md</c> governs <i>tessellator triangle output</i> — earcut,
@@ -52,7 +53,7 @@ namespace MapRenderer.Jobs.Geometry
     ///
     /// <para><b>Two-tier ownership.</b> There is exactly one owner at any moment, in one of two kinds:
     /// <list type="bullet">
-    /// <item>An <see cref="ITileGeometryMaterializer"/> still <b>transfers</b> the buffer it mints — to the
+    /// <item>An <see cref="ITileGeometryMaterializer"/> <b>transfers</b> the buffer it mints — to the
     /// decoded <c>ITileLayer</c>, which owns it for the life of the decoded tile.</item>
     /// <item>The layer <b>lends</b>: every consumer <b>borrows</b> the buffer it reads off
     /// <c>ITileLayer.Geometry</c>. A borrower must never dispose it, never retain it past the decode scope,
@@ -106,7 +107,7 @@ namespace MapRenderer.Jobs.Geometry
         /// ring and a polygon ring are the same shape of data, and an area-based classifier would treat the
         /// LineString as a spurious exterior or hole — silent triangulation corruption, not a crash. It is
         /// also blittable, so a Burst consumer needs no managed <c>IFeature</c>.</para>
-        /// <para><b>Cleared on allocation, deliberately</b>: an unfilled element reads
+        /// <para><b>Cleared on allocation</b>: an unfilled element reads
         /// <see cref="TileGeometryType.Unknown"/>, which every consumer's kind gate rejects. A producer that
         /// forgets to fill this renders NOTHING (loud) rather than something WRONG (silent).</para></summary>
         public NativeArray<TileGeometryType> FeatureGeometryType;

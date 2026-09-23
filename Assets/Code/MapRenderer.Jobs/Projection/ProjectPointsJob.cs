@@ -15,8 +15,8 @@ namespace MapRenderer.Jobs.Projection
     /// The single projection job: projects an array of geodetic SURFACE points (<see cref="GeoCoordinate"/>,
     /// no elevation) to origin-relative render positions + per-vertex surface normals. Does ONLY projection —
     /// the tile→geodetic step is a separate projection-independent job (<see cref="TileToGeoJob"/>), so this job
-    /// is reusable for any geodetic input (tile vertices, symbols). Elevated geometry (GeoCoordinate3D) is a
-    /// future, more-complex path.
+    /// is reusable for any geodetic input (tile vertices, symbols). It does not project elevated geometry
+    /// (GeoCoordinate3D).
     ///
     /// <para><b>Polymorphism via the struct type, no enum.</b> The concrete projection is the generic type
     /// parameter <typeparamref name="TProj"/> — a STATELESS struct implementing <see cref="IProjection"/>
@@ -31,11 +31,12 @@ namespace MapRenderer.Jobs.Projection
     /// the mesh-write casts to <c>float3</c>. The subtract-in-double keeps single-tile precision within float32
     /// range — mandatory on the globe (ECEF ≈ ±6.37 Mm).</para>
     ///
-    /// Note: Burst runs this job only if Jobs ▸ Burst ▸ Enable Compilation is on AND the job compiles —
-    /// <c>CompileSynchronously = true</c> falls back to managed IL SILENTLY on a compile failure
-    /// (<c>FillGraphBurstProbeTests</c>), so a passing numeric test alone never proves Burst compiled it. The
-    /// runner is not the discriminator; in this project's practice <c>./Tools/run-tests.sh</c> (batch mode) is
-    /// the path verified Burst-compiled, via its log's Burst-error grep, not the test result.
+    /// <para>Non-obvious why: Burst runs this job only if Jobs ▸ Burst ▸ Enable Compilation is
+    /// on AND the job compiles — <c>CompileSynchronously = true</c> falls back to managed IL SILENTLY on a
+    /// compile failure (<c>FillGraphBurstProbeTests</c>), so a passing numeric test alone never proves Burst
+    /// compiled it. The runner is not the discriminator; in this project's practice <c>./Tools/run-tests.sh</c>
+    /// (batch mode) is the path verified Burst-compiled, via its log's Burst-error grep, not the test
+    /// result.</para>
     /// </summary>
     [BurstCompile(CompileSynchronously = true, OptimizeFor = OptimizeFor.Performance)]
     public struct ProjectPointsJob<TProj> : IJobParallelFor, IJobParallelForDefer

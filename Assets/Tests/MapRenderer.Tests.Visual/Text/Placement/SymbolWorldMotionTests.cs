@@ -981,7 +981,7 @@ namespace MapRenderer.Tests.Visual
                     tileKey: tileKey);
 
                 var pointBuffer = new SymbolTileBuffer();
-                // Placement left at its default (Point) — this is the point emit path, deliberately.
+                // Placement left at its default (Point) — this is the point emit path.
                 TestSymbolTileBuffer.AddPoint(pointBuffer, origin, pointQuads, pointBounds.Min, pointBounds.Max,
                     up: up,
                     paint: SymbolPaint.Default,
@@ -1206,7 +1206,7 @@ namespace MapRenderer.Tests.Visual
     // A glyph advance is fixed ONCE as a world length and the perspective divide does the rest, so letters AND
     // letter spacing foreshorten together — the same principle as `line-width`.
     //
-    // THE TRAP THESE TEETH EXIST TO AVOID. `CrossNear`/`CrossFar` are ISO-DEPTH by construction, and for an
+    // THE TRAP THESE TEETH EXIST TO AVOID. `CrossNear`/`CrossFar` are ISO-DEPTH inherently, and for an
     // iso-depth symbol a true per-glyph WORLD walk and a screen walk scaled by ONE per-symbol constant produce
     // IDENTICAL output — and that second thing is the screen-walk model these teeth exist to reject. A change
     // can be green on all 14 apparatus teeth while re-implementing the bug. Fixture-T2/T3/T4 live on the RECEDING
@@ -1330,7 +1330,7 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para><b>Why not a closed form.</b> <c>spacingWorld·|P11|·H/(2w)</c> is the PERPENDICULAR span; a
         /// receding displacement's perpendicular component is <c>L·cos θ</c>, so on this arm the closed form
-        /// reads far low by construction. Projecting the two real endpoints through the live camera is exact
+        /// inherently reads far low. Projecting the two real endpoints through the live camera is exact
         /// at any depth AND any direction, needs no <c>cos θ</c>, and imports no second-order correction. The
         /// closed-form number is REPORTED alongside so the substitution is auditable.</para>
         ///
@@ -1547,7 +1547,7 @@ namespace MapRenderer.Tests.Visual
     // THE ORACLE. `PredictedScreenPx` is NOT `IProjection.GroundToScreen` — that method is documented as exact
     // only at tilt=0 ("Exact inverse of ScreenToGround at zero tilt") and its Web-Mercator
     // implementation carries no tilt term at all (WebMercatorProjection.cs:98-132), so at this fixture's tilt=45°
-    // it would predict the WRONG screen position by construction, not merely imprecisely. The oracle instead
+    // it would inherently predict the WRONG screen position, not merely imprecisely. The oracle instead
     // re-derives the two-line formula `MapView.BuildSceneFrame` uses (`SceneOriginRender = proj.Project(lookAt)`)
     // from PUBLIC API only (`MapCamera.Projection` / `MapCamera.CurrentProperties`), then projects the resulting
     // Unity-world point through the LIVE camera's own matrix (`GroundRuler.ProjectPx` → `WorldToScreenPoint`) —

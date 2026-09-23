@@ -34,16 +34,16 @@ namespace MapRenderer.Tests.Text
     /// The sprite-PARKED path end-to-end: the one production site where the decode model's
     /// hardest promise is kept or broken.
     ///
-    /// <para><b>What this tooth used to prove, and what it proves now.</b> Under the scoped lease a parked
+    /// <para><b>What this tooth proved, and what it proves now.</b> Under the scoped lease a parked
     /// build was dispatched long after its kick's scope had closed and freed the tile, so it RE-decoded —
-    /// one extra decode, accepted deliberately, and measured here. Under the reference count the park takes
+    /// one extra decode, accepted and measured here. Under the reference count the park takes
     /// its own reference while the kick's is still live, so the tile survives the whole
     /// <c>SetStyle</c>→<c>SpritesSettled</c> window and the drain reads the SAME decoded tile. Two
     /// assertions therefore INVERT — the decode count 2 → 1, and the kick's tile disposed-while-parked
     /// 1 → 0 — and the inversion is the proof the new model works, not a regression. The symbol differential
-    /// they exist to protect is unchanged. <b>The fixture keeps its name</b> — other docs cite it — but
-    /// "Redecode" is now historical: it names the cost this tooth measured, and then measured the
-    /// deletion of.</para>
+    /// they exist to protect is unchanged. <b>The fixture keeps its name</b> — other docs cite it — though
+    /// "Redecode" does not name today's mechanism: it names the cost this tooth once measured, and now
+    /// measures the absence of.</para>
     ///
     /// <para><b>The differential.</b> Two arms over the same bytes, style, camera and sprite fixture: one
     /// whose sprite fetch is gated open at kick time (parks) and one whose fetch has already settled (never
@@ -72,10 +72,11 @@ namespace MapRenderer.Tests.Text
     /// <para><b>And the parked reference's PRE-CONSUMER exits.</b> Three further teeth at the bottom of the
     /// fixture drive the ways a parked entry can stop being reachable by the mouth meant to consume it — a
     /// restyle whose drain lands between the park's token check and its enqueue, a cancellation with no
-    /// drain, and a fault between the dequeue and the worker starting. Each was previously either declared
-    /// unreachable or unobserved; each frees an <c>Allocator.Persistent</c> tile or leaks it.</para>
+    /// drain, and a fault between the dequeue and the worker starting. None of the three was covered before
+    /// this fixture — each was declared unreachable or left unobserved; each frees an
+    /// <c>Allocator.Persistent</c> tile or leaks it.</para>
     ///
-    /// <para><b>And the drain runs OFF the main thread.</b> The decode can no longer say so — there is only
+    /// <para><b>And the drain runs OFF the main thread.</b> The decode does not say so — there is only
     /// one, and it is the kick's — so the instrument moved to the EXTRACT: the probe records the thread of
     /// every layer read, and a layer is read only inside a worker pass. Replacing <c>PumpBuilds</c>'
     /// <c>RunOnThreadPool</c> with a direct call would move the whole extract onto the frame thread; the
@@ -382,8 +383,8 @@ namespace MapRenderer.Tests.Text
             // frame-time regression the sibling parity tooth cannot see, because it pins the TAIL on main and
             // says nothing about the phase before it.
             //
-            // THE INSTRUMENT MOVED, and it had to. This used to assert on decode index 1 — the drain's
-            // re-decode — and there is no decode 1 any more. The reading is now the EXTRACT's thread, taken
+            // THE INSTRUMENT IS THE EXTRACT, not decode index 1: under the reference count there is no
+            // decode 1 — the drain's would-be re-decode. The reading is the EXTRACT's thread, taken
             // from the layer reads recorded above: every one of them happens inside a worker pass, and the
             // only worker pass that runs for this arm is the parked drain's (DriveKick's mesh read touches
             // `Tile` and never a layer). Same property, new reading, its own falsifier.
@@ -423,10 +424,9 @@ namespace MapRenderer.Tests.Text
 
             SymbolTileBlock unparked = Collect(_oracleSubsystem);
 
-            // Vacuity guard 3, REPLACED — not renumbered. It used to be `oracleProbe.DecodeCount == 1`
-            // against the parked arm's 2, and under the reference count BOTH arms decode once: the old form
-            // no longer discriminates and would sit here green and vacuous forever. The new differential is
-            // the LIFETIME, which still differs sharply between the arms:
+            // Vacuity guard 3: `oracleProbe.DecodeCount == 1` cannot discriminate on its own — under the
+            // reference count BOTH arms decode once, so that alone would sit here green and vacuous forever.
+            // The differential instead is the LIFETIME, which still differs sharply between the arms:
             //
             //   parked arm  — DisposedCount 0 immediately after its kick settles (asserted above): the park's
             //                 reference is holding the tile open.
@@ -671,7 +671,7 @@ namespace MapRenderer.Tests.Text
                 bg.Start();
 
                 // THE RENDEZVOUS (see the summary above for why this is deterministic, not a timing race).
-                // Deliberately KEPT out of the zero-busy-wait conversion (design doc "Open findings"): this
+                // KEPT out of the zero-busy-wait conversion (design doc "Open findings"): this
                 // is not a UniTask completion wait, so there is no kernel event to park WaitOffPlayerLoop on.
                 // It polls raw Thread.ThreadState — a transition this process cannot subscribe to — and the
                 // Sleep(2) dwell is load-bearing: it confirms the blocked state is SUSTAINED, not transient,
@@ -849,7 +849,7 @@ namespace MapRenderer.Tests.Text
         /// <c>List&lt;int&gt;</c> instance the parked entry carries, which is reachable through the
         /// subsystem's private source→layers map.</para>
         ///
-        /// <para>The tooth deliberately lets the exception PROPAGATE (production does; swallowing it here
+        /// <para>The tooth lets the exception PROPAGATE (production does; swallowing it here
         /// would be a behaviour change, not a fix) and asserts only that the reference was released on the
         /// way out.</para>
         ///

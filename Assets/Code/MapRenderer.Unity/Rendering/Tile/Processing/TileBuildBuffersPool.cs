@@ -3,21 +3,15 @@ using System.Collections.Concurrent;
 namespace MapRenderer.Unity.Rendering.Tile.Processing
 {
     /// <summary>
-    /// Thread-safe rent/return pool of <see cref="TileBuildBuffers"/> instances, one per IN-FLIGHT mesh build.
-    /// A source tile's mesh build dispatches through <c>TileManager.KickMeshBuild</c> →
-    /// <c>IWorkScheduler.Schedule</c> → <see cref="TileLayerProcessorRunner.RunWorkerPass"/> —
-    /// CONCURRENTLY on ThreadPool worker threads under <c>ThreadPoolWorkScheduler</c> (desktop/editor), or
-    /// one at a time on the MAIN THREAD
-    /// under <c>InlineWorkScheduler</c> (WebGL, no concurrency at all — see that policy's doc). Either way,
-    /// two builds must never observe the same <see cref="TileBuildBuffers"/> at once — a data race, since
-    /// both would write through the same arrays.
-    ///
-    /// <para><see cref="ConcurrentBag{T}"/> makes that true structurally rather than by convention: <see cref="Rent"/>
-    /// atomically REMOVES an instance from the bag before handing it to the caller, so no other thread can see it
-    /// until <see cref="Return"/> puts it back — there is no window where two threads hold the same reference. A
-    /// build rents exactly once at the start of its worker pass, uses that instance for every layer/feature it
-    /// processes (sequential within one build), and returns it from a <c>finally</c> so a faulted or cancelled
-    /// build still gives its buffers back rather than starving the pool.</para>
+    /// Thread-safe rent/return pool of <see cref="TileBuildBuffers"/> instances, one per IN-FLIGHT mesh
+    /// build. A source tile's mesh build dispatches CONCURRENTLY on ThreadPool worker threads under
+    /// <c>ThreadPoolWorkScheduler</c> (desktop/editor), or one at a time on the MAIN THREAD under
+    /// <c>InlineWorkScheduler</c> (WebGL). Non-local invariant: two builds must never observe the same
+    /// <see cref="TileBuildBuffers"/> at once — <see cref="ConcurrentBag{T}"/> makes that structural, not
+    /// conventional: <see cref="Rent"/> atomically removes an instance before handing it out, so no other
+    /// thread can see it until <see cref="Return"/> puts it back. A build rents once at the start of its
+    /// worker pass and returns it from a <c>finally</c>, so a faulted or cancelled build still gives its
+    /// buffers back.
     /// </summary>
     internal static class TileBuildBuffersPool
     {

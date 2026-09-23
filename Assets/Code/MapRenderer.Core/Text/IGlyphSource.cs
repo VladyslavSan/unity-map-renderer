@@ -7,15 +7,11 @@ using Cysharp.Threading.Tasks;
 namespace MapRenderer.Core.Text
 {
     /// <summary>
-    /// BYO glyph-PBF fetch abstraction, distinct from <see cref="Data.IDataSource"/> (tile-keyed):
-    /// glyph requests are keyed by a fontstack request-key string + 256-aligned range, not a
-    /// <see cref="Geo.TileId"/>. The Unity-side <c>UnityWebRequestGlyphSource</c> implementation (mirrors
-    /// <c>UnityWebRequestDataSource</c>) is a later, deferred batch — this interface is the seam it will
-    /// implement.
-    ///
-    /// Core implementations use only the PlayerLoop-independent UniTask subset
-    /// (<c>UniTask.RunOnThreadPool</c>/<c>SwitchToThreadPool</c>, <c>UniTaskCompletionSource</c>,
-    /// <c>UniTask.FromResult</c>) exactly as <see cref="Data.IDataSource"/> does.
+    /// BYO glyph-PBF fetch abstraction, distinct from the tile-keyed <see cref="Data.IDataSource"/>: a glyph
+    /// request is keyed by a fontstack string + 256-aligned range, not a <see cref="Geo.TileId"/>. The Unity
+    /// side implements it as <c>UnityWebRequestGlyphSource</c>. A Core implementation uses only the
+    /// PlayerLoop-independent UniTask subset (<c>SwitchToThreadPool</c>, <c>UniTaskCompletionSource</c>,
+    /// <c>UniTask.FromResult</c>), as <see cref="Data.IDataSource"/> does.
     /// </summary>
     public interface IGlyphSource : IDisposable
     {
@@ -27,7 +23,7 @@ namespace MapRenderer.Core.Text
         /// <param name="fontStack">
         /// The request-key string identifying the font(s) to fetch — either the full joined
         /// <see cref="FontStack.RequestToken"/> or a single font name, depending on the glyph host's
-        /// convention (decided by the fetch-wiring layer, deferred).
+        /// convention. <c>GlyphManager</c> passes a single font name.
         /// </param>
         /// <param name="rangeStart">The 256-aligned range base (see <see cref="FontStackResolver.ComputeRangeStart"/>).</param>
         UniTask<GlyphRangeResponse> FetchAsync(string fontStack, int rangeStart, CancellationToken ct = default);

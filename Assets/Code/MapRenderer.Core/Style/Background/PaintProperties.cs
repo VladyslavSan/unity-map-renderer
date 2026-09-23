@@ -22,8 +22,8 @@ namespace MapRenderer.Core.Style.Background
         /// <summary>background-opacity: background alpha multiplier [0,1]. Default 1.0.</summary>
         public StyleProperty<float> Opacity { get; init; }
 
-        /// <summary>The background-pattern value (sprite name), or null when absent. Parsed but dead
-        /// (spec-complete, symmetric with fill-pattern) until sprites land.</summary>
+        /// <summary>The background-pattern value (sprite name), or null when absent. Parsed for spec
+        /// completeness, but no renderer reads it: background-pattern is not implemented.</summary>
         public string PatternName { get; init; }
 
         /// <summary>True when ALL paint properties were absent (every property uses the spec default).</summary>

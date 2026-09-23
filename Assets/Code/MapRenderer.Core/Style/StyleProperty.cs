@@ -5,38 +5,10 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Style
 {
     /// <summary>
-    /// A single parsed MapLibre paint or layout property, typed to <typeparamref name="T"/>.
-    /// Collapses the old triple (<c>XKind</c> + <c>PaintPropertyEvaluator X</c> +
-    /// <c>DataDrivenPaintEvaluator DataDrivenX</c>) into ONE object: a single parsed
-    /// <see cref="Expression"/>, a typed default <typeparamref name="T"/>, and a
-    /// <c>Value → T</c> projection delegate.
-    ///
-    /// <list type="bullet">
-    ///   <item><description>
-    ///     <see cref="Kind"/> reads <c>_expr.Kind</c> directly — NOT a stored field — and reports
-    ///     <see cref="ExpressionKind.Constant"/> when the property was absent.
-    ///   </description></item>
-    ///   <item><description>
-    ///     <see cref="DependsOnFeature"/> / <see cref="IsZoomDependent"/> derive from <see cref="Kind"/>.
-    ///   </description></item>
-    ///   <item><description>
-    ///     <see cref="Evaluate(double)"/> (uniform path) throws <see cref="ArgumentException"/> for a
-    ///     Feature- or Composite-kind property — the render pipeline's uniformity guard.
-    ///   </description></item>
-    ///   <item><description>
-    ///     <see cref="Evaluate(double,IFeature)"/> (bake path) passes zoom + feature and is safe for all
-    ///     four <see cref="ExpressionKind"/>s.
-    ///   </description></item>
-    ///   <item><description>
-    ///     <see cref="TryEvaluate(double,IFeature,out T)"/> swallows all exceptions and returns false /
-    ///     <see cref="DefaultValue"/> — the tile-builder bake path relies on this.
-    ///   </description></item>
-    /// </list>
-    ///
-    /// Constant-kind expressions (and absent properties) cache the projected <typeparamref name="T"/>
-    /// value once at construction — evaluation is a field read; no allocation.
-    ///
-    /// Engine-free: no UnityEngine references. Clean-room: semantics from the public MapLibre Style Spec.
+    /// A single parsed MapLibre paint or layout property, typed to <typeparamref name="T"/>: one parsed
+    /// <see cref="Expression"/>, a typed default, and a <c>Value → T</c> projection delegate. A constant
+    /// expression (or an absent property) caches the projected value at construction, so evaluation is a field
+    /// read with no allocation.
     /// </summary>
     public sealed class StyleProperty<T>
     {

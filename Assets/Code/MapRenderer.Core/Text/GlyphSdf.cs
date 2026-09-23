@@ -15,18 +15,15 @@ namespace MapRenderer.Core.Text
         public const int Buffer = 3;
 
         /// <summary>
-        /// How far below a font's ascent reference line the typographic baseline sits, in baked px.
-        /// The glyph-PBF <c>top</c> metric is top-referenced and negative, so a layout's line origin
-        /// (<see cref="TextQuadLayout"/>'s <c>baselineY</c>) is that ascent reference, not the baseline
-        /// itself — a baseline-resting glyph's ink bottom sits this many baked px below it. Measured as
-        /// <c>Height - Top == 26</c> over the committed <c>NotoSansRegular/0-255.pbf.bytes</c> fixture
-        /// (129 of 189 bitmap-bearing glyphs: descenders give 30/32, above-baseline marks 19/23) — the
-        /// same constancy <see cref="TextQuadLayout.PlaceGlyph"/>'s own comment already relies on.
-        /// <b>Scope: measured over Latin (<c>NotoSansRegular/0-255</c>) only</b> — the other three shipped
-        /// glyph-PBF ranges (Arabic, Arabic presentation forms, variation selectors; no CJK/Cyrillic ships
-        /// here) modally measure 27, one baked px off. The glyph PBF carries no font-level metrics, so
-        /// every consumer must assume a baking convention; deriving this per font stack is deferred
-        /// (<c>docs/road-shields-design.md</c>).
+        /// How far below a font's ascent reference line the typographic baseline sits, in baked px. The
+        /// glyph-PBF <c>top</c> metric is top-referenced and negative, so a layout's line origin
+        /// (<see cref="TextQuadLayout"/>'s <c>baselineY</c>) is that ascent reference: a baseline-resting
+        /// glyph's ink bottom sits this far below it.
+        /// <para>Limitation: the value is the mode of <c>Height - Top</c> over the Latin fixture
+        /// <c>NotoSansRegular/0-255.pbf.bytes</c> (129 of 189 bitmap-bearing glyphs), the same constancy
+        /// <see cref="TextQuadLayout.PlaceGlyph"/> relies on. The other shipped ranges (Arabic, Arabic
+        /// presentation forms, variation selectors) modally measure 27. The glyph PBF carries no font-level
+        /// metrics, so the value is one constant, not per font stack (<c>docs/road-shields-design.md</c>).</para>
         /// </summary>
         public const float BaselineBelowReferencePx = 26f;
 

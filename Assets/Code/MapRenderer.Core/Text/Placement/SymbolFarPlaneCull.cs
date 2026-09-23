@@ -1,6 +1,6 @@
-// Engine-free: no UnityEngine dependency. TOP-LEVEL `using Unity.Mathematics;` + unqualified double3/float3x3 —
-// this file lives in MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header for the inline-
-// qualification trap this avoids).
+// Engine-free. TOP-LEVEL `using Unity.Mathematics;` + unqualified double3/float3x3 — this file lives in
+// MapRenderer.Core.Text.Placement (see SymbolScreenProjection's header for the inline-qualification trap this
+// avoids).
 
 using Unity.Mathematics;
 
@@ -20,9 +20,9 @@ namespace MapRenderer.Core.Text.Placement
     /// well-defined for the planar atlas and the globe alike (the globe gets its own tighter occlusion cull
     /// separately, <see cref="HorizonCull"/>).</para>
     ///
-    /// <para>Replaces an earlier fixed viewport-span radius around the LOOK-AT: at high tilt that radius sat
-    /// several times looser than the frustum actually reached, so it culled almost nothing. The far-plane bound is
-    /// tied to the real camera geometry, so one knob behaves sensibly at every tilt and zoom.</para>
+    /// <para>The bound is tied to the real camera geometry, so one knob behaves sensibly at every tilt and
+    /// zoom. A fixed viewport-span radius around the LOOK-AT would not: at high tilt it sits several times
+    /// looser than the frustum reaches, so it culls almost nothing.</para>
     /// </summary>
     public static class SymbolFarPlaneCull
     {

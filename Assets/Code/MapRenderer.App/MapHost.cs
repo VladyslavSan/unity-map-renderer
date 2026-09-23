@@ -16,37 +16,11 @@ using RenderMode = MapRenderer.Unity.Rendering.Materials.RenderMode;
 namespace MapRenderer.App
 {
     /// <summary>
-    /// Map composition root — assembles, wires, and starts the map subsystem. Lives on the scene's map
-    /// root GameObject (<see cref="MapViewComponent"/> + <see cref="Controller"/>).
-    /// One component brings the whole thing up: the MapView + camera graph, lighting, input, and the Map
-    /// reference on any dev surface (debug menu, telemetry, camera panel) that is present in the scene — add one
-    /// to use it; MapHost never adds or gates them, and enabling/disabling is the component's own checkbox.
-    ///
-    /// <para>The Main Camera is a separate plain camera GameObject (tagged <c>MainCamera</c>); this
-    /// component finds it at startup via <c>Camera.main</c> and wires it into <see cref="Controller"/>.</para>
-    ///
-    /// <para>Two wiring entry points are provided:</para>
-    /// <list type="bullet">
-    ///   <item><see cref="Start"/> — the runtime entry (MonoBehaviour lifecycle; reads inspector fields,
-    ///   builds the data source + style, calls <see cref="Wire"/>).</item>
-    ///   <item><see cref="Wire(GameObject, Camera)"/> — static, testable entry that performs the component
-    ///   graph wiring without touching the file system or HTTP. This is what EditMode tests drive.</item>
-    /// </list>
-    ///
-    /// <para>If the Main Camera is absent, <see cref="Wire"/> logs a warning and returns without NRE
-    /// (the map won't pan/zoom but also won't crash).</para>
-    ///
-    /// Inspector fields:
-    ///   <see cref="StyleUri"/>          — the style document URI (the single source of truth — S83b);
-    ///                                     its sources[] declare the tiles (inline or via TileJSON).
-    ///   <see cref="InitialLatitude"/>   — initial map center latitude.
-    ///   <see cref="InitialLongitude"/>  — initial map center longitude.
-    ///   <see cref="InitialZoom"/>       — initial zoom level.
-    ///
-    /// Rendered layer types: see <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerFactory"/> for
-    /// the current supported/not-yet-supported list.
-    ///
-    /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
+    /// Map composition root on the scene's map root GameObject. It wires the MapView + camera graph, lighting,
+    /// input, and the Map reference of each dev surface in the scene; it never adds or gates a dev surface.
+    /// <see cref="Start"/> is the runtime entry and finds the Main Camera via <c>Camera.main</c>.
+    /// <see cref="Wire(GameObject, Camera)"/> is the static entry that EditMode tests drive (no file or HTTP
+    /// access). Supported layer types: <see cref="MapRenderer.Unity.Rendering.Style.RenderLayerFactory"/>.
     /// </summary>
     [RequireComponent(typeof(MapViewComponent))]
     public sealed class MapHost : MonoBehaviour
@@ -57,17 +31,8 @@ namespace MapRenderer.App
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void WireLeakReporter() => VerifiedDisposable.LeakReporter = Debug.LogError;
 
-        // S83b: the STYLE is the single source of truth. One URI points at the style document; its
-        // sources[] declare every data source (a vector source carries either inline tiles[] or a TileJSON
-        // url, resolved at SetStyle time — S83a). The dated/hardcoded tile-URL template is gone: the
-        // openmaptiles source's TileJSON (https://tiles.openfreemap.org/planet) supplies the current tile
-        // path, so it no longer rots when OpenFreeMap rotates the version segment.
-        //
-        // Default: the shipped OpenFreeMap "liberty" style under StreamingAssets (ships in standalone
-        // builds), loaded via file:// for a fully-offline default. A leading scheme (file://, http://,
-        // https://) is used verbatim; a bare relative path is resolved under StreamingAssets as file://.
-        // To use the live OpenFreeMap style instead, set this to
-        // "https://tiles.openfreemap.org/styles/liberty".
+        // A TileJSON url in the style's sources[] keeps the tile path current across OpenFreeMap versions.
+        // Default: offline, from StreamingAssets. Live style: https://tiles.openfreemap.org/styles/liberty.
         [Header("Style")]
         [Tooltip("Style document URI — the single source of truth. file://, http(s):// or a bare path " +
                  "resolved under StreamingAssets. Its sources[] declare the tiles (inline or via TileJSON).")]
@@ -94,8 +59,8 @@ namespace MapRenderer.App
         public bool CapFrameRateToRefreshRate = true;
 
         [Tooltip("Render on a 3D globe (SphericalProjection) instead of the flat Web-Mercator plane. " +
-                 "Launch-time only — the projection is a session constant. First cut: a spherical-cap " +
-                 "tile cover at low-to-mid zoom; true pan/zoom input on the globe is a later stage.")]
+                 "Launch-time only — the projection is a session constant. Pan and zoom input cast " +
+                 "the pixel ray at the sphere.")]
         public bool UseGlobe = false;
 
         private void Start()
@@ -119,77 +84,51 @@ namespace MapRenderer.App
                     Latitude = InitialLatitude, Longitude = InitialLongitude, Altitude = 0.0
                 }, InitialZoom, 0, 0, VerticalFovDeg);
 
-            // 2. Wire camera + components only — the style drives the sources. Wire builds the MapView over
-            //    the main camera; SetStyle (step 4) loads the multi-source pipeline. The projection is the
-            //    launch-time session constant — globe or planar.
+            // 2. Wire camera + components; SetStyle (step 4) loads the sources. The projection is a launch-time
+            //    session constant — globe or planar.
             Wire(gameObject, Camera.main, initialView,
                  UseGlobe ? new SphericalProjection() : null);
 
-            // 2.5. Resolve the render mode ahead of the lighting bootstrap — it is a property of the
-            //      referenced MapMaterialSet (an Unlit set puts the whole view in unlit mode). RequireComponent
-            //      guarantees a MapViewComponent, but guard anyway (matches step 4's null check); an absent
-            //      component OR an unset MaterialSet defaults to Lit, the pre-existing unconditional behaviour.
+            // 2.5. The render mode is a property of the MapMaterialSet; the lighting bootstrap needs it first.
+            //      A missing MapViewComponent or MaterialSet defaults to Lit.
             var mapView    = GetComponent<MapViewComponent>();
             var renderMode = mapView != null && mapView.Config.MaterialSet != null
                 ? mapView.Config.MaterialSet.RenderMode
                 : RenderMode.Lit;
 
-            // 3. Ensure a directional light exists in the scene. Needed in BOTH modes: URP Lit uses it for
-            //    full lighting, and the unlit fill-extrusion twin reads its DIRECTION for a cheap half-Lambert
-            //    so 3D buildings aren't flat solid blocks (fills/lines ignore it). Unconditional — the ambient
-            //    probe below stays Unlit-gated, but the light does not.
+            // 3. Both render modes need the light: URP Lit shades with it, and the unlit fill-extrusion twin
+            //    reads its direction for a half-Lambert. Only the ambient probe below is Unlit-gated.
             EnsureDirectionalLight();
 
-            // 3.5. Ensure the scene has a real ambient probe — a scene whose environment lighting was
-            //      never generated leaves fully-shadowed faces (e.g. fill-extrusion walls facing away
-            //      from the sun) pure black, since URP Lit's indirect term is the only fill they get.
-            //      After EnsureDirectionalLight so a procedural skybox convolves against the real sun.
-            //      S4 (unlit epic): skipped under RenderMode.Unlit — no indirect term to fill.
+            // 3.5. After EnsureDirectionalLight, so a procedural skybox convolves against the real sun.
             EnsureEnvironmentLighting(renderMode);
 
-            // 4. Resolve the style URI and load it. SetStyle is async (fetches the style doc + any
-            //    TileJSON); fire-and-forget — tiles stream in as it completes. The dated hardcoded tile
-            //    path is gone: the openmaptiles source's TileJSON supplies the current path (S83a).
+            // 4. SetStyle is async (style doc + any TileJSON) and fire-and-forget; tiles stream in as it completes.
             if (mapView != null)
             {
-                // Device-independent on-screen tile size: derive the device-pixel ratio from the reported
-                // panel density (dpr = Screen.dpi / 160, the mdpi golden standard) so a selection tile is a
-                // constant physical size across densities. Two caveats, both real: Start runs in PLAY MODE
-                // as well, where Screen.dpi has been OBSERVED to report the density of whichever monitor the
-                // Editor window sits on — so play-testing a mobile build takes this machine's density, not
-                // the device's — and that is an observation rather than a contract, because Screen.dpi's
-                // Editor behaviour is undocumented (Unity documents the divergence for Screen.width/height
-                // and says nothing for dpi). Whether the mdpi derivation is right at all is open: mdpi is an
-                // Android convention, and no runtime API exposes the platform's own scale factor to managed
-                // user code (docs/device-pixel-ratio-design.md). Tests drive Wire, not Start, and keep the
-                // serialized ratio.
+                // dpr = Screen.dpi / 160 (the Android mdpi baseline), so a selection tile keeps one physical size.
+                // In Play Mode, Screen.dpi reports the Editor monitor's density (observed, not documented), and
+                // whether mdpi is the right baseline is open: docs/device-pixel-ratio-design.md. Tests drive Wire
+                // and keep the serialized ratio.
                 mapView.Config.DevicePixelRatio = DeviceScaling.DevicePixelRatioFromDpi(Screen.dpi);
             }
             string styleUri = ResolveStyleUri(StyleUri);
             if (mapView != null)
                 mapView.SetStyle(styleUri).Forget();
 
-            // 5. Apply initial camera framing (perspective, altitude-from-zoom, overhead at pitch=0).
-            //    Delegates to ApplyCameraTransform so frame-0 framing matches the runtime path and
-            //    InitialZoom is respected (zoom 2 → continent scale, zoom 16 → street scale).
-            // Frame-0 belt-and-suspenders: the MapCamera built in Wire already framed the camera; re-applying
-            // via the Controller (when present) is harmless and keeps the interactive path identical.
+            // 5. The MapCamera built in Wire has already framed the camera. Re-applying through the Controller
+            //    (when present) is harmless and gives frame 0 the same path as runtime input.
             var ctrl = GetComponent<Controller>();
             if (ctrl != null && ctrl.Camera != null)
                 ctrl.ApplyCameraTransform(initialView);
 
-            // Sky background on the main camera directly, so it applies with OR without an input Controller
-            // (the stress scene omits the Controller). Camera.main is the same camera Wire framed.
-            // This clear is the camera background ABOVE THE HORIZON under tilt, where a style's tile cover
-            // never reaches past the far plane, and the no-style default. A style's declared `background`
-            // layer paints the GROUND through BackgroundRenderLayer, so the two do not compete.
+            // Set on Camera.main, so it applies without a Controller. This clear is the sky above the horizon and
+            // the no-style default; a style's `background` layer paints the ground, so the two do not compete.
             var mainCam = Camera.main;
             if (mainCam != null && mainCam.backgroundColor == default)
                 mainCam.backgroundColor = new Color(0.85f, 0.95f, 1.0f, 1f); // light blue sky
 
-            // 6. Dev surfaces — wire Map on whatever dev overlay/panel is PRESENT in the scene. Adding one is
-            //    the user's choice and enabling/disabling it uses Unity's own component checkbox; MapHost never
-            //    adds or gates, it only fills the Map reference so you don't have to drag it.
+            // 6. Fill the Map reference of each dev surface present in the scene.
             WireDevSurfaces(mapView);
 
             Debug.Log($"[MapHost] Started. styleUri={styleUri}, zoom={InitialZoom}, " +
@@ -207,9 +146,8 @@ namespace MapRenderer.App
         {
             if (mapView == null) return;
 
-            // Each surface exposes a public `Map` field; with no shared interface, three explicit blocks are
-            // clearer than a reflection/interface hop. FindObjectsInactive.Include so a surface disabled now but
-            // enabled at runtime is already wired; only fill an unassigned Map (respect a hand-set reference).
+            // Each surface exposes a public `Map` field and shares no interface, so three explicit blocks are
+            // clearer than reflection. A hand-set Map is kept.
             var menu = Object.FindAnyObjectByType<Menu.MenuOverlay>(FindObjectsInactive.Include);
             if (menu != null && menu.Map == null) menu.Map = mapView;
 
@@ -221,12 +159,11 @@ namespace MapRenderer.App
         }
 
         /// <summary>
-        /// Resolves <paramref name="styleUri"/> to a loadable URI. A leading scheme
-        /// (<c>file://</c>, <c>http://</c>, <c>https://</c>) is used verbatim; a bare relative path is
-        /// resolved under <c>Application.streamingAssetsPath</c> as a <c>file://</c> URI (so the shipped
-        /// liberty.json loads fully offline in a standalone build).
-        /// <c>internal</c>: <see cref="Menu.StylesPage"/> shares this resolution, so a runtime style
-        /// switch and the startup load agree on the same URI for the same bare path.
+        /// Resolves <paramref name="styleUri"/> to a loadable URI. A leading <c>file://</c>, <c>http://</c> or
+        /// <c>https://</c> scheme is used verbatim. A bare relative path resolves under
+        /// <c>Application.streamingAssetsPath</c> as a <c>file://</c> URI, so the shipped style loads offline.
+        /// <c>internal</c>: <see cref="Menu.StylesPage"/> shares it, so a runtime style switch and the startup
+        /// load resolve a bare path to the same URI.
         /// </summary>
         internal static string ResolveStyleUri(string styleUri)
         {
@@ -240,16 +177,11 @@ namespace MapRenderer.App
         // ── Static wire-up entry (testable without Play mode) ─────────────────────────────────────
 
         /// <summary>
-        /// Wires the map subsystem on <paramref name="root"/>: finds the <see cref="Controller"/> and
-        /// <see cref="MapViewComponent"/>, sets <c>Controller.Camera</c>/<c>Controller.Map</c>, and builds
-        /// the MapView over the camera (from <paramref name="initialView"/>). Data is loaded separately via
-        /// <see cref="MapViewComponent.SetStyle(string,System.Threading.CancellationToken)"/>.
-        ///
-        /// <para>If <paramref name="camera"/> is null the method logs a warning and returns without
-        /// NRE (missing camera is handled gracefully).</para>
-        ///
-        /// <para>This is the single wiring graph entry point. Both the runtime <see cref="Start"/>
-        /// and EditMode wiring tests call this method.</para>
+        /// Wires <see cref="Controller"/> and <see cref="MapViewComponent"/> on <paramref name="root"/> and builds
+        /// the MapView over <paramref name="camera"/> from <paramref name="initialView"/>. A null camera logs a
+        /// warning and builds no MapView. Data loads separately via
+        /// <see cref="MapViewComponent.SetStyle(string,System.Threading.CancellationToken)"/>. The single wiring
+        /// entry: <see cref="Start"/> and the EditMode wiring tests both call it.
         /// </summary>
         /// <param name="root">The map-root GameObject — must carry MapView + Controller.</param>
         /// <param name="camera">The camera to drive; typically <c>Camera.main</c>.</param>
@@ -280,21 +212,17 @@ namespace MapRenderer.App
                 return;
             }
 
-            // The input Controller is OPTIONAL: the essential graph is the MapCamera onto MapView. A scene
-            // may omit it — e.g. an automated stress scene driven entirely by a script (TileLoadStressDriver)
-            // with no user to feed mouse/keyboard/touch — and the map still wires and renders.
+            // The input Controller is optional: a script-driven stress scene (TileLoadStressDriver) omits it,
+            // and the map still wires and renders.
             var ctrl = root.GetComponent<Controller>();
 
             // ── Wire the MapCamera onto MapView (the essential graph, controller-independent) ────────────
-            // MapView owns the (single) MapCamera; SetCamera builds the MapView (valid from that point — an
-            // empty map until SetStyle loads data). MapCamera wraps a real Unity camera, so with no camera
-            // we skip: no MapView is built (the scene always has a main camera in practice).
+            // MapView owns the single MapCamera; SetCamera builds the MapView (empty until SetStyle loads data).
+            // MapCamera wraps a real Unity camera, so a null camera builds no MapView.
             if (camera != null)
             {
-                // FOV + viewport come from initialView / the camera; the altitude multiplier (from the
-                // Controller when present, else 1) and the DPI ratio are side config. Seed DPR at
-                // construction so the ctor's frame-0 SyncToCamera frames the logical viewport too;
-                // LateUpdate keeps it live thereafter.
+                // Seed the DPR at construction so the ctor's frame-0 SyncToCamera frames the logical viewport;
+                // LateUpdate keeps it live afterwards.
                 float altitudeMultiplier = ctrl != null ? ctrl.AltitudeMultiplier : 1f;
                 var mapCamera = new MapCamera(camera, initialView, altitudeMultiplier, projection,
                                               mapView.Config.DevicePixelRatio);
@@ -309,8 +237,8 @@ namespace MapRenderer.App
                 ctrl.Map    = mapView;
 
                 // Wire the touch source alongside the desktop controller, over the same write seam.
-                // GetComponent-or-AddComponent so no committed scene edit is required; the scene validator
-                // only flags missing scripts, not runtime-added ones.
+                // GetComponent-or-AddComponent, so the scene needs no committed edit; the scene validator flags
+                // only missing scripts, not runtime-added ones.
                 var touch = root.GetComponent<TouchController>() ?? root.AddComponent<TouchController>();
                 touch.camera = camera;
                 touch.Map    = mapView;
@@ -320,23 +248,11 @@ namespace MapRenderer.App
         // ── Helpers ──────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// Ensures <see cref="RenderSettings.ambientProbe"/> is non-degenerate, so lit map geometry gets
-        /// indirect fill wherever the directional light's <c>N·L</c> is ≤ 0 (otherwise those faces —
-        /// e.g. fill-extrusion walls facing away from the sun — render pure black; URP Lit has no other
-        /// source of light there). Guarded: only recomputes environment lighting when the probe's DC/L0
-        /// term is (near-)zero, i.e. environment lighting was never generated for this scene — a host
-        /// scene that already baked or generated its own probe is left untouched.
-        ///
-        /// <para>Called once, at startup (from <see cref="Start"/>, after the directional light is ensured
-        /// so a procedural skybox convolves against the real sun). Nothing in this project changes the
-        /// skybox or ambient settings after startup, so a single call suffices; a future time-of-day or
-        /// style-driven-sky feature that mutates <see cref="RenderSettings"/> at runtime would own
-        /// re-calling this.</para>
-        ///
-        /// <para>S4 (unlit epic): a no-op under <see cref="RenderMode.Unlit"/> — the unlit shader
-        /// twins have no indirect-lighting term to fill, so generating a probe for them would be dead work.
-        /// Threaded as a parameter (not read from a global) so <see cref="Start"/> — this type's one caller —
-        /// stays the single place render mode is resolved.</para>
+        /// Ensures <see cref="RenderSettings.ambientProbe"/> is non-degenerate: without it, URP Lit renders black
+        /// every face whose <c>N·L</c> ≤ 0, such as walls facing away from the sun. It recomputes only when the
+        /// probe's DC term is near zero, so a host scene's own probe stays untouched. It runs once at startup,
+        /// because nothing changes the sky or ambient settings later. A no-op under
+        /// <see cref="RenderMode.Unlit"/>: the unlit shader twins have no indirect term.
         /// </summary>
         /// <param name="mode">The active render mode (<see cref="MapMaterialSet.RenderMode"/>); only
         /// <see cref="RenderMode.Lit"/> runs the probe check.</param>
@@ -372,10 +288,8 @@ namespace MapRenderer.App
             var light   = lightGo.AddComponent<Light>();
             light.type                 = LightType.Directional;
             light.intensity            = 1.0f;
-            // Explicit, not left to the component default: buildings cast shadows, and a light that
-            // never enables them makes every backend's declaration invisible. Only the BOOTSTRAP light — the
-            // early return above hands a host-supplied light back untouched, same "don't clobber the host's
-            // lighting" stance as EnsureEnvironmentLighting, so that host owns enabling shadows on its own.
+            // Explicit: buildings cast shadows, and a light without them hides every backend's shadow declaration.
+            // Only the bootstrap light gets it; a host-supplied light keeps the host's own shadow setting.
             light.shadows              = LightShadows.Soft;
             lightGo.transform.rotation = Quaternion.Euler(60f, 30f, 0f);
             Debug.Log("[MapHost] Created directional light (none found in scene).");

@@ -25,38 +25,32 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// Managed per-layer fill mesh builder. Receives real <see cref="TileId"/> + origin, a set of
     /// pre-selected features, and a <see cref="Fill.PaintProperties"/> describing the style.
     ///
-    /// Pipeline: managed color eval → Burst geometry via <c>FillMeshPipeline</c>
-    ///   (decode → assemble → earcut → project, run on this worker via <c>.Run()</c> into NativeArrays) →
-    ///   managed alloc-free stream write into a <c>Mesh.MeshData</c>. No managed triangulator is on this
-    ///   path; <c>PolygonAssembler</c> lives test-side only — the ground truth the differential-oracle
-    ///   tests assemble against.
+    /// Pipeline: managed color eval → Burst geometry via <c>FillMeshGraph</c> (clip → assemble → earcut →
+    /// project, a scheduled job graph writing NativeArrays) → <see cref="FillStreamWriteJob"/> into a
+    /// <c>Mesh.MeshData</c>. <c>PolygonAssembler</c> lives test-side only, as the differential-oracle
+    /// ground truth.
     ///
     /// <see cref="ScheduleWrite"/> builds the mesh AND writes directly into a caller-allocated
-    /// <see cref="Mesh.MeshData"/> (the writable-mesh advanced API), off the main thread: the worker
-    /// populates the mesh buffers in place, and the main thread only allocates (at kick) and applies (at
-    /// consume). The off-thread-write threading contract is guarded by
+    /// <see cref="Mesh.MeshData"/>, off the main thread: the worker populates the mesh buffers in place,
+    /// and the main thread only allocates (at kick) and applies (at consume) — guarded by
     /// <c>MeshDataThreadWriteSpikeTests</c>.
     ///
     /// Stream layout (4 streams, matching Unity's max-4-stream cap):
-    ///   Stream 0 — Position (Float32x3) + Normal (Float32x3) interleaved via <see cref="FillPositionNormal"/>.
-    ///   Stream 1 — TexCoord0 UV (Float32x2) + TexCoord3 band (Float32x3) interleaved via
-    ///              <see cref="FillPatternUvBand"/>, 20 B. The band attribute shares a stream because all
-    ///              four are already spoken for — Unity's cap — so it could not have one of its own.
+    ///   Stream 0 — Position (Float32x3) + Normal (Float32x3) via <see cref="FillPositionNormal"/>.
+    ///   Stream 1 — TexCoord0 UV (Float32x2) + TexCoord3 band (Float32x3) via
+    ///              <see cref="FillPatternUvBand"/>, 20 B (all four streams are already spoken for).
     ///   Stream 2 — Tangent (Float32x4).
     ///   Stream 3 — Color (Float32x4, linearized sRGB).
     ///   Index buffer — UInt32.
     ///
     /// Color: two-carrier split for <c>fill-color</c>. Data-driven bakes the per-feature sRGB colour,
-    /// converted to linear via <c>Color.linear</c> off the main thread, and leaves <c>_BaseColor</c> white.
-    /// Constant/zoom leaves the vertex white and rides the material's <c>_BaseColor</c> uniform instead,
-    /// bound by <see cref="Materials.MaterialFactory.BindFillPaintToApplier"/> (Unity converts sRGB→linear
-    /// on upload for a Color-typed shader property, so that site must NOT pre-convert).
+    /// converted to linear off the main thread, leaving <c>_BaseColor</c> white. Constant/zoom leaves the
+    /// vertex white and rides the material's <c>_BaseColor</c> uniform instead, bound by
+    /// <see cref="Materials.MaterialFactory.BindFillPaintToApplier"/> (Unity converts sRGB→linear on upload
+    /// for a Color-typed shader property, so that site must NOT pre-convert).
     ///
     /// Thread-safety: <see cref="ScheduleWrite"/> touches only pure-managed, stateless Core code plus a
-    /// caller-allocated <c>Mesh.MeshData</c> (whose <c>SetVertexBufferParams</c>/<c>GetVertexData</c>/… are
-    /// off-main-thread safe). No shared mutable static state — safe to run concurrently per tile.
-    ///
-    /// Clean-room: design follows the MapLibre Style Spec. No MapLibre source read.
+    /// caller-allocated <c>Mesh.MeshData</c> — no shared mutable static state, safe to run concurrently per tile.
     /// </summary>
     public static partial class StyledFillTileBuilder
     {
@@ -76,15 +70,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.BuildLayerInput);
 
         // Skip Unity's main-thread index validation (O(indices)) + the redundant intermediate bounds compute:
-        // indices come from earcut and are covered by tests, and the canonical bounds are the worker-computed
-        // AABB assigned to Mesh.bounds after apply. Preserves the no-main-thread-scan contract.
+        // indices come from earcut and are covered by tests; the worker-computed AABB becomes Mesh.bounds.
         private const MeshUpdateFlags NoValidate =
             MeshUpdateFlags.DontValidateIndices | MeshUpdateFlags.DontRecalculateBounds;
 
-        // Hoisted fill vertex attribute descriptor array (static readonly — no per-tile alloc). 4 streams
-        // (Unity max). Canonical ascending VertexAttribute enum order (Position=0, Normal=1, Tangent=2,
-        // Color=3, TexCoord0=4) eliminates the "non-standard order" warning; each attribute on its own stream
-        // so the reorder does not change any stream's byte offset.
+        // Hoisted (static readonly — no per-tile alloc). Ascending VertexAttribute enum order avoids the
+        // "non-standard order" warning; within each stream it matches the struct field order, so offsets hold.
         private static readonly VertexAttributeDescriptor[] FillVertexDescriptors = new[]
         {
             new VertexAttributeDescriptor(VertexAttribute.Position,  VertexAttributeFormat.Float32, 3, stream: 0),
@@ -95,8 +86,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             new VertexAttributeDescriptor(VertexAttribute.TexCoord3, VertexAttributeFormat.Float32, 3, stream: 1),
         };
 
-        // The projection the geometry is built with; this single seam defaults to WebMercator. The pipeline
-        // projects with the chosen Projection struct — WebMercator.Forward is hardcoded nowhere.
+        // The projection the geometry is built with; this single seam defaults to WebMercator, and no path
+        // hardcodes WebMercator.Forward.
         // internal, not private: a test-assembly caller reads this default via InternalsVisibleTo.
         internal static readonly IProjection DefaultProjection = new WebMercatorProjection();
 
@@ -112,17 +103,15 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// Tightly-packed pattern UV + boundary-band attribute struct for stream 1.
-        /// Stride = 5 × 4 = 20 bytes, matching the descriptors (TexCoord0 float2 + TexCoord3 float3).
-        ///
-        /// <para><see cref="Band"/> reaches the shaders as TEXCOORD3 as <c>(dirEast, dirNorth, side)</c> in
-        /// the vertex's own surface frame — the <c>up</c>/<c>east</c>/<c>north</c> frame the mesh already
-        /// supplies through NORMAL and TANGENT, which is what makes it correct on the globe as well as flat.
-        /// <c>(0,0,0)</c> on an interior vertex (coverage 1, nothing displaced); an outward miter with
-        /// <c>side = 1</c> on a boundary-band outer vertex, which <c>Fill_VertexModify.hlsl</c> turns into a
-        /// one-device-pixel displacement and <c>Fill_BandCoverage.hlsl</c> into a coverage ramp. Produced by
-        /// <c>FillBandJob</c> on BOTH arms; the curved arm carries it through subdivision, which lerps
-        /// it at every split midpoint — so <c>side</c> takes intermediate values there, never only 0 or 1.</para>
+        /// Tightly-packed pattern UV + boundary-band attribute struct for stream 1. Stride = 5 × 4 = 20
+        /// bytes, matching the descriptors (TexCoord0 float2 + TexCoord3 float3).
+        /// Non-local invariant: <see cref="Band"/> reaches the shaders as TEXCOORD3 as
+        /// <c>(dirEast, dirNorth, side)</c> in the vertex's own NORMAL/TANGENT surface frame, which is what
+        /// makes it correct on the globe as well as flat. <c>(0,0,0)</c> on an interior vertex; an outward
+        /// miter with <c>side = 1</c> on a boundary-band outer vertex. Produced by <c>FillBandJob</c> on both
+        /// arms. <c>Fill_VertexModify.hlsl</c> turns it into a one-device-pixel displacement, and
+        /// <c>Fill_BandCoverage.hlsl</c> into a coverage ramp. The curved arm's subdivision lerps it at every
+        /// split midpoint, so <c>side</c> takes intermediate values there, never only 0 or 1.
         /// </summary>
         [StructLayout(LayoutKind.Sequential)]
         public struct FillPatternUvBand
@@ -134,18 +123,14 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <summary>
         /// Returns <paramref name="features"/> reordered by <c>fill-sort-key</c> ascending, or the SAME
         /// instance when the layer declares no sort key — the common case, which must stay allocation-free
-        /// and order-identical so every existing snapshot keeps its exact triangle order.
-        ///
-        /// <para>The sort is made STABLE by folding the declared index in as the tiebreak:
-        /// <c>Array.Sort</c> is an introsort and is not stable on its own, and features with equal sort keys
-        /// must keep source order (the spec's implicit ordering). An unevaluable key falls to 0, matching
-        /// <c>TryEvaluate</c>'s contract elsewhere in this builder.</para>
-        ///
-        /// <para><paramref name="buffers"/> (perf/gc-elimination): when non-null, the working buffers and the
-        /// sort comparer are drawn from the caller's pooled <see cref="TileBuildBuffers"/> instead of being
-        /// allocated fresh — byte-identical output, zero managed allocation once the buffers have grown to
-        /// this tile's peak feature count. <c>null</c> (tests, non-pooled callers) keeps the original
-        /// allocating behaviour verbatim.</para>
+        /// and order-identical so every existing snapshot keeps its exact triangle order. Non-obvious why:
+        /// the sort is made STABLE by folding the declared index in as the tiebreak, since <c>Array.Sort</c>
+        /// is an introsort and not stable on its own, and features with equal sort keys must keep source
+        /// order. An unevaluable key falls to 0, matching <c>TryEvaluate</c>'s contract elsewhere in this
+        /// builder. <paramref name="buffers"/>, when non-null, draws the working buffers and sort comparer
+        /// from the caller's pooled <see cref="TileBuildBuffers"/> instead of allocating fresh —
+        /// byte-identical output, zero managed allocation once the buffers reach this tile's peak feature
+        /// count; <c>null</c> (tests, non-pooled callers) allocates fresh buffers per call.
         /// </summary>
         private static IReadOnlyList<SelectedTileFeature> OrderBySortKey(
             IReadOnlyList<SelectedTileFeature> features, Fill.LayoutProperties layout, double zoom,
@@ -176,9 +161,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (buffers != null)
             {
                 // The pool's reusable IComparer<int> field — no per-call closure/delegate allocation, unlike
-                // the lambda overload below. Sorted range is [0, count) — the backing arrays may be LONGER
-                // (grow-only, sized to a prior build's peak), so the 3-arg range overload is load-bearing,
-                // not cosmetic.
+                // the lambda overload below. The 3-arg range overload is load-bearing: the backing arrays
+                // may be LONGER (grow-only, sized to a prior build's peak) than the sorted [0, count) range.
                 System.Array.Sort(declaredOrder, 0, count, buffers.SortKeyComparer(sortKeys));
 
                 SelectedTileFeature[] orderedBuffer = buffers.OrderedFeaturesBuffer(count);
@@ -210,21 +194,14 @@ namespace MapRenderer.Unity.Rendering.Meshing
             => EarthConstants.EquatorialCircumferenceMetres / math.pow(2.0, id.Z);
 
         /// <summary>
-        /// Stream 1 for one vertex: its offset from the tile origin in WORLD UNITS, rather than the 0..1 tile
-        /// fraction this used to write.
-        ///
-        /// <para>The change is what makes pattern sizing correct at all. A tile fraction only means something
-        /// once you know the tile's world size, which the per-layer material uniform cannot know — it sees the
-        /// display zoom, and a tile's own zoom differs from it under overzoom and under mixed-zoom cover. In
-        /// world units the shader needs no tile knowledge at all: it multiplies by repeats-per-world-unit,
-        /// which is a function of the display zoom alone.</para>
-        ///
-        /// <para>Precision: values run 0..tileSpan, which is ~2.4 km at z14 — comfortably inside float32
-        /// (~1e-4 there). It degrades toward z0, where a tile spans the world, but a pattern at z0 is far past
-        /// the point of caring.</para>
-        ///
-        /// <para>Non-pattern fills are unaffected: this stream feeds <c>_BaseMap</c>, which is the default
-        /// white texture for every map fill, so its scaling is unobservable.</para>
+        /// Stream 1 for one vertex: its offset from the tile origin in WORLD UNITS, not a 0..1 tile
+        /// fraction. Non-obvious why: a tile fraction only means something once you know the tile's world
+        /// size, which the per-layer material uniform cannot know (it sees the display zoom, and a tile's
+        /// own zoom differs from it under overzoom and mixed-zoom cover); in world units the shader needs
+        /// no tile knowledge, multiplying by repeats-per-world-unit instead. Precision: values run
+        /// 0..tileSpan (~2.4 km at z14, where float32 resolves ~1e-4), degrading toward z0, past the
+        /// point of caring for a pattern. Non-pattern fills are unaffected — this stream feeds
+        /// <c>_BaseMap</c>, the default white texture, so its scaling is unobservable.
         /// </summary>
         private static Vector2 PatternCoord(double2 tileVertex, double extentInv, double tileSpanWorldUnits)
         {
@@ -236,13 +213,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// The graph arm's prologue — the work that precedes <c>TileBuildGraph</c>'s scheduling, so a
         /// graph-arm processor can run it on the seam and hand the result to the pump. Selects the
         /// fill-sort-key order, bakes each surviving polygon feature's linear colour (<paramref name="featureColors"/>,
-        /// caller-owned, indexed by feature ORDINAL), and builds the ring visit order.
-        ///
-        /// <para>Returns <c>default</c> (an uncreated <see cref="FillMeshPipeline.LayerInput"/>, with
-        /// <paramref name="featureColors"/> also left uncreated) when there is no polygon geometry to build —
-        /// an absent <paramref name="selectedFeatures"/> list, an uncreated <paramref name="geometry"/>, or
-        /// every selected feature failing the polygon-only gate. The caller reads
-        /// <c>Input.RingVisitOrder.IsCreated</c> to tell "nothing to build" from a real request.</para>
+        /// caller-owned, indexed by feature ORDINAL), and builds the ring visit order. Returns
+        /// <c>default</c> (with <paramref name="featureColors"/> also left uncreated) when there is no
+        /// polygon geometry to build; the caller reads <c>Input.RingVisitOrder.IsCreated</c> to tell
+        /// "nothing to build" from a real request.
         /// </summary>
         /// <param name="featureColors">Per-feature linear colour, Persistent-allocated and owned by the
         /// caller from here on — created iff the return value is (both share one fate).</param>
@@ -263,31 +237,23 @@ namespace MapRenderer.Unity.Rendering.Meshing
             if (selectedFeatures == null || selectedFeatures.Count == 0 || !geometry.IsCreated)
                 return default;
 
-            // fill-sort-key: features draw in ASCENDING key order, so a higher key lands LATER in the index
-            // buffer and therefore ON TOP — this layer's features share one mesh drawn under a
-            // painter's-algorithm ZWrite-Off contract, where triangle order IS draw order for coincident
-            // polygons. Absent key ⇒ no sort at all, keeping the source's declared order byte-for-byte.
+            // fill-sort-key: ASCENDING key order, so a higher key lands LATER in the index buffer and ON TOP —
+            // under this layer's ZWrite-Off contract, triangle order IS draw order. Absent key ⇒ no sort.
             selectedFeatures = OrderBySortKey(selectedFeatures, layout, zoom, buffers);
 
             using var sBuild = PmBuildLayerInput.Auto();
 
-            // Bake this layer's per-feature linear colour, and record each surviving polygon feature's RANK —
-            // its position in fill-sort-key order. Both are indexed by the feature's ORDINAL in the source
-            // layer, because that is what the shared buffer's RingFeatureIdx names; a slot-indexed array would
-            // permute colours the moment this layer's filter rejects anything.
-            // Allocator.Persistent, NOT TempJob: this runs off-main (UniTask.RunOnThreadPool) and a build can
-            // span >4 main-thread frames — TempJob's 4-frame lifetime check would flag/reclaim it mid-build.
-            // featureColors is RETURNED (caller-owned from here), so it is a plain local, not `using var`; a
-            // try/catch below disposes it (and RingVisitOrder, once built) on a mid-method throw.
+            // Bakes per-feature linear colour + RANK (position in fill-sort-key order), both indexed by the
+            // feature's ORDINAL, which RingFeatureIdx names; a slot-indexed array would permute colours under a filter.
+            // Persistent, NOT TempJob: this runs off-main and can span >4 main-thread frames. featureColors is
+            // returned, so it is a plain local; the try/catch below disposes it and RingVisitOrder on a throw.
             NativeArray<Vector4> colors = new(geometry.FeatureCount, Allocator.Persistent);
             NativeArray<int>     order  = default;
             try
             {
                 using var rankByOrdinal = new NativeArray<int>(geometry.FeatureCount, Allocator.Persistent);
-                // A `using`-declared local is read-only for index-ASSIGNMENT (CS1654) — reads through
-                // rankByOrdinal (including passing it by value to BuildRingVisitOrder below) are unaffected;
-                // only the write needs a plain-local alias. GetSubArray(0, Length) is a normal method call
-                // returning a NativeArray<T> VIEW over the same memory, assignable to a non-readonly local.
+                // A `using`-declared local rejects index ASSIGNMENT (CS1654), so the write below goes through
+                // a plain-local VIEW over the same memory: GetSubArray(0, Length).
                 NativeArray<int> rankByOrdinalWritable = rankByOrdinal.GetSubArray(0, rankByOrdinal.Length);
                 // KEEP the -1 fill: a default NativeArray<int> is 0, a VALID rank — so without this, non-drawn
                 // features (never ranked below) would read rank 0 and BuildRingVisitOrder would visit their rings.
@@ -299,9 +265,8 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     SelectedTileFeature selected = selectedFeatures[si];
                     IFeature feature = selected.Feature;
 
-                    // Polygon-only. Not the sole guard — RingAssemblyJob has its own kind
-                    // gate — but it stays, because it also decides which ordinals get a colour and how many rings
-                    // are gathered. Two independent guards, each RED-verifiable on its own.
+                    // Polygon-only. Not the sole guard — RingAssemblyJob has its own kind gate — but it
+                    // stays, because it also decides which ordinals get a colour and how many rings are gathered.
                     if (feature.GeometryType != TileGeometryType.Polygon)
                         continue;
 
@@ -315,13 +280,9 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     Color lin = featureColor.linear;
 
                     // Data-driven fill-opacity: bake the per-feature alpha, since one uniform cannot express
-                    // a value that varies per feature. Constant/zoom opacity stays on the _Opacity uniform (bound
-                    // by MaterialFactory) and is NOT folded in here, or the two would multiply twice; the
-                    // data-driven branch is exactly the case MaterialFactory declines to bind. Same split
-                    // BindLinePaintToApplier makes for data-driven line-width.
-                    //
-                    // Alpha is NOT gamma-converted — Color.linear transforms rgb only, and alpha is linear by
-                    // definition. Reading it off `lin` would be a silent no-op today but wrong if that changed.
+                    // a value that varies per feature. Constant/zoom opacity stays on the _Opacity uniform
+                    // (bound by MaterialFactory) and is NOT folded in here, or the two would multiply twice.
+                    // Alpha is NOT gamma-converted — Color.linear transforms rgb only, and alpha is linear by definition.
                     float featureAlpha = lin.a;
                     if (paint.Opacity.DependsOnFeature && paint.Opacity.TryEvaluate(zoom, feature, out float opacity))
                         featureAlpha *= opacity;
@@ -346,16 +307,12 @@ namespace MapRenderer.Unity.Rendering.Meshing
                     OriginRender   = tileOriginRender,
                     Projection     = projection ?? DefaultProjection, // exactly as WriteGeometry passes it
                     Clip           = clip,
-                    // fill-antialias: the ONLY consumer of the parsed property. Encoded 1.0 = true, and the
-                    // parse rejects a data-driven expression, but a ZOOM expression survives — so this is a
-                    // threshold, not an equality, and it resolves at the BUILD zoom (a zoom-varying value
-                    // only takes effect when the tile is re-meshed).
-                    // The `_FillAntialias` uniform is deliberately NOT the consumer: it stays declared,
-                    // instanced and bound, and is read by no pass.
-                    // fill-antialias, already resolved: a layer that omitted it was parsed against the
-                    // project default (MapViewConfig.FillAntialiasing, via StyleParser), so there is nothing
-                    // left to decide here. A ZOOM expression survives the parse, so this resolves at the
-                    // BUILD zoom — a zoom-varying value only takes effect when the tile is re-meshed.
+                    // fill-antialias: the ONLY consumer of the parsed property (the `_FillAntialias`
+                    // uniform stays declared, instanced and bound, but is read by no pass). Encoded 1.0 =
+                    // true; the parse rejects a data-driven expression but a ZOOM expression survives, so
+                    // this resolves at the BUILD zoom — a zoom-varying value only takes effect when the
+                    // tile is re-meshed. A layer that omits it is parsed against the project default
+                    // (MapViewConfig.FillAntialiasing, via StyleParser).
                     SuppressBoundaryBand = !paint.Antialias.Evaluate(zoom),
                 };
             }
@@ -370,22 +327,17 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <summary>
         /// The ring indices this layer wants triangulated, in draw order: a <b>counting sort</b> of the shared
         /// buffer's rings bucketed on their feature's <c>fill-sort-key</c> rank, skipping rings whose feature
-        /// this layer does not draw (<c>rank == -1</c>).
-        ///
-        /// <para>Two properties make this the byte-identical form of a "reorder the feature list, then
-        /// decode it" shape, and both come free from the counting sort being <b>stable</b>:</para>
+        /// this layer does not draw (<c>rank == -1</c>). Non-local invariant: this is byte-identical to
+        /// "reorder the feature list, then decode it" only because the counting sort is <b>stable</b>:
         /// <list type="bullet">
         /// <item>rings of one feature stay <b>contiguous</b> — <c>RingAssemblyJob</c> resets its exterior sign
         /// on a feature change, so a split feature's second run would be re-read as a fresh exterior;</item>
         /// <item>within a feature, rings keep <b>ascending ring index</b> = decode order, which is what makes
-        /// earcut's hole-bridge sort (tiebroken on ring index) land where it did before.</item>
+        /// earcut's hole-bridge sort (tiebroken on ring index) land where the reorder form puts it.</item>
         /// </list>
-        ///
-        /// <para><paramref name="buffers"/> (perf/gc-elimination): when non-null, <c>rankStart</c> and the
-        /// cursor it seeds are drawn from the pool instead of a fresh <c>new int[]</c> + <c>Array.Clone</c> —
-        /// same counting-sort arithmetic, byte-identical <c>order</c>. The returned <see cref="NativeArray{T}"/>
-        /// itself is UNCHANGED by pooling — still a fresh <c>Allocator.Persistent</c> array the caller disposes
-        /// (D1a idiom); only the two MANAGED <c>int[]</c> buffers move to the pool.</para>
+        /// <paramref name="buffers"/>, when non-null, draws <c>rankStart</c> and its cursor from the pool
+        /// instead of a fresh array — same arithmetic, byte-identical <c>order</c>. The returned
+        /// <see cref="NativeArray{T}"/> is always a fresh <c>Allocator.Persistent</c> array the caller disposes.
         /// </summary>
         private static NativeArray<int> BuildRingVisitOrder(
             TileGeometryBuffers geometry, NativeArray<int> rankByOrdinal, int rankCount, TileBuildBuffers buffers)
@@ -428,14 +380,10 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// The sizing + <see cref="FillStreamWriteJob"/> schedule half of <see cref="ScheduleWrite"/>, split
         /// out so a test-assembly caller (via <c>InternalsVisibleTo</c>) can run it over its OWN
         /// caller-supplied <paramref name="md"/> instead of a freshly-minted
-        /// <see cref="Mesh.MeshDataArray"/> — one write job, two callers, no
-        /// <c>MeshData</c>-to-<c>MeshData</c> copy. Declares
-        /// <paramref name="md"/>'s buffers (same order both callers always used) and schedules the job.
-        /// Returns UNCOMPLETED — the caller completes the handle before reading bounds, and disposes the
-        /// bounds array itself.
-        ///
-        /// <para><b>Main-thread only</b>: scheduling <see cref="FillStreamWriteJob"/> is a Unity job-system
-        /// operation.</para>
+        /// <see cref="Mesh.MeshDataArray"/> — one write job, two callers, no <c>MeshData</c>-to-<c>MeshData</c>
+        /// copy. Declares <paramref name="md"/>'s buffers and schedules the job. Returns UNCOMPLETED — the
+        /// caller completes the handle before reading bounds, and disposes the bounds array itself.
+        /// Main-thread only: scheduling a job is a Unity job-system operation.
         /// </summary>
         /// <param name="md">The <c>Mesh.MeshData</c> slot to size and write into — caller-owned.</param>
         /// <param name="output">A layer's completed measure-graph output — caller-verified non-empty
@@ -443,7 +391,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
         /// <param name="featureColors">Per-feature linear colour, indexed by <c>output.VertexFeatureIdx</c>.</param>
         /// <param name="tile">The layer's tile address — feeds <see cref="TileSpanWorldUnits"/>.</param>
         /// <param name="extent">The layer's tile extent — feeds the pattern-coordinate scale.</param>
-        /// <remarks><c>internal</c>, not <c>private</c> (vestige sweep): the production write node is
+        /// <remarks><c>internal</c>, not <c>private</c>: the production write node is
         /// <see cref="ScheduleWrite"/>; a test-assembly caller reaches this second, through
         /// <c>MapRenderer.Unity</c>'s own <c>InternalsVisibleTo("MapRenderer.Tests.Shared")</c>
         /// grant.</remarks>
@@ -454,8 +402,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             int indexCount  = output.TriangleIndices.Length;
 
             // No GetVertexData/GetIndexData here — FillStreamWriteJob takes the whole Md and resolves every
-            // stream/index view INSIDE Execute() (see that job's doc: taking the views here, as separate job
-            // fields, reproducibly made two of them alias at Schedule).
+            // stream/index view INSIDE Execute(): taken here as separate job fields, two of them would alias at Schedule.
             md.SetVertexBufferParams(vertexCount, FillVertexDescriptors);
             md.SetIndexBufferParams(indexCount, IndexFormat.UInt32);
             md.subMeshCount = 1;
@@ -480,12 +427,11 @@ namespace MapRenderer.Unity.Rendering.Meshing
         }
 
         /// <summary>
-        /// The write graph's node for one NON-EMPTY layer — owns
-        /// the vertex-stream layout and the <see cref="Mesh.MeshData"/> boundary, so a caller (the graph
-        /// arm's owner) never needs to know either. Allocates one exact-size <see cref="Mesh.MeshDataArray"/>
-        /// sized to <paramref name="output"/>'s real vertex/index count and hands it to
-        /// <see cref="ScheduleStreamWrite"/>. Returns UNCOMPLETED — the caller polls/completes
-        /// <see cref="MeshWriteOutput.Handle"/> before taking the payload.
+        /// The write graph's node for one NON-EMPTY layer — owns the vertex-stream layout and the
+        /// <see cref="Mesh.MeshData"/> boundary, so a caller never needs to know either. Allocates one
+        /// exact-size <see cref="Mesh.MeshDataArray"/> sized to <paramref name="output"/>'s real
+        /// vertex/index count and hands it to <see cref="ScheduleStreamWrite"/>. Returns UNCOMPLETED — the
+        /// caller polls/completes <see cref="MeshWriteOutput.Handle"/> before taking the payload.
         /// </summary>
         /// <param name="output">A layer's completed measure-graph output — caller-verified non-empty
         /// (<c>TileVertices.Length &gt; 0 &amp;&amp; TriangleIndices.Length &gt; 0</c>) and error-free.</param>

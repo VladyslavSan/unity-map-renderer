@@ -30,10 +30,10 @@ namespace MapRenderer.Jobs.Tiles
 
     /// <summary>
     /// A decoded tile: layers looked up by name. This is the *universal*, polymorphic-by-kind decode
-    /// surface — vector sources resolve to <see cref="ITileLayer"/>/<see cref="IFeature"/> today, and
-    /// future non-vector kinds (raster → texture, terrain → heightfield) are additional decode results at
-    /// this same level, not additions to the vector-feature shape above. Implemented by <see cref="MvtTile"/>
-    /// (and, later, any other <see cref="ITileDecoder"/> output).
+    /// surface — vector sources resolve to <see cref="ITileLayer"/>/<see cref="IFeature"/>, and a non-vector
+    /// kind (raster → texture, terrain → heightfield) would be an additional decode result at this same
+    /// level, not an addition to the vector-feature shape above. Implemented by <see cref="MvtTile"/> and
+    /// <see cref="GeoJsonTile"/>.
     ///
     /// <para><b>Why <see cref="IDisposable"/>.</b> A decoded tile holds <c>Allocator.Persistent</c> native
     /// memory (its layers' <see cref="ITileLayer.Geometry"/>), so it has a definite lifetime and a single

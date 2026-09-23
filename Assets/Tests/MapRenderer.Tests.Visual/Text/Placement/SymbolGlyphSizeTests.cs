@@ -67,7 +67,7 @@ namespace MapRenderer.Tests.Visual
     // DPR factor, and the ŷ sign) are pinned by `MapPitchedGlyphSizeTiltZeroTests` against the VIEWPORT arm,
     // which shares no code with the map branch.
     //
-    // WHY THE RECEDING ARM CARRIES THE CLAIM. `CrossNear`/`CrossFar` are ISO-DEPTH by construction, and for
+    // WHY THE RECEDING ARM CARRIES THE CLAIM. `CrossNear`/`CrossFar` are ISO-DEPTH inherently, and for
     // an iso-depth symbol a true per-glyph world size and a size scaled by ONE constant per symbol are IDENTICAL —
     // that second thing is the reverted screen-ruler model. So a cross-arm reading cannot
     // discriminate the model, and every reading here that claims to is on, or spans, the RECEDING arm. Cross-arm
@@ -330,7 +330,7 @@ namespace MapRenderer.Tests.Visual
         /// Chasing depth here would make the tooth vacuous, which is the opposite of what the headline asks.</para>
         ///
         /// <para><b>SCOPE CAVEAT — read this before citing T2 as evidence for the model.</b> These cells read
-        /// the CROSS-AZIMUTH arm, which is ISO-DEPTH by construction and therefore CANNOT distinguish a
+        /// the CROSS-AZIMUTH arm, which is ISO-DEPTH inherently and therefore CANNOT distinguish a
         /// per-glyph world size from a per-symbol constant. That is fine here, because T2's claim is "letters
         /// do not merge", not "the size is per-glyph" — and the 32.0 px threshold was measured on the cross
         /// arm and is exact only there. <b>T1 on the receding arm is the discriminator; T2 is the
@@ -391,7 +391,7 @@ namespace MapRenderer.Tests.Visual
 
         /// <summary>
         /// <b>T2, the control BELOW the threshold.</b> The near (look-at) cross-azimuth symbol must
-        /// segment into <c>GlyphCount</c> runs. Deliberately NOT a discriminator: at the look-at the two
+        /// segment into <c>GlyphCount</c> runs. NOT a discriminator: at the look-at the two
         /// competing rulers coincide exactly, so this cell is separable under BOTH models. It is what says
         /// the segmentation machinery works at all before the cells above are believed.
         /// </summary>
@@ -423,7 +423,7 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para>Read from <c>WorldBillboardVertex.Offset</c> — production staging, production
         /// <c>BuildWorldQuad</c>, a real built mesh. The expectation is built from the fixture's OWN
-        /// <c>MetresPerLogicalPixel = MetresPerDevicePixel × Config.DevicePixelRatio</c>, deliberately NOT
+        /// <c>MetresPerLogicalPixel = MetresPerDevicePixel × Config.DevicePixelRatio</c>, NOT
         /// from any production field that already carries the product: if both sides sourced the ratio from
         /// one place they would drop it together and the DPR leg would be vacuous.</para>
         ///
@@ -716,7 +716,7 @@ namespace MapRenderer.Tests.Visual
     // and these tests would pass on the broken tree. Two objects hold a size here, and both are Size×Size at
     // every dpr: (1) the RenderTexture assigned to the MapCamera's camera, which is what MapCamera.ViewportPx
     // reads, and (2) SnapshotRenderer's own _rt, which is what _ScreenParams reads during the draw. This
-    // fixture deliberately does NOT use MapViewTestExtensions.WithTestCamera, so that class's shared static
+    // fixture does NOT use MapViewTestExtensions.WithTestCamera, so that class's shared static
     // RenderTexture is not involved at all.
     //
     // What SHOULD move at dpr 2 is the camera: the altitude is framed from the LOGICAL viewport height
@@ -1246,7 +1246,7 @@ namespace MapRenderer.Tests.Visual
         /// <b>T3 — the reported symptom, pinned.</b> A rendered line and a rendered symbol must scale by the
         /// SAME factor across the dpr sweep, and that factor must be 2.
         ///
-        /// <para>Both are asserted against 2.0 AND against each other, deliberately. "Both moved" would pass
+        /// <para>Both are asserted against 2.0 AND against each other. "Both moved" would pass
         /// on a build that multiplied the LABEL side at the style seam as well — the symbol path already
         /// divides by the logical viewport, so a second multiply gives <c>textRatio == 4</c>, which the
         /// against-2.0 clause is the only thing that catches.</para>
@@ -1314,7 +1314,7 @@ namespace MapRenderer.Tests.Visual
     // WHY TILT 0 IS THE ONLY POSE THAT CAN SAY THIS. At tilt 0 the ground plane is perpendicular to the view
     // axis, so every ground point shares ONE view depth d, and `MetresPerLogicalPixel` is BY DEFINITION the
     // metres-per-logical-pixel ruler at d. A map-pitched corner displaced by `cornerPx · mppLogical` METRES
-    // therefore projects to exactly `cornerPx` LOGICAL PIXELS — which is precisely what the viewport branch adds
+    // therefore projects to exactly `cornerPx` LOGICAL PIXELS — which is what the viewport branch adds
     // to clip.xy after projection. So at tilt 0 a map-pitched curved symbol and a viewport-pitched twin must
     // render PIXEL-IDENTICALLY (up to AA).
     //
@@ -1401,7 +1401,7 @@ namespace MapRenderer.Tests.Visual
         /// which divides by <c>_ScreenParamsLogical</c>, would not move. Injection 3 is exactly this
         /// shape.</para>
         ///
-        /// <para><b>Blind to a mirror, by construction — predict that, do not discover it.</b> A mirror is an
+        /// <para><b>Blind to a mirror, inherently — predict that, do not discover it.</b> A mirror is an
         /// ISOMETRY, so it preserves ink count exactly. Injection I2 (flip
         /// <c>SYMBOL_WORLD_MAP_Y_SIGN</c>) leaves this clause at ratio 1.0000 and reds only the centroid
         /// clause below. That is why the two are separate <c>[Test]</c>s and not two asserts in one method.</para>
@@ -1603,7 +1603,7 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para>Both arms are rendered from one <see cref="SymbolPlacementSystem"/>, re-Ticked between them —
         /// the same two-pass discipline <c>OffLookAtSymbolScene</c> uses, and for the same reason: one camera
-        /// means one projection, so the two frames are comparable by construction rather than by assumption.
+        /// means one projection, so the two frames are comparable inherently rather than by assumption.
         /// Each Tick is duplicated because the collision verdict is harvested one Tick late.</para>
         /// </summary>
         private static void Measure(double devicePixelRatio, float roadAngleDeg, bool degenerateUp,
@@ -1643,7 +1643,7 @@ namespace MapRenderer.Tests.Visual
                 double3 pathB = origin + dir * halfLen;
 
                 // The per-vertex surface normal. This scene is Web-Mercator, so up IS (0,1,0) — except on
-                // the T9 arm, which deliberately feeds the float3.zero that the older fixtures and the
+                // the T9 arm, which feeds the float3.zero that the older fixtures and the
                 // null-PathUpRender bakers write, to reach SymbolWorldGroundFrame's guard.
                 double3 up = degenerateUp ? double3.zero : new double3(0.0, 1.0, 0.0);
 

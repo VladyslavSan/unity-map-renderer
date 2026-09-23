@@ -6,24 +6,11 @@ using Unity.Mathematics;
 namespace MapRenderer.Core.Style.Line
 {
     /// <summary>
-    /// <c>line-dasharray</c> — engine-free helpers for the in-shader modulo dash mechanism.
-    ///
-    /// The mechanism is an in-shader modulo over cumulative dash-pattern length: cheap and exact for
-    /// simple patterns, no LUT/SDF texture needed. AA is handled in the fragment shader via fwidth
-    /// feather on the on/off transition edges. Round dash-caps are not implemented.
-    ///
-    /// Dash lengths are line-width units
-    /// (distanceAlong / metersPerDashUnit), so dashes scale automatically with line-width and remain
-    /// zoom-stable. The unit is FIXED FOR THE FRAME — it is the styled width measured with the frame's
-    /// ground resolution, not with each vertex's own screen measurement — so the pattern is anchored to the
-    /// ground and foreshortens with the road instead of sliding along it as the camera moves. The CPU
-    /// mirror in this file returns the same ratio formula that the HLSL fragment uses.
-    ///
-    /// This file is the single source of truth for the dash function. The HLSL mirror lives in
-    /// Assets/Code/MapRenderer.Unity/Shaders/Map/Line/Line_VertexExtrude.hlsl.
-    ///
-    /// Engine-free: no UnityEngine references. Runs in both dotnet core-tests and Unity EditMode.
-    /// Clean-room: dash semantics from the public MapLibre Style Spec.
+    /// <c>line-dasharray</c> — engine-free helpers for the in-shader dash: a modulo over cumulative dash-pattern
+    /// length. The fragment shader feathers the on/off edges with fwidth; round dash-caps are not implemented.
+    /// Dash lengths are line-width units, so dashes scale with line-width. The unit is FIXED FOR THE FRAME (the
+    /// styled width at the frame's ground resolution), so the pattern stays anchored to the ground as the
+    /// camera moves. The single source of the dash function; HLSL mirror: <c>Line_VertexExtrude.hlsl</c>.
     /// </summary>
     public static class LineDash
     {
@@ -31,35 +18,11 @@ namespace MapRenderer.Core.Style.Line
         // Entries beyond this cap are silently truncated; document in callers.
         public const int MaxEntries = 4;
 
-        // ── Dash coverage (CPU mirror of the HLSL fragment function) ─────────────────────────
-        //
-        // Returns 1.0 when the fragment is on a "dash-on" region, 0.0 on a "dash-off" gap.
-        // This is the hard (non-AA) binary step; the GPU fragment adds fwidth feather around
-        // the same transition edges (see Line_VertexExtrude.hlsl).
-        //
-        // Parameters:
-        //   distanceAlong    — cumulative arc length along the line in world meters.
-        //   metersPerDashUnit — metres of road per dash unit: the styled line width in world metres,
-        //                   measured with the FRAME-CONSTANT ruler (MetersPerPixel(zoom)/dpr × the styled
-        //                   device-px width). NOT "the line's width in world metres at this point on
-        //                   screen": that is a different, per-vertex quantity, and using it here makes
-        //                   dashes crawl, skew and depend on tessellation.
-        //   pattern       — on/off alternating lengths in line-width units (same units as dashU).
-        //                   pattern[0] = first on-length, pattern[1] = first off-length, ...
-        //                   Odd-length arrays → treat as solid (documented below).
-        //
-        // Returns 1.0 for solid identity when:
-        //   • pattern is null or empty           → no dasharray set, render solid.
-        //   • metersPerDashUnit ≤ 0              → degenerate, render solid.
-        //   • pattern has odd length / length==1 → ambiguous spec; render solid.
-        //   • all pattern entries are <= 0       → degenerate, render solid.
-        //
-        // Note on [1]: a single-entry array [1] has odd length → solid identity. A single entry cannot
-        // define both an on and an off span, so solid is the correct fallback.
-        //
-        // Mirror note: this function must produce the same on/off result as the HLSL fragment
-        // (Assets/Code/MapRenderer.Unity/Shaders/Map/Line/Line_VertexExtrude.hlsl). Keep both in sync on
-        // any arithmetic change.
+        // ── Dash coverage: CPU mirror of the HLSL fragment function; keep both in sync ──────────────
+        // Returns 1 on a dash and 0 in a gap: a hard step; the GPU adds an fwidth feather at the same edges.
+        // metersPerDashUnit is the frame-constant ruler from the class doc; a per-vertex width here would make
+        // dashes crawl and depend on tessellation. pattern = on/off lengths in line-width units, "on" first.
+        // Solid (1) for a null/empty or odd-length pattern, metersPerDashUnit <= 0, or all entries <= 0.
         public static float DashCoverage(double distanceAlong, double metersPerDashUnit, float[] pattern)
         {
             if (pattern == null || pattern.Length == 0)
@@ -106,25 +69,16 @@ namespace MapRenderer.Core.Style.Line
         }
 
         // ── Dasharray as an expression ─────────────────────────────────────────────────────────
-        //
-        // line-dasharray goes through the expression system like every other paint property: parsed
-        // once into an Expression (whose Kind — Constant / Zoom — is computed at parse time), then
-        // evaluated to a float[] pattern at a given zoom. There is no bespoke evaluator: a constant
-        // dash is a LiteralExpression that evaluates trivially, and StyledLayerSet skips the per-frame
-        // re-eval unless the expression DependsOnZoom (so constants are evaluated once at bind).
-        //
-        // line-dasharray is data-constant in the spec: a feature-dependent value is invalid and
-        // degrades to solid naturally (it errors against a null feature → TryEvaluatePattern false).
+        // line-dasharray goes through the expression system: parsed once, then evaluated to a pattern at a zoom.
+        // LineRenderLayer re-evaluates it per frame only when it depends on zoom. It is data-constant in the
+        // spec: a feature-dependent value errors against the null feature, so TryEvaluatePattern renders solid.
 
         /// <summary>
-        /// Parse a <c>line-dasharray</c> property value into an expression. A dasharray value may write
-        /// its array literals bare (e.g. <c>[2,1]</c>, or the per-stop outputs of
-        /// <c>["step",["zoom"],[1,1],10,[2,1]]</c>), but the strict expression parser rejects an array
-        /// whose first element is not an operator string. So bare arrays are wrapped as
-        /// <c>["literal", …]</c> (<see cref="ExpressionParser.WrapBareArrayLiterals"/>, shared with
-        /// <c>FillExtrusion.PaintProperties</c>'s translate parse) — at the top level and in an
-        /// operator's direct arguments (which covers step / interpolate stop outputs). Returns null for a
-        /// null or malformed value (→ render solid; never throws).
+        /// Parses a <c>line-dasharray</c> property value into an expression. A dasharray may write its arrays bare
+        /// (<c>[2,1]</c>, or the stop outputs of <c>["step",["zoom"],[1,1],10,[2,1]]</c>), which the strict
+        /// expression parser rejects, so <see cref="ExpressionParser.WrapBareArrayLiterals"/> wraps them as
+        /// <c>["literal", …]</c> at the top level and in an operator's direct arguments. Returns null for a null
+        /// or malformed value (→ render solid); never throws.
         /// </summary>
         public static Expression ParseDashArray(JsonValue json)
         {
@@ -135,13 +89,11 @@ namespace MapRenderer.Core.Style.Line
         }
 
         /// <summary>
-        /// Evaluate a parsed dasharray expression at <paramref name="zoom"/> into an alloc-free packed
-        /// pattern (capped at <see cref="MaxEntries"/> = 4 entries). Returns false (→ render solid) when
-        /// the expression is null, errors (e.g. a data-driven value against a null feature), or yields a
-        /// non-array / empty / non-numeric result.
-        ///
-        /// Solid identity is signalled by <paramref name="count"/> == 0 (odd-length arrays, degenerate, or
-        /// missing pattern). Caller: <c>mat.SetVector("_DashArray",(Vector4)packed); mat.SetFloat("_DashCount",count);</c>
+        /// Evaluates a parsed dasharray expression at <paramref name="zoom"/> into an alloc-free packed pattern of
+        /// at most <see cref="MaxEntries"/> entries. Returns false (→ render solid) when the expression is null,
+        /// errors, or yields a non-array, empty or non-numeric result. <paramref name="count"/> == 0 also means
+        /// solid (odd-length, degenerate or missing pattern). The caller binds <c>_DashArray</c> and
+        /// <c>_DashCount</c>.
         /// </summary>
         /// <param name="expr">The parsed dasharray expression (from <see cref="ParseDashArray"/>).</param>
         /// <param name="zoom">The current map zoom level.</param>

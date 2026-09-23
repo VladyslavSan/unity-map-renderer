@@ -16,7 +16,7 @@ using MapRenderer.Unity.Common;
 namespace MapRenderer.Unity.Rendering.Backend.Entities
 {
     /// <summary>
-    /// S53b ECS render backend (internal, IDisposable) — the engine for <c>RenderBackend.Entities</c>.
+    /// The ECS render backend (internal, IDisposable) — the engine for <c>RenderBackend.Entities</c>.
     ///
     /// Each tile-layer draw item is an <see cref="Entity"/> rendered by Entities Graphics (which runs on
     /// <see cref="UnityEngine.Rendering.BatchRendererGroup"/> under the hood). Unlike the raw-BRG backend
@@ -356,10 +356,10 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
 
         // ── Instrumentation counters ────────────────────────────────────────────────────────────
         // Read only by tests, but WRITTEN by the code below, so they stay on the class: they are state this
-        // renderer produces, not a query over it. The read-only queries that used to sit here (DrawItemCount,
-        // TileRootCount, TileRootExists, RootChildBufferCount, IsParentedToTileRoot, EntityExists,
-        // GetInstanceTranslation, GetRenderBoundsLocal, GetLayerEntityName) had zero production callers and
-        // now live in the test assembly — see EntitiesTileRendererTestExtensions.
+        // renderer produces, not a query over it. The read-only queries with zero production callers
+        // (DrawItemCount, TileRootCount, TileRootExists, RootChildBufferCount, IsParentedToTileRoot,
+        // EntityExists, GetInstanceTranslation, GetRenderBoundsLocal, GetLayerEntityName) live in the test
+        // assembly — see EntitiesTileRendererTestExtensions.
 
         /// <summary>Stall #2 tooth: number of batched DestroyEntity structural changes performed by the LAST
         /// <see cref="RemoveItems"/> call (0 or 1 — the whole batch is one structural change). A shallow

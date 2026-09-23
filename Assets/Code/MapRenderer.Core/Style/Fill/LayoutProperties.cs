@@ -5,23 +5,17 @@ using MapRenderer.Core.Json;
 namespace MapRenderer.Core.Style.Fill
 {
     /// <summary>
-    /// The parsed MapLibre fill <b>layout</b> properties for a single fill style layer. Read from the
-    /// layer's <c>layout</c> sub-tree via <see cref="PropertyNames"/>. Engine-free; clean-room (public
-    /// Style Spec, no MapLibre source read).
-    ///
-    /// <para>Exactly one key today (<c>fill-sort-key</c>), but it is a class rather than a bare property on
-    /// <see cref="StyleLayer"/> so it matches <c>Line.LayoutProperties</c>/<c>Symbol.LayoutProperties</c> —
-    /// the paint/layout split is the shape every layer kind uses.</para>
+    /// The parsed MapLibre fill <b>layout</b> properties for a single fill style layer, read from the layer's
+    /// <c>layout</c> sub-tree via <see cref="PropertyNames"/>. It holds one key (<c>fill-sort-key</c>) but is a
+    /// class, not a property on <see cref="StyleLayer"/>, so it matches <c>Line.LayoutProperties</c> and
+    /// <c>Symbol.LayoutProperties</c>: every layer kind has the paint/layout split.
     /// </summary>
     public sealed class LayoutProperties
     {
         /// <summary>
-        /// fill-sort-key: the within-layer draw order for this layer's features. Default 0.
-        /// Zoom- and feature-capable (a <see cref="StyleProperty{T}"/>), so it is evaluated per feature at
-        /// build time rather than bound as a uniform.
-        ///
-        /// <para>Spec ordering: features sort <b>ascending</b>, and a feature with a HIGHER sort key appears
-        /// ABOVE one with a lower key.</para>
+        /// fill-sort-key: the within-layer draw order for this layer's features. Default 0. Zoom- and
+        /// feature-capable, so it is evaluated per feature at build time rather than bound as a uniform.
+        /// Features sort ascending: a HIGHER sort key draws ABOVE a lower one.
         /// </summary>
         public StyleProperty<float> SortKey { get; init; }
 

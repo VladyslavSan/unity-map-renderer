@@ -8,11 +8,10 @@
 // Same A0-F2 Offset.y convention as SymbolTextWorld (baked in BillboardMath.BuildWorldQuad,
 // not here — the vertex stage just consumes it).
 //
-// P-B: the along-line tangent branch (Stage AC's, ported VERBATIM from SymbolTextWorld_ForwardPass.hlsl —
+// P-B: the along-line tangent branch (ported VERBATIM from SymbolTextWorld_ForwardPass.hlsl —
 // the duplication is the convention: a Map/ shader layer may not include another's pass, see
-// docs/meshing-design.md §"Folder layout" — pinned by ShaderStructureTests.MapLayerFiles_ShareOnlyViaSanctionedInclude,
-// renamed S23 I2a; a genuinely shared HELPER like ../PixelsToWorld.hlsl is the one sanctioned exception,
-// not a shared PASS, which this rule still forbids).
+// Shaders/README.md § "Include rules" — pinned by ShaderStructureTests.MapLayerFiles_ShareOnlyViaSanctionedInclude;
+// a sanctioned shared HELPER like ../PixelsToWorld.hlsl is allowed, a shared PASS is not).
 // Without it a map-aligned line icon
 // (road_one_way_arrow*) would draw unrotated — every arrow pointing screen-right regardless of the road.
 //

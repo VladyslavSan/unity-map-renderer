@@ -392,7 +392,7 @@ namespace MapRenderer.Tests.Rendering
     // BackendShadowModeTests — the per-layer CastShadows declaration reaches the GPU
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // Two INDEPENDENT teeth for "buildings cast shadows, ground receives them", deliberately not collapsed into
+    // Two INDEPENDENT teeth for "buildings cast shadows, ground receives them", not collapsed into
     // one parity test:
     //
     //   TRANSPORT  — each backend is handed a shadow list ([On, Off, On] over three FILL layers) that no backend
@@ -776,11 +776,12 @@ namespace MapRenderer.Tests.Rendering
     // RenderLayerCompatibilitySummaryTests — an unpainted/unsupported layer is named, not silent
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // A style layer of an unsupported kind used to vanish with no explanation
-    // (RenderLayerFactory.Create returned a bare null; RenderLayerSet.Build's "if (layer == null) continue;"
-    // dropped it on the floor). These teeth pin the style-load compatibility summary that replaces the
-    // silence: every skipped layer's id, raw type and WHY, collected once per Build — never per tile, never
-    // per frame — with the supported layers around it still taking their slots undisturbed.
+    // Without the compatibility summary, a style layer of an unsupported kind would vanish with no
+    // explanation (RenderLayerFactory.Create returns a bare null; RenderLayerSet.Build's
+    // "if (layer == null) continue;" drops it on the floor). These teeth pin the style-load compatibility
+    // summary that replaces that silence: every skipped layer's id, raw type and WHY, collected once per
+    // Build — never per tile, never per frame — with the supported layers around it still taking their
+    // slots undisturbed.
     [TestFixture]
     public class RenderLayerCompatibilitySummaryTests : BaseTestFixture
     {
@@ -1402,10 +1403,9 @@ namespace MapRenderer.Tests.Rendering
             Assert.AreNotSame(set[3].Material, set[4].Material, "line-c and fill-d must be distinct instances.");
         }
 
-        // The world icon material's renderQueue used to be set SOLELY by
-        // WorldSymbolRenderer.ResolveMaterial's per-frame sync (deleted this commit) — this style, with two
-        // symbol layers at distinct draw indices, pins that BOTH world materials now carry the correct
-        // Build-time queue with NO Tick at all.
+        // The world icon material's renderQueue is set at Build time, with no per-frame sync — this
+        // style, with two symbol layers at distinct draw indices, pins that BOTH world materials carry
+        // the correct Build-time queue with NO Tick at all.
         private const string TwoSymbolLayersStyleJson = @"{
     ""version"": 8,
     ""sources"": { ""s"": { ""type"": ""vector"", ""tiles"": [""https://x/{z}/{x}/{y}.pbf""] } },
@@ -1442,10 +1442,10 @@ namespace MapRenderer.Tests.Rendering
                 int bandTop   = bandBase + LayerDrawOrder.SubSlotsPerLayer - 1;
 
                 Assert.AreEqual(bandBase, iconQueue,
-                    $"slot {i}'s WorldIconMaterial queue must be set directly by SymbolRenderLayer.Create (§0.1), " +
+                    $"slot {i}'s WorldIconMaterial queue must be set directly by SymbolRenderLayer.Create, " +
                     "with NO Tick, at its own layer's Base sub-slot.");
                 Assert.AreEqual(LayerDrawOrder.QueueFor(i, LayerSubSlot.Above), textQueue,
-                    $"slot {i}'s WorldTextMaterial queue must be set by RenderLayerSet.Build (via Material, §0.2), " +
+                    $"slot {i}'s WorldTextMaterial queue must be set by RenderLayerSet.Build (via Material), " +
                     "with NO Tick, at its own layer's Above sub-slot.");
 
                 // The tooth a re-bake cannot fake: icon strictly below its own layer's text.
