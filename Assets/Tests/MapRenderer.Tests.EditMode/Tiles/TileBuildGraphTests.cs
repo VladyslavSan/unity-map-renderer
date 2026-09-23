@@ -71,9 +71,9 @@ namespace MapRenderer.Tests.Tiles
         /// <summary>One layer's fixture: the rented build plus the two owned-by-the-caller locals a test
         /// needs to read independently of anything the build/graph computes (the geometry, BORROWED by the
         /// build and never freed by it, and the visit order, whose LENGTH a precondition reads before the
-        /// build's own <c>Dispose</c> makes it meaningless — see <c>LayerRequest.HasWork</c>'s retired own
-        /// doc for that trap). <see cref="ILayerMeshBuild"/> exposes neither (test-code-bloat rule; the interface's own
-        /// note on why <c>MaterialIndex</c> did not survive onto the interface applies here too), so a test
+        /// build's own <c>Dispose</c> makes it meaningless). <see cref="ILayerMeshBuild"/> exposes neither
+        /// (test-code-bloat rule; the interface's own note on why it carries no <c>MaterialIndex</c> applies
+        /// here too), so a test
         /// that needs them keeps its own reference instead of reaching back through the build.</summary>
         private readonly struct LayerFixture
         {
@@ -210,7 +210,7 @@ namespace MapRenderer.Tests.Tiles
 
             long baseline = MeshDataPayload.DebugLiveAllocCount;
             // Unlike production's shared-quad background tile, these three layers each mint their OWN
-            // geometry (a deliberately different fixture per layer) — none of them is the graph's single
+            // geometry (a different fixture per layer) — none of them is the graph's single
             // per-tile ownedGeometry slot, so that argument is `default` (nothing shared to own) and each
             // layer's own Geometry is disposed by this test in `finally`, after the graph itself (BORROWED —
             // never freed by the build).
@@ -438,7 +438,7 @@ namespace MapRenderer.Tests.Tiles
                     Vector3 p = b0[i].Position, n = b0[i].Normal;
                     s0.AddRange(BitConverter.GetBytes(p.x)); s0.AddRange(BitConverter.GetBytes(p.y)); s0.AddRange(BitConverter.GetBytes(p.z));
                     s0.AddRange(BitConverter.GetBytes(n.x)); s0.AddRange(BitConverter.GetBytes(n.y)); s0.AddRange(BitConverter.GetBytes(n.z));
-                    // Only the UV half is hashed, deliberately: stream 1 gained the band attribute
+                    // Only the UV half is hashed: stream 1 carries the band attribute
                     // alongside it, and the frozen golden must stay the pattern coordinates' own digest so
                     // this tooth still says whether THEY changed.
                     Vector2 pc = b1[i].PatternUv;
@@ -547,7 +547,7 @@ namespace MapRenderer.Tests.Tiles
                     // the ring's (0,0)->(10,0) edge lies wholly on the y = 0 window line: the band stops
                     // there, as it does at every tile seam. (The ring is small enough to take RingClipJob's
                     // wholly-inside fast path, so that edge was never actually cut — the predicate is "both
-                    // endpoints on one window line", which is deliberately the wider of the two readings.)
+                    // endpoints on one window line", which is the wider of the two readings.)
                     Assert.AreEqual(6, bandVertices,
                         "two band vertices per ring vertex, over the fixture's one 3-vertex ring — suppression " +
                         "drops a QUAD, never a vertex pair, so this count does not move with it");
@@ -565,7 +565,7 @@ namespace MapRenderer.Tests.Tiles
                     "and for every index, band triangles included.");
 
                 // The write-job plumbing between the graph's band column and stream 1 — the gap the frozen
-                // PatternUv digest deliberately does not cover. Two assertions instead of a digest: they name
+                // PatternUv digest does not cover. Two assertions instead of a digest: they name
                 // what broke, which a hash never does.
                 var stream1 = md.GetVertexData<StyledFillTileBuilder.FillPatternUvBand>(1);
                 Assert.AreEqual(Vector3.zero, stream1[0].Band,
@@ -683,14 +683,12 @@ namespace MapRenderer.Tests.Tiles
             finally { graph.Dispose(); DisposeGeometries(geometries); } // graph.Dispose() sweeps the cached array itself
         }
 
-        /// <summary><b>The actual defect this stage's Group 0.5 fixed, reproduced.</b> Both real
-        /// <c>TileManager</c> consume sites used to take the array into a LOCAL (<c>LoadedTile.Payloads</c> on
-        /// the pump's local copy) and only store it back to <c>_loaded</c> afterward — so a throw between the
-        /// take and the store (a backend <c>AddTileLayer</c>, a mesh apply) lost the local while
-        /// <c>_payloadsTaken</c> stayed permanently set, and every later Tick's retry hit the old
-        /// <c>InvalidOperationException</c> guard forever, leaking the taken array (nothing else referenced
-        /// it). Reproduced here at the level the fix actually lives — the caller drops its first reference
-        /// exactly as an interrupted store would, then "retries on a later Tick" by calling again.</summary>
+        /// <summary><b>A caller that loses its first reference can take the payloads again.</b> A
+        /// <c>TileManager</c> consume site that took the array into a LOCAL and stored it to <c>_loaded</c>
+        /// only afterward would lose it on a throw in between (a backend <c>AddTileLayer</c>, a mesh apply).
+        /// A permanently set <c>_payloadsTaken</c> would then make every later Tick's retry throw
+        /// <c>InvalidOperationException</c> and leak the array. The test drops its first reference as an
+        /// interrupted store would, then retries by calling again.</summary>
         [Test]
         public void CompleteWriteAndTakePayloads_RecoversAfterTheCallerLosesItsFirstReference()
         {
@@ -867,7 +865,7 @@ namespace MapRenderer.Tests.Tiles
         /// "graph, not the caller, owns this reference" contract is load-bearing, not merely documented.
         /// <para><b>RED:</b> moving <c>TileBuildGraph.Dispose</c>'s
         /// <c>_decode?.Release()</c> above <c>_handle.Complete()</c> would make THIS release (already
-        /// early, by construction) into the NORMAL shape every pen path takes — this test's own throw is
+        /// early) into the NORMAL shape every pen path takes — this test's own throw is
         /// the demonstration of what that reordering would inflict on every caller, not just this one.</para></summary>
         [Test]
         public void DecodeReference_ReleasedEarlyByCaller_ThrowsFromTheSafetySystem()
@@ -921,14 +919,14 @@ namespace MapRenderer.Tests.Tiles
                 // Clean-up: release the delay, Complete() the handle, then
                 // dispose the raw arrays BY HAND — the geometry's own IsCreated already flipped false before
                 // the safety system's throw above, so it needs no further disposal (and a bare
-                // geometry.Dispose() here would itself throw). graph.Dispose() is deliberately NOT called:
+                // geometry.Dispose() here would itself throw). graph.Dispose() is NOT called:
                 // it would try to release decode a SECOND time (a double-release the safety system would
                 // also catch). The accepted cost of a positive control that demonstrates the unsafe path:
-                // (a) the build's own rent DOES count — FillLayerBuild.Rent is unconditional, unlike the
-                // retired LayerRequest.Create's object-initializer
-                // bypass — so LayerMeshBuildCounters.DebugLiveBuilds stays elevated by one for the rest of this batch
-                // process, alongside TileBuildGraph.DebugLiveCount; harmless, every tooth in this suite reads
-                // its own counters as a DELTA against a baseline captured in its own body, never an absolute.
+                // (a) the build's own rent DOES count — FillLayerBuild.Rent is unconditional, with no
+                // object-initializer bypass — so LayerMeshBuildCounters.DebugLiveBuilds stays elevated by
+                // one for the rest of this batch process, alongside TileBuildGraph.DebugLiveCount; harmless,
+                // every tooth in this suite reads its own counters as a DELTA against a baseline captured in
+                // its own body, never an absolute.
                 // (b) a REAL leak, not just a
                 // stale counter — the measure graph's own Allocator.Persistent output buffers are never
                 // freed, because the only path that frees them is graph.Dispose(), which this test cannot
@@ -946,14 +944,13 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── T4 (per-layer build-object stage): the ownership contract, terminal-before-request-columns arm ──
+        // ── per-layer build object: the ownership contract, terminal-before-request-columns arm ──────────
         //
         // The extrusion build is the one case where a REORDER inside Dispose(), not a deletion, is the
         // falsifiable defect: FillExtrusionLayerBuild.Dispose() must complete the extrusion's own terminal
         // (_ext.Dispose(), which is FillExtrusionGraphOutput.Dispose()'s Handle.Complete() → Roof.Dispose()
         // → Walls.Dispose()) BEFORE freeing the request columns (FeatureColors/FeatureBake/Input.RingVisitOrder)
-        // those in-flight wall jobs still hold [ReadOnly]. This is the exact defect the last stage's plan
-        // review caught; it is now a tooth instead of a review finding.
+        // those in-flight wall jobs still hold [ReadOnly].
 
         /// <summary>Disposes a genuinely in-flight <see cref="FillExtrusionLayerBuild"/> directly (not
         /// through a <see cref="TileBuildGraph"/>) — held on <see cref="SpinUntilGateJob"/>
@@ -1128,7 +1125,7 @@ namespace MapRenderer.Tests.Tiles
                     kinds.Add(features[i].GeometryType);
                     commands.Add((features[i] as ITileCommandStreamFeature)?.Geometry);
                 }
-                // Deliberately NOT counted as a Features read: the buffer is built here, once, exactly as the
+                // NOT counted as a Features read: the buffer is built here, once, exactly as the
                 // decoder builds a real layer's — so any read the runner performs is the runner's own.
                 Geometry = MvtGeometryMaterializerTestFactory.Materialize(tile, Extent, kinds, commands);
             }
@@ -1187,9 +1184,9 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// T4a — one source-layer is materialized <b>once per worker pass</b>, however many style
-        /// layers name it. This is the tooth that would have caught the shape the shared buffer fixes: three fill
-        /// layers over one source-layer used to decode its geometry three times.
+        /// One source-layer is materialized <b>once per worker pass</b>, however many style
+        /// layers name it. Without the shared buffer, three fill layers over one source-layer would decode
+        /// its geometry three times; this tooth reds on that.
         ///
         /// <para><b>How to read the number.</b> The layer already holds its buffer, so obtaining geometry
         /// reads <c>Features</c> <b>zero</b> times and the count is exactly N. The assertion is therefore
@@ -1263,12 +1260,10 @@ namespace MapRenderer.Tests.Tiles
 
         // ── Primary semantic tooth ────────────────────────────────────────────────────────────────────
 
-        /// <summary>The slot-join half that used to read <c>payloads[i].MaterialIndex</c> off a
-        /// <c>FakePayload</c> the runner wrapped, then <c>output.Layers[i].MaterialIndex</c> directly, is now
-        /// observed as reference IDENTITY (<c>output.Layers[i]</c> IS the processor's own build) — the
-        /// four-member <see cref="ILayerMeshBuild"/> interface drops <c>MaterialIndex</c> entirely, so
-        /// this is the dense-slot contract job-scheduling-design.md specifies, observed on the
-        /// array production uses.</summary>
+        /// <summary>The slot-join half, observed as reference IDENTITY: <c>output.Layers[i]</c> IS the
+        /// processor's own build. The four-member <see cref="ILayerMeshBuild"/> interface carries no
+        /// <c>MaterialIndex</c>, so this is the dense-slot contract job-scheduling-design.md specifies,
+        /// observed on the array production uses.</summary>
         [Test]
         public void RunWorkerPass_InvokesEveryProcessorOnceInDenseOrder_WithTheSameDecodedTile()
         {
@@ -1346,10 +1341,10 @@ namespace MapRenderer.Tests.Tiles
         // ── The fault is VISIBLE, not just survivable ─────────────────────────────────────────────────
         //
         // RunWorkerPass' catch settles every processor as zero-vertex and carries on — correct, and
-        // deliberately unchanged. What it must not do is stay SILENT: unrelated faults land in that one
+        // it stays. What it must not do is stay SILENT: unrelated faults land in that one
         // catch and produce the identical invisible outcome, and one of them is the ObjectDisposedException
         // the lease raises when its tile is read after the last reference went — which the lease chose
-        // precisely so a use-after-free would be loud. The symbol cadence already logs; these pin that the
+        // so that a use-after-free is loud. The symbol cadence already logs; these pin that the
         // mesh cadence, with 100+ layers behind it, does too — and that the log NAMES THE TILE, which is
         // the only thing that makes the warning actionable when many tiles are in flight.
 
@@ -1457,7 +1452,7 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>A minimal graph-arm layer whose <see cref="BuildGraphRequest"/> always throws — proves
         /// <see cref="TileMeshLayerProcessor"/>'s settlement path on a real (not recording-fake) processor,
-        /// on the graph-arm fault site that replaces the retired seam-arm <c>WriteInto</c> fault.</summary>
+        /// on the graph-arm fault site.</summary>
         private sealed class ThrowingGraphInputRenderLayer : ITileMeshRenderLayer
         {
             public StyleLayer StyleLayer { get; }
@@ -1914,7 +1909,7 @@ namespace MapRenderer.Tests.Tiles
         public void RemovedSource_TilesDoNotSurviveARestyle()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = Track(new GameObject("T7_SlotInvariant"));
+            var go   = Track(new GameObject("SlotInvariant"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5;
@@ -1970,7 +1965,7 @@ namespace MapRenderer.Tests.Tiles
         public void Rebuild_CallerFactoryObservesLoadedClearedFirst()
         {
             var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
-            var go   = Track(new GameObject("T7_RebuildReentrancy"));
+            var go   = Track(new GameObject("RebuildReentrancy"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5;
@@ -2017,7 +2012,7 @@ namespace MapRenderer.Tests.Tiles
     [TestFixture]
     public class NonMvtDecoderFanOutTests : BaseTestFixture
     {
-        // Deliberately malformed as MVT (a truncated length-delimited TileLayers field — MvtDecoder.Decode
+        // Malformed as MVT (a truncated length-delimited TileLayers field — MvtDecoder.Decode
         // throws decoding it — same fixture used by SharedTileDecodeTests/TileLayerProcessorRunnerTests).
         // The falsifier: if RunWorkerPass ignored the injected ITileDecoder and called MvtDecoder.Decode on
         // these bytes directly, the pass would fault instead of producing the expected quad below.

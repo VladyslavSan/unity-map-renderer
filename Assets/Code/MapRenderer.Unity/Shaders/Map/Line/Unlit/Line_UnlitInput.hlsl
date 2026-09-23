@@ -9,7 +9,7 @@
 //   style-bound / internal-render-param split, and the "keep ruler (1) vs ruler (2) distinct" note that
 //   governs how Line_VertexExtrude.hlsl reads these).
 //
-// The unlit twin of Line_LitInput.hlsl (unlit rendering mode epic, stage 3). Declares the SAME map-paint
+// The unlit twin of Line_LitInput.hlsl. Declares the SAME map-paint
 // property names Line_LitInput.hlsl does — that is what lets LineTweaker / ZoomStyleApplier / the C#
 // ShaderProperties.Line registry bind onto this material unchanged (no new PropertyId needed; every name
 // here is already a registered alias under ShaderProperties.Line / ShaderProperties.PropertyId). What is
@@ -17,10 +17,10 @@
 // _SpecColor/_EmissionColor/_Smoothness/_Metallic/_BumpScale/_Parallax/_OcclusionStrength/_ClearCoatMask/
 // _ClearCoatSmoothness/_Detail*MapScale and their textures — Unlit has no lighting model to feed them.
 //
-// [MAP DELTA S3] _BaseMap/_BaseMap_ST/_BaseMap_TexelSize are declared (mirrors stock Unlit + the other two
+// [MAP DELTA] _BaseMap/_BaseMap_ST/_BaseMap_TexelSize are declared (mirrors stock Unlit + the other two
 // twins) but never SAMPLED by Line_UnlitForwardPass.hlsl — the line mesh carries no lightable UV stream
-// either; Line_VertexExtrude's dashU doubles as a surface u only for a future line-pattern (S17), unused
-// today. The property stays declared for structural/GUI parity with the other twins.
+// either; Line_VertexExtrude's dashU is the natural surface u for line-pattern, which no pass samples.
+// The property stays declared for structural/GUI parity with the other twins.
 //
 // _MapFrameMetersPerDevicePixel is declared OUTSIDE the CBUFFER, exactly as in Line_LitInput.hlsl — see
 // that file's header for why (a per-frame GLOBAL pushed by MapCamera.SyncToCamera, not a per-material
@@ -69,7 +69,7 @@ CBUFFER_END
 // ── Frame global — NOT UnityPerMaterial, NOT a ShaderLab Property ────────────────────────────
 // Required by Line_VertexExtrude.hlsl (the width/dash ruler — see Line_LitInput.hlsl's extended header for
 // the full "two rulers" derivation, unchanged here). Pushed once per frame by MapCamera.SyncToCamera via
-// Shader.SetGlobalFloat — a whole-process singleton, deliberately outside the CBUFFER so it does not cost a
+// Shader.SetGlobalFloat — a whole-process singleton, outside the CBUFFER so it does not cost a
 // DOTS-instancing slot for a value identical on every layer.
 float _MapFrameMetersPerDevicePixel;
 

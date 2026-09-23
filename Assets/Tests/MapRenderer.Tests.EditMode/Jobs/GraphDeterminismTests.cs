@@ -10,14 +10,14 @@
 //   GeoJsonTileDecoderTests            — the GeoJSON decoder half: the source-layer answer, and the sliced layer's ordinal domain.
 //   GraphDeterminismTests              — One arm per batch constant, each reading THAT node's OWN constant — a developer restoring one tuned constant to 1<<20 must red exactly that arm, and no other.
 //   JobGraphInstrumentTests            — job-scheduling-design.md — the probes the substrate stage is planned against, plus the delay-job instrument E2 settled on (option iii: FillMeshGraph.Schedule's existing deps parameter, not a test-only production hook).
-//   LineRibbonSizingJobTests           — Claim honestly (an earlier review said the missing arm here "is the gap that would have caught" the original fill bug — it is not; fill's identical sizing-only arm did not catch fill's identical bug, see FillSizingJobTests.cs's header): Arm B is the parity…
+//   LineRibbonSizingJobTests           — Arm A catches a borrowed-count out-of-bounds read in RibbonAggregateJob; Arm B is the parity check and catches only a non-monotonic offset table (a sizing-only arm cannot catch the out-of-bounds read — see FillSizingJobTests.cs's header).
 //   MvtCommandStream                   — Test-only helper (not a fixture): authors MVT geometry command streams so a test can hand MvtGeometryMaterializer an exact ring layout.
 //   MvtGeometryMaterializerTests       — the teeth on the MVT end of Waist 1's producer seam — what the materializer puts in the buffer, and who owns the buffer afterwards.
 //   OrdinalDomainTests                 — tooth B's missing half: the selection/buffer relation, where B closed only the TileId/buffer one.
 //   ProjectionManagedVersusBurstTests  — RED-verified by perturbing one arm alone, run and reverted by hand — never left in this file:   (i)  feed one arm Extent + 1.0 (a COARSE injection — a single-ULP TileCoords bump cannot red this probe;        see the file header for the magnitude…
 //   RingAssemblyDeferredCountTests     — The load-bearing claim: RingAssemblyJob.RingOffsets, taken as list.AsDeferredJobArray() BEFORE the list is populated, resolves to the list's EXECUTE-time length (after a preceding scheduled job populates it), not its length at the moment…
-//   RingAssemblyHoleAttributionTests   — T0 — the property the whole byte-identity argument for earcut's hole-bridge order rests on: every hole belongs to the same source-layer feature as its polygon's outer ring.
-//   RingAssemblyKindGateTests          — T5 — RingAssemblyJob's kind gate: a ring whose feature is not a Polygon is never classified, whatever its area.
+//   RingAssemblyHoleAttributionTests   — The property the whole byte-identity argument for earcut's hole-bridge order rests on: every hole belongs to the same source-layer feature as its polygon's outer ring.
+//   RingAssemblyKindGateTests          — RingAssemblyJob's kind gate: a ring whose feature is not a Polygon is never classified, whatever its area.
 
 using System;
 using System.Threading;
@@ -254,9 +254,9 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The two store teeth, tested on the decoded layer. A source-layer is materialized <b>once</b>
-    /// (T4c) and what a consumer reads is genuinely <b>borrowed</b>, so it can be read twice and left
-    /// intact (T2). The memo is the decoded LAYER's own field: the layer holds one buffer, and the
+    /// The two store teeth, tested on the decoded layer. A source-layer is materialized <b>once</b>,
+    /// and what a consumer reads is genuinely <b>borrowed</b>, so it can be read twice and left
+    /// intact. The memo is the decoded LAYER's own field: the layer holds one buffer, and the
     /// TILE's Dispose frees what it lent.
     ///
     /// <para>A layer's buffer is singular — unlike a store, which could be memoized correctly and
@@ -272,7 +272,7 @@ namespace MapRenderer.Tests.Jobs
         private static readonly TileId SampleTile = new TileId { Z = 8, X = 135, Y = 80 };
         private const double SampleExtent = 4096.0;
 
-        // ── T4c — the memo ────────────────────────────────────────────────────────────────────────
+        // ── the memo ──────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// Two reads of the SAME <see cref="ITileLayer.Geometry"/> hand back the same allocation; two
@@ -336,7 +336,7 @@ namespace MapRenderer.Tests.Jobs
             Assert.DoesNotThrow(() => tile.Dispose(), "a second Dispose must be a no-op, not a double free");
         }
 
-        // ── T2 — borrow, not transfer ─────────────────────────────────────────────────────────────
+        // ── borrow, not transfer ──────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// <c>FillMeshGraph.Schedule</c> may be called <b>twice over the same buffer</b> — the production
@@ -929,13 +929,13 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The GeoJSON decoder half: <b>T2</b> (a geojson tile answers with its sole layer whatever
-    /// <c>source-layer</c> says, and moving that accommodation out of <c>SourceLayerResolver</c> left the MVT
-    /// answer where it was) and <b>T4</b> (the sliced layer's ordinal domain — one slot per feature, and the
-    /// slots ADDRESS the buffer).
+    /// The GeoJSON decoder half: the <b>source-layer answer</b> (a geojson tile answers with its sole layer
+    /// whatever <c>source-layer</c> says, and moving that accommodation out of <c>SourceLayerResolver</c> left
+    /// the MVT answer where it was) and the <b>ordinal domain</b> of the sliced layer (one slot per feature,
+    /// and the slots ADDRESS the buffer).
     ///
-    /// <para><b>Why T2 needs a hand-encoded MVT tile.</b> The resolver does not short-circuit an empty
-    /// <c>source-layer</c> to null; each tile answers for its own format. Over any
+    /// <para><b>Why the source-layer tests need a hand-encoded MVT tile.</b> The resolver does not
+    /// short-circuit an empty <c>source-layer</c> to null; each tile answers for its own format. Over any
     /// real MVT fixture the guard is INERT — <c>GetLayer("")</c> compares against layer names and
     /// no real layer is named <c>""</c>, so the arm passes with or without it. The discriminating input is a
     /// layer whose <c>name</c> field is ABSENT, which decodes to a <b>null</b> name and which a style layer
@@ -1005,9 +1005,9 @@ namespace MapRenderer.Tests.Jobs
         /// <summary>
         /// The CLIPPING fixture: four features, of which the tile sliced (<see cref="SliceTile"/>) keeps only
         /// the second and the fourth. The surviving list is therefore a <b>proper, non-prefix</b> subset of
-        /// the dataset's — the shape T4 needs, because a decoder that built <c>Features</c> from the first
-        /// <i>n</i> of the DATASET while taking geometry from the slice produces the right counts, the right
-        /// ordinal range, and the wrong features.
+        /// the dataset's — the shape the ordinal-domain tests need, because a decoder that built
+        /// <c>Features</c> from the first <i>n</i> of the DATASET while taking geometry from the slice produces
+        /// the right counts, the right ordinal range, and the wrong features.
         ///
         /// <para>The two survivors keep the WEST/EAST layout the addressing tooth argues from; the two
         /// discards live in neighbouring z1 tiles, a full tile away from a window that extends only
@@ -1023,10 +1023,10 @@ namespace MapRenderer.Tests.Jobs
         private static StyleLayer LayerWithSourceLayer(string sourceLayer)
             => new StyleLayer { Id = "probe", Source = "s", SourceLayer = sourceLayer };
 
-        // ── T2 · a geojson tile has one layer and does not match names ────────────────────────────────
+        // ── a geojson tile has one layer and does not match names ─────────────────────────────────────
 
         /// <summary>
-        /// <b>T2</b> — the Style Spec makes <c>source-layer</c> "required for vector sources" and unused for
+        /// The Style Spec makes <c>source-layer</c> "required for vector sources" and unused for
         /// geojson ones, so a geojson tile has nothing to match a name against: absent, empty and bogus all
         /// answer with the sole layer.
         ///
@@ -1036,7 +1036,7 @@ namespace MapRenderer.Tests.Jobs
         /// the spec says is ignored.</para>
         /// </summary>
         [Test]
-        public void T2_AGeoJsonTileIgnoresTheSourceLayerNameEntirely()
+        public void AGeoJsonTileIgnoresTheSourceLayerNameEntirely()
         {
             using IDecodedTile tile = TwoRectangleDecoder().Decode(WorldTile, null);
 
@@ -1048,7 +1048,7 @@ namespace MapRenderer.Tests.Jobs
 
             Assert.AreSame(sole, tile.GetLayer(null),
                 "an ABSENT source-layer must resolve the sole layer. This is the spec-conformant shape for a " +
-                "geojson source — the key is unused — and it is the one that used to select nothing.");
+                "geojson source — the key is unused — and a short-circuiting resolver makes it select nothing.");
             Assert.AreSame(sole, tile.GetLayer(""),
                 "…and so must an EMPTY one: a geojson tile has no sub-layers to disambiguate, so there is " +
                 "nothing for a name to select between");
@@ -1058,13 +1058,13 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// <b>T2 arm A</b> — the recorded bug, at the production seam: a spec-conformant geojson style layer
+        /// <b>The GeoJSON side</b> — the recorded bug, at the production seam: a spec-conformant geojson style layer
         /// omits <c>source-layer</c>, and <see cref="SourceLayerResolver.ResolveTileLayer"/> must still
         /// resolve it. A resolver that short-circuits a null/empty <c>source-layer</c> to null makes
         /// such a layer select zero features and render NOTHING, silently.
         /// </summary>
         [Test]
-        public void T2A_AStyleLayerWithNoSourceLayer_ResolvesAGeoJsonTilesSoleLayer()
+        public void AStyleLayerWithNoSourceLayer_ResolvesAGeoJsonTilesSoleLayer()
         {
             using IDecodedTile tile = TwoRectangleDecoder().Decode(WorldTile, null);
 
@@ -1077,12 +1077,12 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// <b>T2 arm B, the anti-vacuity half.</b> A NAMED <c>source-layer</c> still resolves on an MVT tile.
-        /// Without it, its sibling below is satisfied by "MVT resolves nothing, ever" — which would be a
+        /// <b>The MVT side, the anti-vacuity half.</b> A NAMED <c>source-layer</c> still resolves on an MVT
+        /// tile. Without it, its sibling below is satisfied by "MVT resolves nothing, ever" — which would be a
         /// total regression of the vector path passing as a guard working.
         /// </summary>
         [Test]
-        public void T2B_ANamedSourceLayer_StillResolvesOnAnMvtTile()
+        public void ANamedSourceLayer_StillResolvesOnAnMvtTile()
         {
             byte[] bytes = MvtBytes.Tile(MvtBytes.Layer("places", MvtBytes.PointFeature(10, 20)));
             using MvtTile tile = MvtDecoder.Decode(MvtTileId, bytes);
@@ -1096,7 +1096,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// <b>T2 arm B</b> — moving the accommodation into the tile must not turn "no <c>source-layer</c>"
+        /// <b>The MVT side</b> — moving the accommodation into the tile must not turn "no <c>source-layer</c>"
         /// into "the nameless layer" for a background or raster style layer over an MVT source.
         ///
         /// <para><b>The input is the whole tooth.</b> Over an ordinary fixture this claim is INERT: no real
@@ -1106,7 +1106,7 @@ namespace MapRenderer.Tests.Jobs
         /// and one whose name is present and EMPTY (which <c>l.Name == ""</c> matches).</para>
         /// </summary>
         [Test]
-        public void T2B_AStyleLayerWithNoSourceLayer_StillSelectsNothingFromAnMvtTile()
+        public void AStyleLayerWithNoSourceLayer_StillSelectsNothingFromAnMvtTile()
         {
             byte[] bytes = MvtBytes.Tile(
                 MvtBytes.NamelessLayer(MvtBytes.PointFeature(10, 20)),   // name field ABSENT ⇒ Name == null
@@ -1123,17 +1123,17 @@ namespace MapRenderer.Tests.Jobs
             Assert.AreEqual(string.Empty, tile.Layers[1].Name, "precondition: …and the empty-named sibling");
 
             Assert.IsNull(SourceLayerResolver.ResolveTileLayer(LayerWithSourceLayer(null), tile),
-                "an MVT tile must answer NULL for an absent source-layer. The resolver no longer " +
-                "short-circuits, so this is now the TILE's claim — moving it must not turn 'no " +
+                "an MVT tile must answer NULL for an absent source-layer. The resolver does not " +
+                "short-circuit, so this is the TILE's claim — moving it must not turn 'no " +
                 "source-layer' into 'the nameless layer' for a background or raster style layer.");
             Assert.IsNull(SourceLayerResolver.ResolveTileLayer(LayerWithSourceLayer(string.Empty), tile),
                 "…and the same through the empty-name half of the old condition");
         }
 
-        // ── T4 · the ordinal domain of a sliced layer ─────────────────────────────────────────────────
+        // ── the ordinal domain of a sliced layer ──────────────────────────────────────────────────────
 
         /// <summary>
-        /// <b>T4</b> — over a tile that CLIPS features away, the layer lists exactly the SURVIVORS, and its
+        /// Over a tile that CLIPS features away, the layer lists exactly the SURVIVORS, and its
         /// ordinal domain is positions in that list.
         ///
         /// <para><b>The fixture is the load-bearing part.</b> Two of the dataset's four features fall in
@@ -1154,7 +1154,7 @@ namespace MapRenderer.Tests.Jobs
         /// <c>WaistOneProducerAgreementTests</c> — that is where a RED for it belongs, not here.</para>
         /// </summary>
         [Test]
-        public void T4_ASlicedGeoJsonLayer_ListsOnlyTheSurvivingFeatures_AndItsOrdinalsAddressTheBuffer()
+        public void ASlicedGeoJsonLayer_ListsOnlyTheSurvivingFeatures_AndItsOrdinalsAddressTheBuffer()
         {
             GeoJsonTileDecoder decoder = ClippingDecoder();
             using IDecodedTile tile = decoder.Decode(SliceTile, null);
@@ -1202,15 +1202,15 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// <b>T4</b> — an empty slice yields a tile with <b>zero</b> layers, not a layer with zero features.
+        /// An empty slice yields a tile with <b>zero</b> layers, not a layer with zero features.
         ///
         /// <para><b>This is the tooth that observes the DECODER.</b> Its sibling in <c>GeoJsonSourceTests</c>
-        /// (<c>T1_AnEmptyInlineDataset_RendersNothing</c>) is satisfied upstream, by the source's emptiness
+        /// (<c>AnEmptyInlineDataset_RendersNothing</c>) is satisfied upstream, by the source's emptiness
         /// probe, and stays GREEN against a decoder injected to emit a full-extent quad whenever its slice is
         /// empty — measured. This one reds on it. Do not delete it as a duplicate of that arm.</para>
         /// </summary>
         [Test]
-        public void T4_AnEmptySlice_YieldsATileWithNoLayerAtAll()
+        public void AnEmptySlice_YieldsATileWithNoLayerAtAll()
         {
             // A dataset that exists but falls entirely outside the tile asked for: the slice is empty for
             // this tile while the decoder still has real work to reject, which "no features at all" would not
@@ -1228,7 +1228,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// <b>T4</b> — the addressing claim, not the counting one: each ring must be filed under the ordinal
+        /// The addressing claim, not the counting one: each ring must be filed under the ordinal
         /// of the feature that produced it.
         ///
         /// <para>Counts agreeing is cheap; a producer that permuted the path column keeps every count right
@@ -1239,7 +1239,7 @@ namespace MapRenderer.Tests.Jobs
         /// argument is unchanged and the input is strictly stronger.</para>
         /// </summary>
         [Test]
-        public void T4_EveryRingIsFiledUnderItsOwnFeaturesOrdinal()
+        public void EveryRingIsFiledUnderItsOwnFeaturesOrdinal()
         {
             using IDecodedTile tile = ClippingDecoder().Decode(SliceTile, null);
             ITileLayer layer = tile.GetLayer(GeoJsonTileLayer.WellKnownName);
@@ -2003,7 +2003,7 @@ namespace MapRenderer.Tests.Jobs
         [Test]
         public void DelayJob_HeldByGate_IsGenuinelyInFlight_UnderDefaultWorkerCount()
         {
-            // Deliberately does NOT touch JobsUtility.JobWorkerCount — the finding above is why.
+            // Does NOT touch JobsUtility.JobWorkerCount — the finding above is why.
             const int maxIterations = 2_000_000_000;
             var gate = new NativeArray<int>(1, Allocator.Persistent);
             var started = new NativeArray<int>(1, Allocator.Persistent);
@@ -2113,10 +2113,10 @@ namespace MapRenderer.Tests.Jobs
     [TestFixture]
     public class LineRibbonSizingJobTests
     {
-        /// <summary>The arm that would have caught the line side's counterpart of the fill bug: the real
+        /// <summary>The arm that catches the line side's counterpart of the fill bug: the real
         /// <see cref="RibbonAggregateJob"/> over a <see cref="RibbonBuffers"/> already at the
-        /// post-early-return shape (every column length 0), with a real <c>RingFeature</c> standing in for the
-        /// borrowed ring count the retired bound would have used.
+        /// post-early-return shape (every column length 0), with a real <c>RingFeature</c> holding the
+        /// borrowed ring count that a loop bounded by a borrowed column, not its own, would read.
         ///
         /// <para><b>Constructed, not driven — the one way it differs from the real early-return state, stated
         /// plainly (not "byte-for-byte", which would be false):</b> <see cref="RibbonSizingJob"/>
@@ -2172,7 +2172,7 @@ namespace MapRenderer.Tests.Jobs
                 Assert.AreEqual(0, outVertexFeatureIdx.Length);
                 Assert.AreEqual(0, outIndices.Length, "no ring to append means no output indices");
 
-                // Non-vacuity witness: the borrowed ring count the retired bound would have used is still 2 —
+                // Non-vacuity witness: the borrowed ring count a borrowed-column bound would read is still 2 —
                 // without this the test would pass identically on an input where there was nothing to
                 // iterate in the first place.
                 Assert.AreEqual(2, ringFeature.Length);
@@ -2254,8 +2254,8 @@ namespace MapRenderer.Tests.Jobs
     /// Authors MVT geometry command streams (spec §4.3: <c>command = id &amp; 0x7</c>,
     /// <c>count = id &gt;&gt; 3</c>; MoveTo=1, LineTo=2, ClosePath=7; parameters are zigzag deltas against a
     /// running cursor) so a test can hand <see cref="MvtGeometryMaterializer"/> an exact ring layout.
-    /// The encoding is the one <c>MvtDecodeJob</c> decodes; production hand-authors no such stream now
-    /// that the background quad's is retired (see <c>FullExtentRingCommandStream</c>, its frozen record).
+    /// The encoding is the one <c>MvtDecodeJob</c> decodes; production hand-authors no such stream
+    /// (<c>FullExtentRingCommandStream</c> keeps a frozen full-extent ring as test data).
     /// </summary>
     internal static class MvtCommandStream
     {
@@ -2333,7 +2333,7 @@ namespace MapRenderer.Tests.Jobs
         private const double SampleExtent = 8192.0;
 
         /// <summary>
-        /// T3 — the shared buffer carries <b>every</b> ring the source expresses, including rings too short
+        /// The shared buffer carries <b>every</b> ring the source expresses, including rings too short
         /// to be a polygon. Fill's <c>rLen &lt; 3</c> filter belongs to <c>RingAssemblyJob</c>; a filter that
         /// crept into the shared decode stage would starve the line consumer, and a fill mesher's own output
         /// cannot see it (ring assembly re-filters, and nothing downstream reports the pre-filter ring
@@ -2381,7 +2381,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// T4a — ownership TRANSFERS on return: every call mints a fresh buffer, so one materializer may be
+        /// Ownership TRANSFERS on return: every call mints a fresh buffer, so one materializer may be
         /// materialized more than once (<c>RingClipJobTests</c> does exactly that) and disposing one result
         /// cannot touch another. A cached buffer would double-free instead.
         /// </summary>
@@ -2391,7 +2391,7 @@ namespace MapRenderer.Tests.Jobs
             uint[] stream = MvtCommandStream.Feature(
                 MvtCommandStream.Ring(100, 100, 200, 100, 200, 200, 100, 200));
 
-            // 2a: the flattened INPUT buffers are borrowed, not owned by the materializer, so this
+            // The flattened INPUT buffers are borrowed, not owned by the materializer, so this
             // still works — a materializer that consumed/disposed its input on the first call would fault
             // reading it on the second. `flat` outlives both `Materialize()` calls, disposed once at the end.
             var materializer = MakeMaterializer(
@@ -2435,7 +2435,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// T4b — <c>RingCapacity</c> is the producer's sized upper bound, never the decoded count.
+        /// <c>RingCapacity</c> is the producer's sized upper bound, never the decoded count.
         /// <c>Schedule</c> sizes the per-polygon arrays from it, so a value that tracked
         /// <c>RingCount</c> would under-allocate the moment the two differ.
         /// </summary>
@@ -2480,12 +2480,10 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// T6 — the kind column is filled from <b>each feature's own declared kind</b>, never a literal.
-        /// This is the surviving half of the retired parallel-list desync guard (T9): with one feature
-        /// list instead of two positionally-joined columns there is nothing left to desync, so that guard is
-        /// structurally unnecessary, not merely weakened. What still needs an observer is the remaining landmine —
-        /// a materializer that wrote a constant <c>Polygon</c> would make every consumer's ring gate
-        /// inert, and every downstream stage would keep passing.
+        /// The kind column is filled from <b>each feature's own declared kind</b>, never a literal.
+        /// One feature list replaces two positionally-joined columns, so the two cannot desync. What still
+        /// needs an observer is the kind itself: a materializer that wrote a constant <c>Polygon</c> would
+        /// make every consumer's ring gate inert, and every downstream stage would keep passing.
         /// </summary>
         [Test]
         public void Materialize_FillsTheKindColumnFromEachFeature_NotALiteral()
@@ -2514,7 +2512,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// T7 — the MVT materializer reads bytes off <see cref="IMvtGeometryCarrier"/>, MVT's own
+        /// The MVT materializer reads bytes off <see cref="IMvtGeometryCarrier"/>, MVT's own
         /// contract, not off the neutral feature interface. A feature that is an <see cref="IFeature"/>
         /// but not a carrier is a <b>wiring error</b> — some other format's feature routed to the MVT
         /// producer — and must fail loudly, naming the index, rather than materialize as an empty layer that
@@ -2568,7 +2566,7 @@ namespace MapRenderer.Tests.Jobs
         /// <summary>The materializer takes (tile, extent, kinds, commands) rather than a feature
         /// list. This adapter keeps the fixtures authored as features, which is still the readable
         /// shape, and splits the two columns here.
-        /// 2a: flattens the split columns via <see cref="MvtGeometryMaterializerTestFactory"/> and
+        /// It flattens the split columns via <see cref="MvtGeometryMaterializerTestFactory"/> and
         /// materializes once — the shape almost every test in this file wants.</summary>
         private static TileGeometryBuffers MaterializeFeatures(
             TileId tile, double extent, params IFeature[] features)
@@ -3226,7 +3224,7 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// T0 — the property the whole byte-identity argument for earcut's <b>hole-bridge order</b> rests
+    /// The property the whole byte-identity argument for earcut's <b>hole-bridge order</b> rests
     /// on: <b>every hole belongs to the same source-layer feature as its polygon's outer ring</b>.
     ///
     /// <para><b>Why it matters.</b> The shared buffer replaces "the materializer receives exactly this layer's features" with
@@ -3312,7 +3310,7 @@ namespace MapRenderer.Tests.Jobs
                 "fixture rather than deleting the clause.");
             Assert.Greater(totalHoles, 0, "anti-vacuity: zero holes were classified");
 
-            Debug.Log($"[T0] corpus: {layersExamined} layers, {totalPolygons} polygons, " +
+            Debug.Log($"[hole attribution] corpus: {layersExamined} layers, {totalPolygons} polygons, " +
                       $"{totalPolygonsWithHoles} with holes, {totalHoles} holes — all holes shared their " +
                       "outer's feature.");
         }
@@ -3406,7 +3404,7 @@ namespace MapRenderer.Tests.Jobs
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// T5 — <see cref="RingAssemblyJob"/>'s <b>kind gate</b>: a ring whose feature is not a Polygon is
+    /// <see cref="RingAssemblyJob"/>'s <b>kind gate</b>: a ring whose feature is not a Polygon is
     /// never classified, whatever its area.
     ///
     /// <para><b>Why the job needs its own gate.</b> The assembler classifies purely by signed area, and a

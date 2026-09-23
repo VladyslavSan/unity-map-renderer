@@ -1241,7 +1241,7 @@ namespace MapRenderer.Tests.Style
                 + "must never fire — PathRender length stays the original decoded vertex count");
         }
 
-        // ── T6: globe subdivision + anchor alignment (the crux) ────────────────────────────────────────
+        // ── globe subdivision + anchor alignment (the crux) ────────────────────────────────────────────
 
         /// <summary>Minimal engine-free <see cref="IFeature"/>/<see cref="ITileLayer"/>/<see cref="IDecodedTile"/>
         /// test doubles for a synthetic tile — mirrors <c>ByteLessTileFeatureSourceTests.FixtureDecodedTile</c>/
@@ -1285,7 +1285,7 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(1, symbols.Count, "one line symbol for the single synthetic feature");
             SymbolStyle.SymbolFeature symbol = symbols[0];
 
-            // (a) tooth #1 — subdivision fired, off the chord.
+            // (a) Subdivision fired, off the chord.
             Assert.Greater(symbol.PathRender.Length, 2, "the globe must subdivide the 2-vertex line");
             double3 chordStart = symbol.PathRender[0];
             double3 chordEnd = symbol.PathRender[symbol.PathRender.Length - 1];
@@ -1295,13 +1295,13 @@ namespace MapRenderer.Tests.Style
             Assert.Greater(distFromChord, 1.0,
                 "an inserted mid vertex must sit OFF the straight render chord (curvature, not a facet)");
 
-            // (b) tooth #2 — count/position invariant, index refined.
+            // (b) Count/position invariant, index refined.
             Assert.IsNotNull(symbol.LineAnchors);
             Assert.AreEqual(1, symbol.LineAnchors.Length, "line-center still places a single anchor (arc-length invariant)");
             Assert.Greater(symbol.LineAnchors[0].Segment, 0,
                 "the anchor's segment index must be refined onto the finer path (0 would mean it never resubdivided)");
 
-            // (c) tooth #3 — resolves to the correct arc position on the RENDER curve. Independently project the
+            // (c) Resolves to the correct arc position on the RENDER curve. Independently project the
             // geographic midpoint of the (still 2-vertex) tile-local line — the arc-length midpoint of a straight
             // 2-point segment is its linear midpoint — and compare against what the anchor resolves to.
             double2 midTile = new double2(extent * 0.5, extent * 0.5);

@@ -1,13 +1,13 @@
 // FillExtrusionUnlit.shader — Map/FillExtrusionUnlit (unlit twin of Map/FillExtrusion)
 //
 // Mirrors stock URP Unlit.shader's pass list (Unlit / DepthOnly / DepthNormalsOnly) the way FillUnlit.shader
-// mirrors it for the flat fill layer — verbatim + minimal marked deltas. GBuffer/Meta/MotionVectors are
-// deferred (unlit rendering mode epic §3/§6); ShadowCaster is DROPPED by construction (stock URP Unlit has
-// none — an unlit material cannot cast a shadow; fill-extrusion's own building-shadow behaviour under unlit
-// is confirmed-by-mirror, not by a decision — see the epic plan §3/§8).
+// mirrors it for the flat fill layer — verbatim + minimal marked deltas. It has no GBuffer/Meta/
+// MotionVectors pass, and no ShadowCaster (stock URP Unlit has none — an unlit material cannot cast a
+// shadow). So unlit buildings cast no shadow: that follows from mirroring stock Unlit, not from a design
+// decision about building shadows.
 //
 // Key design points:
-//   • Unlit ≠ 2D: the D1 height extrusion happens ENTIRELY in the vertex hook (FillExtrusion_VertexModify.hlsl,
+//   • Unlit ≠ 2D: the height extrusion happens ENTIRELY in the vertex hook (FillExtrusion_VertexModify.hlsl,
 //     reused VERBATIM, unchanged from the Lit twin), so this shader still renders flat-coloured 3D blocks
 //     that self-occlude — not a flattened fill. See that file's class doc for the sec(φ) derivation.
 //   • Fragment is flat albedo = _BaseColor × vColor / alpha = _BaseColor.a × vColor.a × _Opacity — no
@@ -15,11 +15,11 @@
 //   • CBUFFER (UnityPerMaterial) is IDENTICAL across all passes — SRP Batcher requires this.
 //   • ELEVATED-3D CONTRACT: the property DEFAULTS below mirror FillExtrusion.shader's OWN declared
 //     defaults verbatim (which are, as that file documents, the same transparent-band numbers Fill.shader
-//     uses — "I2b keeps the FILL transparent-band defaults"). The RUNTIME contract — opaque, ZWrite On,
-//     LEqual, One/Zero blend — is asserted by FillExtrusionTweaker.ApplyElevatedContract, which
-//     MaterialFactory.CreateFillExtrusionMaterial calls on every clone of this shader's base .mat exactly as
-//     it does for the Lit twin; see that tweaker. Declaring the full render-state block (below) is what lets
-//     it bind (S37 regression guard — omitting a render-state property lets URP force queue 2000 on import).
+//     uses). The RUNTIME contract — opaque, ZWrite On, LEqual, One/Zero blend — is asserted by
+//     FillExtrusionTweaker.ApplyElevatedContract, which MaterialFactory.CreateFillExtrusionMaterial calls
+//     on every clone of this shader's base .mat exactly as it does for the Lit twin; see that tweaker.
+//     Declaring the full render-state block (below) is what lets it bind (import guard — omitting a
+//     render-state property lets URP force queue 2000 on import).
 //   • The DepthOnly/DepthNormalsOnly passes reuse FillExtrusion_DepthOnlyPass.hlsl /
 //     FillExtrusion_DepthNormalsPass.hlsl VERBATIM (no new file) — buildings must keep writing depth so
 //     overlapping buildings, and a single building's own near/far walls, occlude correctly (SSAO too).

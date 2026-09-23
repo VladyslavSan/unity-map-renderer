@@ -11,7 +11,7 @@ namespace MapRenderer.Tests
     /// A minimal MVT protobuf writer — the inverse of the slice of the spec <c>MvtDecoder</c> reads, and the
     /// only way to obtain decoded layers whose shapes no committed fixture holds: a ring-less feature
     /// (<see cref="OrdinalDomainTests"/> clause A) and a layer with no usable <c>name</c>
-    /// (<see cref="GeoJsonTileDecoderTests"/>' T2B).
+    /// (<see cref="GeoJsonTileDecoderTests.AStyleLayerWithNoSourceLayer_StillSelectsNothingFromAnMvtTile"/>).
     ///
     /// <para>Deliberately its own transcription rather than a call into anything production owns: an encoder
     /// that shared the decoder's field numbers would agree with it about a wrong one.</para>

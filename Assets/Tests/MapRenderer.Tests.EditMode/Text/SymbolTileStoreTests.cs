@@ -3,8 +3,9 @@
 // The three pump-related fixtures first (subsystem pump, work scheduler, tail pump), then the store lifecycle fixture, then the standalone allocation regression pin.
 //
 // Contents:
-//   SymbolSubsystemPumpTests           — the symbol subsystem builds a fetched tile off the main thread and does not re-upload the 16 MB glyph atlas per glyph-adding tile.
-//   SymbolSubsystemWorkSchedulerTests  — ReconcileDispatch_* proves T2 (the WebGL-only permanent placement wedge at :899): under Inline the pickup lands ONE CurrentBatch call later than the schedule (PickupCompletedReconcile runs BEFORE ScheduleReconcileIfDirty inside CurrentBatch), so the tooth…
+//   SymbolSubsystemPumpTests           — the symbol subsystem builds a fetched tile off the main thread and does
+//                                        not re-upload the 16 MB glyph atlas per glyph-adding tile.
+//   SymbolSubsystemWorkSchedulerTests  — ReconcileDispatch_* guards the WebGL-only permanent placement wedge: under Inline the pickup lands ONE CurrentBatch call later than the schedule (PickupCompletedReconcile runs BEFORE ScheduleReconcileIfDirty inside CurrentBatch), so the tooth…
 //   SymbolTailPumpTests                — The acceptance teeth for the worker-phase / tail split — the worker phase (TryBeginBuild's returned pass) stops after the pool-side extract and hands a ready tail (via the pool→main handoff) to PumpBuilds' budgeted tail-start loop…
 //   SymbolTileStoreTests               — The symbol-lifecycle fix (zoom-out-then-in "no symbols" bug): SymbolTileStore keeps a released-to-cache tile's symbols WARM and restores them on a prepared-cache hit (which does not re-fetch), while a truly-evicted tile drops them.
 //   TextQuadLayoutAllocTests           — The layout hot path (steady, single-line, no-wrap) must allocate ZERO managed garbage once the caller's output List capacity has stabilized -- see TextQuadLayout's class doc for why (an in-place List index write per emitted quad, no auxiliary…
@@ -465,9 +466,9 @@ namespace MapRenderer.Tests.Text
             return subsystem;
         }
 
-        // ── :643 — the parked-build drain ─────────────────────────────────────────────────────────────
+        // ── PumpBuilds' parked-build drain ────────────────────────────────────────────────────────────
 
-        /// <summary>T1: the WebGL-only unrecoverable decode leak. <c>PumpBuilds</c>' parked-queue drain
+        /// <summary>Guards the WebGL-only unrecoverable decode leak. <c>PumpBuilds</c>' parked-queue drain
         /// dispatches through <see cref="SymbolSubsystem.WorkScheduler"/>
         /// — under <see cref="InlineWorkScheduler"/> the dispatched body (the ONLY release for the decode
         /// reference the park took) runs synchronously, on the calling thread, before <c>PumpBuilds</c>
@@ -477,8 +478,8 @@ namespace MapRenderer.Tests.Text
         /// dequeued from <c>_pendingSpriteQueue</c> by the time <c>Schedule</c> is even called — an
         /// empty-queue assertion would pass whether or not the dispatched body (and its release) ever ran.
         /// <see cref="LeaseProbeDecoder.DisposedCount"/> is read synchronously, with NO yield between it and
-        /// <c>PumpBuilds()</c> returning, which is exactly what makes it discriminate: under the (reverted)
-        /// <c>UniTask.RunOnThreadPool</c> shape the pool thread has not run yet at that point even on
+        /// <c>PumpBuilds()</c> returning, which is what makes it discriminate: under a
+        /// <c>UniTask.RunOnThreadPool</c> dispatch the pool thread has not run yet at that point even on
         /// desktop, so this reading is false-negative-proof against "ran eventually on the pool" — it can
         /// only pass if the body ran INSIDE the call.</para>
         ///
@@ -524,7 +525,7 @@ namespace MapRenderer.Tests.Text
 
             Assert.AreEqual(1, probe.DisposedCount,
                 "the decode reference the park took must be RELEASED — read synchronously, with no yield, " +
-                "immediately after PumpBuilds() returns. This is the leak T1 exists to close: the dispatched " +
+                "immediately after PumpBuilds() returns. This is the leak this test exists to close: the dispatched " +
                 "body's `finally` is the ONLY release for this reference, so a scheduler that failed to run " +
                 "it (or ran it later, off this call) leaks it exactly as UniTask.RunOnThreadPool does on web.");
             Assert.AreEqual(0, probe.UnbalancedCount, "…exactly once — not a double release.");
@@ -533,9 +534,9 @@ namespace MapRenderer.Tests.Text
             gate.TrySetResult(new SpriteResponse { HasData = false }); // tidy: never leave a gate hanging
         }
 
-        // ── :899 — the cross-tile reconcile ───────────────────────────────────────────────────────────
+        // ── ScheduleReconcileIfDirty — the cross-tile reconcile ───────────────────────────────────────
 
-        /// <summary>T2: the WebGL-only permanent placement wedge. <c>ScheduleReconcileIfDirty</c>
+        /// <summary>Guards the WebGL-only permanent placement wedge. <c>ScheduleReconcileIfDirty</c>
         /// dispatches through <see cref="SymbolSubsystem.WorkScheduler"/> —
         /// under Inline the reconcile body runs synchronously, on the calling thread, inside the SAME
         /// <c>CurrentBatch</c> call that scheduled it.
@@ -545,7 +546,7 @@ namespace MapRenderer.Tests.Text
         /// dispatch completes synchronously, the just-scheduled reconcile is only picked up on the NEXT
         /// call — <c>_reconcileInFlight</c> stays true across the frame that scheduled it. Asserting only one
         /// call would either miss the in-flight window entirely or (if asserted wrong) demand a same-frame
-        /// pickup that would be a behaviour change outside this stage's scope.</para>
+        /// pickup, which is a behaviour change.</para>
         ///
         /// <para><b>RED injection:</b> revert <c>ScheduleReconcileIfDirty</c>'s dispatch to
         /// <c>UniTask.RunOnThreadPool(…).Preserve()</c> — <c>spy.ScheduleCount</c> stays 0 and
@@ -605,14 +606,15 @@ namespace MapRenderer.Tests.Text
                 "actually applied, not merely that the flag cleared.");
         }
 
-        // ── Glyph-fetch hoist (T5c) ────────────────────────────────────────────────────────────────
+        // ── Glyph-fetch hoist: a cancel at the glyph-prepare await ─────────────────────────────────
 
         // A literal (non-templated) text-field: TextFieldResolver returns a template VERBATIM whenever it
         // contains no '{' — so every one of the fixture's ~248 "centroids" features resolves to this SAME
         // mixed-direction string, regardless of its own NAME property. 'A' (strong LTR) + U+0628 Arabic beh
         // (strong RTL) is the single-run-bidi combination CodepointTextShaper rejects
         // (NotSupportedException) — the same trigger StyledSymbolTileBuilderTests' mixed-direction tooth
-        // uses. Existing only to make T5c's shape-loop-ran/-didn't-run distinction observable (see below).
+        // uses. It exists only to make the shape-loop-ran/-didn't-run distinction observable in
+        // CancelDuringGlyphPrepare_UnwindsBeforeShapeOrCommit_ReleasesTheDecodeExactlyOnce.
         // This is a BORROWED precondition, not a guarantee — see Precondition_ShapingTheMixedDirectionTextStillThrows.
         private const string MixedDirectionText = "Aب";
         private static readonly string MixedDirectionStyleJson = (@"{
@@ -624,23 +626,21 @@ namespace MapRenderer.Tests.Text
             ]
         }").Replace('\'', '"');
 
-        /// <summary>T5c: the genuinely NEW risk the hoist introduces — <c>RunTailAsync</c> now suspends at a
-        /// NEW position (the build-wide glyph-range ensure step, BEFORE the shape loop) and needs its own
-        /// cancellation guard there. Drives a build past its worker step into the tail, where a GATED glyph
-        /// source parks it in the ensure step; cancels the build's scope (a restyle, mirroring production);
-        /// then releases the gate with a NORMAL (non-cancelled) response, so the suspended
-        /// <c>EnsureGlyphRangesAsync</c> await returns CLEANLY and the pre-loop
+        /// <summary><c>RunTailAsync</c> suspends in the build-wide glyph-range ensure step, BEFORE the shape
+        /// loop, and needs its own cancellation guard there. Drives a build past its worker step into the
+        /// tail, where a GATED glyph source parks it in the ensure step; cancels the build's scope (a
+        /// restyle, mirroring production); then releases the gate with a NORMAL (non-cancelled) response,
+        /// so the suspended <c>EnsureGlyphRangesAsync</c> await returns CLEANLY and the pre-loop
         /// <c>tail.Ct.ThrowIfCancellationRequested()</c> is the only thing standing between the already-
         /// cancelled token and the shape loop.
         ///
-        /// <para><b>Why not release the gate as cancelled (the naive, and FIRST-WRITTEN, version of this
-        /// tooth).</b> Doing so makes the awaited call ITSELF throw the <see cref="OperationCanceledException"/>
-        /// — control never reaches the pre-loop check's line at all, so its presence or absence is invisible.
-        /// Worse: even releasing normally, <c>RunTailAsync</c>'s OLDER, pre-existing TRAILING ct check (after
-        /// the shape loop, before the commit) is a second, redundant safety net for the exact same outcome
+        /// <para><b>Why not release the gate as cancelled.</b> Doing so makes the awaited call ITSELF throw the
+        /// <see cref="OperationCanceledException"/> — control never reaches the pre-loop check's line at all,
+        /// so its presence or absence is invisible. Also, even with a normal release, <c>RunTailAsync</c>'s
+        /// TRAILING ct check (after the shape loop, before the commit) is a second safety net for the same outcome
         /// ("nothing committed, <c>CancelledBuildCount</c> bumped") — so asserting only the FINAL outcome
         /// cannot tell "the pre-loop guard fired" apart from "the shape loop ran to completion and the
-        /// TRAILING guard caught it instead". Both naive designs are RED-VERIFIED VACUOUS below; this is why
+        /// TRAILING guard caught it instead". RED-verification shows both of these designs are vacuous; this is why
         /// <see cref="MixedDirectionStyleJson"/> exists: it makes "did the shape loop actually run" itself
         /// observable. Shape's per-symbol <c>catch (Exception ex) when (!(ex is OperationCanceledException) &amp;&amp;
         /// !ct.IsCancellationRequested)</c> filter is FALSE whenever <c>ct</c> is already cancelled — so if the
@@ -652,8 +652,8 @@ namespace MapRenderer.Tests.Text
         /// <para>The decode-disposal assertion is a bundled sanity check, not evidence for the guard itself
         /// — the decode's one and only release already happened at the worker step
         /// (<see cref="TileSymbolLayerProcessor.ProcessOnWorker"/>'s caller releases it right after handing
-        /// off), well before the tail's suspension. It just confirms this restructure did not somehow
-        /// disturb that unrelated lifetime.</para>
+        /// off), well before the tail's suspension. It confirms that the tail does not disturb that
+        /// unrelated lifetime.</para>
         ///
         /// <para><b>RED injection:</b> delete the <c>tail.Ct.ThrowIfCancellationRequested()</c>
         /// <c>RunTailAsync</c> calls right after <c>await _builder.EnsureGlyphRangesAsync(...)</c> — the
@@ -661,12 +661,11 @@ namespace MapRenderer.Tests.Text
         /// and <c>CancelledBuildCount</c> stays 0 (a warning is logged instead).</para>
         ///
         /// <para><b>Borrowed precondition.</b> This tooth's discriminating power depends on shaping
-        /// <see cref="MixedDirectionText"/> still throwing today — a production LIMITATION, not a guarantee.
-        /// If mixed-direction shaping is ever implemented, both unwind paths converge on the same
-        /// <c>CancelledBuildCount</c> outcome again and this tooth silently reverts to exactly the vacuity it
-        /// was rewritten to fix. <see cref="Precondition_ShapingTheMixedDirectionTextStillThrows"/> pins that
-        /// precondition directly, so a future implementer hits a loud, named failure pointing HERE instead of
-        /// a green suite hiding a hollow tooth.</para></summary>
+        /// <see cref="MixedDirectionText"/> still throwing — a production LIMITATION, not a guarantee.
+        /// If mixed-direction shaping becomes supported, both unwind paths converge on the same
+        /// <c>CancelledBuildCount</c> outcome and this tooth becomes vacuous without failing.
+        /// <see cref="Precondition_ShapingTheMixedDirectionTextStillThrows"/> pins that precondition
+        /// directly, so that change fails a named test that points here.</para></summary>
         [Test]
         public void CancelDuringGlyphPrepare_UnwindsBeforeShapeOrCommit_ReleasesTheDecodeExactlyOnce()
         {
@@ -758,7 +757,7 @@ namespace MapRenderer.Tests.Text
             ]
         }").Replace('\'', '"');
 
-        /// <summary>T1's behavioural claim, driven through the PRODUCTION dispatch path
+        /// <summary>The fetch-precedes-shape claim, driven through the PRODUCTION dispatch path
         /// (<c>TryBeginBuild</c> → <c>RunWorkerAndHandoff</c> → <c>PumpBuilds</c> → <c>RunTailAsync</c>), not
         /// <c>BuildAsync</c> — which <see cref="GlyphPrepareBeforeShapeTests.EveryGlyphFetchPrecedesTheFirstShapedSymbol"/>
         /// drives, but which has ZERO production callers (production runs through
@@ -879,12 +878,12 @@ namespace MapRenderer.Tests.Text
 
             Assert.AreEqual(0, CountOccurrences(workerBody, shapeCallForm),
                 $"RunWorkerAndHandoff must contain ZERO '{shapeCallForm}' call sites — the per-layer shape " +
-                "loop lives only in RunTailAsync (A5a's split, preserved by A5b's feed swap).");
+                "loop lives only in RunTailAsync (the worker/tail split).");
             Assert.AreEqual(0, CountOccurrences(workerBody, commitCallForm),
                 $"RunWorkerAndHandoff must contain ZERO '{commitCallForm}' call sites — the commit lives " +
                 "only in RunTailAsync too.");
             Assert.AreEqual(1, CountOccurrences(tailBody, shapeCallForm),
-                $"RunTailAsync must call '{shapeCallForm}' exactly once — the per-layer shape loop (A5a's split).");
+                $"RunTailAsync must call '{shapeCallForm}' exactly once — the per-layer shape loop.");
             Assert.AreEqual(1, CountOccurrences(tailBody, commitCallForm),
                 $"RunTailAsync must call '{commitCallForm}' exactly once — the sole commit site after the split.");
         }
@@ -892,12 +891,12 @@ namespace MapRenderer.Tests.Text
         // ── The commit-gating ORDER in RunTailAsync — the sole CompleteBuild commit
         //    is reached only AFTER the whole per-layer CompleteOnMain loop AND a trailing ct check, so a
         //    cancel landing mid-loop (between processor tails k and k+1, or after the last one) never commits
-        //    partial symbols. F-1 pins the call COUNTS (each exactly once); this pins their ORDER — the actual
-        //    partial-commit guard review flagged as covered only indirectly. Complements the behavioural
-        //    F-3(b) (cancel OBSERVED inside a shape await); this pins the guard structurally + deterministically.
-        //    Glyph-fetch hoist: RunTailAsync now ALSO has a ct check right after its EnsureGlyphRangesAsync
-        //    await, BEFORE the shape loop — so ".ThrowIfCancellationRequested(" now occurs TWICE in the tail
-        //    body. The trailing (partial-commit) guard we pin here is the LAST occurrence, not the first.
+        //    partial symbols. RunWorkerAndHandoff_NeverShapesOrCommits_RunTailAsync_DoesBothExactlyOnce pins
+        //    the call COUNTS (each exactly once); this pins their ORDER — the actual partial-commit guard.
+        //    Complements the behavioural case (a cancel OBSERVED inside a shape await); this pins the guard
+        //    structurally + deterministically. RunTailAsync ALSO has a ct check right after its
+        //    EnsureGlyphRangesAsync await, BEFORE the shape loop — so ".ThrowIfCancellationRequested(" occurs
+        //    TWICE in the tail body. The trailing (partial-commit) guard we pin here is the LAST occurrence.
         [Test]
         public void RunTailAsync_CommitIsGatedBehindTheWholeLoopAndACtCheck()
         {
@@ -929,12 +928,12 @@ namespace MapRenderer.Tests.Text
 
             Assert.IsTrue(tailBody.Contains("catch (OperationCanceledException"),
                 "RunTailAsync must catch OperationCanceledException — a cancel OBSERVED inside a shape await " +
-                "(F-3(b)) unwinds before the commit, silently (no partial commit on that path either).");
+                "unwinds before the commit, silently (no partial commit on that path either).");
         }
 
-        // ── Glyph-fetch hoist (T4/T5a/T5b) ────────────────────────────────────────────────────────────
+        // ── Glyph-fetch hoist: the tail's await, its collect site, its fields ─────────────────────────
 
-        /// <summary>T4 structural half: <c>RunTailAsync</c> now awaits exactly ONCE — the build-wide glyph-
+        /// <summary>Structural half: <c>RunTailAsync</c> awaits exactly ONCE — the build-wide glyph-
         /// range ensure step — and that ONE await comes BEFORE the per-layer shape loop starts. Complements
         /// <c>GlyphPrepareBeforeShapeTests.TheMainTailHasNoSuspensionPoint</c>'s reflection half (a different
         /// instrument reading a different thing, whose blind spot does not transfer).
@@ -964,7 +963,7 @@ namespace MapRenderer.Tests.Text
                 "point of the hoist is that shaping never suspends.");
         }
 
-        /// <summary>T5a: the collect step must run on MAIN, after the worker step, inside <c>RunTailAsync</c>
+        /// <summary>The collect step must run on MAIN, after the worker step, inside <c>RunTailAsync</c>
         /// — never migrated into the worker pass, where it would run off-main against a glyph
         /// cache/atlas that is main-thread-only. Reads TWO source files: the worker step
         /// (<c>TileSymbolLayerProcessor.ProcessOnWorker</c>) and the pass's owner
@@ -1009,7 +1008,7 @@ namespace MapRenderer.Tests.Text
                 $"RunTailAsync must call '{collectCallForm}' exactly once — the sole main-thread collect site.");
         }
 
-        /// <summary>T5b: <c>ReadySymbolTail</c> must never start carrying a
+        /// <summary><c>ReadySymbolTail</c> must never carry a
         /// <see cref="SharedDisposable{T}"/>&lt;<see cref="IDecodedTile"/>&gt; — its decode reference's
         /// lifetime ends at the worker step (the parked-drain body's <c>finally</c> / the kick lambda's
         /// release), before a <see cref="SymbolSubsystem.ReadySymbolTail"/> even exists. If a future change

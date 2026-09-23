@@ -20,8 +20,9 @@
 //
 // A Core-only round trip is VACUOUS for the basis half, because the dash period in world metres is
 // (w_logical·dpr) × (mpp_logical/dpr) × Σ and the dpr cancels — only a tooth that reads the two halves from
-// the two files that own them can see a basis error. It is NOT vacuous for the source half: T2 below is a
-// pure CPU tooth and is the only row in the suite that can tell the two derivations apart.
+// the two files that own them can see a basis error. It is NOT vacuous for the source half:
+// SyncToCamera_TracksTheAltitudeMultiplier_NotTheZoomFormula below is a pure CPU tooth and is the only row
+// in the suite that can tell the two derivations apart.
 
 #if UNITY_EDITOR
 using NUnit.Framework;
@@ -97,7 +98,7 @@ namespace MapRenderer.Tests.Style
                    * math.tan(math.radians(cam.CurrentProperties.VerticalFovDeg) * 0.5) / cam.ViewportPx.y;
 
         /// <summary>
-        /// <b>T1.</b> The pushed frame constant is metres per DEVICE pixel AND is the camera's own measured
+        /// The pushed frame constant is metres per DEVICE pixel AND is the camera's own measured
         /// scale at the look-at — two independent readings of one number, asserted together.
         ///
         /// <para>The device-px clause: expected values are computed from
@@ -105,23 +106,23 @@ namespace MapRenderer.Tests.Style
         /// RELATION (the ÷ dpr) and not a transcription of the zoom curve. The 1.5 row is there because a
         /// dyadic ratio can hide reciprocal-vs-divide drift; the 0.0 and 100.0 rows are there because the ÷
         /// must go through <see cref="DeviceScaling.PerLogicalPxToPerDevicePx"/>'s plausibility band — a raw
-        /// <c>/ dpr</c> reads +∞ and 3.06 on those two. Their expected values are unaffected by the move to
-        /// the camera, and not by luck: the same fallback is inherited through
+        /// <c>/ dpr</c> reads +∞ and 3.06 on those two. Their expected values are the same under the
+        /// camera-measured derivation, and not by luck: the same fallback is inherited through
         /// <see cref="MapCamera.ViewportLogicalPx"/> → <see cref="DeviceScaling.DeviceToLogicalPx"/>, which is
         /// the only place the ratio enters the altitude framing.</para>
         ///
-        /// <para>The camera clause is the tooth that would have caught the 8×: a fixture
-        /// rendering at z8 read 2445.985 = <c>MetersPerPixel(5.0)</c> out of this global — three whole zoom
-        /// levels of stale process state — while its own camera measured 305.748113. Nothing in the suite
-        /// compared the two.</para>
+        /// <para>The camera clause catches a stale ruler. A fixture rendering at z8 that read this global
+        /// after a z5 fixture would read 2445.985 = <c>MetersPerPixel(5.0)</c> — three whole zoom levels of
+        /// stale process state — while its own camera measures 305.748113. This clause compares the two
+        /// directly.</para>
         /// </summary>
-        [TestCase(8.0,  1.0,   1.0, TestName = "T1_MetresPerDevicePx_Zoom8_Dpr1")]
-        [TestCase(8.0,  2.0,   2.0, TestName = "T1_MetresPerDevicePx_Zoom8_Dpr2")]
-        [TestCase(8.0,  1.5,   1.5, TestName = "T1_MetresPerDevicePx_Zoom8_Dpr1p5")]
-        [TestCase(8.0,  0.0,   1.0, TestName = "T1_MetresPerDevicePx_Zoom8_Dpr0_FallsBackToOne")]
-        [TestCase(8.0,  100.0, 1.0, TestName = "T1_MetresPerDevicePx_Zoom8_Dpr100_FallsBackToOne")]
-        [TestCase(14.0, 1.0,   1.0, TestName = "T1_MetresPerDevicePx_Zoom14_Dpr1")]
-        [TestCase(14.0, 2.0,   2.0, TestName = "T1_MetresPerDevicePx_Zoom14_Dpr2")]
+        [TestCase(8.0,  1.0,   1.0, TestName = "MetresPerDevicePx_Zoom8_Dpr1")]
+        [TestCase(8.0,  2.0,   2.0, TestName = "MetresPerDevicePx_Zoom8_Dpr2")]
+        [TestCase(8.0,  1.5,   1.5, TestName = "MetresPerDevicePx_Zoom8_Dpr1p5")]
+        [TestCase(8.0,  0.0,   1.0, TestName = "MetresPerDevicePx_Zoom8_Dpr0_FallsBackToOne")]
+        [TestCase(8.0,  100.0, 1.0, TestName = "MetresPerDevicePx_Zoom8_Dpr100_FallsBackToOne")]
+        [TestCase(14.0, 1.0,   1.0, TestName = "MetresPerDevicePx_Zoom14_Dpr1")]
+        [TestCase(14.0, 2.0,   2.0, TestName = "MetresPerDevicePx_Zoom14_Dpr2")]
         public void SyncToCamera_PushesTheCameraMeasuredMetresPerDevicePixel(
             double zoom, double dpr, double effectiveRatio)
         {
@@ -153,14 +154,15 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// <b>T2 — the discriminating row.</b> The constant tracks the CAMERA, not the zoom formula.
+        /// <b>The discriminating row.</b> The constant tracks the CAMERA, not the zoom formula.
         ///
         /// <para><see cref="MapCamera.AltitudeMultiplier"/> is an art-direction scale on the orbit radius:
         /// at 1.5 the camera sits 1.5× further out, so a device pixel covers 1.5× as much ground and the
-        /// ruler must read 1.5× larger. The retired push read <c>MetersPerPixel(zoom)/dpr</c>, which does not
-        /// contain the multiplier at all — so it stays at 305.748 while the camera is at 458.622, and every
-        /// px-width line renders 1.5× too thin with no test in the suite able to see it. This is the ONE row
-        /// that separates the two derivations; every row of T1 is green under both.</para>
+        /// ruler must read 1.5× larger. A push that read <c>MetersPerPixel(zoom)/dpr</c> would not contain
+        /// the multiplier at all — it would stay at 305.748 while the camera is at 458.622, and every
+        /// px-width line would render 1.5× too thin. This is the ONE row
+        /// that separates the two derivations; every row of
+        /// <see cref="SyncToCamera_PushesTheCameraMeasuredMetresPerDevicePixel"/> is green under both.</para>
         /// </summary>
         [Test]
         public void SyncToCamera_TracksTheAltitudeMultiplier_NotTheZoomFormula()
@@ -182,7 +184,7 @@ namespace MapRenderer.Tests.Style
                     $"Read {pushed:F6}.");
 
                 Assert.That(pushed, Is.Not.EqualTo(zoomFormula).Within(Tolerance),
-                    $"the pushed constant is {zoomFormula:F6} — MetersPerPixel(8)/dpr, the retired " +
+                    $"the pushed constant is {zoomFormula:F6} — MetersPerPixel(8)/dpr, the " +
                     "Web-Mercator zoom formula, which has no AltitudeMultiplier term. The constant must be " +
                     "MEASURED off the camera, not re-derived from the zoom the camera was framed with.");
             }
@@ -209,15 +211,15 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// <b>T2b.</b> The constant does not move with TILT. The orbit radius is what
+        /// The constant does not move with TILT. The orbit radius is what
         /// <see cref="CameraPoseMath.ComputeRelativePose"/> holds fixed, so the world width a style asks for
         /// is the same overhead as at the horizon — tilt changes only where in the frame each depth lands,
-        /// which is the perspective divide's business and not the ruler's. A tilt term here would be a
-        /// per-frame version of exactly the compensation that was reverted.
+        /// which is the perspective divide's business and not the ruler's. A tilt term here would make the
+        /// ruler compensate for perspective once per frame, which is wrong for the same reason.
         /// </summary>
-        [TestCase(0.0,  TestName = "T2b_FrameConstant_Tilt0")]
-        [TestCase(30.0, TestName = "T2b_FrameConstant_Tilt30")]
-        [TestCase(55.0, TestName = "T2b_FrameConstant_Tilt55")]
+        [TestCase(0.0,  TestName = "FrameConstant_Tilt0")]
+        [TestCase(30.0, TestName = "FrameConstant_Tilt30")]
+        [TestCase(55.0, TestName = "FrameConstant_Tilt55")]
         public void SyncToCamera_IsIndependentOfTilt(double tiltDeg)
         {
             double expected = CameraPoseMath.MetersPerPixel(8.0);

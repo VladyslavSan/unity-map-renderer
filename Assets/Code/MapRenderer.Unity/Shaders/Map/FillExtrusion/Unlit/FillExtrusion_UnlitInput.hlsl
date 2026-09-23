@@ -8,7 +8,7 @@
 // Modified from upstream: the map-paint additions below are copied from FillExtrusion_LitInput.hlsl's own
 //   CBUFFER tail (this repo's code, not URP's) — see that file for the per-property rationale.
 //
-// The unlit twin of FillExtrusion_LitInput.hlsl (unlit rendering mode epic, stage 2). Declares the SAME
+// The unlit twin of FillExtrusion_LitInput.hlsl. Declares the SAME
 // map-paint property names FillExtrusion_LitInput.hlsl does — that is what lets FillExtrusionTweaker /
 // ZoomStyleApplier / the C# ShaderProperties registry bind onto this material unchanged (no new PropertyId
 // needed; every name here is already a registered alias under ShaderProperties.FillExtrusion /
@@ -17,11 +17,11 @@
 // _BumpScale/_Parallax/_OcclusionStrength/_ClearCoatMask/_ClearCoatSmoothness/_Detail*MapScale and their
 // textures — Unlit has no lighting model to feed them.
 //
-// [MAP DELTA S2] _BaseMap/_BaseMap_ST/_BaseMap_TexelSize are declared (mirrors stock Unlit + the Fill unlit
+// [MAP DELTA] _BaseMap/_BaseMap_ST/_BaseMap_TexelSize are declared (mirrors stock Unlit + the Fill unlit
 // twin) but never SAMPLED by FillExtrusion_UnlitForwardPass.hlsl: StyledFillExtrusionTileBuilder bakes no
 // TEXCOORD0 UV stream at all — its VertexDescriptors write only Position/Normal/Tangent/Color/TexCoord3/
-// TexCoord4 (StyledFillExtrusionTileBuilder.cs:114-121; TEXCOORD0-2 are "DELIBERATELY not supplied", per
-// that file's own comment). A texture read here would therefore sample the identical zero-UV texel for
+// TexCoord4 (TEXCOORD0-2 are "not supplied here", per the comment on those VertexDescriptors).
+// A texture read here would therefore sample the identical zero-UV texel for
 // every vertex — a degenerate, pointless "texture" that the Lit twin's own InitializeStandardLitSurfaceData
 // already carries for free (it samples that same fixed UV too) but that fill-extrusion styling has never
 // used. The property stays declared for structural/GUI parity with the other twins (Surface Inputs' Base

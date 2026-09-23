@@ -32,8 +32,8 @@ Inverse:
 φ = 2·atan(exp(y / R)) − π/2     (Gudermannian)
 ```
 > **EPSG:3857 quirk:** inputs are **WGS84 geodetic** lon/lat, but the projection math is **spherical**
-> (`R = a`, eccentricity ignored). So **Mercator ignores `e2`; ECEF (§3) uses it.** Same lon/lat → two
-> different projections — never cross the constants between them.
+> (`R = a`, eccentricity ignored). So **Mercator ignores `e2`; ECEF (§ "Geodetic ↔ ECEF (globe)" below)
+> uses it.** Same lon/lat → two different projections — never cross the constants between them.
 
 ## 3. Geodetic ↔ ECEF (globe)
 Forward — geodetic (λ, φ, h) → ECEF (X, Y, Z), meters:
@@ -61,7 +61,8 @@ v = (y + py/E) / 2^z          # [0,1] latitude fraction (from north)
 lon = u·360 − 180
 lat = atan(sinh(π·(1 − 2v))) · 180/π
 ```
-Then `lon/lat → Mercator` (§2) or `→ ECEF` (§3) depending on mode.
+Then `lon/lat → Mercator` (§ "Web Mercator (planar)" above) or `→ ECEF` (§ "Geodetic ↔ ECEF (globe)"
+above) depending on mode.
 
 ## 5. Render space & precision (RTC / floating origin) — mandatory in BOTH modes
 - All core math in **float64** (`double` / `Unity.Mathematics double3`).
@@ -78,7 +79,7 @@ hand-authored surface for the Burst jobs — and NOT a second interface for the 
 lives as ONE method (`ProjectPoint`) on the struct, called from BOTH the managed OOP path and the Burst job.
 One source of truth ⇒ the managed path and the job path **cannot drift**.
 
-**One interface, two concerns (maintainer decision, S91).** A projection is one concept; splitting its
+**One interface, two concerns (maintainer decision).** A projection is one concept; splitting its
 behaviour across two interfaces would scatter "everything about WebMercator" into two places. So the SAME
 `IProjection` carries both the **geometry** methods below AND the **camera-interaction** methods
 (`ScreenToGround` / `GroundToScreen` / `ClampValidLatitude` — the camera only needs a few things).
@@ -110,10 +111,10 @@ wrap) so the finite Mercator sheet cannot be panned off the viewport, and `Camer
 `MinZoomToFill` (world fills the viewport, no off-world margin — the shorter axis crops) for a finite world vs
 `MinZoomToFit` (fits with margin) for the globe. The globe returns `ClampLookAtToWorld => cam.LookAt` (identity)
 and keeps its `MinZoomToFit` floor, so its behaviour is unchanged. This is distinct from `TryGetHorizonOccluder`
-(self-occlusion) and `MaxRefineAngleRad` (subdivision) — finiteness is its own fact. *Known follow-ups (deferred):*
+(self-occlusion) and `MaxRefineAngleRad` (subdivision) — finiteness is its own fact. *Known limits:*
 (1) the clamp is heading/tilt-conservative (axis-aligned half-span, exact at tilt=0); a rotated/pitched view can
 still show a corner sliver off-world. (2) nothing proactively re-clamps `camera.Zoom` upward when the floor
-*rises* (a globe→Mercator swap or a viewport shrink) — safely masked today by the "world smaller than viewport →
+*rises* (a globe→Mercator swap or a viewport shrink) — masked by the "world smaller than viewport →
 lock to centre" guard in `ClampLookAtToWorld`, but if it ever reads as "camera briefly locked to centre after a
 switch," raise the zoom to the new floor at the swap.
 
@@ -147,8 +148,8 @@ supplies per-vertex altitude, and the shading normal comes from the height *grad
 **Rejected alternatives (for the record):** an enum + `switch` in the job (works, but a parallel enum to keep
 in sync — the struct type already discriminates); a `ProjectionRules`/`ProjectionParams` blittable struct (adds
 per-projection state the stateless model doesn't want); Burst `FunctionPointer`s (force `Unity.Burst` +
-`AOT.MonoPInvokeCallback`/`UnityEngine` into engine-free `Core`, breaking the fast dotnet core-tests). The
-interim `ProjectionMode` enum (S61) is retired. Camera-interaction code (S63) uses `IProjection` **directly**
+`AOT.MonoPInvokeCallback`/`UnityEngine` into engine-free `Core`, breaking the fast dotnet core-tests). No
+`ProjectionMode` enum exists. Camera-interaction code uses `IProjection` **directly**
 on the managed side (through the boxed struct; no Burst constraint there).
 
 ## 7. Axis conventions (Unity is left-handed, Y-up) — LOCKED defaults
@@ -156,13 +157,15 @@ on the managed side (through the boxed struct; no Burst constraint there).
 - **Mercator plane → Unity:** east → `+X`, north → `+Z`, elevation/height → `+Y`.
 - Winding: geometry is **constructed CCW** (canonical earcut/ribbon IR), then **reversed to Unity-front at the
   GPU mesh-write boundary** (`StyledFill`/`StyledLineTileBuilder`) so stock **Cull Back** (`_Cull:2`) keeps the
-  camera-facing surface (§7.1). Globe surface normal for lighting = geodetic `up` (§3).
+  camera-facing surface (§ "Handedness, winding & why the ECEF reflection is load-bearing" below). Globe
+  surface normal for lighting = geodetic `up` (§ "Geodetic ↔ ECEF (globe)" above).
 - **Camera tilt is defined relative to the surface normal at `LookAt`.** `tilt = 0°` ⇒ the camera view
   (forward) vector is the **inverse of the earth normal at `LookAt`** (top-down); `tilt = 90°` ⇒ the view is
   **parallel to the surface at `LookAt`** (horizon), and is the limit ⇒ range `[0°, 90°]`. The normal is
-  **projection-dependent**: constant `+Y` on Mercator, the geodetic normal `IProjection.UpAt(lon, lat)` (§6)
-  on the globe — so on Mercator `tilt=0` is directly overhead (matches `CameraPoseMath.ComputeRelativePose`).
-  (`Tilt`/`Heading` become `ConstrainedAngle` camera params — S68.)
+  **projection-dependent**: constant `+Y` on Mercator, the geodetic normal `IProjection.UpAt(lon, lat)`
+  (§ "Projection interface — ONE abstraction, a STRUCT usable in Burst (LOCKED principle)" above) on the
+  globe — so on Mercator `tilt=0` is directly overhead (matches `CameraPoseMath.ComputeRelativePose`).
+  (`Tilt`/`Heading` are `ConstrainedAngle` camera params.)
 
 ### 7.1 Handedness, winding & why the ECEF reflection is load-bearing
 *(the general coordinate-systems lesson — settled empirically by the de-reflection experiment, 2026-07-05)*
@@ -182,30 +185,31 @@ directly: *"det(B) must be +1 (proper rotation)"*.
 
 **Winding: canonical CCW construction, reversed once at the GPU boundary.** After the rebase, both projections
 render in the same right-handed local frame — there is no world-handedness difference to "fix", and both paths
-wind **consistently by construction** (S100): fills map all three triangle vertices through one `ProjectPoint`,
+wind **consistently**: fills map all three triangle vertices through one `ProjectPoint`,
 and lines tie `across = cross(along, up)` to the same `up` the centerline was projected with — so the canonical
-winding is uniform across fills, lines, and every projection, with **no per-projection flip** (`ReversesWinding`
-/`IsCurved` were retired — §8 rule 5; there is no handedness/curvature lookup). But that canonical order is
-**CCW**, and the ECEF→render reflection makes CCW render back-faces toward the camera. So the **GPU mesh-write
-boundary reverses triangle winding once, uniformly** — both `StyledFillTileBuilder` fill writes, the globe
-subdivide output, `StyledLineTileBuilder`, and the test `SyntheticLineMesh.Upload` — to yield a genuine
-Unity-front face for **stock Cull Back** (`MapFill`/`MapLine` `_Cull:2`, matching the already-stock
-`MapSymbolText`). The upstream IR (`FillGraphOutput.TriangleIndices`, the subdivide job output) stays
-CCW/convention-neutral so the earcut and globe-subdivide parity oracles hash raw winding. Pinned by
-`GlobeFillWindingTests` / `GlobeLineWindingTests` — now an **absolute** check (front face points OUT of the
+winding is uniform across fills, lines, and every projection, with **no per-projection flip** (no
+handedness/curvature flag or lookup exists — § "Low-level rules (invariants)" below, rule 5). But that
+canonical order is **CCW**, and the ECEF→render reflection makes CCW render back-faces toward the camera.
+So the **GPU mesh-write boundary reverses triangle winding once, uniformly** — both
+`StyledFillTileBuilder` fill writes, the globe subdivide output, `StyledLineTileBuilder`, and the test
+`SyntheticLineMesh.Upload` — to yield a genuine Unity-front face for **stock Cull Back** (`MapFill`/`MapLine`
+`_Cull:2`, matching the already-stock `MapSymbolText`). The upstream IR (`FillGraphOutput.TriangleIndices`,
+the subdivide job output) stays CCW/convention-neutral so the earcut and globe-subdivide parity oracles hash
+raw winding. Pinned by
+`GlobeFillWindingTests` / `GlobeLineWindingTests` — an **absolute** check (front face points OUT of the
 surface, dominant sign +1) *plus* globe == Mercator, so an inversion can't hide behind a relative-only compare
-(the hole that let "front renders as back" ship).
+(which cannot see "front renders as back").
 
 **The de-reflection experiment (rejected).** Hypothesis: make Spherical right-handed like Mercator
 (`(X,Z,Y)→(X,Z,−Y)`, a rotation) across `Ecef.Forward` / `TangentBasis` / `ProjectPoint` / `ReconstructView` +
 inverse trig, and drop the line flip. Measured, on a branch:
-1. **`det(TangentBasis) → −1`** ⇒ `GlobePlacementTests` fails (rebase is no longer a rotation ⇒ the tile-transform
+1. **`det(TangentBasis) → −1`** ⇒ `GlobePlacementTests` fails (rebase is not a rotation ⇒ the tile-transform
    quaternion is garbage). The reflection is structurally required — confirming the matched pair above.
 2. **Winding did not unify — it *swapped*.** A global de-reflection flips *every* mesh-local winding, so the fill
    inverted while the line became correct — you trade one flip for another. `GlobeFillWindingTests` went red
-   (globe +1 vs Mercator −1); the line test went green. Net zero. *(This predates S100: winding is now uniform by
-   construction, and a single boundary reversal serves both paths — so a de-reflection would just move the one
-   reversal, not swap per-path flips. The load-bearing-reflection conclusion is unchanged.)*
+   (globe +1 vs Mercator −1); the line test went green. Net zero. *(With winding uniform across paths, a single
+   boundary reversal serves both, so a de-reflection only moves that one reversal. The load-bearing-reflection
+   conclusion holds.)*
 3. **Snapshots were unchanged (a render no-op).** The coordinated de-reflection composes straight back through the
    rebase (`rebase' · project'` = `rebase · project`), so the *rendered pixels* are identical — the reflection is an
    internal representation detail, invisible on screen.
@@ -215,7 +219,7 @@ inverse trig, and drop the line flip. Measured, on a branch:
 - If a reflection is composed into a downstream **rotation** (here `rebase`), it is load-bearing — moving it flips
   the downstream determinant and breaks any rotation-only consumer (quaternion, `LookRotation`).
 - Winding correctness lives with the geometry **construction**, not the projection's world handedness — and
-  (S100) it is uniform across paths (`across = cross(along, up)` ties the ribbon to the centerline's `up`), so
+  it is uniform across paths (`across = cross(along, up)` ties the ribbon to the centerline's `up`), so
   one reversal at the mesh-write boundary serves fills and lines on every projection: no per-path, no
   per-projection flip.
 - When handedness reasoning gets slippery, **don't derive the sign — calibrate to a known-good reference and test**
@@ -229,17 +233,19 @@ inverse trig, and drop the line flip. Measured, on a branch:
 4. **Line width extrudes along the in-surface perpendicular:** `across = normalize(cross(along, up))`.
    Planar: `up = +Y` ⇒ the 2D perpendicular. Globe: `up = geodetic normal` ⇒ ribbon hugs the surface.
    (Width itself is meters, converted to pixels per the styling model — see `ARCHITECTURE.md` § "Styling model — build geometry once, restyle via material".)
-   *(Implemented S100 — `RibbonJob` builds the ribbon in 3D from a `(point, up)` array. NOTE the sign:
+   *(`RibbonJob` builds the ribbon in 3D from a `(point, up)` array. NOTE the sign:
    `cross(along, up)`, NOT `cross(up, along)` — the two differ by a reflection, and only the former winds the
    flat Mercator ribbon like the confirmed-correct 2D reference. The sign is **calibrated** to that oracle,
-   not derived from handedness (§7.1); tying `across` to the same `up` the centerline was projected with makes
-   winding correct by construction for every projection, so there is no per-projection winding flip.)*
+   not derived from handedness (§ "Handedness, winding & why the ECEF reflection is load-bearing" above);
+   tying `across` to the same `up` the centerline was projected with makes winding correct for every
+   projection, so there is no per-projection winding flip.)*
 5. **Globe needs curvature subdivision:** large straight primitives (ocean/country fills, long lines) must
    be subdivided so chords don't cut through the sphere — threshold by angular span / sagitta tolerance.
-   Planar mode: no subdivision. *(Implemented S100 — the projection declares the tolerance as
+   Planar mode: no subdivision. *(The projection declares the tolerance as
    `IProjection.MaxRefineAngleRad`; Mercator returns `∞`, so the split count falls out to zero and "no
-   subdivision" is the degenerate value, not a capability flag. Retired `IsCurved`/`ReversesWinding`.)*
-6. **Consistent winding & normals** as in §7; verify no mirroring across the ECEF→Unity handedness flip.
+   subdivision" is the degenerate value, not a capability flag. No `IsCurved`/`ReversesWinding` flag exists.)*
+6. **Consistent winding & normals** as in § "Axis conventions (Unity is left-handed, Y-up) — LOCKED
+   defaults" above; verify no mirroring across the ECEF→Unity handedness flip.
 
 ## 9. DECIDED (2026-07-02) — CPU-at-build: project once during mesh modelling
 **The projection is applied ONCE, on the CPU at mesh-build time** — bake the final projected
@@ -259,8 +265,8 @@ project in the vertex shader; enables a rebuild-free MapLibre-style morph. Field
 when projection is a live runtime toggle — which it is not here.)*
 
 This locks the **vertex format** (final positions + baked frame) and the **shader contract** (frame-consuming,
-no projection). Downstream: curvature subdivision (§8.5) is a **build-time pass**; line width extrudes along
-the baked `cross(up, tangent)` (§8.4).
+no projection). Downstream: curvature subdivision (§ "Low-level rules (invariants)" above, rule 5) is a
+**build-time pass**; line width extrudes along the baked `cross(along, up)` (the same section, rule 4).
 
 ---
 

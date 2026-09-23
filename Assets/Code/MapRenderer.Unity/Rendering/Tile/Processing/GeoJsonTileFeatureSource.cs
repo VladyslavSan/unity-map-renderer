@@ -21,7 +21,7 @@ namespace MapRenderer.Unity.Rendering.Tile.Processing
     /// <para>The slice stays OFF the main thread under the desktop policy, routed through
     /// <see cref="TileDecodeDispatch.DecodeAsync"/> — the same dispatch the MVT source uses, under
     /// whichever <see cref="IWorkScheduler"/> this source was constructed with, and pinned by
-    /// <c>GeoJsonSourceTests.T5_GetTile_SlicesOffTheMainThread</c>. Under
+    /// <c>GeoJsonSourceTests.GetTile_SlicesOffTheMainThread</c>. Under
     /// <see cref="ThreadPoolWorkScheduler"/> (desktop/editor) this is a pool hop, because slicing inline
     /// inside <c>Tick</c> would stall the main thread once per cover tile; under
     /// <see cref="InlineWorkScheduler"/> (WebGL) the slice runs synchronously on whatever thread calls

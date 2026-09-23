@@ -249,7 +249,7 @@ namespace MapRenderer.Tests.Tiles
                 "is the other half of getting the reference count wrong.");
         }
 
-        // ── T-D1: a record evicted before its kick ────────────────────────────────────────────────────
+        // ── a record evicted before its kick ──────────────────────────────────────────────────────────
 
         /// <summary>
         /// The wholly new path — a tile fetched, decoded, and then evicted by a cover change before it ever
@@ -290,7 +290,7 @@ namespace MapRenderer.Tests.Tiles
             finally { fake.Gate?.TrySetResult(); view.Teardown(); }
         }
 
-        // ── T-D2: a restyle ───────────────────────────────────────────────────────────────────────────
+        // ── a restyle ─────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// The same funnel reached through <c>SetSources</c>, which tears down every record wholesale on a
@@ -299,7 +299,8 @@ namespace MapRenderer.Tests.Tiles
         /// <c>TryGetValue</c> + <c>Remove</c>), and because a restyle is the one path that discards records
         /// the camera never left.
         ///
-        /// <para><b>RED injection:</b> the same site as T-D1, observed through the restyle path.</para>
+        /// <para><b>RED injection:</b> the same site as <c>ARecordEvictedBeforeItsKick_ReleasesItsDecode</c>,
+        /// observed through the restyle path.</para>
         /// </summary>
         [Test]
         public void ARestyle_ReleasesEveryUnkickedRecordsDecode()
@@ -329,7 +330,7 @@ namespace MapRenderer.Tests.Tiles
             finally { fake.Gate?.TrySetResult(); view.Teardown(); }
         }
 
-        // ── T-D3: teardown ────────────────────────────────────────────────────────────────────────────
+        // ── teardown ──────────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// Teardown, and the reason <c>DoDispose</c> is routed through the funnel instead of leaving it with
@@ -366,7 +367,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── T-D4: a fetch discarded mid-flight ────────────────────────────────────────────────────────
+        // ── a fetch discarded mid-flight ──────────────────────────────────────────────────────────────
 
         /// <summary>
         /// The second funnel: a tile released while its <c>GetTile</c> was still in flight. The record goes

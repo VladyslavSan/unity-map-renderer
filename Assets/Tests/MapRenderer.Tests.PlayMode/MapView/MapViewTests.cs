@@ -57,7 +57,7 @@ namespace MapRenderer.Tests.PlayMode.MapViews
                            ""source-layer"": ""countries"", ""paint"": { ""fill-color"": [""rgba"", 200, 50, 50, 1] } } ]
         }");
 
-        /// <summary>Two distinct rendered sources — the S83b multi-source discriminator (each gets its own
+        /// <summary>Two distinct rendered sources — the multi-source discriminator (each gets its own
         /// TileManager pipeline / <c>_loaded</c> record per cover tile).</summary>
         private static StyleDocument TwoSourceStyle() => StyleParser.Parse(@"{
             ""version"": 8, ""name"": ""multi-source-b"",
@@ -1116,10 +1116,10 @@ namespace MapRenderer.Tests.PlayMode.MapViews
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// S83b acceptance — the live <see cref="MapView.SetStyle"/> path: file:// offline (zero network),
+    /// The live <see cref="MapView.SetStyle"/> path: file:// offline (zero network),
     /// inline-<c>tiles[]</c> fetch-side short-circuit, multi-source per-source routing, restyle reuses an
     /// unchanged source's pipeline+bytes, and <c>styleId</c> establishment. (The TileJSON parse+fill proof
-    /// is S83a's fast-core tooth; not re-tested here.)
+    /// is the fast-core <c>TileJsonTests</c>; not re-tested here.)
     /// </summary>
     [TestFixture]
     public class MapViewSetStyleTests : BaseTestFixture

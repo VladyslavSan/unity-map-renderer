@@ -88,12 +88,12 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         internal readonly Dictionary<int, ItemRec>    _items          = new Dictionary<int, ItemRec>();
         internal readonly Dictionary<TileId, RootRec> _tileRoots      = new Dictionary<TileId, RootRec>();
 
-        // Stall #2: reused scratch for one RemoveItems() batch — the record's layer entities plus any tile
+        // Reused scratch for one RemoveItems() batch — the record's layer entities plus any tile
         // root the batch empties, destroyed in ONE EntityManager.DestroyEntity(NativeArray) structural change
         // instead of one per layer. Persistent (reused every release); disposed in DoDispose.
         private NativeList<Entity> _destroyList;
 
-        // ── Stall #3: ID-based layer creation (avoid the per-entity RenderMeshArray) ──────────────────
+        // ── ID-based layer creation (avoid the per-entity RenderMeshArray) ────────────────────────────
         // EG's ID route: register each layer material ONCE + each mesh on add, and point the entity at them
         // via MaterialMeshInfo.FromMeshIDAndMaterialID — no fresh one-element RenderMeshArray shared component
         // (and its batch registration) per consumed mesh. Layer entities are Instantiated from a single
@@ -107,13 +107,14 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         private Entity                                 _layerPrototypeCast;   // Instantiated for ShadowCastingMode.On slots
         private Mesh                                   _prototypeMesh;  // inert placeholder mesh for the prototypes' RenderMeshArray
 
-        /// <summary>Stall #3 tooth: distinct RenderMeshArray VALUES constructed (the prototypes share ONE).
-        /// The old path created one per AddTileLayer; this must stay ≤1 no matter how many layers are added,
-        /// and the two shadow-mode prototypes do not move it — RenderMeshArray equality is content-hashed, so
-        /// both resolve to the same shared-component index.</summary>
+        /// <summary>Distinct RenderMeshArray VALUES constructed (the prototypes share ONE). It must stay ≤1
+        /// no matter how many layers are added, and the two shadow-mode prototypes do not move it —
+        /// RenderMeshArray equality is content-hashed, so both resolve to the same shared-component index.
+        /// Pinned by
+        /// <c>EntitiesTileRendererTests.AddTileLayer_IdRoute_NoPerEntityArray_BalancedMeshRegistration</c>.</summary>
         internal int RenderMeshArraysCreated { get; private set; }
 
-        /// <summary>Stall #3 tooth: live EG-registered meshes (inc on RegisterMesh in AddTileLayer, dec on
+        /// <summary>Live EG-registered meshes (inc on RegisterMesh in AddTileLayer, dec on
         /// UnregisterMesh in RemoveItem/RemoveItems). Must return to 0 after a full load→release (incl. the
         /// prepared-cache round-trip) — catches the ID route's missing-unregister leak trap.</summary>
         internal int RegisteredMeshCount { get; private set; }
@@ -205,7 +206,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             _simGroup  = _world.GetExistingSystemManaged<SimulationSystemGroup>();
             _presGroup = _world.GetExistingSystemManaged<PresentationSystemGroup>(); // contains EntitiesGraphicsSystem
 
-            // Stall #3: register each layer material ONCE with EG (stable BatchMaterialID); meshes register
+            // Register each layer material ONCE with EG (stable BatchMaterialID); meshes register
             // per-add. Then build the single layer prototype every AddTileLayer instantiates.
             _eg = _world.GetExistingSystemManaged<EntitiesGraphicsSystem>();
             _materialIds = new BatchMaterialID[_layerMaterials.Count];
@@ -260,7 +261,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         }
 
         /// <summary>
-        /// Stall #3: builds the layer-entity PROTOTYPES — one per shadow-cast mode.
+        /// Builds the layer-entity PROTOTYPES — one per shadow-cast mode.
         /// <see cref="RenderMeshUtility.AddComponents"/>
         /// stamps EG's full render component set (LocalToWorld, RenderBounds, MaterialMeshInfo, and the
         /// RenderMeshArray shared component); we add Parent/LocalTransform (the transform hierarchy) and Prefab
@@ -361,12 +362,13 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         // EntityExists, GetInstanceTranslation, GetRenderBoundsLocal, GetLayerEntityName) live in the test
         // assembly — see EntitiesTileRendererTestExtensions.
 
-        /// <summary>Stall #2 tooth: number of batched DestroyEntity structural changes performed by the LAST
+        /// <summary>Number of batched DestroyEntity structural changes performed by the LAST
         /// <see cref="RemoveItems"/> call (0 or 1 — the whole batch is one structural change). A shallow
-        /// loop-over-<see cref="RemoveItem"/> implementation leaves this 0.</summary>
+        /// loop-over-<see cref="RemoveItem"/> implementation leaves this 0. Pinned by
+        /// <c>EntitiesTileRendererTests.RemoveItems_DestroysWholeRecord_InOneBatchedStructuralChange</c>.</summary>
         internal int DestroyEntityBatchesLastRemove { get; private set; }
 
-        /// <summary>Stall #2 tooth: entities destroyed by the last <see cref="RemoveItems"/> batch (the record's
+        /// <summary>Entities destroyed by the last <see cref="RemoveItems"/> batch (the record's
         /// layer entities plus any tile root the batch emptied).</summary>
         internal int EntitiesDestroyedLastRemove { get; private set; }
 
@@ -470,10 +472,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             BatchMeshID meshId;
             using (PmAddRegister.Auto())
             {
-                // Stall #3 ID route: Instantiate the shared-archetype prototype (ONE structural op, no fresh
+                // ID route: Instantiate the shared-archetype prototype (ONE structural op, no fresh
                 // RenderMeshArray shared component / batch registration per layer), register the mesh with EG,
-                // and point the entity at (meshId, materialId). This replaces the old per-entity
-                // CreateEntity + RenderMeshUtility.AddComponents(new RenderMeshArray(...)) — the "prime suspect".
+                // and point the entity at (meshId, materialId).
                 e      = _em.Instantiate(ShadowModeFor(materialIndex) == ShadowCastingMode.Off
                     ? _layerPrototypeNoCast
                     : _layerPrototypeCast);
@@ -579,9 +580,9 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
         }
 
         /// <summary>
-        /// Stall #2: removes a whole record's layer entities (and any tile root the batch empties) in ONE
-        /// <c>EntityManager.DestroyEntity(NativeArray&lt;Entity&gt;)</c> structural change instead of L+1 — the
-        /// per-layer structural-change cost was the release-storm spike. Same bookkeeping as
+        /// Removes a whole record's layer entities (and any tile root the batch empties) in ONE
+        /// <c>EntityManager.DestroyEntity(NativeArray&lt;Entity&gt;)</c> structural change instead of L+1 — one
+        /// structural change per layer would make a burst of tile releases spike the frame. Same bookkeeping as
         /// <see cref="RemoveItem"/> (child-count decrement, root-dies-at-0), just collected then destroyed once.
         /// Idempotent for unknown handles. The Mesh assets are NOT destroyed here — TileManager owns them.
         /// </summary>
@@ -700,7 +701,7 @@ namespace MapRenderer.Unity.Rendering.Backend.Entities
             }
             _world = null;
 
-            // Stall #3: the world disposal tore down EG's registries wholesale, so no explicit Unregister* is
+            // The world disposal tears down EG's registries wholesale, so no explicit Unregister* is
             // needed for correctness. But the prototype's placeholder Mesh is a UnityEngine.Object we created —
             // destroy it explicitly (a Mesh is not freed just because nothing references it).
             if (_prototypeMesh != null)

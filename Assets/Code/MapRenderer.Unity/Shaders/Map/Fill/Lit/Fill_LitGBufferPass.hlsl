@@ -40,7 +40,7 @@ struct Attributes
     // already claimed by the lightmap UVs above, and a TEXCOORDn semantic binds to the MESH's attribute
     // index, so a mis-slotted stream would silently feed one of those instead of failing to compile.
     float3 band         : TEXCOORD3;
-    // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
+    // [MAP DELTA] Per-vertex baked color from data-driven expression (mesh COLOR stream).
     float4 color        : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
@@ -78,7 +78,7 @@ struct Varyings
     float4 probeOcclusion           : TEXCOORD9;
 #endif
 
-    // [MAP DELTA S12] Per-vertex baked color (data-driven dimension).
+    // [MAP DELTA] Per-vertex baked color (data-driven dimension).
     // TEXCOORD11 is free in this pass; TEXCOORD10 is unused but skip it to avoid potential collisions.
     half4 vColor                    : TEXCOORD11;
 
@@ -212,7 +212,7 @@ Varyings LitGBufferPassVertex(Attributes input)
 
     output.positionCS = vertexInput.positionCS;
 
-    // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
+    // [MAP DELTA] Pass per-vertex baked color to the fragment stage.
     output.vColor = input.color;
 
     return output;
@@ -247,10 +247,10 @@ GBufferFragOutput LitGBufferPassFragment(Varyings input)
     InitializeStandardLitSurfaceData(input.uv, surfaceData);
 
     // [MAP DELTA] Modulate albedo/alpha by map paint properties (init-then-modulate pattern).
-    // [MAP DELTA S12] Composite data-driven × constant:
-    //   input.vColor.rgb = per-feature baked color (data-driven dimension, S12)
-    //   _BaseColor.rgb   = zoom-level or constant color (S11 uniform dimension, applied above)
-    //   Multiply combines both: when vColor is white (default), reduces to S11 behavior exactly.
+    // [MAP DELTA] Composite data-driven × constant:
+    //   input.vColor.rgb = per-feature baked color (data-driven dimension)
+    //   _BaseColor.rgb   = zoom-level or constant color (uniform dimension, applied above)
+    //   Multiply combines both: a white vColor (the default) leaves the uniform color unchanged.
     surfaceData.albedo *= input.vColor.rgb;
     surfaceData.alpha  *= input.vColor.a   * _Opacity;
 

@@ -2,16 +2,15 @@
 //
 // Mirrors stock URP Unlit.shader's pass list (Unlit / DepthOnly / DepthNormalsOnly) the way FillUnlit.shader
 // and FillExtrusionUnlit.shader mirror it for their layers — verbatim + minimal marked deltas.
-// GBuffer/Meta/MotionVectors are deferred (unlit rendering mode epic §3/§6); ShadowCaster is DROPPED by
-// construction (stock URP Unlit has none — an unlit material cannot cast a shadow; Line.shader's own
-// ShadowCaster pass is CAPABILITY-ONLY / present-but-inert for the transparent queue anyway, so nothing is
-// lost that the Lit twin actually exercises today).
+// It has no GBuffer/Meta/MotionVectors pass, and no ShadowCaster (stock URP Unlit has none — an unlit
+// material cannot cast a shadow; Line.shader's own ShadowCaster pass is CAPABILITY-ONLY / present-but-inert
+// for the transparent queue anyway, so the Lit twin exercises nothing this shader lacks).
 //
 // Key design points:
 //   • TRANSPARENT contract, NOT elevated (unlike FillExtrusionUnlit): _ZWrite=0, painter's-order
 //     compositing, coplanar lines. The Properties-block DEFAULTS below mirror Line.shader's OWN declared
 //     defaults verbatim for the shared blend-state family (_Surface/_Blend/_SrcBlend/_DstBlend/_ZWrite/
-//     _ZTest/_Cull/_BlendOp) — same S37 queue-2000 regression guard as the other two twins (declaring the
+//     _ZTest/_Cull/_BlendOp) — same queue-2000 import guard as the other two twins (declaring the
 //     FULL block is what lets URP's ValidateMaterial resolve the queue from _Surface rather than forcing
 //     opaque queue 2000 on import). The runtime contract is asserted by LineTweaker.ApplyPainterContract,
 //     which MaterialFactory.CreateLineMaterial calls on every clone of this shader's base .mat exactly as
@@ -48,7 +47,7 @@ Shader "Map/LineUnlit"
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
 
         // ── Blending state (mirrors Line.shader's OWN declared defaults for the shared block; consumed by
-        // URP's ValidateMaterial — S37 regression guard, see the header comment above) ──
+        // URP's ValidateMaterial — the queue-2000 import guard, see the header comment above) ──
         _Surface("__surface", Float) = 1.0
         _Blend("__blend", Float) = 0.0
         [ToggleUI] _AlphaClip("__clip", Float) = 0.0

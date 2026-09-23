@@ -7,7 +7,7 @@
 // Modified from upstream: standard URP-lit CBUFFER props preserved verbatim; DOTS bridge + helpers
 //   carried with Map conventions (paint-color = _BaseColor, modulation after InitializeStandardLitSurfaceData).
 //
-// S66: Map-flavoured skeleton — copy into Map/<Layer>/<Layer>_LitInput.hlsl and add the layer's
+// Map-flavoured skeleton — copy into Map/<Layer>/<Layer>_LitInput.hlsl and add the layer's
 //   paint props at the markers below. Included by NO .shader (the .Template.hlsl infix signals
 //   "reference only; never compiled"). URP already ships a pristine LitInput.hlsl; this adds
 //   our Map conventions on top (SRP-Batcher warning, _BaseColor-as-paint-color note, DOTS bridge).

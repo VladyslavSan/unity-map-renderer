@@ -580,7 +580,7 @@ namespace MapRenderer.Tests.Visual
         private const int   SizePx     = 512;
         private const float TextSizePx = 160f;
 
-        /// <summary>`AlignFlags` bit1 — Stage AC's along-line rotation. Spelled out here rather than read from
+        /// <summary>`AlignFlags` bit1 — the along-line rotation. Spelled out here rather than read from
         /// <c>WorldSymbolRenderer</c>'s own private constant: a tooth that compares a value to itself pins
         /// nothing (the same reason <c>WorldSymbolGroupingTests</c> asserts its hierarchy names literally).</summary>
         private const float AlongLineBit = 2f;

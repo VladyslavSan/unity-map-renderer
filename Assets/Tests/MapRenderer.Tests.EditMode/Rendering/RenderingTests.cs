@@ -701,9 +701,9 @@ namespace MapRenderer.Tests.Rendering
     // FillExtrusionRenderLayerTests — factory dispatch + fetch source for fill-extrusion
     // ───────────────────────────────────────────────────────────────────────────────────
 
-    // T4: a style with a fill-extrusion layer (a) TryGetFetchSource returns true with its source, and
-    // (b) RenderLayerFactory.Create returns a non-null IRenderLayer taking a slot. RED-verified
-    // against the previous code, where both returned false/null.
+    // A style with a fill-extrusion layer: (a) TryGetFetchSource returns true with its source, and
+    // (b) RenderLayerFactory.Create returns a non-null IRenderLayer taking a slot. RED-verify: a
+    // factory without a fill-extrusion arm returns false/null for both.
     //
     // The render layer clones its OWN Map/FillExtrusion base material
     // (MapMaterialSet.FillExtrusionMaterial), not the flat FILL base fill reuses. This suite builds its own
@@ -1256,9 +1256,9 @@ namespace MapRenderer.Tests.Rendering
     // (raster/unknown) takes a slot, or if a symbol/background slot's queue math desyncs the tile-mesh layers
     // shifted above it.
     //
-    // E3 flip: background is now material-bearing too (a real quad + fill-base clone) — the LAST
-    // null-material slot from E1/E2 is gone. Build_Materials_* and Build_QueueShift assert slot 0 like every
-    // other slot; Factory_* now Dispose() the whole layer (background owns a GO + Mesh besides its material).
+    // Background is material-bearing too (a real quad + fill-base clone), so a configured set has no
+    // null-material slot. Build_Materials_* and Build_QueueShift assert slot 0 like every
+    // other slot; Factory_* Dispose() the whole layer (background owns a GO + Mesh besides its material).
     [TestFixture]
     public class RenderLayerSetTests
     {
@@ -1360,8 +1360,8 @@ namespace MapRenderer.Tests.Rendering
             // increments drawIndex once per slot regardless; the QUEUE WRITE is skipped only when that
             // slot's own base material is unconfigured); MaterialSubSlot is Base for background/fill/line and
             // Above for symbol-b's Material (its WorldTextMaterial), since a symbol layer's text must draw
-            // over its own icon. E3 made background material-bearing too, so slot 0 (bg) now carries its own
-            // queue same as every other slot — the last E1/E2 null-material slot is gone.
+            // over its own icon. Background is material-bearing too, so slot 0 (bg) carries its own
+            // queue same as every other slot.
             Assert.AreEqual(LayerDrawOrder.QueueFor(0, set[0].MaterialSubSlot), set[0].Material.renderQueue,
                 "bg — slot 0, Base, material-bearing so it gets a queue like every other slot.");
             Assert.AreEqual(LayerDrawOrder.QueueFor(1, set[1].MaterialSubSlot), set[1].Material.renderQueue, "fill-a — slot 1, Base.");
@@ -1373,7 +1373,7 @@ namespace MapRenderer.Tests.Rendering
             // Monotonic over EVERY material-bearing slot (background, fill, symbol, line, fill), in declared order.
             Assert.Less(set[0].Material.renderQueue, set[1].Material.renderQueue);
             Assert.Less(set[1].Material.renderQueue, set[2].Material.renderQueue);
-            // U3: symbol-b's TEXT queue (slot 2, Above — its own layer's higher sub-slot) must still be
+            // Symbol-b's TEXT queue (slot 2, Above — its own layer's higher sub-slot) must still be
             // strictly below slot 3's Base — the next layer's band must not be reachable from inside this one.
             Assert.Less(set[2].Material.renderQueue, set[3].Material.renderQueue,
                 "symbol-b's text (Above sub-slot) must stay strictly below line-c's Base sub-slot — a symbol " +
@@ -1386,7 +1386,7 @@ namespace MapRenderer.Tests.Rendering
         {
             using var set = Build(InterleavedStyleJson);
 
-            // E3: background is now material-bearing too (a fill-base clone, MaterialFactory
+            // Background is material-bearing too (a fill-base clone, MaterialFactory
             // .CreateBackgroundMaterial) — no slot is null when the material set is configured.
             Assert.IsNotNull(set[0].Material, "bg now owns a material — BackgroundRenderLayer.Create clones MapMaterialSet.FillMaterial.");
             Assert.IsNotNull(set[1].Material);
@@ -1515,7 +1515,7 @@ namespace MapRenderer.Tests.Rendering
                 Assert.IsNotNull(layer, $"'{sl.Id}' is a renderable type and must produce an IRenderLayer.");
                 Assert.AreSame(sl, layer.StyleLayer, "the render layer must reference its source StyleLayer.");
                 Assert.AreEqual(drawIndex, layer.DrawIndex, "the factory must set DrawIndex from its parameter.");
-                layer.Dispose(); // no set owns it here — free it (correct for every kind; background also owns a GO+Mesh, E3)
+                layer.Dispose(); // no set owns it here — free it (correct for every kind; background also owns a GO+Mesh)
                 drawIndex++;
             }
         }
@@ -1540,7 +1540,7 @@ namespace MapRenderer.Tests.Rendering
                             Assert.IsInstanceOf<BackgroundRenderLayer>(layer, $"'{sl.Id}' must dispatch to BackgroundRenderLayer.");
                         break;
                 }
-                layer?.Dispose(); // no set owns it here — free it (background also owns a GO+Mesh, E3)
+                layer?.Dispose(); // no set owns it here — free it (background also owns a GO+Mesh)
                 drawIndex++;
             }
         }

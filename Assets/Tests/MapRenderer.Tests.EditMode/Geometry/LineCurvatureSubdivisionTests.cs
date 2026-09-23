@@ -23,7 +23,7 @@ namespace MapRenderer.Tests.Geometry
         private static (double3 a, double3 b) UpsApart(double angleRad)
             => (new double3(1.0, 0.0, 0.0), new double3(math.cos(angleRad), math.sin(angleRad), 0.0));
 
-        // ─── T1: Mercator ∞ = identity ─────────────────────────────────────────────────────
+        // ─── Mercator ∞ = identity ─────────────────────────────────────────────────────────
 
         [Test]
         public void Subdivide_InfiniteTolerance_ReturnsPathValueUnchanged()
@@ -42,7 +42,7 @@ namespace MapRenderer.Tests.Geometry
             }
         }
 
-        // ─── T2: globe splits a long segment; inserted points collinear ───────────────────
+        // ─── globe splits a long segment; inserted points collinear ───────────────────────
 
         [Test]
         public void Subdivide_LargeArc_SplitsIntoExpectedCountWithCollinearInsertions()
@@ -76,7 +76,7 @@ namespace MapRenderer.Tests.Geometry
             }
         }
 
-        // ─── T3: bounded — always-bound-loops ──────────────────────────────────────────────
+        // ─── bounded — always-bound-loops ──────────────────────────────────────────────────
 
         [Test]
         public void Subdivide_PathologicalTolerance_CapsAtMaxCurveSegments()
@@ -93,7 +93,7 @@ namespace MapRenderer.Tests.Geometry
                 "a pathological tolerance must still be bounded by MaxCurveSegments");
         }
 
-        // ─── T4: SegmentSteps policy parity ────────────────────────────────────────────────
+        // ─── SegmentSteps policy parity ────────────────────────────────────────────────────
 
         [Test]
         public void SegmentSteps_InfiniteTolerance_ReturnsOneForAnyUps()

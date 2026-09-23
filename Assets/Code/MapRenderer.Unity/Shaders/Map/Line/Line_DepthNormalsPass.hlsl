@@ -14,7 +14,8 @@
 //     the _ALPHATEST_ON path. Everything else — the full _NORMALMAP/_DETAIL/_PARALLAXMAP feature paths and
 //     the _GBUFFER_NORMALS_OCT packing — is the stock fragment, keyword-gated (functional via the real tangent).
 //
-// CAPABILITY-ONLY (S67): inert for transparent lines (Queue ≥ 2501). S69 activates it for depth-write mode.
+// CAPABILITY-ONLY: inert while lines render transparent (Queue ≥ 2501). An opaque-queue line material
+// would activate it.
 // Include order (set by Line.shader): Line_LitInput.hlsl → Line_VertexExtrude.hlsl → this file.
 
 #ifndef MAP_LINE_DEPTH_NORMALS_PASS_INCLUDED

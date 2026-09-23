@@ -1,7 +1,7 @@
-// SymbolIconWorld.shader — Map/Symbol/IconWorld (Epic A / A1: world-anchored icon billboards).
+// SymbolIconWorld.shader — Map/Symbol/IconWorld (world-anchored icon billboards).
 //
-// The world-anchored sibling of the retired screen-space icon shader — the A0 SymbolTextWorld vertex stage
-// (world MVP + px offset + near-pin) with the retired shader's fragment (plain sprite sample, no SDF).
+// The SymbolTextWorld vertex stage (world MVP + px offset + near-pin) with a plain sprite-sample
+// fragment (no SDF).
 // Reuses SymbolIcon_Input.hlsl verbatim (its CBUFFER already carries exactly what this needs — engine-only
 // _ScreenParamsLogical + a plain Texture2D _MainTex, no SDF props) — no new Input file. See
 // SymbolTextWorld.shader's header for the shared "object-to-world transform is MEANINGFUL here" rationale.
@@ -18,7 +18,7 @@ Shader "Map/Symbol/IconWorld"
         // WorldSymbolRenderer (mirrors SymbolTextWorld's/SymbolIcon's identical _ScreenParamsLogical).
         _ScreenParamsLogical ("Screen Params Logical (px)", Vector) = (1920, 1080, 0, 0)
 
-        // (C) Render state — material-UI knobs (S58 pattern), verbatim from SymbolIcon.
+        // (C) Render state — material-UI knobs (mirrors Fill/Line's parameterized render state).
         [Enum(UnityEngine.Rendering.BlendMode)]    _SrcBlend      ("Blend Src (RGB)", Float) = 5
         [Enum(UnityEngine.Rendering.BlendMode)]    _DstBlend      ("Blend Dst (RGB)", Float) = 10
         [Enum(UnityEngine.Rendering.BlendMode)]    _SrcBlendAlpha ("Blend Src (Alpha)", Float) = 1

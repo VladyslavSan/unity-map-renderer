@@ -1,20 +1,20 @@
-// Line.shader — Map/Line (S33: lit, forward-transparent, world-space extrusion)
+// Line.shader — Map/Line (lit, forward-transparent, world-space extrusion)
 //
-// S67: FIVE passes — ForwardLit + ShadowCaster + DepthOnly + DepthNormals + GBuffer.
+// FIVE passes — ForwardLit + ShadowCaster + DepthOnly + DepthNormals + GBuffer.
 // Passes 2-5 are CAPABILITY-ONLY (present-but-inert). URP excludes Queue=Transparent (>=2501)
 // materials from the opaque depth/GBuffer prepasses, so they never execute at runtime.
-// S69 will activate them when line rendering mode is changed (opaque-queue or forced shadows).
+// An opaque-queue or forced-shadow line material would activate them.
 //
-// Key design points (S33/S66/S67):
-//   • Fragment uses InitializeStandardLitSurfaceData — NEVER hand-assembled SurfaceData (S34).
+// Key design points:
+//   • Fragment uses InitializeStandardLitSurfaceData — NEVER hand-assembled SurfaceData.
 //   • CBUFFER (UnityPerMaterial) in Line_LitInput.hlsl; byte-IDENTICAL across all passes (SRP Batcher).
 //   • Line_VertexExtrude.hlsl: shared helper included before every pass body.
-//     Defines: LineAttributes struct, Line_VertexExtrude() (world-space extrusion, S05 fix),
+//     Defines: LineAttributes struct, Line_VertexExtrude() (scale-invariant world-space extrusion),
 //     LineCoverage() (fwidth-smoothstep outer+inner+dash coverage). Single extrusion site.
 //   • NORMAL stream = constant +Y (lighting); extrudeN on TEXCOORD0 (not overloaded).
-//   • Alpha = LineCoverage() × _Opacity (S05 formula; makes _Opacity functional).
+//   • Alpha = LineCoverage() × _Opacity (makes _Opacity functional).
 //   • Tiny +Y lift (0.001m) in Line_VertexExtrude, applied to every pass equally.
-//   • ForwardLit: S58-parameterized Blend/ZWrite/ZTest/Cull.
+//   • ForwardLit: parameterized Blend/ZWrite/ZTest/Cull.
 //   • Passes 2-5: inherit the SubShader-parameterized Cull [_Cull]; override ZWrite On + ZTest LEqual
 //     (the SubShader ZWrite default 0 would break their depth/shadow writes).
 //
@@ -65,15 +65,15 @@ Shader "Map/Line"
         [HideInInspector] _ClearCoatSmoothness("_ClearCoatSmoothness", Float) = 0.0
 
         // ── Blending state (mirrors URP Lit.shader; consumed by URP's ValidateMaterial) ──
-        // S37: the line is intrinsically transparent (ShaderLab hardcodes Blend/ZWrite Off/
-        // Queue=Transparent). These props must be DECLARED here so material.HasProperty(...)
-        // is true and URP's ValidateMaterial (run on every import via MapLitShaderGUI :
-        // BaseShaderGUI) resolves the queue from _Surface/_QueueControl. Without them
-        // ValidateMaterial defaults the material to opaque and forces queue 2000, clobbering
-        // the SubShader's Queue=Transparent on import (the S37 regression). Defaults =
+        // A line renders in the transparent band (SubShader Queue=Transparent;
+        // LineTweaker.ApplyPainterContract sets ZWrite off and straight alpha blend at runtime).
+        // These props must be DECLARED here so material.HasProperty(...) is true and URP's
+        // ValidateMaterial (run on every import via MapLitShaderGUI : BaseShaderGUI) resolves the queue
+        // from _Surface/_QueueControl. Without them ValidateMaterial defaults the material to opaque and
+        // forces queue 2000, clobbering the SubShader's Queue=Transparent on import. Defaults =
         // transparent (_Surface=1, _Blend=0 alpha, _SrcBlend=SrcAlpha, _DstBlend=OneMinusSrcAlpha,
-        // _ZWrite off) so a default-constructed line material is import-stable at Queue>=2501.
-        // These do NOT fight the fixed ShaderLab render state — they only feed queue resolution.
+        // _ZWrite off), matching the painter contract, so a default-constructed line material is
+        // import-stable at Queue>=2501. The forward pass reads them through its parameterized render state.
         _Surface("__surface", Float) = 1.0
         _Blend("__blend", Float) = 0.0
         [ToggleUI] _AlphaClip("__clip", Float) = 0.0
@@ -82,9 +82,9 @@ Shader "Map/Line"
         _SrcBlendAlpha("__srcA", Float) = 1.0
         _DstBlendAlpha("__dstA", Float) = 10.0
         _ZWrite("__zw", Float) = 0.0
-        // S58: forward render state as parameters (driven by the typed tweaker layer / ShaderGUI).
-        // Defaults reproduce the previously-hardcoded line state: ZTest LEqual(4), Cull Off(0), BlendOp Add(0).
-        // (_SrcBlend=5 SrcAlpha / _DstBlend=10 OneMinusSrcAlpha / _ZWrite=0 already match the old hardcode.)
+        // Forward render state as parameters (driven by the typed tweaker layer / ShaderGUI).
+        // Defaults: ZTest LEqual(4), Cull Off(0), BlendOp Add(0), with _SrcBlend=5 SrcAlpha /
+        // _DstBlend=10 OneMinusSrcAlpha / _ZWrite=0 above.
         _ZTest("__ztest", Float) = 4.0
         _Cull("__cull", Float) = 0.0
         _BlendOp("__blendop", Float) = 0.0
@@ -117,19 +117,19 @@ Shader "Map/Line"
         _Width          ("Width (line-width, m or px)", Float) = 2.0
         // line-blur (px, spec default 0): opt-in soft edge (MapLibre line-blur, NOT antialiasing). 0 = hard.
         _Blur           ("Line Blur (line-blur, px)", Range(0, 8)) = 0.0
-        // S14: line-gap-width — hollow/cased line. 0 = solid (default). Units = pixels (same as _Width).
+        // line-gap-width — hollow/cased line. 0 = solid (default). Units = pixels (same as _Width).
         _GapWidth       ("Gap Width (line-gap-width, px)", Float) = 0.0
-        // S14: line-translate — pixel offset for the rendered ribbon.
+        // line-translate — pixel offset for the rendered ribbon.
         _LineTranslate  ("Line Translate (px xy)", Vector) = (0, 0, 0, 0)
-        // S14: line-translate-anchor — 0 = map (world-space), 1 = viewport (screen-space).
+        // line-translate-anchor — 0 = map (world-space), 1 = viewport (screen-space).
         _LineTranslateAnchor ("Translate Anchor", Float) = 0.0
-        // S14: line-pattern hook — 0 = solid color fallback, 1 = pattern (real sampling deferred to S17).
+        // line-pattern hook — 0 = solid color fallback, 1 = pattern (no pass samples it; renders solid).
         _LinePattern    ("Line Pattern (hook)", Float) = 0.0
-        // S43: line-dasharray — on/off lengths in line-width units (up to 4 values packed into a Vector).
+        // line-dasharray — on/off lengths in line-width units (up to 4 values packed into a Vector).
         // _DashCount = 0 → solid identity (no dashing). _DashCount = 2 → [on, off] pair, etc.
         _DashArray      ("Dash Array (4 on/off, width units)", Vector) = (0,0,0,0)
         _DashCount      ("Dash Entry Count", Float) = 0.0
-        // S44: line-offset — perpendicular band-center shift in pixels (same units as _Width).
+        // line-offset — perpendicular band-center shift in pixels (same units as _Width).
         // 0 = no shift (default). Positive = left of travel direction.
         _LineOffset     ("Line Offset (px)", Float) = 0.0
 
@@ -140,7 +140,7 @@ Shader "Map/Line"
         // [ToggleUI] is UI-only and attaches NO keyword — LineShaderGUI.ValidateMaterial syncs it in code,
         // mirroring _ReceiveShadows (:96). NOT a CBUFFER member.
         [ToggleUI] _EdgeAntialiasing ("Edge Antialiasing", Float) = 1.0
-        // Hairline strategy (internal): 0 = Default (today's straddle, no keyword); 1 = Hard
+        // Hairline strategy (internal): 0 = Default (the straddle, no keyword); 1 = Hard
         // (_HAIRLINE_HARD — the ramp narrows toward a step below ~2 px band); 2 = SolidCore
         // (_HAIRLINE_SOLID_CORE — the band is clamped to 2 px and coverage scaled back down).
         // [Enum] is a UI-only drawer and attaches NO keyword; LineShaderGUI.ValidateMaterial syncs it in
@@ -162,7 +162,7 @@ Shader "Map/Line"
         LOD 300
 
         // Two-sided ribbon; no depth write (coplanar layer ordering via render queue).
-        // S58: parameterized — defaults (Cull Off / ZWrite Off / ZTest LEqual) reproduce the prior state.
+        // Parameterized — defaults: Cull Off / ZWrite Off / ZTest LEqual.
         Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
         BlendOp [_BlendOp]
         AlphaToMask [_AlphaToMask]
@@ -173,7 +173,7 @@ Shader "Map/Line"
         // ─────────────────────────────────────────────────────────────────────
         // Pass: UniversalForward — lit forward-transparent pixels.
         // The only pass that renders for the transparent queue; passes 2-5 (ShadowCaster/GBuffer/DepthOnly/
-        // DepthNormals) are S67 capability passes — present-but-inert (URP excludes Queue=Transparent).
+        // DepthNormals) are capability passes — present-but-inert (URP excludes Queue=Transparent).
         // ─────────────────────────────────────────────────────────────────────
         Pass
         {
@@ -269,7 +269,7 @@ Shader "Map/Line"
 
         // ─────────────────────────────────────────────────────────────────────
         // Pass: ShadowCaster — CAPABILITY-ONLY (present-but-inert for transparent lines).
-        // URP only invokes this for opaque-queue materials. S69 activates it.
+        // URP only invokes this for opaque-queue materials.
         // Inherits the SubShader-parameterized Cull [_Cull]; overrides ZWrite On / ZTest LEqual
         // (the SubShader ZWrite default 0 would break shadow depth writes).
         // ─────────────────────────────────────────────────────────────────────
@@ -305,7 +305,7 @@ Shader "Map/Line"
 
         // ─────────────────────────────────────────────────────────────────────
         // Pass: DepthOnly — CAPABILITY-ONLY (present-but-inert for transparent lines).
-        // URP only invokes this for opaque-queue materials. S69 activates it.
+        // URP only invokes this for opaque-queue materials.
         // ─────────────────────────────────────────────────────────────────────
         Pass
         {
@@ -337,7 +337,7 @@ Shader "Map/Line"
 
         // ─────────────────────────────────────────────────────────────────────
         // Pass: DepthNormals — CAPABILITY-ONLY (present-but-inert for transparent lines).
-        // URP only invokes this for opaque-queue materials. S69 activates it.
+        // URP only invokes this for opaque-queue materials.
         // ─────────────────────────────────────────────────────────────────────
         Pass
         {
@@ -370,7 +370,7 @@ Shader "Map/Line"
 
         // ─────────────────────────────────────────────────────────────────────
         // Pass: GBuffer — CAPABILITY-ONLY (present-but-inert for transparent lines).
-        // URP only invokes this for opaque-queue materials in deferred mode. S69 activates it.
+        // URP only invokes this for opaque-queue materials in deferred mode.
         // Requires shader target 4.5 and excludes renderers without MRT support.
         // ─────────────────────────────────────────────────────────────────────
         Pass

@@ -8,7 +8,7 @@
 // Contents:
 //   FillBandJobTests                   — the outward boundary band at FillBandJob's own output — orientation, winding, no rendering.
 //   RingClipJobTests                   — RingClipJob's tile-space clip arithmetic.
-//   TileGeometryBuffersTests           — the ownership teeth for TileGeometryBuffers, which now owns the ring-stage buffers FillMeshPipeline.Schedule used to hold as private locals.
+//   TileGeometryBuffersTests           — the ownership teeth for TileGeometryBuffers, which owns the ring-stage buffers.
 //   TileGeometryMaterializerSeamTests  — the teeth on Waist 1's producer seam as seen from FillMeshGraph.Schedule.
 //   WaistOneProducerAgreementTests     — Waist 1's two producers agree on the feature count as a property of the type, not of one writer.
 
@@ -505,7 +505,7 @@ namespace MapRenderer.Tests.Jobs
             new double2(  -64.0,  4160.0),
         };
 
-        // ── T1: the clip actually cuts, and only what it should ───────────────────────────────────
+        // ── the clip actually cuts, and only what it should ───────────────────────────────────────
 
         [Test]
         public void Clip_AtZeroMargin_CutsTheBufferedRectToTheTileSquare()
@@ -682,7 +682,7 @@ namespace MapRenderer.Tests.Jobs
             finally { result.Dispose(); }
         }
 
-        // ── T1e: the RING INDIRECTION itself ──────────────────────────────────────────────────────
+        // ── the RING INDIRECTION itself ───────────────────────────────────────────────────────────
 
         /// <summary>
         /// The job reads <b>the rings <c>RingVisitOrder</c> names, in the order it names them</b> — not
@@ -784,7 +784,7 @@ namespace MapRenderer.Tests.Jobs
             finally { result.Dispose(); }
         }
 
-        // ── T2: holes and the exterior-sign invariant ─────────────────────────────────────────────
+        // ── holes and the exterior-sign invariant ─────────────────────────────────────────────────
 
         [Test]
         public void Clip_DropsAHoleThatFallsOutsideTheWindow_WithoutPromotingItToAnOuterRing()
@@ -844,7 +844,7 @@ namespace MapRenderer.Tests.Jobs
                 "behind as a solid polygon.");
         }
 
-        // ── T4: clipping does not make triangulation worse ────────────────────────────────────────
+        // ── clipping does not make triangulation worse ────────────────────────────────────────────
 
         [Test]
         public void Clip_OverTheBufferedCorpus_KeepsGeometryInExtent_AndDoesNotWorsenTriangulation()
@@ -919,7 +919,7 @@ namespace MapRenderer.Tests.Jobs
                         $"{unclippedForceClips} to {clippedForceClips}. That is a finding " +
                         "about the clipper (the degenerate-channel case), not a licence to retune earcut.");
 
-                    Debug.Log($"[RingClipJob T4] {fixture}/{layerName}: verts {unclipped.TileVertices.Length} → " +
+                    Debug.Log($"[RingClipJob corpus] {fixture}/{layerName}: verts {unclipped.TileVertices.Length} → " +
                               $"{clipped.TileVertices.Length}, forceClips {unclippedForceClips} → " +
                               $"{clippedForceClips}");
                 }
@@ -1206,7 +1206,7 @@ namespace MapRenderer.Tests.Jobs
         private static readonly TileId SampleTile = new TileId { Z = 8, X = 135, Y = 80 };
         private const double SampleExtent = 4096.0;
 
-        /// <summary>T4a: the array-backed mode owns its three arrays and frees all of them, once, on
+        /// <summary>The array-backed mode owns its three arrays and frees all of them, once, on
         /// Dispose — and a second Dispose is a no-op rather than a double free.</summary>
         [Test]
         public void Allocate_ThenDispose_FreesEveryArray_AndIsIdempotent()
@@ -1236,7 +1236,7 @@ namespace MapRenderer.Tests.Jobs
                 "double free");
         }
 
-        /// <summary>T4b: the list-backed mode frees the backing <b>lists</b> and never the <c>AsArray()</c>
+        /// <summary>The list-backed mode frees the backing <b>lists</b> and never the <c>AsArray()</c>
         /// views over them. This is the tooth that catches a wrong backing-mode discriminator — and it is
         /// the <b>only</b> one.
         /// <para><b>Measured, not assumed:</b> disposing an <c>AsArray()</c> view is a <b>silent no-op</b>
@@ -1302,9 +1302,8 @@ namespace MapRenderer.Tests.Jobs
                 "Dispose must be idempotent in the list-backed mode too");
         }
 
-        /// <summary>T4c: adopting derives the counts from the list lengths exactly as the clip handover in
-        /// <c>FillMeshPipeline.Schedule</c> used to — ring count is <c>RingOffsets.Length - 1</c> because the
-        /// offsets carry a trailing sentinel.</summary>
+        /// <summary>Adopting derives the counts from the list lengths — ring count is
+        /// <c>RingOffsets.Length - 1</c> because the offsets carry a trailing sentinel.</summary>
         [Test]
         public void AdoptDerivedLists_DerivesCountsFromTheListLengths()
         {
@@ -1335,7 +1334,7 @@ namespace MapRenderer.Tests.Jobs
             buffers.Dispose();
         }
 
-        /// <summary>T4d: the counts are the producing job's reported values, <b>stored</b>, not derived from
+        /// <summary>The counts are the producing job's reported values, <b>stored</b>, not derived from
         /// the buffer capacity. Deriving them would make <c>FillMeshPipeline.EnsureCapacity</c>'s
         /// count-vs-capacity comparison tautological and silently disarm the sizing-vs-decode backstop — a
         /// regression no behavioural test can see, because exact pre-count sizing makes the two values equal
@@ -1365,7 +1364,7 @@ namespace MapRenderer.Tests.Jobs
             buffers.Dispose();
         }
 
-        /// <summary>T4e: the provenance metadata is carried, not dropped — the pipeline reads
+        /// <summary>The provenance metadata is carried, not dropped — the pipeline reads
         /// <see cref="TileGeometryBuffers.Extent"/> back off the buffer when it sizes the clip window.</summary>
         [Test]
         public void Allocate_CarriesTheTileAndExtentItWasGiven()
@@ -1384,14 +1383,12 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// T2b — the per-feature kind column must survive a <b>derive</b>, and the derived buffer's
+        /// The per-feature kind column must survive a <b>derive</b>, and the derived buffer's
         /// <c>Dispose</c> must not reach into the buffer it was derived from.
         ///
-        /// <para>This is the direct replacement for the clip-handover tooth. The mechanism inverted: the
-        /// column used to be <b>transferred</b> (released from the pre-clip buffer, adopted by the clipped
-        /// one), because the source was about to be disposed. The source is now <b>borrowed</b> — it is
-        /// the store's shared buffer, several fill layers derive from it — so it must be left completely
-        /// intact, and the derived buffer gets a <b>copy</b>.</para>
+        /// <para>The source is <b>borrowed</b> — it is the store's shared buffer, several fill layers
+        /// derive from it — so it must be left completely intact, and the derived buffer gets a
+        /// <b>copy</b>.</para>
         ///
         /// <para>Why this needs a test at all: an <c>AdoptDerivedLists</c> that <i>took</i> the array instead
         /// of copying it would pass every behavioural fill test in the repo. The first layer to derive would
@@ -1499,7 +1496,7 @@ namespace MapRenderer.Tests.Jobs
         private const double HoleMin  = 3000.0, HoleMax  = 5000.0;
 
         /// <summary>
-        /// T1 — the pipeline is <b>producer-blind</b>: a GeoJSON tile and an MVT tile carrying the same
+        /// The pipeline is <b>producer-blind</b>: a GeoJSON tile and an MVT tile carrying the same
         /// tile-local rings produce bit-identical mesh buffers. A differential over producers, so it cannot
         /// pass by both arms being equally wrong about the pipeline.
         /// </summary>
@@ -1552,7 +1549,7 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// T2a — the clip window is derived from the <b>buffer's own</b> extent. At extent 8192 the
+        /// The clip window is derived from the <b>buffer's own</b> extent. At extent 8192 the
         /// standard 64-unit buffer gives <c>[−128, 8320]²</c>, which contains the whole fixture, so enabling
         /// the clip is a provable no-op. A window sized from the 4096 reference literal would be
         /// <c>[−64, 4224]²</c> and would cut the fixture in half.
@@ -1604,9 +1601,10 @@ namespace MapRenderer.Tests.Jobs
         }
 
         /// <summary>
-        /// T2b — the tile→geodetic conversion reads the <b>buffer's own</b> extent too, which T2a
-        /// cannot see. The same geodetic polygon sliced into the same tile at 4096 and at 8192 must land in
-        /// the same place in world space; a <c>TileToGeoJob</c> reading a 4096 literal would place the 8192
+        /// The tile→geodetic conversion reads the <b>buffer's own</b> extent too, which
+        /// <see cref="ClipWindow_UsesTheBuffersOwnExtent_NotTheReferenceExtent"/> cannot see. The same geodetic
+        /// polygon sliced into the same tile at 4096 and at 8192 must land in the same place in world space; a
+        /// <c>TileToGeoJob</c> reading a 4096 literal would place the 8192
         /// arm at twice tile-local scale — an error of order a whole tile edge.
         /// </summary>
         [Test]

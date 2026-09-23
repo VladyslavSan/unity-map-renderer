@@ -47,7 +47,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// tests). It is a SEPARATE stream from the lighting normal (roof=up, wall=outward-horizontal) — never
     /// overload the two.</para>
     ///
-    /// <para><b><c>WebMercator.Forward</c> caveat (OQ1 flag, recorded not fixed):</b>
+    /// <para><b><c>WebMercator.Forward</c> caveat (a known limitation):</b>
     /// <c>WebMercator.Forward</c>'s <c>altitude → +Y</c> pass-through is 1:1, which would be wrong under
     /// sec φ — but it is unexercised here: this builder projects every footprint vertex at altitude 0
     /// (<c>WebMercatorProjection.ProjectPoint</c> hardcodes <c>Altitude = 0.0</c>) and applies height
@@ -55,7 +55,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
     /// argument. If elevated SURFACE geometry (terrain) ever routes through <c>Forward</c>, it must adopt
     /// sec φ to match.</para>
     ///
-    /// <para><b>Globe wall chording (recorded, not fixed):</b> wall quads are flat (2 triangles, no
+    /// <para><b>Globe wall chording (a known limitation):</b> wall quads are flat (2 triangles, no
     /// curvature subdivision) even on the globe — unlike the roof, which subdivides via
     /// <see cref="GlobeFillSubdivideDispatch"/>. A wall's height (tens of metres) is negligible next to a
     /// chord's sag at building zooms; the sag only becomes visible at very low zoom, where fill-extrusion
@@ -469,7 +469,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             return order;
         }
 
-        /// <summary>metres→world factor at one vertex (OQ1): 1.0 on the globe (true ECEF metres); the Web
+        /// <summary>metres→world factor at one vertex: 1.0 on the globe (true ECEF metres); the Web
         /// Mercator point-scale factor sec(φ) on the flat sheet (φ = the vertex's OWN latitude — a low-zoom
         /// tile can span enough latitude that a per-tile constant would be visibly wrong).</summary>
         private static double MetresToWorldFactor(bool globe, double latitudeDegrees)

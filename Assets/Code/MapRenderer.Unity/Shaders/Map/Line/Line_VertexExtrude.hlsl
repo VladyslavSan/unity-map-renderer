@@ -17,10 +17,8 @@
 #ifndef MAP_LINE_VERTEX_EXTRUDE_INCLUDED
 #define MAP_LINE_VERTEX_EXTRUDE_INCLUDED
 
-// MapPixelsToWorld is shared with Fill and FillExtrusion via ../PixelsToWorld.hlsl (S23 I2a); see
-// Shaders/README.md "Shared px→world include". It previously lived here as a sentinel-pinned,
-// character-identical copy of the block also carried by Map/Fill/Fill_VertexModify.hlsl, kept honest
-// by ShaderStructureTests comparing the two byte for byte. One copy now serves every carrier.
+// MapPixelsToWorld is shared with Fill and FillExtrusion via ../PixelsToWorld.hlsl; see
+// Shaders/README.md "Shared px→world include".
 #include "../PixelsToWorld.hlsl"
 
 // ── Vertex attributes ─────────────────────────────────────────────────────────
@@ -28,8 +26,8 @@
 // as in Fill_LitForwardPass.hlsl Attributes). This is why we cannot reuse that struct.
 // All five line passes consume this byte-identical input — silhouette guarantee across passes.
 //
-// S14: COLOR attribute added for per-feature data-driven color (baked by StyledLineTileBuilder).
-//      Default white = identity multiply when no data-driven color is set.
+// COLOR carries the per-feature data-driven color (baked by StyledLineTileBuilder).
+// Default white = identity multiply when no data-driven color is set.
 struct LineAttributes
 {
     float4 positionOS   : POSITION;
@@ -37,24 +35,24 @@ struct LineAttributes
     float3 extrudeN     : TEXCOORD0;  // 3D across-direction (tangent-plane; Y=0 Mercator); miter factor in |n|
     float2 sideAndDist  : TEXCOORD1;  // (side ∈ {+1,−1}, distanceAlong)
     float  widthScale   : TEXCOORD2;  // per-feature width scale (default=1)
-    float4 color        : COLOR;      // S14: per-vertex baked color (data-driven); white=identity
+    float4 color        : COLOR;      // per-vertex baked color (data-driven); white=identity
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
-// ── Hairline strategy constants (compile-time; deliberately NOT material properties) ──────────
+// ── Hairline strategy constants (compile-time; NOT material properties) ───────────────────────
 // At a styled width of one device pixel the straddle's solid core vanishes: the profile is a tent peaking
 // at 1.0 only where a pixel centre lands on the centreline, so a hairline reads as one bright pixel or two
 // half-bright ones depending on sub-pixel phase, and shimmers under motion. There is no tunable knob and no
 // successor to _AaEdgeWidth — widening a fade blurs, it never adds resolution.
 #define HAIRLINE_CRISP_WIDTH_PX 1.0   // at or below this band width: effectively a step edge
-#define HAIRLINE_FULL_WIDTH_PX  2.0   // at or above this: the ramp is algebraically today's
+#define HAIRLINE_FULL_WIDTH_PX  2.0   // at or above this: the ramp is algebraically the default one
 #define HAIRLINE_MIN_RAMP_PX    0.05  // narrowest ramp; 0 would divide by zero
 #define HAIRLINE_MIN_WIDTH_PX   2.0   // _HAIRLINE_SOLID_CORE: floor for the RENDERED band, device px
 
 // ── Line_VertexExtrude ────────────────────────────────────────────────────────
-// Performs the S05 world-space extrusion. Called by the vertex entry point of EVERY line pass
+// Performs the world-space extrusion. Called by the vertex entry point of EVERY line pass
 // so all five passes (ForwardLit, ShadowCaster, DepthOnly, DepthNormals, GBuffer) share exactly
-// one extrusion site — silhouette divergence is impossible by construction.
+// one extrusion site — so their silhouettes cannot diverge.
 //
 // Returns: extruded OBJECT-SPACE position (ready for GetVertexPositionInputs or TransformObjectToHClip).
 // Out params: the per-vertex coverage inputs that must be interpolated across every pass's Varyings
@@ -77,19 +75,19 @@ float3 Line_VertexExtrude(
     // Avoid div-by-zero on degenerate (cap) vertices.
     float3 unitDir_OS = (miter > 1e-6) ? (input.extrudeN / miter) : float3(0, 0, 0);
 
-    // ── S104: width & pixel-based line props resolved in SCREEN space — NO _MetersPerPixel uniform ─────────
+    // ── Width & pixel-based line props resolved in SCREEN space — NO _MetersPerPixel uniform ───────────────
     // For pixel widths we MEASURE the local world-metres-per-screen-pixel along the across direction (the
     // px→world scale — foreshortening-correct at any latitude/tilt/projection) instead of reading a per-frame
     // CPU uniform. width, gap, line-offset and line-translate all convert through it.
 
-    // World-space frame. NORMALIZE strips parent scale (the S05 fix) so extrusion is scale-invariant.
+    // World-space frame. NORMALIZE strips parent scale so extrusion is scale-invariant.
     //
     // The degenerate case has to be carried through the NORMALIZE too, not just the divide above:
     // normalize(float3(0,0,0)) is NaN, a NaN position discards every triangle referencing the vertex, and
-    // every round-cap fan triangle references the zero-extrudeN pivot — so the entire cap silently vanished
-    // and `line-cap: round` rendered identical to butt. Zero is the right value here: it keeps the pivot on
-    // the centerline, because both places it is consumed (the lateral extrusion below and the line-offset
-    // shift) multiply by it.
+    // every round-cap fan triangle references the zero-extrudeN pivot — so the entire cap would
+    // silently vanish and `line-cap: round` would render identical to butt. Zero is the right value here:
+    // it keeps the pivot on the centerline, because both places it is consumed (the lateral extrusion below
+    // and the line-offset shift) multiply by it.
     float3x3 objectToWorld = (float3x3)GetObjectToWorldMatrix();
     float3 acrossWS   = mul(objectToWorld, unitDir_OS);
     float3 unitDir_WS = (miter > 1e-6) ? normalize(acrossWS) : float3(0, 0, 0);
@@ -107,20 +105,18 @@ float3 Line_VertexExtrude(
     // (2) pxToWorld — a frame CONSTANT (below). Read by the styled width family: width, gap, line-offset,
     //     and the dash divisor. A styled `N px` fixes a WORLD size once; the perspective divide renders it.
     //
-    // KEEP THEM DISTINCT AND KEEP THEM NAMED. Before S116 both were the same expression, so a consumer's
-    // ruler was whatever `pxToWorld` happened to be and the distinction lived only in prose. When the width
-    // moved to the frame constant, EVERY consumer of `pxToWorld` silently changed meaning; two of them were
-    // screen quantities and had to be moved back here (the AA pad, found in-stage; `minHalfWorld`, found in
-    // review). The full audit of ruler (2)'s consumers, so the next reader need not redo it:
-    //   widthWorld, gapWorld, _LineOffset  → frame constant, deliberate (the width model).
-    //   dashMetersPerUnit                  → reads the global directly, deliberate (S110).
+    // KEEP THEM DISTINCT AND KEEP THEM NAMED. If both were one expression, a consumer's ruler would be
+    // whatever `pxToWorld` happened to be and the distinction would live only in prose: a change to the
+    // width's ruler would silently change the meaning of every screen quantity that shares it. The full
+    // audit of ruler (2)'s consumers, so the next reader need not redo it:
+    //   widthWorld, gapWorld, _LineOffset  → frame constant, by design (the width model).
+    //   dashMetersPerUnit                  → reads the global directly, by design (see its comment).
     //   aaPadWorld, minHalfWorld           → ruler (1). Screen quantities.
-    //   minWidthWorld (SolidCore)          → ruler (1), via aaPadWorld. Already correct.
+    //   minWidthWorld (SolidCore)          → ruler (1), via aaPadWorld.
     //   line-translate                     → its own per-axis MapPixelsToWorld calls. Different direction.
     //
-    // ONE probe serves all of ruler (1) — fewer than the two the AA-on path took before, and they cannot
-    // drift apart. This is NOT the width/pad cancellation returning: that one shared a ruler between the
-    // width and the pad, and it is the WIDTH that is now on the other ruler.
+    // ONE probe serves all of ruler (1), so its consumers cannot drift apart. The width is on ruler (2),
+    // so the width and the pad share no ruler and no width/pad cancellation can hide a probe defect.
     float metresPerDevicePx = MapPixelsToWorld(centerWS, unitDir_WS);
 
     // px→world scale ALONG THE ACROSS-DIRECTION, for the width-family properties below. Non-pixel widths are
@@ -144,8 +140,9 @@ float3 Line_VertexExtrude(
     // road of every styled width collapses to the same 1 device-px hairline — MEASURED, not assumed: the AA
     // pad is still extruded, so the frame is not quite empty, and a uniform hairline is arguably a worse
     // diagnostic than an empty one because it looks like a plausible render. Either way it presents as a
-    // defect in something other than the missing push, which is exactly what happened in S116. Branches on a
-    // uniform, so the control flow is uniform and no wave diverges. Pinned by T7.
+    // defect in something other than the missing push. Branches on a uniform, so the control flow is
+    // uniform and no wave diverges. Pinned by
+    // LineAaSnapshotTests.PixelWidthBand_StillRenders_WhenTheFrameConstantIsUnset.
     float pxToWorld = (_WidthIsPixels > 0.5)
         ? ((_MapFrameMetersPerDevicePixel > 1e-9) ? _MapFrameMetersPerDevicePixel : metresPerDevicePx)
         : 1.0;
@@ -158,10 +155,10 @@ float3 Line_VertexExtrude(
     // the frame constant. (`pxToWorld` could not serve it anyway: it is a unit conversion and reads a
     // literal 1.0 for a world-unit layer, which would pad by half a METRE.)
     //
-    // The width and the pad therefore no longer share one number. They used to, and that hid a defect: at
-    // the round-cap pivot MapPixelsToWorld's degenerate-direction case blew up 51x, both terms inherited it
-    // and it cancelled out of hairlineScale. Fixed at source in MapPixelsToWorld above — do NOT re-couple
-    // the pad to the WIDTH to make a cap tooth go green. (Sharing ruler (1) with minHalfWorld is a different
+    // The width and the pad therefore do not share one number. A shared number would hide a defect: a
+    // blow-up in MapPixelsToWorld's degenerate-direction case at the round-cap pivot would reach both terms
+    // and cancel out of hairlineScale. That case is handled at source in MapPixelsToWorld — do NOT re-couple
+    // the pad to the WIDTH to make a cap test go green. (Sharing ruler (1) with minHalfWorld is a different
     // thing entirely and is correct: they are the same physical quantity, half a device pixel here.)
     float aaPadWorld = 0.5 * metresPerDevicePx;
 #endif
@@ -176,24 +173,23 @@ float3 Line_VertexExtrude(
     // visible line with no dash edges), and mixing the two would trade a benign symptom for a subtle one.
     // A dash length is specified in line-width units, so the divisor inherits every way its ruler varies,
     // and dashU INTEGRATES that along the road while every other consumer of pxToWorld is bounded by the
-    // styled width. The per-vertex MapPixelsToWorld this replaced varies four ways, all of which showed:
-    //   1. with DEPTH            → the world period grew with distance; the pattern crawled under tilt.
+    // styled width. A per-vertex MapPixelsToWorld divisor would vary four ways, each of them visible:
+    //   1. with DEPTH            → the world period grows with distance; the pattern crawls under tilt.
     //   2. with DIRECTION        → measured along `across` while dashes run `along`, so two roads at equal
-    //                              depth with perpendicular bearings got different periods.
-    //   3. with the SIGN of the direction → HISTORICAL. The two ribbon vertices of a station share one
-    //                              centreline point and carry opposite extrudeN, so MapPixelsToWorld probed
-    //                              ONE-SIDED in opposite directions and returned rulers differing by
-    //                              (1+e)/(1-e), e = 0.02*tan(fov/2)*dot(across,fwd) — 1.91% at fov 60 /
-    //                              tilt 55. dashU then differed across the ribbon, tilting every dash
-    //                              boundary off perpendicular: the diagonal parallelograms. S111 divided
-    //                              the probe's own foreshortening back out, so this term no longer exists
-    //                              at source; the frame constant is still what makes dashU immune to the
-    //                              other three.
+    //                              depth with perpendicular bearings get different periods.
+    //   3. with the SIGN of the direction → the two ribbon vertices of a station share one centreline
+    //                              point and carry opposite extrudeN. A one-sided probe returns rulers
+    //                              differing by (1+e)/(1-e), e = 0.02*tan(fov/2)*dot(across,fwd) — 1.91% at
+    //                              fov 60 / tilt 55 — so dashU differs across the ribbon and every dash
+    //                              boundary tilts off perpendicular: diagonal parallelograms.
+    //                              MapPixelsToWorld divides the probe's own foreshortening back out, so
+    //                              this term is gone at source; the frame constant still makes dashU
+    //                              immune to the other three.
     //   4. SAMPLED PER VERTEX and interpolated → dashU is a plain varying, so the chord of a hyperbola
-    //                              rendered a period that stepped at every road vertex and depended on the
+    //                              renders a period that steps at every road vertex and depends on the
     //                              road's tessellation density (1.12x between a 2 km and a 30 km mesh).
     // A frame constant has no depth term, no direction, no sign, and is identical at every vertex so any
-    // interpolant is exact. All four go in one move.
+    // interpolant is exact. It removes all four.
     // The world-metre width mode is untouched: pxToWorld is 1.0 there, and so is the factor below.
     // CPU mirror: LineDash.DashCoverage's `metersPerDashUnit` (Core/Style/Line/LineDash.cs).
     float dashMetersPerUnit = _Width * input.widthScale *
@@ -206,18 +202,20 @@ float3 Line_VertexExtrude(
     // Floor the rendered band at HAIRLINE_MIN_WIDTH_PX device pixels so a hairline always has a solid
     // core, then scale coverage by the true width over the clamped width so the coverage INTEGRAL is
     // still the styled width. BOTH HALVES OR NEITHER: the clamp alone renders a 1 px road twice as
-    // prominent as the style asked for (tooth T8), and the compensation alone leaves the phase-dependent
-    // tent it was meant to remove (tooth T7).
+    // prominent as the style asked for (LineAaSnapshotTests.Hairline_SolidCore_ConservesEnergy), and the
+    // compensation alone leaves the phase-dependent tent it is meant to remove
+    // (LineAaSnapshotTests.Hairline_SolidCore_PeakIsPhaseInvariant).
     //
     // aaPadWorld is half a device pixel in world metres, so 2·aaPadWorld is one device pixel — which is
-    // why the pad block above had to move ahead of this one. It is measured in BOTH width modes, so
+    // why the pad block above has to come ahead of this one. It is measured in BOTH width modes, so
     // unlike the min-width floor this works for world-unit widths too.
     //
-    // NOTE that the floor is a DEVICE-PIXEL floor and the width is now a WORLD length, so unlike before
-    // pxToWorld no longer cancels out of hairlineScale: a pixel-width hairline recedes, its world width
-    // holds, and the clamp engages progressively with depth while the compensation dims it to match. That
-    // is the intended behaviour of a world-width model — a receding hairline keeps a solid 2 px core and
-    // pays for it in alpha — and it is why A7.3 asserts smooth degradation rather than constancy.
+    // The floor is a DEVICE-PIXEL floor and the width is a WORLD length, so pxToWorld does not cancel out
+    // of hairlineScale: a pixel-width hairline recedes, its world width holds, and the clamp engages
+    // progressively with depth while the compensation dims it to match. That is the intended behaviour of a
+    // world-width model — a receding hairline keeps a solid 2 px core and pays for it in alpha — and it is
+    // why LineAaSnapshotTests.HairlineScale_DegradesSmoothlyWithDepth_UnderTilt asserts smooth
+    // degradation rather than constancy.
     float minWidthWorld = HAIRLINE_MIN_WIDTH_PX * (2.0 * aaPadWorld);
     renderWidthWorld    = max(widthWorld, minWidthWorld);
     hairlineScale       = saturate(widthWorld / max(renderWidthWorld, 1e-9));
@@ -236,14 +234,12 @@ float3 Line_VertexExtrude(
     // exactly like the AA pad it is written next to: a road that has thinned to nothing on screen must be
     // rescued WHERE it thinned. On the frame constant this would be half a device pixel at the look-at and a
     // fixed world length everywhere else, so a 1 px road at 3x the look-at depth would render ~0.33 px with
-    // no floor at all. That is what this line silently became when the width moved to the frame constant and
-    // this expression did not — no textual change, meaning inverted. It is invisible to the whole suite,
-    // because every hairline arm runs the top-down ORTHOGRAPHIC fixture where the two rulers are bitwise
-    // equal; see the dev report's recorded gap.
+    // no floor at all. No test observes the choice: every hairline arm where this floor can bind runs the
+    // top-down ORTHOGRAPHIC fixture, where the two rulers are bitwise equal (the tilted arm is SolidCore).
     //
-    // NOTE it cannot bind under _HAIRLINE_SOLID_CORE: that clamp already forces the extruded half-width to
+    // It cannot bind under _HAIRLINE_SOLID_CORE: that clamp already forces the extruded half-width to
     // at least HAIRLINE_MIN_WIDTH_PX/2 + 0.5 = 1.5 px, above this floor's 1.0 px, so the max() below always
-    // takes the miter branch. That is deliberate — proportionality below 1 px is exactly what SolidCore
+    // takes the miter branch. That is intended — proportionality below 1 px is exactly what SolidCore
     // buys with it — but it means a sub-pixel line genuinely fades there instead of holding a 1 px
     // hairline. Recorded in the shader README's strategy comparison; do not "fix" it here.
     float minHalfWorld = (_WidthIsPixels > 0.5) ? (0.5 * metresPerDevicePx) : 0.0;
@@ -254,13 +250,13 @@ float3 Line_VertexExtrude(
     // (RibbonJob.ComputeMiterNormals), defined so the PERPENDICULAR distance equals the multiplied
     // value — so miter*(outer + pad) holds the perpendicular pad at exactly 0.5 px at any corner. Padding
     // AFTER the multiply would give a perpendicular pad of pad*cos(θ/2), which SHRINKS toward zero as the
-    // corner sharpens; the ramp would then have nowhere to land precisely where geometry is tightest.
+    // corner sharpens; the ramp would then have nowhere to land exactly where geometry is tightest.
     // The min-width-floor branch takes the pad un-miter'd, matching how that branch already ignores miter.
     float3 lateralWS = unitDir_WS * max(miter * (outerWorld + aaPadWorld), minHalfWorld + aaPadWorld);
 #endif
     float3 offsetWS  = lateralWS;
 
-    // ── S44: line-offset ──────────────────────────────────────────────────────
+    // ── line-offset ───────────────────────────────────────────────────────────
     // Shift the band centre perpendicular to the centerline. ×sideAndDist.x so both station vertices shift by
     // the same world vector. Layer-level (not per-feature). CPU mirror: LineOffset (Core/Style/LineOffset.cs).
     offsetWS += unitDir_WS * input.sideAndDist.x * (miter * _LineOffset * pxToWorld);
@@ -276,10 +272,10 @@ float3 Line_VertexExtrude(
     // and +y is SOUTH/down. _LineTranslateAnchor: 0 = "map" (the offset rides the map, rotating with it),
     // 1 = "viewport" (pinned to the screen). Mirrors Fill_VertexModify's MapVertexModify.
     //
-    // This replaced four defects at once, all invisible to the old top-down / pixel-width tooth: the scale
-    // was skipped entirely unless _WidthIsPixels (so a world-unit width layer offset by raw METRES); it was
-    // measured along `across`, an unrelated direction; the offset was hardcoded into world XZ (a flat-ground
-    // assumption that breaks on the globe); and +y pointed NORTH. See docs/line-translate-parity-design.md.
+    // Four properties matter, and a top-down / pixel-width test sees none of them: the scale applies in
+    // BOTH width modes (else a world-unit width layer offsets by raw METRES); each axis is measured along
+    // itself, not along `across`; the offset follows the surface frame, not world XZ (a flat-ground
+    // assumption that breaks on the globe); and +y points SOUTH. See docs/line-translate-parity-design.md.
     //
     // The early-out is not merely an optimisation: [0,0] is the spec default, so nearly every layer takes it
     // and skips two projection round-trips per vertex.
@@ -330,12 +326,12 @@ float3 Line_VertexExtrude(
     float3x3 worldToObject = (float3x3)GetWorldToObjectMatrix();
     float3 posOS = input.positionOS.xyz + mul(worldToObject, offsetWS);
 
-    // ── S14: innerFrac for gap-width fragment clipping ────────────────────────
+    // ── innerFrac for gap-width fragment clipping ─────────────────────────────
     // innerFrac = fraction of the extruded half-width that is the inner (gap) hole, in [side]-space.
     // When gap=0, innerFrac=0 → no clipping in fragment (solid line path, unchanged).
     // Inner hole: |side| < innerFrac (in normalized side-space). |side| == 1 is the PADDED edge, not the
     // styled one, so the ratio is taken against the padded outer — otherwise the gap hole would be sized
-    // against a half-width the ribbon no longer has.
+    // against a half-width the padded ribbon does not have.
 #if defined(_EDGE_ANTIALIASING_OFF)
     innerFrac = (gapWorld > 1e-6) ? (0.5 * gapWorld / outerWorld) : 0.0;
 #else
@@ -344,11 +340,11 @@ float3 Line_VertexExtrude(
 
     // ── Out parameters ────────────────────────────────────────────────────────
     side  = input.sideAndDist.x;  // ∈ {+1,−1}, interpolated for AA
-    // S43/S110: dashU = distanceAlong / dashMetersPerUnit — dimensionless position in line-width units,
+    // dashU = distanceAlong / dashMetersPerUnit — dimensionless position in line-width units,
     // world-anchored so the pattern stays welded to the road under any camera motion.
     // ALSO the surface u fed to InitializeStandardLitSurfaceData via uv.xy — inert while no line material
-    // binds a uv-dependent texture (MapLine.mat binds none), and the right axis for S17 line-pattern.
-    // Mirror of LineDash.DashCoverage's "u = distanceAlong / metersPerDashUnit" (CPU D1 formula).
+    // binds a uv-dependent texture (MapLine.mat binds none), and the right axis for line-pattern.
+    // Mirror of LineDash.DashCoverage's "u = distanceAlong / metersPerDashUnit" (the CPU formula).
     dashU = (dashMetersPerUnit > 1e-6) ? (input.sideAndDist.y / dashMetersPerUnit) : 0.0;
 
     // ── Tangent (along the line) — derived, projection-agnostic ───────────────
@@ -399,10 +395,9 @@ float LineCoverage(float side, float innerFrac, float dashU)
     // by |cos θ| + |sin θ| ∈ [1, √2]. Dividing by that stretches the ramp to 1.41 px on a 45° diagonal
     // while an axis-aligned line keeps 1.00 px, so the same road renders softer AND thinner where it runs
     // diagonally: the integral is W + 1 − c, i.e. it loses 0.41 px of ink at 45°. Direction-dependent
-    // antialiasing quality is invisible to a horizontal-fixture tooth and very visible to the eye — it is
-    // the second, never-diagnosed defect of the AA removed in 0b910c7, and it survived into the rebuild.
+    // antialiasing quality is invisible to a horizontal-fixture test and very visible to the eye.
     //
-    // Computed once and shared by both ramps below. `_Blur` and dash deliberately keep fwidth: they are
+    // Computed once and shared by both ramps below. `_Blur` and dash keep fwidth: they are
     // separate style features, not antialiasing.
     float sideGrad = max(length(float2(ddx(side), ddy(side))), 1e-6);
 #endif
@@ -418,7 +413,7 @@ float LineCoverage(float side, float innerFrac, float dashU)
     // the outer radius would badly over-read a thin casing ring. innerFrac = 0 reduces to 2·halfStyledPx.
     float bandPx = (innerFrac > 1e-6) ? max(halfStyledPx - innerFrac * halfPadPx, 0.0)
                                       : 2.0 * halfStyledPx;
-    // 1 ⇒ today's ramp exactly; → 0 ⇒ a step. smoothstep returns exactly 1 above its upper edge, so the
+    // 1 ⇒ the default ramp exactly; → 0 ⇒ a step. smoothstep returns exactly 1 above its upper edge, so the
     // transition band is closed rather than asymptotic and wide lines are untouched.
     float rampPx = lerp(HAIRLINE_MIN_RAMP_PX, 1.0,
                         smoothstep(HAIRLINE_CRISP_WIDTH_PX, HAIRLINE_FULL_WIDTH_PX, bandPx));
@@ -430,14 +425,15 @@ float LineCoverage(float side, float innerFrac, float dashU)
 #elif defined(_HAIRLINE_HARD)
     // Narrowed, but still CENTRED on the styled edge at |side| = 1 − 0.5·|∇side| — the same centring the
     // gap-hole cut below uses. Narrowing without re-centring leaves the hard edge half a pixel out and
-    // renders the line a pixel fat: the S70 outset artefact, which tooth T6b catches. rampPx = 1 reduces
+    // renders the line a pixel fat (pinned by
+    // LineAaSnapshotTests.Hairline_Hard_ProfileIsBinaryAndConservesEnergy). rampPx = 1 reduces
     // this to saturate((1 − |side|)/sideGrad), the default expression, algebraically.
     float coverage = saturate(((1.0 - 0.5 * sideGrad) - absSide) / (sideGrad * rampPx) + 0.5);
 #else
     float coverage = saturate((1.0 - absSide) / sideGrad);
 #endif
 
-    // S14 inner edge (gap hole) for cased/hollow lines: drop the inner |side| < innerFrac region.
+    // Inner edge (gap hole) for cased/hollow lines: drop the inner |side| < innerFrac region.
     if (innerFrac > 1e-6)
     {
 #if defined(_EDGE_ANTIALIASING_OFF)
@@ -463,8 +459,8 @@ float LineCoverage(float side, float innerFrac, float dashU)
         coverage *= smoothstep(0.0, feather * _Blur, 1.0 - absSide);
     }
 
-    // ── S43: dash coverage ────────────────────────────────────────────────────
-    // _DashCount == 0: identity guard (solid line, no dashing). Byte-identical to pre-S43 path.
+    // ── Dash coverage ─────────────────────────────────────────────────────────
+    // _DashCount == 0: identity guard (solid line, no dashing). Coverage passes through unchanged.
     // _DashCount >= 2: walk on/off runs (even index=on, odd=off); AA-feather transitions with fwidth.
     //
     // dashU = distanceAlong / dashMetersPerUnit (set in vertex, interpolated — NOT a constant).

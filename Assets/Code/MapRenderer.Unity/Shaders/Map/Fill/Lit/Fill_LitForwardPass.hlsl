@@ -46,7 +46,7 @@ struct Attributes
     // already claimed by the lightmap UVs above, and a TEXCOORDn semantic binds to the MESH's attribute
     // index, so a mis-slotted stream would silently feed one of those instead of failing to compile.
     float3 band         : TEXCOORD3;
-    // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
+    // [MAP DELTA] Per-vertex baked color from data-driven expression (mesh COLOR stream).
     float4 color        : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
@@ -87,7 +87,7 @@ struct Varyings
     float4 probeOcclusion : TEXCOORD10;
 #endif
 
-    // [MAP DELTA S12] Per-vertex baked color (data-driven dimension).
+    // [MAP DELTA] Per-vertex baked color (data-driven dimension).
     // TEXCOORD11 is free in this pass; avoids collisions with TEXCOORD0-10 above.
     half4 vColor                    : TEXCOORD11;
 
@@ -259,7 +259,7 @@ Varyings LitPassVertex(Attributes input)
 
     output.positionCS = vertexInput.positionCS;
 
-    // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
+    // [MAP DELTA] Pass per-vertex baked color to the fragment stage.
     output.vColor = input.color;
 
     return output;
@@ -293,17 +293,17 @@ void LitPassFragment(
     // [MAP DELTA] Modulate albedo/alpha by map paint properties (init-then-modulate pattern).
     // The constant/zoom layer color rides _BaseColor (applied in InitializeStandardLitSurfaceData);
     // _Opacity modulates alpha (effective in transparent queue).
-    // [MAP DELTA S12] Composite data-driven × constant:
-    //   input.vColor.rgb = per-feature baked color (data-driven dimension, S12)
-    //   _BaseColor.rgb   = zoom-level or constant color (S11 uniform dimension, applied above)
-    //   Multiply combines both: when vColor is white (default), reduces to S11 behavior exactly.
+    // [MAP DELTA] Composite data-driven × constant:
+    //   input.vColor.rgb = per-feature baked color (data-driven dimension)
+    //   _BaseColor.rgb   = zoom-level or constant color (uniform dimension, applied above)
+    //   Multiply combines both: a white vColor (the default) leaves the uniform color unchanged.
     surfaceData.albedo *= input.vColor.rgb;
     surfaceData.alpha  *= input.vColor.a   * _Opacity;
 
     // [MAP DELTA] fill-pattern: the sprite REPLACES the layer colour — per the Style Spec, fill-color is not
     // used AT ALL on a pattern layer, so both the vColor bake and _BaseColor are overwritten rather than
-    // tinted (a pattern layer's fill-color is Constant/Zoom, so its spec default, opaque black, now rides
-    // _BaseColor and leaves vColor white — _BaseColor is the one that used to paint these layers black).
+    // tinted (a pattern layer's fill-color is Constant/Zoom, so its spec default, opaque black, rides
+    // _BaseColor and leaves vColor white — so _BaseColor is the one that would paint these layers black).
     // fill-opacity still applies: it is the one paint property that survives, so _Opacity is re-applied
     // here on top of the sprite's own alpha.
     bool  patternClipped;

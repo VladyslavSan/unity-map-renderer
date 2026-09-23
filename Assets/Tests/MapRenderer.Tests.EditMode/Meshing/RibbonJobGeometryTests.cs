@@ -5,7 +5,7 @@
 // Contents:
 //   LinePaintBuildMeshTests             — data-driven per-feature color baking end-to-end through BuildMeshData.
 //   LineRibbonJobTests                  — Direct teeth against RibbonJob (3D, Burst) over a flat centerline (points on the XZ plane, up = +Y, via FlatRibbon).
-//   LineSharedBufferTests               — teeth E1 and E2: line reads a buffer it shares with the whole source layer, and joins its per-feature colour/width columns by the source-layer ordinal rather than by its own selected-list position.
+//   LineSharedBufferTests               — line reads a buffer it shares with the whole source layer, and joins its per-feature colour/width columns by the source-layer ordinal rather than by its own selected-list position.
 //   MeshDataThreadWriteSpikeTests       — (Established once as a spike: writing works off-thread, but AllocateWritableMeshData / ApplyAndDisposeWritableMeshData are main-thread only — "CreateNewMeshDatas can only be called from the main thread" — which is why allocation happens at kick and apply…
 //   RibbonJobGeometryTests              — First-principles geometry teeth for RibbonJob over a flat centerline (FlatRibbon): unit normals, exact per-join/per-cap vertex counts, the miter→bevel/round cascade, the round-cap pivot, winding, and the fold onset at the documented s_crit.
 //   SourceLayerBufferSharingTests       — one materialization per source-layer per tile, shared across BOTH cadences of a kick.
@@ -132,7 +132,7 @@ namespace MapRenderer.Tests.Meshing
         private const double TestExtent = 4096.0;
         private const double TestZoom   = 0.0;
 
-        // ── Tooth #2a: data-driven match → ≥2 distinct baked colors ────────────
+        // ── data-driven match → ≥2 distinct baked colors ───────────────────────
 
         [Test]
         public void BuildMeshData_DataDrivenMatchColor_BakesDistinctColorsPerFeature()
@@ -204,7 +204,7 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // ── Tooth #2b: constant-input control → exactly 1 distinct baked color ─
+        // ── constant-input control → exactly 1 distinct baked color ─
 
         [Test]
         public void BuildMeshData_ConstantColorExpression_BakesUniformColor()
@@ -276,7 +276,7 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // ── Tooth #2c: data-driven line-width → ≥2 distinct baked WidthScales ───
+        // ── data-driven line-width → ≥2 distinct baked WidthScales ───
 
         [Test]
         public void BuildMeshData_DataDrivenWidth_BakesDistinctWidthScalesPerFeature()
@@ -345,7 +345,7 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // ── Tooth #2d: data-driven line-opacity → ≥2 distinct baked alpha values ─
+        // ── data-driven line-opacity → ≥2 distinct baked alpha values ─
 
         [Test]
         public void BuildMeshData_DataDrivenOpacity_BakesDistinctAlphaPerFeature()
@@ -414,7 +414,7 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // ── Tooth #3: line-miter-limit threaded (latent-bug fix) ────────────────
+        // ── line-miter-limit threaded ──────────────────────────────────────────
 
         /// <summary>
         /// Before this stage, <see cref="SyncMeshWrite.Line"/>'s production predecessor hardcoded the ribbon job's
@@ -460,12 +460,13 @@ namespace MapRenderer.Tests.Meshing
                 "layout.MiterLimit into RibbonJob instead of hardcoding 2.0.");
         }
 
-        // ── Tooth #4: line-round-limit threaded ──────────────────────────────────
+        // ── line-round-limit threaded ────────────────────────────────────────────
 
         /// <summary>
         /// Hardcoding <c>RoundLimit</c> in <see cref="StyledLineTileBuilder"/> (instead of
-        /// reading <c>layout.RoundLimit</c>) passes the entire suite — the same latent-bug class T3 above
-        /// exists to catch for <c>MiterLimit</c>. Reuses T3's 90° corner (f = 1/cos(45°) = √2 ≈ 1.414) with
+        /// reading <c>layout.RoundLimit</c>) passes the entire suite — the same latent-bug class
+        /// <c>BuildMeshData_MiterLimitThreaded_SharpCornerBevelsUnderTightLimit</c> exists to catch for
+        /// <c>MiterLimit</c>. Reuses its 90° corner (f = 1/cos(45°) = √2 ≈ 1.414) with
         /// <c>line-join: round</c>: under <c>line-round-limit: 1.05</c> the corner is NOT shallow (√2 > 1.05)
         /// so the fan is preserved (11 verts — <c>RibbonJobGeometryTests.RightAngle_RoundJoin_ExactVertexCount</c>);
         /// under <c>line-round-limit: 2.0</c> the SAME corner IS shallow (√2 ≤ 2.0) and collapses to the
@@ -671,20 +672,18 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Teeth <b>E1</b> and <b>E2</b>: line reads a buffer it <b>shares</b> with the whole source
+    /// Line reads a buffer it <b>shares</b> with the whole source
     /// layer, and joins its per-feature colour/width columns by the source-layer <b>ordinal</b> rather than by
     /// its own selected-list position.
     ///
-    /// <para><b>Written BEFORE the conversion.</b> Both tests drive the production line path through
-    /// <see cref="TestTileMeshBuilder.BuildLineFromLayer"/>, whose signature does not change when
-    /// <c>StyledLineTileBuilder.WriteMeshData</c> moves onto the borrowed buffer — so the reference these
-    /// teeth measure is the PRE-conversion output, and a post-conversion pass is byte-identity, not
-    /// ratification.</para>
+    /// <para>Both tests drive the production line path through
+    /// <see cref="TestTileMeshBuilder.BuildLineFromLayer"/>, which builds from the layer's borrowed buffer
+    /// through <c>StyledLineTileBuilder.BuildLayerInput</c>.</para>
     ///
     /// <para><b>The production configuration is the one under test</b> (the standing check). Every existing
     /// line instrument in the repo — <c>StyledLineBufferParityTests</c>, <c>LineRibbonJobTests</c>, every line
     /// pixel suite — hands the builder a feature list that <i>is</i> the whole layer, so slot and ordinal
-    /// coincide and the re-base this phase performs is inert. This fixture is the only one where they differ:
+    /// coincide and the ordinal join is inert. This fixture is the only one where they differ:
     /// the style layer's filter admits a <b>strict subset</b> (ordinals <c>[0, 3, 4, 5]</c> of six), the
     /// unselected features <b>have rings</b> — including one that is a <c>LineString</c>, so a missing
     /// selection gate produces line geometry rather than nothing — and a <b>Polygon is selected</b> and
@@ -717,10 +716,10 @@ namespace MapRenderer.Tests.Meshing
         // subset and its ordinals are NOT 0..n-1 — the discriminator the whole fixture rests on.
         private const string FilterJson = @"[""!="", ""cls"", ""skip""]";
 
-        // ── E1 — per-feature attribution over a shared layer buffer ────────────────────────────────
+        // ── per-feature attribution over a shared layer buffer ─────────────────────────────────────
 
         /// <summary>
-        /// E1 — the mesh built from the SIX-feature source layer, with only four features selected, is
+        /// The mesh built from the SIX-feature source layer, with only four features selected, is
         /// element-wise identical (positions, colours, width scales, indices) to the mesh built from the three
         /// drawable features alone with an identity selection.
         ///
@@ -798,10 +797,10 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // ── E2 — ring emission order ───────────────────────────────────────────────────────────────
+        // ── ring emission order ────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// E2 — the rings the shared build emits are, in order, exactly the selected LineString features'
+        /// The rings the shared build emits are, in order, exactly the selected LineString features'
         /// rings in <b>decode order</b>: feature <c>a</c>'s ring, then <c>b</c>'s, then <c>c</c>'s two, and
         /// nothing else.
         ///
@@ -862,7 +861,9 @@ namespace MapRenderer.Tests.Meshing
 
         /// <summary>
         /// The source layer, in decode order. Every LineString ring is HORIZONTAL and at its own tile
-        /// <c>y</c> — E2's run oracle depends on it; the polygons are NOT horizontal.
+        /// <c>y</c> — the run oracle of
+        /// <c>LineRingOrder_OverTheSharedBuffer_IsDecodeOrderOfTheSelectedLineRings</c> depends on it; the
+        /// polygons are NOT horizontal.
         /// </summary>
         private static IReadOnlyList<IFeature> SharedLayerFeatures() => new List<IFeature>
         {
@@ -2850,8 +2851,8 @@ namespace MapRenderer.Tests.Meshing
     {
         // ── Fixture geometry: a single convex square ring (exterior only, no holes) ──────────────
         // MVT command stream: MoveTo(1) to the first corner, LineTo(3) for the rest, implicitly closed.
-        // Winding (CW/CCW in tile-local Y-down space) is NOT asserted here — T6 measures the ACTUAL
-        // rendered front-face sign, it does not assume one.
+        // Winding (CW/CCW in tile-local Y-down space) is NOT asserted here — the Winding_FrontFacesPointOut_*
+        // tests measure the ACTUAL rendered front-face sign, they do not assume one.
 
         private static uint ZigZag(int n) => (uint)((n << 1) ^ (n >> 31));
 
@@ -2874,7 +2875,7 @@ namespace MapRenderer.Tests.Meshing
         private const double Extent = 4096.0;
         private static readonly TileId ModerateTile = new TileId { Z = 10, X = 300, Y = 380 }; // mid-latitude, arbitrary
 
-        // ── T1 (RED-verify) + T5 (topology invariant): a single square footprint ─────────────────
+        // ── RED-verify + topology invariant: a single square footprint ───────────────────────────
 
         [Test]
         public void Wall_FloorAndRoof_CoincideInFootprintPosition()
@@ -2907,7 +2908,7 @@ namespace MapRenderer.Tests.Meshing
                 Assert.AreEqual(0f, tFloorA, 1e-6f); Assert.AreEqual(0f, tFloorB, 1e-6f);
                 Assert.AreEqual(1f, tRoofB,  1e-6f); Assert.AreEqual(1f, tRoofA,  1e-6f);
 
-                // T1: floor/roof AT THE SAME RING POINT share the identical footprint position — the mesh
+                // Floor/roof AT THE SAME RING POINT share the identical footprint position — the mesh
                 // is height-agnostic; only t (+ the extrude-up magnitude, checked below) differs.
                 Assert.AreEqual(floorA, roofA,
                     $"edge {edge}: floorA and roofA must coincide in position (height-agnostic footprint).");
@@ -2924,7 +2925,7 @@ namespace MapRenderer.Tests.Meshing
 
             // RED-VERIFIED (2026-09-04): baking `extrudeUp * 10` into `Position` for t>0.5 in AddWallVertex
             // failed "edge 0: floorA and roofA must coincide in position (height-agnostic footprint)." —
-            // T1's own message, confirming the tooth can fail.
+            // this test's own message, confirming the tooth can fail.
         }
 
         [Test]
@@ -2942,7 +2943,7 @@ namespace MapRenderer.Tests.Meshing
                 "changing _ExtrusionHeight's VALUE must never change the index count.");
         }
 
-        // ── T5: uniform vs bake ───────────────────────────────────────────────────────────────────
+        // ── uniform vs bake ───────────────────────────────────────────────────────────────────────
 
         [Test]
         public void ConstantHeight_BakeStreamStaysZero()
@@ -2980,7 +2981,7 @@ namespace MapRenderer.Tests.Meshing
                     "data-driven fill-extrusion-height must bake the EVALUATED value per vertex.");
         }
 
-        // ── T2: height factor tracks per-vertex sec(φ) — two discriminators ────────────────────────
+        // ── height factor tracks per-vertex sec(φ) — two discriminators ────────────────────────────
         // z=0 (one tile spans the whole globe): a footprint near the north edge sits at high latitude
         // (sec φ ≫ 1); one straddling the equator sits at φ≈0 (sec φ = 1, the value a MISSING factor would
         // also produce — the equator is not a discriminating point on its own). Both builds share the SAME
@@ -3026,7 +3027,7 @@ namespace MapRenderer.Tests.Meshing
             return max;
         }
 
-        // ── T6: winding — front faces point OUT, under both Mercator and the globe ─────────────────
+        // ── winding — front faces point OUT, under both Mercator and the globe ─────────────────────
         // Mirrors GlobeFillWindingTests.WindingSign: tally sign(dot(cross(edges), lighting-normal)) across
         // every triangle. An ABSOLUTE +1 check (not merely globe==Mercator) — see that file's comment for
         // why a relative-only check can pass while both sides are inverted.

@@ -3,21 +3,22 @@
 // Grouped by production area, alphabetically within each: boundary-glitch regression, then the three Earcut triangulation fixtures, then the four Fill fixtures (build-buffers pool, graph allocation, pipeline bounds, shared buffer, sort-key/opacity), then the two Globe subdivision fixtures, then the standalone jobified-water and layer-pooling fixtures, then the three Line mesh-graph fixtures, then the shared right-handed test projection helper.
 //
 // Contents:
-//   BoundaryGlitchMeshTests          — Rung 2 (EditMode, the source of truth): build the REAL boundary_3 line mesh through the production path — projection (TileToGeoJob → managed ProjectPoint) + the actual Burst RibbonJob + the Mercator bake — for the three maintainer-reported "line/polygon…
+//   BoundaryGlitchMeshTests          — EditMode, the source of truth: build the REAL boundary_3 line mesh through the production path — projection (TileToGeoJob → managed ProjectPoint) + the actual Burst RibbonJob + the Mercator bake — for the three maintainer-reported "line/polygon…
 //   EarcutDegenerateTriangleTests    — Unit tests for PointInTriangle's degenerate-candidate branch.
-//   EarcutEarTestScanBoundTests      — Acceptance teeth for the bounding-box index over the ear-clip scan (see docs/mesh-triangulation-robustness-design.md): the scan must visit a small, machine-independent number of candidates (T2.1), and the index arm must be…
+//   EarcutEarTestScanBoundTests      — Acceptance teeth for the bounding-box index over the ear-clip scan (see docs/mesh-triangulation-robustness-design.md): the scan must visit a small, machine-independent number of candidates, and the index arm must be…
 //   EarcutTests                      — EditMode tests for EarcutJobPolygonRunner, the driver for EarcutJob (Unity EditMode only — NativeArray/Burst; not registered in Tools/core-tests).
 //   FillMeshBuildBuffersPoolTests    — perf/gc-elimination: StyledFillTileBuilder.WriteMeshData runs FillMeshGraph.Schedule (there is no synchronous FillMeshPipeline.Schedule), which itself allocates schedule-time managed…
-//   FillMeshGraphAllocationTests     — FillMeshPipeline.Schedule is retired — the graph (FillMeshGraph.Schedule + Handle.Complete()) is the only mesher left, so this measures schedule-time…
+//   FillMeshGraphAllocationTests     — the schedule-time managed allocation of the only fill mesher, the graph
+//                                      (FillMeshGraph.Schedule + Handle.Complete()).
 //   FillMeshPipelineBoundsTests      — Exact sizing pre-count + its never-fired capacity backstop.
 //   FillSharedBufferTests            — fill reads a buffer it shares with other layers, and joins its per-feature side arrays by the source-layer ordinal rather than by its own selected-list position.
 //   FillSortKeyAndOpacityTests       — the two build-time fill behaviours that show up in the MESH rather than in a uniform: fill-sort-key ordering and data-driven fill-opacity.
 //   GlobeSubdivisionJobParityTests   — Unity-only source-of-truth parity tooth.
 //   GlobeSubdivisionTests            — Globe-fill SUBDIVISION testbench (mesh-triangulation-robustness-design.md), driving SubdivisionCoverageValidator.
 //   JobifiedWaterTriangulationTests  — drives the REAL jobified fill path — Schedule, the Burst EarcutJob — over the committed corpus water tile, and validates the output has no folds and conserves area.
-//   LayerMeshBuildPoolingTests       — A pooled ILayerMeshBuild instance is never handed to two renters at once — the hazard LayerMeshBuildPool{T} introduces that the retired struct LayerRequest did not have: a class can be…
+//   LayerMeshBuildPoolingTests       — A pooled ILayerMeshBuild instance is never handed to two renters at once — the hazard LayerMeshBuildPool{T} carries: a class can be…
 //   LineExtentRoutingTests           — line's own TileToGeoJob extent routing, which had no observing tooth.
-//   LineGraphParityTests             — Step 1 (this file's non-negotiable gate): the per-ring SUBDIVIDED POINT COUNT, exact, element for element — a quantiser (LineCurvatureSubdivision.SegmentSteps), so a 1-ULP input difference across a ceil boundary can shift every downstream vertex.
+//   LineGraphParityTests             — gates first on the per-ring SUBDIVIDED POINT COUNT, exact, element for element — a quantiser (LineCurvatureSubdivision.SegmentSteps), so a 1-ULP input difference across a ceil boundary can shift every downstream vertex.
 //   LineGraphSchedulingTests         — job-scheduling-design.md (line graph) — acceptance teeth (a), (b), (d), (e), (g), (h).
 //   RightHandedSphereTestProjection  — Test-only helper (not a fixture): a right-handed mirror of SphericalProjection, used to pin winding independently of the production projection's own handedness.
 
@@ -61,7 +62,7 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Rung 2 (EditMode, the source of truth): build the REAL boundary_3 line mesh through the production
+    /// EditMode, the source of truth: build the REAL boundary_3 line mesh through the production
     /// path — projection (TileToGeoJob → managed ProjectPoint) + the actual Burst RibbonJob + the
     /// Mercator bake — for the three maintainer-reported "line/polygon across the whole screen" tiles, and
     /// scan the resulting Mesh for any triangle whose edge spans more than half a tile.
@@ -1108,7 +1109,7 @@ namespace MapRenderer.Tests.Meshing
                ""bottom"", ""#ff0000"", ""middle"", ""#00ff00"", ""top"", ""#0000ff"", ""#ffffff""]}";
         private const string SortKeyBySk = @"{""fill-sort-key"": [""get"", ""sk""]}";
 
-        // ── T1b — the shared-buffer form of the draw-order tooth ──────────────────────────────────
+        // ── the shared-buffer form of the draw-order tooth ────────────────────────────────────────
 
         /// <summary>
         /// The SAME three sort-keyed squares, but sharing their buffer with (a) two polygon features this
@@ -1222,7 +1223,7 @@ namespace MapRenderer.Tests.Meshing
                     "ordinal, so every feature paints with a neighbour's colour.");
         }
 
-        // ── T1d — the GLOBE colour join (a second, independent read of featureColors) ─────────────
+        // ── the GLOBE colour join (a second, independent read of featureColors) ─────────────
 
         /// <summary>
         /// The globe fill path colours its vertices through a <b>second</b>, independent read of
@@ -1289,7 +1290,7 @@ namespace MapRenderer.Tests.Meshing
                     "renders perfectly and is simply the wrong colour.");
         }
 
-        // ── T1c — WITHIN-feature ring order (the measured blind spot) ──────────────────────────
+        // ── WITHIN-feature ring order (the measured blind spot) ────────────────────────────────
 
         /// <summary>
         /// A single polygon feature whose rings are <b>outer then hole</b> must still be triangulated with the
@@ -1387,7 +1388,7 @@ namespace MapRenderer.Tests.Meshing
             return a;
         }
 
-        // ── T7 — the tile extent is ROUTED, not assumed ───────────────────────────────────────────
+        // ── the tile extent is ROUTED, not assumed ────────────────────────────────────────────────
 
         /// <summary>
         /// The fill mesh write reads the tile extent off the <b>buffer</b>. Built at extent 2048 and at 4096
@@ -1432,7 +1433,7 @@ namespace MapRenderer.Tests.Meshing
                     "2048 arm exactly 2x.");
         }
 
-        // ── T8 — the tile ADDRESS is routed too ───────────────────────────────────────────────────
+        // ── the tile ADDRESS is routed too ────────────────────────────────────────────────────────
 
         /// <summary>
         /// The pattern stream's world span comes from <c>geometry.Tile</c>, the buffer's own address. The same
@@ -1776,7 +1777,7 @@ namespace MapRenderer.Tests.Meshing
         }
 
         /// <summary>
-        /// T5b — <c>fill-sort-key</c> reorders the GEOMETRY and the COLOURS <b>together</b>. Both come
+        /// <c>fill-sort-key</c> reorders the GEOMETRY and the COLOURS <b>together</b>. Both come
         /// off the same loop over the sorted list, so a build that sorted only one of them would paint each
         /// feature's colour onto its neighbour's polygon.
         ///
@@ -1842,7 +1843,7 @@ namespace MapRenderer.Tests.Meshing
         }
 
         /// <summary>
-        /// T5 — the fill ordinal join survives a geometry-less feature. The builder does not skip a
+        /// The fill ordinal join survives a geometry-less feature. The builder does not skip a
         /// Polygon whose command stream is null: it occupies an ordinal in the list handed to the
         /// materializer (there is no interface member left to test it by, and the materializer treats a
         /// null stream as zero commands). It contributes no ring, so
@@ -2572,9 +2573,8 @@ namespace MapRenderer.Tests.Meshing
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// T3 (the per-layer build-object stage): a pooled <see cref="ILayerMeshBuild"/> instance is never
-    /// handed to two renters at once — the hazard <see cref="LayerMeshBuildPool{T}"/> introduces that the
-    /// retired struct <c>LayerRequest</c> did not have: a class can be
+    /// A pooled <see cref="ILayerMeshBuild"/> instance is never
+    /// handed to two renters at once — the hazard <see cref="LayerMeshBuildPool{T}"/> carries: a class can be
     /// returned to its pool twice (once per redundant <c>Dispose()</c> call), landing the same reference in
     /// the <c>ConcurrentBag</c> twice, so two independent <c>Rent</c> calls then observe the identical
     /// instance. <see cref="FillLayerBuild.Dispose"/>'s own <c>if (_disposed) return;</c> guard is what
@@ -3151,9 +3151,10 @@ namespace MapRenderer.Tests.Meshing
         // ── Tooth (b): the ring gate is the line gate, through the GRAPH ─────────────────────────────
 
         /// <summary>
-        /// (b) extends <c>StyledLineBufferParityTests</c> T2's mixed
-        /// buffer (a polygon ring, a selected LineString, an exterior/hole pair) with the two cases it
-        /// lacked, retargeted at <see cref="LineMeshGraph.Schedule"/> instead of the managed seam: a
+        /// (b) extends the mixed buffer of
+        /// <c>StyledLineBufferParityTests.LineLayer_WithPolygonAndLineFeaturesSelected_RibbonsOnlyTheLines</c>
+        /// (a polygon ring, a selected LineString, an exterior/hole pair) with two more cases, aimed at
+        /// <see cref="LineMeshGraph.Schedule"/> instead of the managed seam: a
         /// 2-POINT LineString (selected — line's own <c>&gt;= 2</c> threshold, never fill's <c>&gt;= 3</c>)
         /// and an UNSELECTED LineString. Only the selected LineStrings (the mixed-kind ring and the 2-point
         /// one) may produce ribbon geometry.

@@ -26,10 +26,10 @@ using MapView = MapRenderer.Unity.Rendering.Map.MapViewComponent;
 namespace MapRenderer.Tests.GeoJsons
 {
     /// <summary>
-    /// The GeoJSON source, end to end: <b>T1</b> (an inline geojson source actually renders through
-    /// <c>MapView.SetStyle</c>), <b>T3</b> (<c>SourceKey</c> carries the inline-data identity, both
-    /// directions) and <b>T5</b> (the slice happens inside <c>GetTile</c>, OFF the main thread, and its
-    /// native buffers are freed by the lease's last release).
+    /// The GeoJSON source, end to end: an inline geojson source actually renders through
+    /// <c>MapView.SetStyle</c>, <c>SourceKey</c> carries the inline-data identity in both directions,
+    /// and the slice happens inside <c>GetTile</c>, OFF the main thread, with its native buffers freed
+    /// by the lease's last release.
     /// </summary>
     [TestFixture]
     public class GeoJsonSourceTests : BaseTestFixture
@@ -148,10 +148,10 @@ namespace MapRenderer.Tests.GeoJsons
             return total;
         }
 
-        // ── T1 · a GeoJSON source renders through the real loop ───────────────────────────────────────
+        // ── a GeoJSON source renders through the real loop ────────────────────────────────────────────
 
         /// <summary>
-        /// <b>T1 (the headline)</b> — a style whose only source is inline geojson renders a fill mesh, driven
+        /// <b>The headline tooth</b> — a style whose only source is inline geojson renders a fill mesh, driven
         /// through the production <c>MapView.SetStyle</c> → <c>BuildSourceSpecs</c> path (not a hand-minted
         /// <c>SourceSpec</c>, or the wiring would be unobserved).
         ///
@@ -172,11 +172,11 @@ namespace MapRenderer.Tests.GeoJsons
         /// same three-corner half and the two half-areas add to exactly the rectangle's, with every vertex
         /// still present and still consumed one-to-one, while half the polygon renders twice.</para>
         ///
-        /// <para>At <c>cbe1d7d9</c> this fails at the first step: <c>BuildSourceSpecs</c> has no geojson
-        /// branch, so the source "resolved to no tiles" and no pipeline existed at all.</para>
+        /// <para>A <c>BuildSourceSpecs</c> with no geojson branch fails this at the first step: the source
+        /// resolves to no tiles and no pipeline exists at all.</para>
         /// </summary>
         [Test]
-        public void T1_AnInlineGeoJsonSource_RendersItsAuthoredPolygon()
+        public void AnInlineGeoJsonSource_RendersItsAuthoredPolygon()
         {
             var view = NewView(out var go);
             Track(go);
@@ -322,15 +322,16 @@ namespace MapRenderer.Tests.GeoJsons
 
                 Assert.AreEqual(expectedArea, TriangleArea(meshes[0]), expectedArea * 0.01,
                     "the indexed triangles must enclose the AUTHORED area, within 1%. Zero here is the " +
-                    "collapsed-mesh failure the positional arms above are deliberately not asked to catch; " +
+                    "collapsed-mesh failure the positional arms above are not asked to catch; " +
                     "twice it would be a doubled or self-overlapping fan.");
             }
             finally { view.Teardown(); }
         }
 
         /// <summary>
-        /// <b>T1 anti-vacuity.</b> The same style with an EMPTY FeatureCollection must render nothing. Without
-        /// this arm the tooth above cannot tell "rendered the dataset" from "rendered anything at all".
+        /// <b>Anti-vacuity for the headline tooth.</b> The same style with an EMPTY FeatureCollection must
+        /// render nothing. Without this arm the tooth above cannot tell "rendered the dataset" from
+        /// "rendered anything at all".
         ///
         /// <para><b>Measured limitation, stated so it is not over-read.</b> This arm is satisfied UPSTREAM of
         /// the decoder: an empty dataset has an inverted bounding box, so <c>GetTile</c>'s probe rejects every
@@ -338,11 +339,11 @@ namespace MapRenderer.Tests.GeoJsons
         /// quad whenever its slice is empty leaves this arm GREEN. So the "renders anything" hole is closed by
         /// two teeth together, not by this one: this arm observes the PROBE (its partner is
         /// <see cref="GetTile_AnEmptyDataset_RejectsEveryTile"/>), and
-        /// <c>GeoJsonTileDecoderTests.T4_AnEmptySlice_YieldsATileWithNoLayerAtAll</c> observes the DECODER —
+        /// <c>GeoJsonTileDecoderTests.AnEmptySlice_YieldsATileWithNoLayerAtAll</c> observes the DECODER —
         /// that one is what the injected quad reds.</para>
         /// </summary>
         [Test]
-        public void T1_AnEmptyInlineDataset_RendersNothing()
+        public void AnEmptyInlineDataset_RendersNothing()
         {
             var view = NewView(out var go);
             Track(go);
@@ -446,17 +447,17 @@ namespace MapRenderer.Tests.GeoJsons
                 "a skip, only a count of wired sources is.");
         }
 
-        // ── T3 · SourceKey carries the inline-data identity ───────────────────────────────────────────
+        // ── SourceKey carries the inline-data identity ────────────────────────────────────────────────
 
         private static SourceDefinition GeoJsonDef(string dataJson)
             => StyleParser.Parse(StyleWithInlineData(dataJson)).GetSource("geo");
 
-        /// <summary><b>T3 arm A (unit)</b> — two definitions identical except for the inline <c>data</c>
+        /// <summary><b>Different data (unit)</b> — two definitions identical except for the inline <c>data</c>
         /// produce DIFFERENT keys. Without the field they are value-equal on all six other fields (an inline
         /// source has no url, no tiles[], and takes the spec defaults for zoom/scheme/bounds), so the restyle
         /// diff keeps the first dataset's pipeline.</summary>
         [Test]
-        public void T3A_TwoInlineSources_DifferingOnlyInData_HaveDifferentKeys()
+        public void TwoInlineSources_DifferingOnlyInData_HaveDifferentKeys()
         {
             SourceDefinition first  = GeoJsonDef(RectangleAt(RectMin, RectMax));
             SourceDefinition second = GeoJsonDef(RectangleAt(OtherMin, OtherMax));
@@ -469,16 +470,16 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.IsNull(first.Tiles, "precondition: an inline source has no tiles[]");
 
             Assert.AreNotEqual(TileManager.SourceKey.From(first), TileManager.SourceKey.From(second),
-                "two different inline datasets must not be the same source. They used to be — so a " +
-                "restyle between them kept the first one's pipeline and rendered the wrong geometry.");
+                "two different inline datasets must not be the same source. If they were, a restyle " +
+                "between them would keep the first one's pipeline and render the wrong geometry.");
         }
 
-        /// <summary><b>T3 arm B (unit)</b> — two definitions with the SAME data produce EQUAL keys, even
-        /// though the restyle re-parsed the document into fresh <see cref="JsonValue"/> objects. Arm A alone
-        /// over-claims: a "fix" keyed on reference identity passes it and silently rebuilds every GeoJSON
-        /// pipeline on every restyle.</summary>
+        /// <summary><b>Same data (unit)</b> — two definitions with the SAME data produce EQUAL keys, even
+        /// though the restyle re-parsed the document into fresh <see cref="JsonValue"/> objects. The
+        /// different-data test alone over-claims: a "fix" keyed on reference identity passes it and silently
+        /// rebuilds every GeoJSON pipeline on every restyle.</summary>
         [Test]
-        public void T3B_TwoInlineSources_WithTheSameData_HaveEqualKeys_AcrossAReparse()
+        public void TwoInlineSources_WithTheSameData_HaveEqualKeys_AcrossAReparse()
         {
             string data = RectangleAt(RectMin, RectMax);
             SourceDefinition first  = GeoJsonDef(data);
@@ -500,7 +501,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// <summary>The same claim where member ORDER differs — the realistic re-parse difference, and the
         /// one a naive concatenation of the raw text would get wrong.</summary>
         [Test]
-        public void T3B_MemberOrderInTheInlineData_DoesNotChangeTheKey()
+        public void MemberOrderInTheInlineData_DoesNotChangeTheKey()
         {
             SourceDefinition a = GeoJsonDef(@"{""type"":""FeatureCollection"",""features"":[]}");
             SourceDefinition b = GeoJsonDef(@"{""features"":[],""type"":""FeatureCollection""}");
@@ -509,7 +510,7 @@ namespace MapRenderer.Tests.GeoJsons
                 "JSON object member order is not semantic; two authorings of one dataset are one source");
         }
 
-        // ── T3C · the key's OTHER identity field: the source type ─────────────────────────────────────
+        // ── the key's OTHER identity field: the source type ──────────────────────────────────────────
 
         /// <summary>Two definitions equal on every key field except <c>type</c>. Constructed directly rather
         /// than parsed, because the point is to hold the other six fields EQUAL — a style
@@ -529,7 +530,7 @@ namespace MapRenderer.Tests.GeoJsons
         };
 
         /// <summary>
-        /// <b>T3C (unit)</b> — <c>type</c> is part of the key. It is not a tolerated extra field: it is the
+        /// <b>Source type (unit)</b> — <c>type</c> is part of the key. It is not a tolerated extra field: it is the
         /// field <c>MapView.BuildSourceSpecs</c> branches on to decide whether the source fetches bytes or
         /// slices a local dataset, so two definitions differing only in it are not the same source under any
         /// reading of the question the key asks.
@@ -541,7 +542,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// </para>
         /// </summary>
         [Test]
-        public void T3C_TwoSourcesDifferingOnlyInType_HaveDifferentKeys()
+        public void TwoSourcesDifferingOnlyInType_HaveDifferentKeys()
         {
             TileManager.SourceKey vector  = TileManager.SourceKey.From(DefTyped(SourceType.Vector));
             TileManager.SourceKey geoJson = TileManager.SourceKey.From(DefTyped(SourceType.GeoJson));
@@ -566,18 +567,18 @@ namespace MapRenderer.Tests.GeoJsons
                 "SourceRegistry.Find is a linear scan calling Equals directly, and SourceKey is a dictionary " +
                 "key nowhere — so this pins structural participation, not correctness: a key whose hash ignores " +
                 "a field it compares is only correct while nothing hashes it, and the day something does, " +
-                "two keys that differ ONLY in that field land in the same bucket by construction.");
+                "two keys that differ ONLY in that field always land in the same bucket.");
         }
 
         /// <summary>
-        /// <b>T3C (behavioural)</b> — the same claim at the production diff site: flipping only the source
+        /// <b>Source type (behavioural)</b> — the same claim at the production diff site: flipping only the source
         /// type across a restyle REBUILDS the pipeline, and the factory that runs is the NEW spec's.
         ///
         /// <para>Both thunks build the same kind of feature source on purpose — the tooth is about WHICH
         /// spec's thunk the diff invokes, so the recorded tag is the discriminator, not the object.</para>
         /// </summary>
         [Test]
-        public void T3C_TheRestyleDiff_RebuildsWhenOnlyTheSourceTypeChanged()
+        public void TheRestyleDiff_RebuildsWhenOnlyTheSourceTypeChanged()
         {
             var view = NewView(out var go);
             Track(go);
@@ -622,13 +623,13 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// <b>T3 arms A and B, behaviourally</b>, at the production diff site: <c>TileManager.SetSources</c>
-        /// KEEPS a pipeline whose <c>(SourceId, Key)</c> matches and REBUILDS one whose key changed. Observed
-        /// by counting <c>CreateSource</c> invocations — the thunk the diff calls only for a new or changed
-        /// spec — with keys computed by the production <c>SourceKey.From</c>.
+        /// <b>Same data and different data, behaviourally</b>, at the production diff site:
+        /// <c>TileManager.SetSources</c> KEEPS a pipeline whose <c>(SourceId, Key)</c> matches and REBUILDS
+        /// one whose key changed. Observed by counting <c>CreateSource</c> invocations — the thunk the diff
+        /// calls only for a new or changed spec — with keys computed by the production <c>SourceKey.From</c>.
         /// </summary>
         [Test]
-        public void T3_TheRestyleDiff_KeepsThePipelineForEqualData_AndRebuildsItForDifferent()
+        public void TheRestyleDiff_KeepsThePipelineForEqualData_AndRebuildsItForDifferent()
         {
             var view = NewView(out var go);
             Track(go);
@@ -673,12 +674,12 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// <b>T3 arm A, end to end</b>: a <c>SetStyle</c> → <c>SetStyle</c> between two datasets renders the
-        /// SECOND one's geometry. The unit arms pin the key; this pins that the key is what the render path
-        /// actually follows.
+        /// <b>Different data, end to end</b>: a <c>SetStyle</c> → <c>SetStyle</c> between two datasets renders
+        /// the SECOND one's geometry. The unit tests pin the key; this pins that the key is what the render
+        /// path actually follows.
         /// </summary>
         [Test]
-        public void T3A_ARestyleBetweenTwoDatasets_RendersTheSecondOne()
+        public void ARestyleBetweenTwoDatasets_RendersTheSecondOne()
         {
             var view = NewView(out var go);
             Track(go);
@@ -716,13 +717,13 @@ namespace MapRenderer.Tests.GeoJsons
             finally { view.Teardown(); }
         }
 
-        // ── T5 · the lease: the handle is LAZY and the buffers are FREED ──────────────────────────────
+        // ── the lease: the handle is LAZY and the buffers are FREED ───────────────────────────────────
 
         private static GeoJsonTileFeatureSource SourceOver(string dataJson, GeoJsonSliceOptions options)
             => new GeoJsonTileFeatureSource(GeoJsonParser.Parse(dataJson), options, Scheduler);
 
         /// <summary>
-        /// <b>T5 (the decisive arm), INVERTED — <c>GetTile</c> SLICES, and slices OFF THE MAIN THREAD.</b>
+        /// <b>The decisive tooth, INVERTED — <c>GetTile</c> SLICES, and slices OFF THE MAIN THREAD.</b>
         ///
         /// <para><c>GetTile</c> slices eagerly, like the MVT source: every drop path owns a reference
         /// under the reference-count model, so a pre-built tile is never freed by nothing.</para>
@@ -736,7 +737,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// synchronous form flips the first to non-zero.</para>
         /// </summary>
         [UnityTest]
-        public IEnumerator T5_GetTile_SlicesOffTheMainThread()
+        public IEnumerator GetTile_SlicesOffTheMainThread()
         {
             using var source = SourceOver(RectangleAt(RectMin, RectMax), GeoJsonSliceOptions.Default);
 
@@ -770,16 +771,17 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.AreEqual(0, mainHits,
                 "DECISIVE: MapRenderer.Tile.Decode must NOT fire on the main thread. GetTile is called once " +
                 "per cover tile from inside Tick, so a source that sliced inline would put a full slice on " +
-                "the frame thread for every one of them — the cost laziness used to avoid by accident and " +
-                "TileDecodeDispatch.DecodeAsync now avoids on purpose.");
+                "the frame thread for every one of them — the cost TileDecodeDispatch.DecodeAsync exists " +
+                "to avoid.");
         }
 
         /// <summary>
-        /// <b>T5, POLICY ARM</b> — proves the source actually REACHES the <see cref="IWorkScheduler"/> it was
-        /// constructed with, rather than merely landing off the main thread by coincidence. <see cref="T5_GetTile_SlicesOffTheMainThread"/>
-        /// only proves "not on main", which a <c>DecodeAsync</c> that ignored its scheduler parameter and
-        /// hardcoded <see cref="ThreadPoolWorkScheduler"/> internally would satisfy too — that substitution is
-        /// exactly what the WebGL fix depends on being impossible.
+        /// <b>The scheduler-policy tooth</b> — proves the source actually REACHES the
+        /// <see cref="IWorkScheduler"/> it was constructed with, rather than merely landing off the main
+        /// thread by coincidence. <see cref="GetTile_SlicesOffTheMainThread"/> only proves "not on main",
+        /// which a <c>DecodeAsync</c> that ignored its scheduler parameter and hardcoded
+        /// <see cref="ThreadPoolWorkScheduler"/> internally would satisfy too — that substitution is exactly
+        /// what the WebGL fix depends on being impossible.
         ///
         /// <para>Constructed with <see cref="InlineWorkScheduler"/> instead of <see cref="Scheduler"/>.
         /// <see cref="GeoJsonTileFeatureSource.GetTile"/> has no <c>await</c> before <c>DecodeAsync</c>, so
@@ -787,7 +789,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// sibling tooth's assertion, using the same two recorders.</para>
         /// </summary>
         [UnityTest]
-        public IEnumerator T5_GetTile_HonoursAnInjectedInlineScheduler_AndSlicesOnTheCallingThread()
+        public IEnumerator GetTile_HonoursAnInjectedInlineScheduler_AndSlicesOnTheCallingThread()
         {
             using var source = new GeoJsonTileFeatureSource(
                 GeoJsonParser.Parse(RectangleAt(RectMin, RectMax)), GeoJsonSliceOptions.Default,
@@ -825,7 +827,7 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// <b>T5 (the lifetime arm)</b> — the LAST release frees the tile's native buffers, and a second
+        /// <b>The lifetime tooth</b> — the LAST release frees the tile's native buffers, and a second
         /// <c>GetTile</c> for the same tile slices again (there is no cross-call cache).
         ///
         /// <para>Reduced from "one slice per open SCOPE": a lease never slices, so sharing within one is
@@ -834,7 +836,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// place in the suite that observes the NATIVE free rather than a counted <c>Dispose</c> call.</para>
         /// </summary>
         [Test]
-        public async Task T5_TheLastReleaseFreesTheBuffers_AndASecondGetTileSlicesAgain()
+        public async Task TheLastReleaseFreesTheBuffers_AndASecondGetTileSlicesAgain()
         {
             using var source = SourceOver(RectangleAt(RectMin, RectMax), GeoJsonSliceOptions.Default);
             SharedDisposable<IDecodedTile> handle = await source.GetTile(WorldTile);
@@ -915,8 +917,9 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>A dataset with no located feature has an INVERTED bounding box, so every tile is
-        /// disjoint from it and nothing is ever sliced. This is the arm that makes T1's anti-vacuity arm
-        /// mean "the probe rejected it", not "the fill happened to be empty".</summary>
+        /// disjoint from it and nothing is ever sliced. This is the arm that makes
+        /// <see cref="AnEmptyInlineDataset_RendersNothing"/> mean "the probe rejected it", not "the fill
+        /// happened to be empty".</summary>
         [Test]
         public async Task GetTile_AnEmptyDataset_RejectsEveryTile()
         {

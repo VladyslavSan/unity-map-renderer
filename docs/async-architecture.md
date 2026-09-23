@@ -1,6 +1,6 @@
 # Async architecture — UniTask, no `System.Threading.Tasks`
 
-**Status:** decided 2026-06-21. Drives stage **S51** (the migration) and constrains all later async work.
+**Status:** decided. Constrains all async work.
 Clean-room: our own architecture + standard async patterns; UniTask is a vendored MIT third-party library.
 
 ## TL;DR (the decisions)
@@ -12,7 +12,8 @@ Clean-room: our own architecture + standard async patterns; UniTask is a vendore
    created and destroyed **only on the main thread**.
 4. **Data source is dependency-inverted**: an engine-free `UniTask`-returning interface, a highly-efficient
    `UnityWebRequest` production implementation in the Unity layer, and a trivial engine-free test/fixture impl.
-5. **The migration is one atomic stage** (S51), not an incremental split — see "Why one stage".
+5. **No `Task`↔`UniTask` bridge at any seam** — the fetch → schedule → consume chain is one contract; see
+   "One contract, no bridge".
 
 ## Problem
 
@@ -22,8 +23,8 @@ Clean-room: our own architecture + standard async patterns; UniTask is a vendore
   destroy-driven cancellation.
 - But `MapRenderer.Core` is **engine-free by design** — its asmdef references only `Unity.Mathematics`, and
   `Tools/core-tests` compiles the *real* Core `.cs` files with a 2-field math shim and **no UnityEngine**, for
-  a ~0.3 s headless test loop (`docs/` + `CLAUDE.md`). Today the Core data layer (`IDataSource.FetchAsync`,
-  `FileDataSource`, `HttpDataSource`, `TileScheduler`) is `Task`-based precisely because `Task` is BCL
+  a fast headless test loop (`docs/` + `CLAUDE.md`). `Task` looks like the natural primitive for the Core
+  data layer (`IDataSource.FetchAsync`, `FileDataSource`, `TileScheduler`), because `Task` is BCL
   (engine-free) and the obvious Unity replacement, `Awaitable`, is not.
 
 ## Why UniTask, not `Awaitable`
@@ -71,22 +72,21 @@ MapRenderer.Unity (UniTask via vendored build; owns threading + UnityEngine.Obje
 `UnityWebRequestDataSource`, while Core defines only the `UniTask` contract and ships a Task-free file/fixture
 impl. A test-only impl *may* fall back to `Task`/`HttpClient` as an explicit escape hatch, but we don't need it.
 
-### CPU-offload update: `IWorkScheduler`/`WorkHandle<T>`, not unconditionally UniTask
+### CPU offload: `IWorkScheduler`/`WorkHandle<T>`, not UniTask
 
-This doc originally stated UniTask as the unconditional primitive for "threading lives in the Unity layer".
-That no longer holds for CPU offload: `UnityEngine`'s managed ThreadPool is not wired to WebGL web workers
-(`docs/web-target.md`), so `UniTask.RunOnThreadPool` silently never runs its body there. The tile
-pipeline's CPU-offload sites (decode dispatch, then the mesh-build kicks) now go through
-`MapRenderer.Unity/Concurrency/IWorkScheduler` — `ThreadPoolWorkScheduler` (desktop/editor, reproducing the
-old `RunOnThreadPool` dispatch byte-for-byte) or `InlineWorkScheduler` (WebGL, runs the body synchronously on
-the calling thread) — and the result travels as a `WorkHandle<T>`, not a bare `UniTask<T>`. Every I/O await
-(HTTP fetch, `SwitchToMainThread`) is unaffected and still goes through UniTask exactly as designed above;
-this is a CPU-offload-only correction, not a reopening of "why UniTask".
+UniTask is the primitive for I/O, not for CPU offload. `UnityEngine`'s managed ThreadPool is not wired to
+WebGL web workers (`docs/web-target.md`), so `UniTask.RunOnThreadPool` silently never runs its body there.
+The tile pipeline's CPU-offload sites (decode dispatch and the mesh-build kicks) go through
+`MapRenderer.Unity/Concurrency/IWorkScheduler` — `ThreadPoolWorkScheduler` (desktop/editor, a
+`ThreadPool` work item) or `InlineWorkScheduler` (WebGL, runs the body synchronously on the calling
+thread) — and the result travels as a `WorkHandle<T>`, not a bare `UniTask<T>`. Every I/O await (HTTP fetch,
+`SwitchToMainThread`) goes through UniTask as designed above; the offload rule does not reopen "why
+UniTask".
 
 ### `TileScheduler`'s negative-cache TTL
 
-A fetch reporting `HasData=false` (HTTP 404/204, a missing file) is deliberately NOT written to the LRU
-`TileCache`. Two simpler alternatives were rejected: caching the absent response in the LRU (no expiry —
+A fetch reporting `HasData=false` (HTTP 404/204, a missing file) is NOT written to the LRU
+`TileCache`. Two simpler alternatives are rejected: caching the absent response in the LRU (no expiry —
 a transient 404 would stick until LRU eviction, arbitrarily far in the future) and not caching it at all
 (a permanently-missing *visible* tile would re-fetch every single frame). Instead it goes into a small
 scheduler-level negative cache with a short, injectable-clock TTL: a re-request within the TTL returns
@@ -123,12 +123,12 @@ lifetime question comes up (it's forced by the platform, not a style choice: job
   the double-free/leak guard. Teardown order is always **destroy meshes → then dispose the backend**.
 - **Corollary — the dispose-guard machinery only ever touches the *class* side.** A `VerifiedDisposable`-style
   base / the `CountMeshObjects` leak baseline apply to the `Mesh`-owning **classes**; the job-side struct data
-  stays trivial by construction. That's why there are **two** leak-guard systems, one per resource class:
+  stays trivial. That's why there are **two** leak-guard systems, one per resource class:
   `NativeArray` alloc-vs-dispose counts (`LayerMeshData.DebugLiveAllocCount`) for the *data*, and `Mesh`
   created-vs-destroyed counts (`CountMeshObjects`) for the *resource*. Caching the *data* would tangle the two
-  and invert the "arrays return to baseline after consume" invariant — which is exactly why S82 caches the
-  `Mesh`, not the `NativeArray`.
-- **UMR-151 (style-transitions Stage 3) extends the single-owner rule to the render-layer SLOT.** A
+  and invert the "arrays return to baseline after consume" invariant — which is why `PreparedTileCache`
+  caches the `Mesh`, not the `NativeArray`.
+- **The single-owner rule extends to the render-layer SLOT.** A
   `RenderLayerSet` slot is stable for a surviving layer across a partial-survival restyle — never
   reassigned, never shared — and a RETIRED slot's `Material` is destroyed exactly ONCE, by the tombstone
   swap in `RenderLayerSet.TryRestyleInPlace` (`_layers[slot].Dispose()` immediately before
@@ -137,37 +137,36 @@ lifetime question comes up (it's forced by the platform, not a style choice: job
 
 **Cancellation ≠ cleanup.** A `CancellationToken` stops the *work*; allocated resources still need explicit
 disposal at all four exits: (1) **consumed** → dispose after main-thread upload; (2) **released-while-in-flight**
-→ the discard path must `Dispose()` the result, not drop it (today's generation check silently drops — safe
-only because the result is managed; it becomes a leak the moment `NativeArray`s land); (3) **cancelled mid-work**
+→ the discard path must `Dispose()` the result, not drop it (the release-time holding pens complete it, then
+dispose it — `docs/tile-pipeline-design.md` § "Release-time holding pens"); (3) **cancelled mid-work**
 → off-thread `try/finally` frees what was allocated; (4) **teardown** (`OnDestroy`) → await outstanding, then
-dispose all pending data + destroy all Meshes/GameObjects + dispose Materials. With UniTask the await
-continuation resumes on the main thread — the single choke-point that owns the upload-vs-dispose branch.
+dispose all pending data + destroy all Meshes/GameObjects + dispose Materials. `TileManager.Tick`, on the main
+thread, owns the upload-vs-dispose branch: `PumpPending` uploads a live record's build, and
+`RenderTeardownRecord` puts an abandoned one in the pens that `Tick` drains.
 
 **Leak-guard test (teeth):** drive N tiles through load→release including the race (release a tile whose
 mesh build result has completed but not yet been consumed); assert **zero leaked `NativeArray`** (Unity
 `NativeLeakDetection`/alloc-vs-dispose counts) and **zero orphaned `Mesh`** (created-vs-destroyed count).
 
-### `TileManager.LoadedTile.Decode`'s residency lifetime (moved from its field doc, UMR-118)
+### `TileManager.LoadedTile.Decode`'s residency lifetime
 
 `Decode` is the decode-provisioning handle the fetch produced (`ITileFeatureSource.GetTile`'s result); set
-when the fetch completes, null before that and null again once the record no longer owns it. **This field
+when the fetch completes, null before that and null again once the record releases it. **This field
 IS one reference** to an already-decoded tile holding `Allocator.Persistent` buffers, and it is cleared
-exactly ONE way — `TileManager.RenderTeardownRecord` RELEASES it (cover change, eviction, restyle,
-teardown), for a kicked record precisely as much as a never-kicked one. The mesh kick no longer TRANSFERS
-this reference: it takes its own separate one (`TileManager.KickMeshBuild`'s prologue `Acquire()`), so this
-field stays live and unchanged across the whole kick. Dropping it any other way leaks the tile.
+ONE way — `TileManager.RenderTeardownRecord` RELEASES it (cover change, eviction, restyle, teardown), for a
+kicked record and a never-kicked one alike. The mesh kick does not take this reference over: it takes its
+own separate one (`TileManager.KickMeshBuild`'s prologue `Acquire()`), so this field stays live and
+unchanged across the whole kick. Dropping it any other way leaks the tile.
 
-**Deliberate cost, recorded rather than tested** (no observing tooth exists for it). Because this field now
-survives the kick instead of being released when the mesh build completes, a decoded tile's
+**A resource-lifetime cost that no test observes.** Because this field survives the kick, a decoded tile's
 `Allocator.Persistent` buffers live for the record's WHOLE in-cover lifetime, not just until its mesh is
-built — a DURATION increase in peak resident decoded-tile memory on top of the eager-decode BREADTH
-increase the prior stage already accepted (every fetched cover tile decodes, kicked or not). Rendered
-output is unaffected — this is a resource-lifetime cost, not a behaviour change — and it was chosen
-knowingly over the alternative (release at kick completion instead of at teardown), which would have partly
-resurrected the transfer machinery this stage deletes. A future residency-ceiling tooth, if one is ever
-added, is the thing that would stop this being deliberate.
+built. That adds DURATION to peak resident decoded-tile memory, on top of the BREADTH that eager decode
+costs (every fetched cover tile decodes, kicked or not). Rendered output is unaffected. The alternative —
+release at kick completion instead of at teardown — needs the record to hand its reference to the kick,
+and that transfer machinery is what the separate kick reference avoids. A residency-ceiling test would be
+the tooth for this cost; none exists.
 
-### `TileManager.DrainMeshBuilds`'s off-PlayerLoop proof (moved from its method doc, UMR-118)
+### `TileManager.DrainMeshBuilds`'s off-PlayerLoop proof
 
 A full drain handles tiles at any stage of the pipeline:
 1. Fetch in-flight: parks until the fetch `UniTask` completes, then kicks mesh build inline.
@@ -182,7 +181,7 @@ the same non-blocking guarantee, by a different mechanism. Parking on either com
 `UniTaskParkExtensions.WaitOffPlayerLoop` from the main thread therefore does not deadlock (no PlayerLoop
 dependency to dead-end on).
 
-### `TileManager.KickMeshBuild`'s off-PlayerLoop completion (moved from its method doc, UMR-118)
+### `TileManager.KickMeshBuild`'s off-PlayerLoop completion
 
 `KickMeshBuild` dispatches through `IWorkScheduler` — `ThreadPoolWorkScheduler` on desktop/editor,
 `InlineWorkScheduler` on a WebGL player, where no worker ever picks a ThreadPool dispatch up
@@ -196,11 +195,11 @@ after `Initialise`); no `UnityEngine.Object` is captured or touched off-main.
 ### `TileScheduler.Dispose` does not drain in-flight fetches
 
 `TileScheduler.Dispose` cancels and disposes the per-tile CTSs and clears its maps, but does not block to
-await outstanding fetches first. This is deliberate: `Dispose` can be called from the main thread, and a
+await outstanding fetches first. The reason: `Dispose` can be called from the main thread, and a
 blocking drain there risks deadlock if a fetch's completion needs that same thread to make progress.
 In-flight fetches are cancelled best-effort instead; a late completion is harmless because the CTS-identity
-guard skips the cache write. A future caller that genuinely needs to await outstanding fetches before
-disposing should add an explicit `DrainAsync()` method rather than making `Dispose` itself block.
+guard skips the cache write. A caller that needs to await outstanding fetches before disposing adds an
+explicit `DrainAsync()` method rather than making `Dispose` itself block.
 
 ## Packaging
 
@@ -213,17 +212,14 @@ disposing should add an explicit `DrainAsync()` method rather than making `Dispo
 - **Pin both distributions to the same UniTask version tag** (Cysharp releases UPM + NuGet in lockstep) so the
   headless and editor builds can't drift on API.
 
-## Why one stage (no intermediate steps)
+## One contract, no bridge
 
-The chain `IDataSource.FetchAsync → TileScheduler → MapView consume` is one connected contract. Migrating Core
-to `UniTask` while leaving the Unity consumer on `Task` would require a temporary `.AsUniTask()`/`.AsTask()`
-bridge at the seam — which is throwaway **and** is the exact API that trips the #716 engine-free `CS0012` trap.
-So the whole chain moves in one reviewed commit. (The developer may sequence internally — add the package, then
-migrate — but it lands atomically.)
+The chain `IDataSource.FetchAsync → TileScheduler → MapView consume` is one connected contract. A `Task` on
+either side of any seam in it needs a `.AsUniTask()`/`.AsTask()` bridge — and that is the API that trips the
+#716 engine-free `CS0012` trap. So every link in the chain is `UniTask`, and no seam converts.
 
-## Out of scope (separate, composes after)
+## Out of scope (separate axes)
 
-- **S48** — advanced `NativeArray`/`Mesh.MeshDataArray` upload API for fills. Different axis (upload
-  efficiency, not the async model); composes on the clean UniTask base. Its `NativeArray`s extend the
-  leak-guard above.
-- ECS/BRG batched rendering (S49); the deferred low-zoom frustum-precision decision.
+- The `NativeArray`/`Mesh.MeshDataArray` upload path — upload efficiency, not the async model. Its
+  `NativeArray`s fall under the leak guard above.
+- ECS/BRG batched rendering; the low-zoom frustum-precision decision.

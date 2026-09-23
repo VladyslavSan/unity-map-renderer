@@ -685,8 +685,8 @@ namespace MapRenderer.Tests.Style
                     0f, v => (float)v.AsNumber());
                 var applier = new ZoomStyleApplier(lineMat);
                 applier.BindFloat(widthSp, ShaderProperties.Line.PropertyId.Width);
-                // T8b: also exercise the device-pixel float loop — it iterated ZERO elements in
-                // this file until now, so a used allocation there could not have been caught here.
+                // Also exercise the device-pixel float loop — without this binding it iterates ZERO
+                // elements here, so a used allocation there could not be caught.
                 var devicePixelSp = new StyleProperty<float>(
                     JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"],5,1.0,15,4.0]"),
                     0f, v => (float)v.AsNumber());
@@ -721,8 +721,8 @@ namespace MapRenderer.Tests.Style
                     default, v => v.AsColorCoerced());
                 var applier = new ZoomStyleApplier(fillMat);
                 applier.BindColor(colorSp, ShaderProperties.PropertyId.BaseColor);
-                // T8b: also exercise the device-pixel float loop — see the sibling float-binding
-                // test's identical addition for why.
+                // Also exercise the device-pixel float loop — see the same binding in
+                // ApplyZoom_SweepingZoom_FloatBinding_AllocatesZeroGCMemory for why.
                 var devicePixelSp = new StyleProperty<float>(
                     JsonParser.Parse("[\"interpolate\",[\"linear\"],[\"zoom\"],5,1.0,15,4.0]"),
                     0f, v => (float)v.AsNumber());
@@ -845,7 +845,7 @@ namespace MapRenderer.Tests.Style
         private const float NewR = 0x22 / 255f, NewG = 0x88 / 255f, NewB = 0xDD / 255f;
 
         /// <summary>
-        /// <b>T3.</b> A surviving symbol layer's <c>_TextColor</c> uniform must reach the NEW colour after
+        /// A surviving symbol layer's <c>_TextColor</c> uniform must reach the NEW colour after
         /// the transition settles — with <c>Restyle</c> a no-op the uniform
         /// held the previous style's colour forever. RED-verify: revert <c>SymbolRenderLayer.Restyle</c> to
         /// <c>=&gt; StyleLayer = layer</c> — the uniform holds #996633 and the R assertion fires first.
@@ -870,7 +870,7 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// <b>T4a.</b> Mid-transition, <c>_TextColor</c> must lie STRICTLY between the two endpoints on
+        /// Mid-transition, <c>_TextColor</c> must lie STRICTLY between the two endpoints on
         /// every channel — not merely differ from the target. RED-verify: delete
         /// <c>_applier.SetTransition(...)</c> from <c>Restyle</c> — the rebind is not a retarget, so the
         /// target is pushed immediately and the mid value EQUALS the target.
@@ -902,10 +902,11 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// <b>T4b.</b> <see cref="RenderLayerSet.TransitioningCount"/> is <c>&gt; 0</c> mid-ease and
-        /// <c>== 0</c> once settled — a SEPARATE injection from T4a's, because T4a's defect (an immediate
-        /// snap) would also red this. RED-verify: make <c>SymbolRenderLayer.TransitioningCount</c> return
-        /// <c>0</c> unconditionally — the mid-ease clause fires while T4a stays green.
+        /// <see cref="RenderLayerSet.TransitioningCount"/> is <c>&gt; 0</c> mid-ease and
+        /// <c>== 0</c> once settled — a SEPARATE injection from
+        /// <see cref="SymbolRestyle_MidEase_TextColorLiesBetweenTheEndpoints"/>'s, because that test's defect
+        /// (an immediate snap) would also red this. RED-verify: make <c>SymbolRenderLayer.TransitioningCount</c>
+        /// return <c>0</c> unconditionally — the mid-ease clause fires while the mid-ease colour test stays green.
         /// </summary>
         [Test]
         public void SymbolRestyle_TransitioningCount_RisesThenSettles()
@@ -924,7 +925,7 @@ namespace MapRenderer.Tests.Style
                 Assert.AreEqual(0, set.TransitioningCount, "settled at exactly the transition duration.");
         }
 
-        // ── T8a: the symbol applier's own zero-alloc tooth ────────────────────────────────────
+        // ── the symbol applier's own zero-alloc tooth ─────────────────────────────────────────
 
         private const string ThreeSymbolLayersJson = @"{
     ""version"": 8,
@@ -945,7 +946,7 @@ namespace MapRenderer.Tests.Style
 }";
 
         /// <summary>
-        /// <b>T8a.</b> Three symbol layers' <c>ApplyZoom</c> must not allocate GC memory. Needed because the
+        /// Three symbol layers' <c>ApplyZoom</c> must not allocate GC memory. Needed because the
         /// five allocation teeth build over <c>MinimalStyle()</c> — one fill layer — so their sweep
         /// iterates ZERO symbol bindings and cannot see this path. RED-verify: add a USED allocation inside
         /// <c>SymbolRenderLayer.ApplyZoom</c> (assign a <c>new float[1]</c> to a static sink — an unused
@@ -1175,7 +1176,7 @@ namespace MapRenderer.Tests.Style
 
         // ── Fixtures ──────────────────────────────────────────────────────────────────────────
 
-        /// <summary>F1 — three fill layers over ONE vector source, at slots [a, b, c].</summary>
+        /// <summary>Three fill layers over ONE vector source, at slots [a, b, c].</summary>
         private static StyleDocument ThreeFillsAbc() => StyleParser.Parse(@"{
             ""version"": 8,
             ""sources"": { ""maplibre"": { ""type"": ""vector"", ""tiles"": [""https://example.invalid/{z}/{x}/{y}.pbf""] } },
@@ -1186,9 +1187,9 @@ namespace MapRenderer.Tests.Style
             ]
         }");
 
-        /// <summary>F1's B variant — layer <c>b</c> gains a filter. Mesh-affecting, so
+        /// <summary><see cref="ThreeFillsAbc"/> with layer <c>b</c> given a filter. Mesh-affecting, so
         /// <c>SurvivingLayerGate.LayerSurvives</c> refuses and the REBUILD arm (the only arm with probes) is
-        /// taken; the SOURCE set is identical, which is what makes property B's hazard live. The filter is
+        /// taken; the SOURCE set is identical, which is what makes the retry-absorption hazard live. The filter is
         /// <c>["has","NAME"]</c> — every country feature in the sample tile carries NAME, so <c>b</c> stays
         /// drawable and the mesh count does not silently change.</summary>
         private static StyleDocument ThreeFillsAbc_FilterChangedOnB() => StyleParser.Parse(@"{
@@ -1248,11 +1249,11 @@ namespace MapRenderer.Tests.Style
             return live;
         }
 
-        // ── T6-1 — property A: the old style stays fully live ─────────────────────────────────
+        // ── the old style stays fully live ────────────────────────────────────────────────────
 
-        /// <summary>T6-1: an abort at <c>IdentityCommitted</c> must leave the PREVIOUS style fully live —
+        /// <summary>An abort at <c>IdentityCommitted</c> must leave the PREVIOUS style fully live —
         /// its layers, its materials, its baked meshes and its cache token. This is the only site where
-        /// property A can be asserted: every later phase runs at or after <c>Layers.Build</c>, which has
+        /// the old style's liveness can be asserted: every later phase runs at or after <c>Layers.Build</c>, which has
         /// already destroyed the old materials.
         /// <para>The slot-id clause compares against A's ids captured before the call, not against
         /// <c>_style</c> — the field that just moved, which would make the assertion circular. The
@@ -1334,9 +1335,9 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── T6-2..5 — property B: an aborted rebuild is not absorbed by the retry ─────────────
+        // ── an aborted rebuild is not absorbed by the retry ───────────────────────────────────
 
-        /// <summary>T6-2: an abort at <c>MaterialMemoWritten</c> must not be absorbed by the NEXT call's
+        /// <summary>An abort at <c>MaterialMemoWritten</c> must not be absorbed by the NEXT call's
         /// in-place gate. Driven through the MaterialSet lever rather than a style edit, because that is the
         /// only lever that moves <c>MaterialSnapshot</c> under byte-identical style content — which is what
         /// makes the memo the deciding conjunct.
@@ -1392,7 +1393,7 @@ namespace MapRenderer.Tests.Style
                 view.Teardown();
             }
         }
-        /// <summary>T6-3/4/5: an abort at any phase from <c>LayersBuilt</c> on must not be absorbed by the
+        /// <summary>An abort at any phase from <c>LayersBuilt</c> on must not be absorbed by the
         /// next call's in-place gate. One body over three phases — one property, one root cause, one
         /// mechanism: the live layers are the aborted call's, so the retry's per-layer gate compares the new
         /// document against itself and every layer "survives".
@@ -1460,22 +1461,23 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        // ── T6-6 — property C: no husk, no leak, no double-free ───────────────────────────────
+        // ── no husk, no leak, no double-free ──────────────────────────────────────────────────
 
-        /// <summary>T6-6: an abort inside <c>TileManager.SetSources</c>' per-record teardown loop must leave
+        /// <summary>An abort inside <c>TileManager.SetSources</c>' per-record teardown loop must leave
         /// no HALF-torn-down record behind (C1), and must leak nothing (C2).
-        /// <para><b>Both C1 clauses stay meaningful post-fix.</b> The fix drops each record from
+        /// <para><b>Both C1 clauses stay meaningful.</b> <c>SetSources</c> drops each record from
         /// <c>_loaded</c> BEFORE tearing that record down, one at a time, so after an abort the records the
         /// loop never reached are still there and INTACT. C1a therefore inspects real entries rather than an
         /// empty set, and C1b pins exactly that: some records remain, and strictly fewer than before.</para>
-        /// <para><b>C2 cannot stand in for C1:</b> the pre-fix husk's second <c>decode.Release()</c> takes
+        /// <para><b>C2 cannot stand in for C1:</b> a husk's second <c>decode.Release()</c> takes
         /// <c>remaining == -1</c>, which leaves <c>DebugLiveCount</c> untouched and
         /// <c>DebugNegativeObservations</c> at 0, and its own assert is <c>System.Diagnostics.Debug</c>,
         /// invisible to NUnit.</para>
         /// <para><b>RED recipe for C2:</b> comment out <c>DestroyTrackedMeshes(ref lt);</c> in
         /// <c>TileManager.RenderTeardownRecord</c> — records leak their meshes and the post-teardown count
         /// exceeds the baseline. That is the single teardown funnel, so it is a broad site: run filtered.
-        /// C1a is RED against the un-fixed tree with no injection.</para></summary>
+        /// C1a reds with no injection against a teardown that tears a record down while it is still in
+        /// <c>_loaded</c>.</para></summary>
         [Test]
         public void AbortMidRecordTeardown_LeavesNoHuskAndLeaksNothing()
         {
@@ -1555,12 +1557,12 @@ namespace MapRenderer.Tests.Style
                 "C2: the mesh count must return to baseline — an aborted restyle must leak no Mesh.");
         }
 
-        // ── T7 — the no-blank-window bound ────────────────────────────────────────────────────
+        // ── the no-blank-window bound ─────────────────────────────────────────────────────────
 
-        /// <summary>T7: across the rebuild-arm commit sequence, the live layer-material count never drops
+        /// <summary>Across the rebuild-arm commit sequence, the live layer-material count never drops
         /// below <c>min(N_old, N_new)</c> — a LOWER BOUND at every phase, never an equality. This is the
-        /// no-blank-window statement this seam can hold: the brief's "a correct implementation transiently
-        /// holds both sets" is false here, because all six probes are on the rebuild arm and
+        /// no-blank-window statement this seam can hold. The intuitive statement "a correct implementation
+        /// transiently holds both sets" is false here, because all six probes are on the rebuild arm and
         /// <c>RenderLayerSet.Build</c> calls <c>ClearLayers()</c> first.
         /// <para>On this drive <c>N_old == N_new == 3</c>, so the <c>min()</c> is decoration — the bound
         /// exercised is <c>&gt;= 3</c>. The <c>min</c> form is what makes the property true in general. If a

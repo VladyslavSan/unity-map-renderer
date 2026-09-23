@@ -714,7 +714,7 @@ namespace MapRenderer.Tests.Mvt
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// T1b + T2 (string→id key hoist) — the integration proof, over the real fixture, that
+    /// The string→id key hoist — the integration proof, over the real fixture, that
     /// <see cref="FeatureSelector"/>'s per-layer bind step resolves a filter's constant-key <c>get</c>/<c>has</c>
     /// names ONCE per <see cref="FeatureSelector.SelectFeatures(StyleLayer, ITileLayer, double, List{SelectedTileFeature})"/>
     /// call — not once per feature — and that the hoisted int-key binding path (via the
@@ -798,7 +798,7 @@ namespace MapRenderer.Tests.Mvt
             public IFeatureKeyResolver KeyResolver => Resolver;
         }
 
-        // ── T1b: O(layers), not O(features) ──────────────────────────────────────────────────────
+        // ── O(layers), not O(features) ───────────────────────────────────────────────────────────
 
         [Test]
         public void SelectFeatures_ResolvesKeysOncePerCall_NotPerFeature_AndSelectionIsUnchanged()
@@ -855,7 +855,7 @@ namespace MapRenderer.Tests.Mvt
                 "if this drifts, the fixture changed underneath both tests, not just this one");
         }
 
-        // ── T2: hoisted (int-key) and string-lookup selection still agree ───────────────────────────
+        // ── hoisted (int-key) and string-lookup selection agree ─────────────────────────────────────
 
         [TestCase("[\"==\",[\"get\",\"CONTINENT\"],\"Africa\"]")]
         [TestCase("[\"has\",\"NAME\"]")]
@@ -924,7 +924,7 @@ namespace MapRenderer.Tests.Mvt
                 $" and AppContext.BaseDirectory={AppContext.BaseDirectory}");
         }
 
-        // ── Tooth #1c — the discriminator ──────────────────────────────────────────────────────
+        // ── the discriminator ──────────────────────────────────────────────────────────────────
 
         /// <summary>
         /// <see cref="DensePropertyStore"/>'s instance field set must be EXACTLY
@@ -953,7 +953,7 @@ namespace MapRenderer.Tests.Mvt
                 "No uint[] and no NativeArray<uint> (a 48 B per-store handle that erases the win over ~495 stores/tile).");
         }
 
-        // ── Tooth #1a ───────────────────────────────────────────────────────────────────────────
+        // ── one tag-words buffer per non-empty layer ────────────────────────────────────────────
 
         /// <summary>
         /// Every non-empty layer owns exactly one tag-words buffer. "Non-empty" here means
@@ -983,7 +983,7 @@ namespace MapRenderer.Tests.Mvt
                 "precondition: the fixture must decode at least one non-empty layer, or this tooth is vacuous");
         }
 
-        // ── Tooth #4 — ownership/leak ───────────────────────────────────────────────────────────
+        // ── ownership/leak ──────────────────────────────────────────────────────────────────────
 
         /// <summary>Frees the shared tag-words buffer exactly once, and a second <c>Dispose</c> is a no-op
         /// (idempotent write-back), not a throw.</summary>
@@ -1074,7 +1074,7 @@ namespace MapRenderer.Tests.Mvt
                 "a second Dispose must be a no-op (idempotent write-back), not a throw.");
         }
 
-        // ── Tooth #5 — use-after-free bound ────────────────────────────────────────────────────
+        // ── use-after-free bound ───────────────────────────────────────────────────────────────
 
         /// <summary>
         /// Reading a property after the owning tile is disposed must fail LOUD — the disposed-<c>NativeArray</c>

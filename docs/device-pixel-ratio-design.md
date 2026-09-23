@@ -1,8 +1,9 @@
 # Device-pixel ratio — one logical-pixel convention for the whole map (design / SSOT)
 
-**Status:** the model below ships, with one part open — where the ratio comes from (§7). This doc is the
-*why*. The *contract* — the standing requirements a conforming implementation must hold — is the normative
-[`specs/device-pixel-ratio.md`](../specs/device-pixel-ratio.md), and is not restated here.
+**Status:** the model below ships, with one part open — where the ratio comes from (§ "Open — where the
+ratio comes from" below). This doc is the *why*. The *contract* — the standing requirements a conforming
+implementation must hold — is the normative [`specs/device-pixel-ratio.md`](../specs/device-pixel-ratio.md),
+and is not restated here.
 
 **Read with:** `docs/line-rendering-design.md` § "The width model" (the frame-constant ruler the line width family rides),
 `docs/coordinates-and-projections.md` (the logical-pixel tile definition `WebMercator.TilePixelSize` sets),
@@ -31,8 +32,8 @@ direction, and make the space a property lands in something a reader can enumera
 
 ### 2.1 The decision procedure — layout vs sampling
 
-This is the rule to apply when adding any new px-valued quantity. Everything in §4's table is an instance of
-it.
+This is the rule to apply when adding any new px-valued quantity. Everything in the table of § "The px-valued
+surface" below is an instance of it.
 
 | the quantity answers | unit | examples |
 |---|---|---|
@@ -231,7 +232,8 @@ row per property. A new px-valued property is added to the table, and the table 
    uniform; they resolve through `WebMercator.TilePixelSize` or `ViewportLogicalPx` and are logical because
    of it. Nothing new is expressible about them: `symbol-spacing`'s extractor takes no ratio, so the only
    assertable property is source text. A future slip into device space there would be invisible at every
-   ratio, and the thing that actually protects them is that `TilePixelSize` keeps its meaning (§6).
+   ratio, and the thing that actually protects them is that `TilePixelSize` keeps its meaning
+   (§ "Rejected alternatives" below).
 6. **The camera's framing ordering is held by argument.** `MapView.LateUpdate` refreshes the camera's ratio
    before it builds the tile-selection config, whose framing viewport *is* `MapCamera.ViewportLogicalPx`.
    `BuildTileSelectionConfig` has a single production caller, nothing between the refresh and the consume
@@ -243,8 +245,8 @@ row per property. A new px-valued property is added to the table, and the table 
 - **One basis everywhere — emit device px for the whole surface.** Moving the label path off
   `_ScreenParamsLogical` is the identity at dpr 1 and so survives every existing gate, while dragging
   `SymbolProjectionJob.ViewportLogicalPx`, `SymbolBox`, the collision grid's cell sizing and every px
-  threshold in the fade machinery into device px. That reproduces §1's failure mode at roughly ten times
-  the surface, to buy uniformity in a half that is already correct.
+  threshold in the fade machinery into device px. That reproduces the failure mode of § "The itch" at
+  roughly ten times the surface, to buy uniformity in a half that is already correct.
 
 - **Fixing the basis inside `MapPixelsToWorld` rather than on the CPU.** The shader's `pxToWorld` must keep
   returning metres per **device** pixel, because the AA straddle pad and the hairline floor derived from it
@@ -263,8 +265,8 @@ row per property. A new px-valued property is added to the table, and the table 
     property is the failure this convention exists to prevent, reintroduced by a change meant to simplify
     it.
   * **`fill-pattern` sprite size halves.** `FillPattern` pairs `GroundResolution` with a member named
-    `LogicalSizePixels`. A 32-px sprite would paint 32 *device* px = 16 logical px at dpr 2, against §2.1's
-    "how big should this *look*?".
+    `LogicalSizePixels`. A 32-px sprite would paint 32 *device* px = 16 logical px at dpr 2, against the
+    "how big should this *look*?" row of § "The decision procedure — layout vs sampling".
   * **Tile selection's answer changes.** `FrustumTileSelector`'s `_selectionZoomOffset` is
     `round(log2(tilePx / onScreenPx))`; at dpr 2 it becomes 1 and the cover is selected a whole level
     deeper. Exempting that one site immediately reinstates two constants, which is the thing the fold was
@@ -302,10 +304,11 @@ row per property. A new px-valued property is added to the table, and the table 
 `Screen.dpi / 160` against the Android **mdpi** baseline. **Whether that derivation is right is an open
 maintainer decision**, and it is a policy call rather than a mechanical edit.
 
-The plumbing (§3, §4) is independent of the value and lands first. Otherwise a value change silently rescales
-the map with nothing pinning what "correct" means — and a green gate after a formula change carries **zero**
-information about the formula, because `MapHost.Start` never runs under the test runner and every fixture
-holds the serialized default.
+The plumbing (§ "The mechanism — two named conversions, one fallback" and § "The px-valued surface"
+above) is independent of the value, and it must hold before the value changes. Otherwise a value change
+silently rescales the map with nothing pinning what "correct" means — and a green gate after a formula
+change carries **zero** information about the formula, because `MapHost.Start` never runs under the test
+runner and every fixture holds the serialized default.
 
 ### 7.1 The finding that makes it a policy call
 
@@ -360,7 +363,7 @@ contract.
 | **B3** | **Explicit override plus auto** | a `{Auto, Manual}` mode on `MapViewConfig`; `Auto` runs B1/B2, `Manual` honours the serialized value | one serialized enum, one branch. Today the derivation overwrites the field unconditionally, so there is **no supported way to set a ratio by hand on a device**, and the eyeball workflow — sliding the value live — depends on that being possible |
 | **B4** | **Editor-only truth** | read `EditorGUIUtility.pixelsPerPoint` under `UNITY_EDITOR`; the player falls back to B1/B2 | ~3 lines, but **wrong as the shipping mechanism**: Editor and player would disagree, so the eyeball would validate behaviour the build lacks. Useful as a *measurement* |
 | **B5** | **Native plugin** | `NSScreen.backingScaleFactor` / `GetDpiForWindow` per desktop platform | two small native plugins plus per-platform build config and maintenance. **The only way to get the real factor in a player**, and out of proportion until desktop DPR matters |
-| **B6** | **`UnityEngine.Device.Screen.dpi`** | a one-token change at the derivation site. The Device-Simulator shim yields the *simulated device's* values in the Editor and forwards to `UnityEngine.Screen` in a player | removes most of §7.3's harm **with no policy attached**, and composes with B1/B3. Does not answer the desktop question at all |
+| **B6** | **`UnityEngine.Device.Screen.dpi`** | a one-token change at the derivation site. The Device-Simulator shim yields the *simulated device's* values in the Editor and forwards to `UnityEngine.Screen` in a player | removes most of the harm of § "A live consequence of the current derivation" **with no policy attached**, and composes with B1/B3. Does not answer the desktop question at all |
 
 A standalone `Application.isEditor` gate is **assessed and rejected**: it adds a third policy branch that
 B1+B3 then has to reconcile, and B6 is a strictly better version of the same intent.
@@ -378,7 +381,7 @@ not make a *constant* 2.0 correct — drag the window to a 1× monitor and it is
 remains the only fully correct mechanism.
 
 **What nothing in-process can judge** is whether the chosen number matches what the OS intends. That oracle
-is not in the process; it *is* §7.1's finding.
+is not in the process; it *is* the finding of § "The finding that makes it a policy call" above.
 
 ## 8. Grounding (file:symbol touch points)
 
@@ -404,5 +407,5 @@ straddle pad, the hairline floor, `_Blur`), `Fill/Fill_VertexModify.hlsl` and `P
 definition), `Coordinates/WebMercatorProjection` (the pixel↔ground service),
 `Text/Placement/SymbolStagingMath` / `SymbolBox` / `SymbolViewTransform` (the collision space),
 `Style/Fill/FillPattern.LogicalSizePixels`.
-`MapRenderer.App/`: `MapHost.Start` (the open derivation, §7), `Controller` / `TouchController` (the
-interaction seams).
+`MapRenderer.App/`: `MapHost.Start` (the open derivation, § "Open — where the ratio comes from"),
+`Controller` / `TouchController` (the interaction seams).

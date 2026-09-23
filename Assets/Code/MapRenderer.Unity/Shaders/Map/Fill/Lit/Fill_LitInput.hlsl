@@ -7,7 +7,7 @@
 // Modified from upstream: full UnityPerMaterial + fill paint properties (_Opacity, _FillOutlineColor, etc.);
 //   DOTS bridge extended for fill props; InitializeStandardLitSurfaceData preserved verbatim.
 //
-// S34/S66: Fill-layer input — the UnityPerMaterial CBUFFER, DOTS-instancing bridge, and
+// Fill-layer input — the UnityPerMaterial CBUFFER, DOTS-instancing bridge, and
 //   InitializeStandardLitSurfaceData for all Fill passes. Included by Fill.shader BEFORE any
 //   pass body (Fill_VertexModify.hlsl, then Fill_<Pass>.hlsl). Define-before-use order — no
 //   forward-declaration hack needed.
@@ -51,22 +51,21 @@ half _ClearCoatSmoothness;
 half _DetailAlbedoMapScale;
 half _DetailNormalMapScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
-// ── Map paint properties (S34/S13 additions) ──────────────────────────────────
+// ── Map paint properties ──────────────────────────────────────────────────────
 // The per-layer paint color is the standard URP _BaseColor (declared above): it multiplies onto
-// albedo (and its alpha into the surface alpha) exactly like Lit. (S58 retired the redundant
-// _MapColor, which duplicated _BaseColor's rgb tint while ignoring its alpha.)
-// _Opacity        — overall opacity [0,1], multiplied onto alpha in the fragment.
-//                   In opaque queue it has no visual effect; wired for forward-compatible styling.
-// _FillOutlineColor — fill-outline-color (S13): used by a future outline pass; declared here so
-//                   the SRP Batcher CBUFFER shape is stable across all passes from day one.
-// _FillTranslate  — fill-translate (S13): xy = pixel offset (world-space or viewport-space per
+// albedo (and its alpha into the surface alpha) exactly like Lit.
+// _Opacity        — overall opacity [0,1], multiplied onto alpha in the fragment. Fills render in
+//                   the transparent band, so it blends.
+// _FillOutlineColor — fill-outline-color: read by no pass; declared here so the SRP Batcher
+//                   CBUFFER shape is stable across all passes.
+// _FillTranslate  — fill-translate: xy = pixel offset (world-space or viewport-space per
 //                   _FillTranslateAnchor). zw unused; packed as float4 to avoid half-alignment issues.
 // _FillAntialias  — fill-antialias: 1=AA on (default), 0=off. Declared, instanced and bound, and read
-//                   by NO pass — deliberately, and not pending. Fill antialiasing is geometry: the
-//                   property is consumed in C# at mesh-build time, by emitting no boundary band for a
-//                   layer that opts out (docs/fill-boundary-antialiasing-design.md). Do not give this
-//                   uniform a shader reader to make it look consumed.
-// _FillTranslateAnchor — fill-translate-anchor (S13): 0=map world-space, 1=viewport screen-space.
+//                   by NO pass. Fill antialiasing is geometry: the property is consumed in C# at
+//                   mesh-build time, by emitting no boundary band for a layer that opts out
+//                   (docs/fill-boundary-antialiasing-design.md). Do not give this uniform a shader
+//                   reader to make it look consumed.
+// _FillTranslateAnchor — fill-translate-anchor: 0=map world-space, 1=viewport screen-space.
 // _FillPattern    — fill-pattern: 0 = solid (the fill-color path), 1 = this is a pattern layer.
 // _PatternRect    — xy = sprite top-left in sheet px, zw = sprite size in sheet px. A ZERO-AREA rect
 //                   (zw == 0) means "pattern layer, sprite not resolved" and the fragment clips. That is
@@ -111,7 +110,7 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _ClearCoatSmoothness)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailAlbedoMapScale)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailNormalMapScale)
-    // Map paint additions (S34/S13):
+    // Map paint additions:
     UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
     UNITY_DOTS_INSTANCED_PROP(float4, _FillOutlineColor)
     UNITY_DOTS_INSTANCED_PROP(float4, _FillTranslate)
@@ -137,7 +136,7 @@ static float  unity_DOTS_Sampled_ClearCoatMask;
 static float  unity_DOTS_Sampled_ClearCoatSmoothness;
 static float  unity_DOTS_Sampled_DetailAlbedoMapScale;
 static float  unity_DOTS_Sampled_DetailNormalMapScale;
-// Map paint statics (S34/S13):
+// Map paint statics:
 static float  unity_DOTS_Sampled_Opacity;
 static float4 unity_DOTS_Sampled_FillOutlineColor;
 static float4 unity_DOTS_Sampled_FillTranslate;
@@ -192,7 +191,7 @@ void SetupDOTSMapLitMaterialPropertyCaches()
 #define _ClearCoatSmoothness    unity_DOTS_Sampled_ClearCoatSmoothness
 #define _DetailAlbedoMapScale   unity_DOTS_Sampled_DetailAlbedoMapScale
 #define _DetailNormalMapScale   unity_DOTS_Sampled_DetailNormalMapScale
-// Map paint redirects (S34/S13):
+// Map paint redirects:
 #define _Opacity                unity_DOTS_Sampled_Opacity
 #define _FillOutlineColor       unity_DOTS_Sampled_FillOutlineColor
 #define _FillTranslate          unity_DOTS_Sampled_FillTranslate

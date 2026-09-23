@@ -13,8 +13,8 @@
 //     coordinate (uv = dashU/side/innerFrac); the fragment clips by LineCoverage to give the shadow a
 //     ribbon silhouette, in place of the _ALPHATEST_ON path.
 //
-// CAPABILITY-ONLY (S67): inert for transparent lines (Queue ≥ 2501; URP excludes them from
-// ShadowCaster). S69 activates it if the line moves to an opaque/forced-shadow mode.
+// CAPABILITY-ONLY: inert while lines render transparent (Queue ≥ 2501; URP excludes them from
+// ShadowCaster). An opaque or forced-shadow line material would activate it.
 //
 // Include order (set by Line.shader): Line_LitInput.hlsl → Line_VertexExtrude.hlsl → this file.
 

@@ -10,7 +10,7 @@
 //   _FillExtrusionTranslateAnchor); DOTS bridge extended for those props; InitializeStandardLitSurfaceData
 //   preserved verbatim. No fill-pattern texture (the spec has no fill-extrusion-pattern).
 //
-// S23 I2b: this is a DELIBERATE FORK of Fill_LitInput.hlsl (same reasoning as Line_LitInput.hlsl, S33/S66):
+// This is a FORK of Fill_LitInput.hlsl (same reasoning as Line_LitInput.hlsl):
 //      we CANNOT #include Fill_LitInput.hlsl and add to it — that would produce a duplicate UnityPerMaterial
 //      CBUFFER, which the HLSL compiler rejects. SRP Batcher requires the CBUFFER to be IDENTICAL in every
 //      pass of the fill-extrusion shader, so all its passes must #include THIS file, not Fill_LitInput.hlsl.
@@ -54,12 +54,12 @@ half _ClearCoatSmoothness;
 half _DetailAlbedoMapScale;
 half _DetailNormalMapScale;
 UNITY_TEXTURE_STREAMING_DEBUG_VARS;
-// ── Map fill-extrusion paint properties (S23 I2b) ─────────────────────────────
+// ── Map fill-extrusion paint properties ───────────────────────────────────────
 // The per-layer paint color is the standard URP _BaseColor (declared above): it multiplies onto
 // albedo (and its alpha into the surface alpha), exactly like Fill.
 // _Opacity                     — fill-extrusion-opacity: overall opacity [0,1].
 // _ExtrusionHeight             — fill-extrusion-height (constant/zoom path; data-driven bakes per-vertex
-//                                 instead — S23 I2b mesh builder). NOT named _Height (reserved).
+//                                 instead — StyledFillExtrusionTileBuilder). NOT named _Height (reserved).
 // _ExtrusionBase               — fill-extrusion-base (constant/zoom path).
 // _FillExtrusionTranslate      — fill-extrusion-translate: xy = pixel offset (world/viewport per
 //                                 _FillExtrusionTranslateAnchor). zw unused; packed as float4 for alignment.
@@ -91,7 +91,7 @@ UNITY_DOTS_INSTANCING_START(MaterialPropertyMetadata)
     UNITY_DOTS_INSTANCED_PROP(float , _ClearCoatSmoothness)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailAlbedoMapScale)
     UNITY_DOTS_INSTANCED_PROP(float , _DetailNormalMapScale)
-    // Map fill-extrusion additions (S23 I2b):
+    // Map fill-extrusion additions:
     UNITY_DOTS_INSTANCED_PROP(float , _Opacity)
     UNITY_DOTS_INSTANCED_PROP(float , _ExtrusionHeight)
     UNITY_DOTS_INSTANCED_PROP(float , _ExtrusionBase)
@@ -114,7 +114,7 @@ static float  unity_DOTS_Sampled_ClearCoatMask;
 static float  unity_DOTS_Sampled_ClearCoatSmoothness;
 static float  unity_DOTS_Sampled_DetailAlbedoMapScale;
 static float  unity_DOTS_Sampled_DetailNormalMapScale;
-// Map fill-extrusion statics (S23 I2b):
+// Map fill-extrusion statics:
 static float  unity_DOTS_Sampled_Opacity;
 static float  unity_DOTS_Sampled_ExtrusionHeight;
 static float  unity_DOTS_Sampled_ExtrusionBase;
@@ -163,7 +163,7 @@ void SetupDOTSMapFillExtrusionMaterialPropertyCaches()
 #define _ClearCoatSmoothness    unity_DOTS_Sampled_ClearCoatSmoothness
 #define _DetailAlbedoMapScale   unity_DOTS_Sampled_DetailAlbedoMapScale
 #define _DetailNormalMapScale   unity_DOTS_Sampled_DetailNormalMapScale
-// Map fill-extrusion redirects (S23 I2b):
+// Map fill-extrusion redirects:
 #define _Opacity                          unity_DOTS_Sampled_Opacity
 #define _ExtrusionHeight                  unity_DOTS_Sampled_ExtrusionHeight
 #define _ExtrusionBase                    unity_DOTS_Sampled_ExtrusionBase

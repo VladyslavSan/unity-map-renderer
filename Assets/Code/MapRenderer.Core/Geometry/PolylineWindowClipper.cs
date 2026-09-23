@@ -33,7 +33,9 @@ namespace MapRenderer.Core.Geometry
     /// frame puts that crossing at <c>x = 0</c>, and the interpolation lands at <c>−4.547e−13</c> — outside
     /// that tile's window altogether. Neither vertex is ON the seam, so neither tile's inclusive-boundary
     /// test recognises it as a seam vertex, and (in the frames the slicer actually builds, which do not
-    /// round alike — see <c>GeoJsonTileSlicerTests.T13b</c>) the two tiles need not even agree on the point.
+    /// round alike — see
+    /// <c>GeoJsonTileSlicerTests.AdjacentTilesPutTheirSharedSeamVertexOnTheirOwnBoundary</c>) the two tiles
+    /// need not even agree on the point.
     /// The assignment removes all of that: the clipped axis is the boundary literal in each frame, so the
     /// vertex is on the seam exactly and the two tiles name the same edge. This is the same
     /// guarantee <see cref="RingWindowClipper"/>'s <c>Intersect</c> makes, stated the same way, so ring and

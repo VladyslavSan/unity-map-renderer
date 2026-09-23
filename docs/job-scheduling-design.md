@@ -6,10 +6,11 @@ the main thread and polled at the tile pump. This doc is the SSOT for how Burst 
 imposes, and for which parts of `docs/tile-pipeline-design.md`'s build seam this design owns.
 
 **Read with:** `docs/web-target.md` §"Measured in THIS project" (what the web target can and cannot run
-off-main), `docs/async-architecture.md` §"Disposal & cancellation contract" (the lifetime contract §8
-extends), `docs/gc-and-allocation-design.md` § "Allocator lifetime trap: `TempJob` is *main-thread*
-frames" (why off-main scratch is `Persistent`), `docs/meshing-design.md` § "Mesh pipeline" (what the mesh
-stages compute), and `docs/tile-geometry-ir-design.md` (the buffers a graph reads).
+off-main), `docs/async-architecture.md` §"Disposal & cancellation contract" (the lifetime contract that
+§ "Disposal and cancellation — the invariant" below extends), `docs/gc-and-allocation-design.md`
+§ "Allocator lifetime trap: `TempJob` is *main-thread* frames" (why off-main scratch is `Persistent`),
+`docs/meshing-design.md` § "Mesh pipeline" (what the mesh stages compute), and
+`docs/tile-geometry-ir-design.md` (the buffers a graph reads).
 
 ---
 
@@ -38,11 +39,11 @@ with the workers idle. Two independent consequences follow:
 | where a graph is scheduled | on the main thread, at the tile pump — the job system's contract. Off-main managed code never schedules; it produces native inputs the main thread schedules over. |
 | how completion reaches the consumer | polled once per Tick on `JobHandle.IsCompleted`, at the pump that already polls `WorkHandle.IsCompleted`. No callback, no UniTask hop. `Complete()` runs before any output is read. |
 | the tile build's shape | three polled steps per tile: **prologue** (managed, `IWorkScheduler`, shrinking) → **measure graph** (Burst; all geometry) → **write graph** (main allocates one exact-size `MeshData` per layer, Burst streams into it). |
-| `.Run()` vs `.Schedule()` | the ordered discriminator in §7 — call-site placement first, then latency tolerance, then span. Never a per-site judgement call. |
+| `.Run()` vs `.Schedule()` | the ordered discriminator in § "The dispatch discriminator — `.Run()` or `.Schedule()`" — call-site placement first, then latency tolerance, then span. Never a per-site judgement call. |
 | `IWorkScheduler` | survives, shrunk to the bodies that are still managed, and is deleted per site as each body becomes a job. It never wraps a job. |
 | platform | one graph shape, zero `#if`. The single platform decision point is `WorkSchedulerFactory`, and it governs only the residual managed bodies. |
 | cancellation | never disposes and never interrupts. A released tile's `(buffers, MeshDataArrays, handle, decode reference)` unit moves to a pen that completes it, then disposes it. A lifetime token gates the *next main-thread step*, never a running job. |
-| safety | every graph edge is a container hand-off the Editor safety system checks at `Schedule` time. The parallel-slice exceptions are confined to two job types and fenced by a structure test (§9). |
+| safety | every graph edge is a container hand-off the Editor safety system checks at `Schedule` time. The parallel-slice exceptions are confined to two job types and fenced by a structure test (§ "Safety — making the Editor's check sufficient"). |
 
 ## 3. The tile build — three polled steps
 
@@ -57,7 +58,7 @@ fetch (UniTask) ─▶ decode (managed, IWorkScheduler) ─▶ SharedDisposable<
                                                                  │  IsCompleted
                                                                  ▼
  ┌─ MEASURE GRAPH ────────────────────────── Burst, scheduled on main, polled ──────┐
- │  one graph per layer (§4), fanned in by CombineDependencies to one tile handle    │
+ │  one graph per layer, fanned in by CombineDependencies to one tile handle         │
  └────────────────────────────────────────────── TileBuildGraph, polled ────────────┘
                                                                  │  IsCompleted → Complete()
                                                                  ▼
@@ -310,8 +311,8 @@ The four exits:
 Two consequences worth naming:
 
 - **The decode reference is held to the end of the chain.** It is released by `TileBuildGraph.Dispose()` after
-  `Complete()`, at consume or in the pen. The window matches the chain's duration either way; it is now
-  expressed as ownership rather than as a `finally` in a worker body.
+  `Complete()`, at consume or in the pen. The window matches the chain's duration; it is expressed as
+  ownership rather than as a `finally` in a worker body.
 - **`Allocator.Persistent` everywhere in a graph.** `TempJob`'s four-frame guard counts main-thread frames and
   a build spans more. Scratch released through `Dispose(handle)` nodes is still `Persistent` — the deferred
   dispose node is what gives deterministic release with no main-thread read-back. A job's *own* transient
@@ -387,8 +388,7 @@ thread 0 versus on a worker. A web build whose builds all report 0 is running in
 absent — and says so in the diagnostics panel instead of merely rendering slowly. **A probe that cannot tell
 "ran inline" from "ran on a worker" returns no verdict**, and this is the only reading that may be used to
 claim off-main execution: a `BuildStep` trail proves scheduling order, never placement. Nothing in
-`Assets/Code` declares `[NativeSetThreadIndex]` today, so off-main execution on the web is currently
-unobserved.
+`Assets/Code` declares `[NativeSetThreadIndex]`, so no instrument observes off-main execution on the web.
 
 ## 10. Where the wall-clock win is — off-main versus parallel
 
@@ -451,9 +451,10 @@ the main thread at kick, and its graph is scheduled directly.
 `WorkHandle<T>` is the prologue's handle. `WorkSchedulerFactory` is the one `#if`. When the prologue is empty,
 `TileManager` has no use for the seam and drops it together with the `MeshBuildGateForTest`
 mutual-exclusion guard; the seam then serves decode and symbols only. What replaces the gate's capability —
-holding a build genuinely in flight so teardown can be exercised against it — is the `deps` spin job of §7: a
-Burst job cannot park on a `WaitHandle`, but it can spend a bounded, fixture-chosen number of iterations, and
-it needs no mutual exclusion because it is policy-independent.
+holding a build genuinely in flight so teardown can be exercised against it — is the `deps` spin job of
+§ "Holding a graph in flight inside a test" above: a Burst job cannot park on a `WaitHandle`, but it can
+spend a bounded, fixture-chosen number of iterations, and it needs no mutual exclusion because it is
+policy-independent.
 
 ## 12. What this design owns from `docs/tile-pipeline-design.md`
 
@@ -528,7 +529,7 @@ chunking was meant to close is **not** addressed and is not claimed to be.
   that scales with vertex count.
 - **Folding the prologue onto the main thread everywhere.** Deletes the seam one stage earlier at the price
   of a desktop main-thread regression until nativization.
-- **Per-chunk `MeshData`.** See §12.
+- **Per-chunk `MeshData`.** See § "What this design owns from `docs/tile-pipeline-design.md`" above.
 - **A registration-based projection registry** keyed by projection type. `ProjectionDispatch`'s closed
   `switch` is the one place the concrete projection structs are enumerated; a registry is process-wide
   mutable state that outlives a domain reload (test-to-test leakage) and erases that enumeration. The generic
@@ -544,8 +545,9 @@ chunking was meant to close is **not** addressed and is not claimed to be.
   thread at harvest, and nothing in this design mitigates it. The remedy, if it bites, is a cap on in-flight
   tile graphs below `MaxConcurrentTileLoads` — a scheduling knob on `TileBuildGraph`, not a change of shape.
   Sizing it needs a web trace with several graphs in flight.
-- **§9 rule 4's worker-index reading needs a running player to observe on web.** `docs/web-target.md`'s
-  *Proving a build is what it claims* carries the web-side half of that obligation.
+- **The worker-index reading (§ "Safety — making the Editor's check sufficient" above, rule 4) needs a
+  running player to observe on web.** `docs/web-target.md`'s *Proving a build is what it claims* carries
+  the web-side half of that obligation.
 
 ## 16. Grounding (file:symbol touch points)
 
@@ -572,4 +574,4 @@ Teeth: `Tests.EditMode/Jobs/GraphDeterminismTests` (rule 3), `Tests.EditMode/Str
 `FillMeshGraphStructureTests` (the attribute and consumer-set fences),
 `Tests.EditMode/Tiles/TileBuildGraphTests` / `SourceTileGraphBuildTests`,
 `Tests.EditMode/Lifetime/DisposalLeakGuardTests` / `TeardownCancelInflightBuildsTests`,
-`Tests.Shared/SpinUntilGateJob` (the in-flight instrument of §7).
+`Tests.Shared/SpinUntilGateJob` (the in-flight instrument of § "Holding a graph in flight inside a test").

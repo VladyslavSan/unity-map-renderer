@@ -851,7 +851,7 @@ namespace MapRenderer.Tests
                         $"P-M precondition ({id}): every staged glyph must project inside " +
                         $"[{recedingMarginPx:F0}, {config.SizePx - recedingMarginPx:F0}]² device px — worst " +
                         $"margin {worstMarginPx:F1} px. All {recedingGlyphs.Length} positions:{positions}. " +
-                        "STOP RULE S2 applies here too: lower the ZOOM and report, never the depth ratio.");
+                        "STOP RULE 2 applies here too: lower the ZOOM and report, never the depth ratio.");
                 }
 
                 // PASS 2 — ink. Only the cross-azimuth pair, so a band's ink can only have come from the

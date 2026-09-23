@@ -2,9 +2,9 @@
 // (Tools/core-tests). Do NOT add any UnityEngine, NativeArray, or MonoBehaviour references.
 //
 // Projection math tests:
-//   T3: Ecef is genuinely 3D (pole, antipodal, chord, tangent-frame varies with position).
-//   T4-numeric: batch Forward equals scalar Forward element-wise (exact), for both modules.
-//   T6: WebMercator.Forward(geo).xz == FromLonLat(lon,lat) within 1e-6 m.
+//   Ecef is genuinely 3D (pole, antipodal, chord, tangent-frame varies with position).
+//   Batch Forward equals scalar Forward element-wise (exact), for both modules.
+//   WebMercator.Forward(geo).xz == FromLonLat(lon,lat) within 1e-6 m.
 //   TangentBasis orthonormality for both modules.
 
 using System;
@@ -24,10 +24,10 @@ namespace MapRenderer.Tests.Projection
         private const double Tol1m = 1.0;            // 1 metre tolerance
         private const double TolParity = 1e-6;       // Mercator parity tolerance
 
-        // ── T3 — Ecef is genuinely 3D ─────────────────────────────────────────────────────────
+        // ── Ecef is genuinely 3D ──────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// T3a: North pole (lat=90, lon=0, alt=0) → render ≈ (0, b, 0), tol ≤ 1 m.
+        /// North pole (lat=90, lon=0, alt=0) → render ≈ (0, b, 0), tol ≤ 1 m.
         /// Mercator diverges at 90°; only a genuinely 3D impl can pass this.
         /// Render-space axis-swap: (X_ecef, Z_ecef, Y_ecef) — at pole, X=0, Y=0, Z=b → render=(0,b,0).
         /// </summary>
@@ -43,7 +43,7 @@ namespace MapRenderer.Tests.Projection
         }
 
         /// <summary>
-        /// T3b: Antipodal longitudes — Forward(0,0,0)≈(A,0,0) and Forward(180,0,0)≈(−A,0,0).
+        /// Antipodal longitudes — Forward(0,0,0)≈(A,0,0) and Forward(180,0,0)≈(−A,0,0).
         /// Opposite x sign; |sum| ≤ 1 m. A flat/planar impl puts both at +x.
         /// At equator: X_ecef = A*cos(0) = A; for lon=180: X_ecef = A*cos(0)*cos(π) = −A.
         /// Axis-swap: render = (X_ecef, Z_ecef, Y_ecef); at equator Z_ecef=0, Y_ecef=0.
@@ -64,7 +64,7 @@ namespace MapRenderer.Tests.Projection
         }
 
         /// <summary>
-        /// T3c: Equatorial 90° chord — |Forward(0,0,0) − Forward(90,0,0)| ≈ A·√2 ≈ 9.02e6 m, tol ≤ 1 m.
+        /// Equatorial 90° chord — |Forward(0,0,0) − Forward(90,0,0)| ≈ A·√2 ≈ 9.02e6 m, tol ≤ 1 m.
         /// At lon=0: render x=A, z=0. At lon=90: render x=0, z=A. Chord = sqrt(A^2+A^2) = A*sqrt(2).
         /// </summary>
         [Test]
@@ -85,7 +85,7 @@ namespace MapRenderer.Tests.Projection
         }
 
         /// <summary>
-        /// T3d: Tangent frame varies with position (globe) vs constant (plane).
+        /// Tangent frame varies with position (globe) vs constant (plane).
         /// Ecef.TangentBasis(0,0) Up≈(1,0,0); TangentBasis(0,90) Up≈(0,1,0).
         /// WebMercator.TangentBasis(any) constant Up=(0,1,0), East=(1,0,0).
         /// Both bases orthonormal (dot products on columns).
@@ -135,10 +135,10 @@ namespace MapRenderer.Tests.Projection
             AssertOrthonormal(wm00, "WebMercator");
         }
 
-        // ── T6 — Mercator parity ─────────────────────────────────────────────────────────────────
+        // ── Mercator parity ──────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// T6: WebMercator.Forward(geo).xz equals pre-refactor FromLonLat(lon,lat) at
+        /// WebMercator.Forward(geo).xz equals WebMercator.FromLonLat(lon,lat) at
         /// equator, ±45°, and near the 85.05° limit — tolerance ≤ 1e-6 m.
         /// </summary>
         [Test]
@@ -163,7 +163,7 @@ namespace MapRenderer.Tests.Projection
         }
 
         /// <summary>
-        /// T6b: <see cref="WebMercator.Forward"/>'s planar output pinned against hard-coded oracle values,
+        /// <see cref="WebMercator.Forward"/>'s planar output pinned against hard-coded oracle values,
         /// computed independently (not by re-invoking <c>Forward</c> or <c>FromLonLat</c>) —
         /// <see cref="WebMercator_ForwardXZ_MatchesFromLonLat"/> only proves the two callers agree with EACH
         /// OTHER, never that either is numerically correct (both reduce to the same pure function called
@@ -192,10 +192,10 @@ namespace MapRenderer.Tests.Projection
             Assert.That(general.z, Is.EqualTo(-3948518.427099392).Within(Tol1m), "lon=-73.5,lat=-33.4 y must match oracle");
         }
 
-        // ── T4-numeric — Batch equals scalar (exact) ────────────────────────────────────────────
+        // ── Batch equals scalar (exact) ─────────────────────────────────────────────────────────
 
         /// <summary>
-        /// T4 (numeric part): WebMercator.Forward(span,dst) equals scalar Forward element-wise (exact).
+        /// WebMercator.Forward(span,dst) equals scalar Forward element-wise (exact).
         /// Caller-owned managed array is used (no NativeArray here — that's the Unity-only test).
         /// </summary>
         [Test]
@@ -228,7 +228,7 @@ namespace MapRenderer.Tests.Projection
         }
 
         /// <summary>
-        /// T4 (numeric part): Ecef.Forward(span,dst) equals scalar Forward element-wise (exact).
+        /// Ecef.Forward(span,dst) equals scalar Forward element-wise (exact).
         /// </summary>
         [Test]
         public void Ecef_BatchEqualsScalar_Exact()

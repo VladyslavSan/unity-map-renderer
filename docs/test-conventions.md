@@ -7,16 +7,16 @@ The code-style rules a test file follows are the same ones production code follo
 [`conventions-short.md`](conventions-short.md). This file adds only what is specific to tests.
 
 Every count below (files, tests, lines) was measured at `259b5533` (2026-09-19) over 427 files that carry
-at least one test, and is **indicative, not current** — the suite moves (UMR-176 is queued to move it a
-lot). Re-measure before relying on a specific number; the file/folder/lane RULES are what does not drift.
+at least one test, and is **indicative, not current** — the suite moves. Re-measure before relying on a
+specific number; the file/folder/lane RULES are what does not drift.
 
 ---
 
 ## 1. Topic — what a file is about
 
 - **A test file is named for its TOPIC, never for a production type. Where a topic needs more than one
-  file (§4), each file is named for the sub-area that dominates it — not for a single subject and not for
-  the class under test.**
+  file (§ "Size — pack by topic and lane, not by subject" below), each file is named for the sub-area that
+  dominates it — not for a single subject and not for the class under test.**
   - The name still answers "what behaviour does this pin?", not "which class did I open?" — `FillSortKey`
     is a legitimate sub-area name inside `meshing`; `StyledFillTileBuilder` is not, because it names the
     production type instead of the behaviour. This is
@@ -42,7 +42,7 @@ lot). Re-measure before relying on a specific number; the file/folder/lane RULES
   - `text` is the largest topic in the suite and is **not** in the `AGENTS.md` scope list. Treat that as a
     gap in the doc, not a gap in the vocabulary.
   - `shaders` and `backends` are live commit scopes with no folder. Their tests sit in `Visual/` and
-    `Structure/` instead — which is §2.
+    `Structure/` instead — which is § "Kind — the second axis" below.
   - `Jobs/` splits by topic: a fill or line job is `meshing`, a decode job is `decode`. The folder is not
     the topic; what the job builds is.
 
@@ -54,7 +54,8 @@ lot). Re-measure before relying on a specific number; the file/folder/lane RULES
     its own `.asmdef` referencing only `MapRenderer.Tests.Shared` — it runs and can be skipped as a unit,
     separately from `Structure/`, which stays a folder inside `MapRenderer.Tests.EditMode`.
 
-- **Behavioural** — calls production code and asserts the result. The default. Files by topic, §1.
+- **Behavioural** — calls production code and asserts the result. The default. Files by topic, § "Topic —
+  what a file is about" above.
 
 - **Visual** — renders and reads pixels back, or needs a GPU context. Stays in `Visual/`
   (`MapRenderer.Tests.Visual`).
@@ -107,8 +108,8 @@ Three lanes. Take the **first** one whose entry condition holds.
 - **PlayMode.** Entry condition: the behaviour needs **real frames** — a player loop, `yield return null`,
   an async settle, a `ThreadPool` completion that lands between frames.
   - 15 test files. It is the smallest lane and the one that carries what EditMode cannot exercise.
-  - PlayMode sat red and unlooked-at for eight days because the default gate skipped it. Both runners now
-    run; a stage is done against the unqualified `./Tools/run-tests.sh`, never against `EditMode` alone.
+  - A default gate that skips PlayMode leaves it red and unseen. Both runners run; a stage is done against
+    the unqualified `./Tools/run-tests.sh`, never against `EditMode` alone.
 
 - **EditMode.** Everything else.
 
@@ -145,7 +146,7 @@ Three lanes. Take the **first** one whose entry condition holds.
     class". That trade was made on purpose — see WHY below.
 
 - **WHY a cap exists at all: not readability, a merge-conflict and load-time ceiling.** The maintainer
-  accepts a long file — size is no longer a readability rule, it is the point past which one file becomes
+  accepts a long file — size is not a readability rule, it is the point past which one file becomes
   a merge-conflict magnet that everyone touching the topic collides on, and a slow thing to open and diff.
   4,000 lines is where that starts to bite; it is not a claim that a 4,000-line file is pleasant to read.
 
@@ -158,7 +159,7 @@ Three lanes. Take the **first** one whose entry condition holds.
     | 2,500 | 55 |
     | 4,000 | 34 |
 
-  These are floors, not forecasts — the lane fence and the §4 stay-alone list push the real count above
+  These are floors, not forecasts — the lane fence and the stay-alone list below push the real count above
   them. Topic+lane packing at 4,000 projects to roughly **63 EditMode files** before those protections
   force some singles back out, against **432 EditMode files today**. Subject-pure packing never gets
   close to any of these floors regardless of cap: its mean file is 321 lines, so it stalls around 373
@@ -177,8 +178,8 @@ Three lanes. Take the **first** one whose entry condition holds.
 
 - **Five things stay in their own file whatever their size.** A small isolated file is the right design
   here, and none of them is evidence against the rule above.
-  - A GPU or visual snapshot fixture (§2).
-  - A fixture that only measures correctly in a full run (§2).
+  - A GPU or visual snapshot fixture (§ "Kind — the second axis" above).
+  - A fixture that only measures correctly in a full run (§ "Kind — the second axis" above).
   - A Burst schedule probe. `Jobs/FillGraphBurstProbeTests` exercises the safety system's aliasing check at
     schedule time, which is sensitive to what else the process has scheduled.
   - A regression pin written for one specific defect. Keep its class name and its XML doc — the file
@@ -224,7 +225,7 @@ second. Splitting stays the default.
 
 The list is not closed. Two of these were found by merging, not by inspection, after a plan had already
 been written on the assumption the earlier ones were complete. **When a merge surfaces a new collision,
-re-sweep the destinations already built** — they were assembled under a model now known to be incomplete.
+re-sweep the destinations already built** — they were assembled under an incomplete model.
 
 **Aliases.** `UnityEngine.TestTools.Constraints.Is` derives from `NUnit.Framework.Is` and adds a single
 member, `AllocatingGCMemory()`. It hides nothing, so a file that gains the alias behaves identically —
@@ -242,12 +243,12 @@ so a `[TearDown]` that writes a shader global, resets a scene, or clears a stati
 fixtures it never reached before. This applies to all four hook attributes independently — a
 TearDown-only file is the case a `SetUp`-shaped search misses.
 
-**Tests that assert a delta against a process-wide counter are order-sensitive by construction.** A
+**Tests that assert a delta against a process-wide counter are order-sensitive.** A
 baseline subtracts leakage that already exists; it cannot subtract async work from another fixture that
 completes inside the window. Such a test failing after a merge is information about the suite, not a
 merge defect to be silenced — and it is never fixed by editing the test.
 
-**When a destination file is split off deliberately, its header records which symbol collided.** An
+**When a destination file is split off on purpose, its header records which symbol collided.** An
 undocumented split reads as an oversight and gets merged back by the next round.
 
 ## 5. Where a new test goes
@@ -255,9 +256,8 @@ undocumented split reads as an oversight and gets merged back by the next round.
 Ordered. First match wins. Read down until one fires.
 
 1. **Does it assert a shape — source text off disk, the production file tree, or reflection where the
-   reflection IS the assertion (§2)?** → a fence file in `Structure/`. `Structure/` is flat today (23
-   files, no subfolders); grouping it by topic is UMR-176's move, not this one's — UMR-175 forbids moving
-   files. Never inside a behavioural fixture.
+   reflection IS the assertion (§ "Kind — the second axis" above)?** → a fence file in `Structure/`.
+   `Structure/` is flat (no subfolders). Never inside a behavioural fixture.
 2. **Does it render and read pixels back, or need a GPU context?** → `Visual/`
    (`MapRenderer.Tests.Visual`, its own assembly). Not merged with anything outside `Visual/`.
 3. **Does it need real frames to settle?** → `MapRenderer.Tests.PlayMode/<Topic>/`.
@@ -267,26 +267,28 @@ Ordered. First match wins. Read down until one fires.
 5. **Otherwise** → `MapRenderer.Tests.EditMode/<Topic>/`.
 
 - **`<Topic>/` is one folder only for `camera` and `projection` — the folder name already matches the
-  topic and nothing else claims it. The other six topics (§1) span more than one existing folder;
-  UMR-175 does not move files, so the destination for a NEW file is the one below, not an average of
+  topic and nothing else claims it. The other six topics (§ "Topic — what a file is about" above) span
+  more than one existing folder, so the destination for a NEW file is the one below, not an average of
   where old ones already sit.**
 
   | Topic | Destination | Exception → its folder |
   |---|---|---|
   | `tile-pipeline` | `Tiles/` | concurrency primitive → `Concurrency/`; tile eviction/retention → `Lifetime/`; data-source loading → `DataSources/`; `MapView` selector/view-state → `MapView/` |
-  | `meshing` | `Meshing/` | Burst schedule/determinism mechanics, not what the job computes (§4's schedule-probe case) → `Jobs/`; globe-specific subdivision → `Globe/`; pure geometry math with no job involved → `Geometry/` |
+  | `meshing` | `Meshing/` | Burst schedule/determinism mechanics, not what the job computes (the schedule-probe case of § "Size — pack by topic and lane, not by subject") → `Jobs/`; globe-specific subdivision → `Globe/`; pure geometry math with no job involved → `Geometry/` |
   | `style` | `Style/` | expression evaluation → `Expressions/`; filter compilation → `Filters/` |
   | `text` | `Text/` | placement/collision → `Text/Placement/`; sprite atlas → `Text/Sprites/` |
   | `decode` | the format under test names it: `Mvt/`, `GeoJson/`, or `Json/` | — |
   | `render-layers` | `Rendering/` | material assembly/config → `Materials/` |
 
 - **Then pick the file inside that folder: the one for your (topic, lane) that still has room under the
-  4,000-line cap.** Subject does not decide the file — size does (§4).
+  4,000-line cap.** Subject does not decide the file — size does (§ "Size — pack by topic and lane, not
+  by subject" above).
   - **If the file you'd add to is already at the cap, split it** — divide however keeps both halves under
     4,000 lines, not along a subject boundary.
   - **If no file for this (topic, lane) exists yet, create one** — named for the topic, or its dominant
-    sub-area (§1). A new file is correct when the topic is new here, or every existing file for it is
-    already full. It is not correct just because you would rather not read the file that has room.
+    sub-area (§ "Topic — what a file is about" above). A new file is correct when the topic is new here,
+    or every existing file for it is already full. It is not correct just because you would rather not
+    read the file that has room.
   - Shared fixtures and harnesses used by more than one runner go in `MapRenderer.Tests.Shared`, not in a
     production class. See [`conventions-short.md`](conventions-short.md) §"Test code must not bloat the
     production codebase".

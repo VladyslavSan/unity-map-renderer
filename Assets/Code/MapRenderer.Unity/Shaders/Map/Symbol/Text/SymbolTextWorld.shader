@@ -1,25 +1,23 @@
-// SymbolTextWorld.shader — Map/Symbol/TextWorld (Epic A / A0: world-anchored SDF text billboards).
+// SymbolTextWorld.shader — Map/Symbol/TextWorld (world-anchored SDF text billboards).
 //
-// The world-anchored sibling of the retired screen-space text shader — copy of its structure verbatim
-// (same Properties incl. the Stage-M 2DArray _MainTex, same (B)/(A)/(C) property groups, same render-state
-// defaults, same `#pragma require 2darray`), but vertices are TILE-LOCAL WORLD ANCHORS projected by the
-// stock object/view/projection transform (TransformObjectToHClip) plus a logical-px screen offset — NOT
-// pre-projected screen px. Unlike the retired shader (whose object-to-world transform was INERT — its vertex
-// stage bypassed it entirely), the object-to-world transform is MEANINGFUL here: it carries the per-frame
-// floating-origin rebase, the same mechanism tile meshes use. The shared F2 (unlit, not a lit surface)
-// rationale still applies; see SymbolTextWorld_ForwardPass.hlsl for the vertex-math delta.
+// Vertices are TILE-LOCAL WORLD ANCHORS projected by the stock object/view/projection transform
+// (TransformObjectToHClip) plus a logical-px screen offset — NOT pre-projected screen px. The
+// object-to-world transform is MEANINGFUL here: it carries the per-frame floating-origin rebase, the same
+// mechanism tile meshes use. The shader is unlit, not a lit surface; see SymbolTextWorld_ForwardPass.hlsl
+// for the vertex math.
 //
-// Submission: a dedicated per-(tile,DrawIndex,kind) symbol renderer (A1) sets this material's per-frame
-// transform via FloatingOrigin.TileToSceneRebased — never Graphics.RenderMesh, never a static tile mesh.
+// Submission: a dedicated per-(tile,DrawIndex,kind) symbol renderer (WorldSymbolRenderer) sets this
+// material's per-frame transform via FloatingOrigin.TileToSceneRebased — never Graphics.RenderMesh, never
+// a static tile mesh.
 Shader "Map/Symbol/TextWorld"
 {
     Properties
     {
-        // Stage M: a Texture2DArray — one layer per GlyphAtlas page (see SymbolText_Input.hlsl).
+        // A Texture2DArray — one layer per GlyphAtlas page (see SymbolText_Input.hlsl).
         _MainTex("Atlas (R8 SDF, Texture2DArray)", 2DArray) = "white" {}
 
         // Internal render/engine params — NOT style properties (see SymbolText_Input.hlsl's doc comment);
-        // refreshed every frame by the world-anchored label renderer (A1).
+        // refreshed every frame by the world-anchored symbol renderer (WorldSymbolRenderer).
         _ScreenParamsLogical ("Screen Params Logical (px)", Vector) = (1920, 1080, 0, 0)
         _SdfEdge             ("SDF Edge (iso, fontnik = 0.75)", Range(0, 1)) = 0.75
         _SdfAaDevicePx       ("SDF AA Width, outside the edge (RASTER px; 1 = phase-invariant)", Range(0.05, 2)) = 1.0
@@ -31,8 +29,8 @@ Shader "Map/Symbol/TextWorld"
         _TextColor    ("Text Color (text-color multiplier, identity white)", Color) = (1, 1, 1, 1)
         _HaloColor    ("Halo Color (text-halo-color multiplier, identity white)", Color) = (1, 1, 1, 1)
 
-        // Render state — material-UI knobs (S58 pattern, mirrors Fill/Line's [_Cull]/[_ZWrite]/[_ZTest]
-        // and Blend). Defaults match Map/Symbol/Text's: straight alpha, ZWrite Off, ZTest Always (unlit
+        // Render state — material-UI knobs (mirrors Fill/Line's [_Cull]/[_ZWrite]/[_ZTest]
+        // and Blend). Defaults: straight alpha, ZWrite Off, ZTest Always (unlit
         // UI-like text always renders on top), Cull Off (billboard corners have no meaningful winding).
         [Enum(UnityEngine.Rendering.BlendMode)]    _SrcBlend      ("Blend Src (RGB)", Float) = 5
         [Enum(UnityEngine.Rendering.BlendMode)]    _DstBlend      ("Blend Dst (RGB)", Float) = 10

@@ -1,34 +1,29 @@
-// SymbolTextWorld_ForwardPass.hlsl — Map/Symbol/TextWorld vertex + fragment (Epic A / A0; Stage AC adds
-// the along-line tangent-rotation branch for curved text).
+// SymbolTextWorld_ForwardPass.hlsl — Map/Symbol/TextWorld vertex + fragment (world-anchored SDF text,
+// with an along-line tangent-rotation branch for curved text).
 //
-// VERTEX: the world-anchored sibling of the retired screen-space shader's px→clip bypass. Every
-// WorldBillboardVertex's AnchorLocal IS a real object-space position (tile-local render space — the
-// floating-origin Level-1 bake, see FloatingOrigin.cs) — this vertex stage runs it through the STOCK URP
-// MVP (TransformObjectToHClip; the floating-origin Level-2 rebase lives in unity_ObjectToWorld, set once
-// per frame by the symbol renderer, mirrors tile placement), then adds a constant-LOGICAL-px glyph-corner
-// offset in clip space so the glyph stays a fixed screen size at any depth. No `ndc.y = -ndc.y`: that was
-// the retired OLD path's own on-screen calibration for its
-// px→clip bypass — stock MVP already handles Y correctly here (A0's Y-flip
-// reconciliation lives in the emit/test convention, never a shader flip — see WorldSymbolAbRenderSnapshotTests).
+// VERTEX: every WorldBillboardVertex's AnchorLocal IS a real object-space position (tile-local render
+// space — the floating-origin Level-1 bake, see FloatingOrigin.cs) — this vertex stage runs it through the
+// STOCK URP MVP (TransformObjectToHClip; the floating-origin Level-2 rebase lives in unity_ObjectToWorld,
+// set once per frame by the symbol renderer, mirrors tile placement), then adds a constant-LOGICAL-px
+// glyph-corner offset in clip space so the glyph stays a fixed screen size at any depth. No
+// `ndc.y = -ndc.y`: stock MVP already handles Y correctly here, and the Y-flip reconciliation lives in the
+// emit/test convention, never a shader flip — see WorldSymbolAbRenderSnapshotTests.
 //
-// Stage AC (curved-world) D-I: when AlignFlags bit1 is set (along-line, curved only), the UNROTATED corner
-// (input.offsetPx) is rotated by the LIVE projected screen angle of the baked world Tangent — see D-E below
-// — instead of the point/icon north-up passthrough. Point/icon never take this branch (bit1 clear), so
-// their render stays byte-identical.
+// When AlignFlags bit1 is set (along-line, curved only), the UNROTATED corner (input.offsetPx) is rotated
+// by the LIVE projected screen angle of the baked world Tangent — see the tangent projection below —
+// instead of the point/icon north-up passthrough. Point/icon never take this branch (bit1 clear), so
+// their render is unaffected by it.
 //
 // FRAGMENT: shades ONE thing. It takes a colour (vertex COLOR, tinted in the vertex stage by whichever of
 // _TextColor/_HaloColor this run uses — see there) and a pair of device-px widenings
 // (TEXCOORD7, WorldBillboardVertex.SdfWidenPx) that push the SDF fill edge out and widen the AA transition,
 // and it emits that colour at the resulting coverage. At a zero widening that is the plain glyph.
 //
-// There is deliberately no second colour and no second coverage term to combine with: what a draw paints is
+// There is no second colour and no second coverage term to combine with: what a draw paints is
 // decided entirely by the vertex stream that fed it, so submission order alone decides what ends up on top.
 // WorldSymbolRenderer.Emit is what uses the widening, and its doc says why.
-//
-// The fragment body was DUPLICATED verbatim from the retired screen-space shader (not factored out at the
-// time — that would have risked the OLD path's frozen goldens). Now the only surviving copy.
 
-// W2: when AlignFlags bit2 is ALSO set (map pitch alignment, curved only), `offsetPx` is not pixels at all —
+// When AlignFlags bit2 is ALSO set (map pitch alignment, curved only), `offsetPx` is not pixels at all —
 // it is WORLD METRES, and the corner is displaced in the ground plane at the anchor BEFORE projection so the
 // glyph is a fixed WORLD size that foreshortens with depth. See SymbolWorldPitchAlign.hlsl for the model and
 // for why that path queries no ruler. Bit2 clear (every point/icon label, every viewport-pitched curved
@@ -49,12 +44,12 @@ struct SymbolWorldAttributes
                                    // text-color/text-halo-color, which rides a uniform instead
     float2 uv         : TEXCOORD0;
     float  page       : TEXCOORD1; // atlas Texture2DArray layer
-    float2 offsetPx   : TEXCOORD2; // unrotated glyph-corner offset — logical px, OR METRES when bit2 is set (W2)
-    float  alignFlags : TEXCOORD3; // bit0: map(1)/viewport(0) rotation-alignment (A3); bit1: along-line
-                                   // (Stage AC); bit2: map PITCH alignment (W2) — offsetPx is metres
-    float  opacity    : TEXCOORD4; // stream 1 — A0: constant 1
-    float3 tangentOS  : TEXCOORD5; // Stage AC: tile-local WORLD tangent along the line; zero/unread for point/icon
-    float3 up         : TEXCOORD6; // P2: the unit surface normal at the anchor; read only by W2's map-pitch branch
+    float2 offsetPx   : TEXCOORD2; // unrotated glyph-corner offset — logical px, OR METRES when bit2 is set
+    float  alignFlags : TEXCOORD3; // bit0: map(1)/viewport(0) rotation-alignment; bit1: along-line;
+                                   // bit2: map PITCH alignment — offsetPx is metres
+    float  opacity    : TEXCOORD4; // stream 1
+    float3 tangentOS  : TEXCOORD5; // tile-local WORLD tangent along the line; zero/unread for point/icon
+    float3 up         : TEXCOORD6; // the unit surface normal at the anchor; read only by the map-pitch branch
     float2 sdfWidenPx : TEXCOORD7; // device px the glyph grows past its fill edge: x = edge, y = AA transition
 };
 
@@ -67,8 +62,8 @@ struct SymbolWorldVaryings
     float2 sdfWidenPx : TEXCOORD2;
 };
 
-// Stage AC D-E: rotates a 2D vector CCW (y-up logical-px frame) by `ang` — the SAME convention
-// BillboardMath.Rotate uses on the CPU side for the old screen path's rotation.
+// Rotates a 2D vector CCW (y-up logical-px frame) by `ang` — the SAME convention
+// BillboardMath.Rotate uses on the CPU side.
 float2 RotateOffsetPx(float2 p, float ang)
 {
     float s, c;
@@ -83,7 +78,7 @@ SymbolWorldVaryings SymbolWorldPassVertex(SymbolWorldAttributes input)
     float4 clip = TransformObjectToHClip(input.anchorOS);    // stock URP MVP; floating origin in unity_ObjectToWorld
     float2 off  = input.offsetPx;                             // unrotated corner (both point/icon and curved)
 
-    // W2: bit2 set ⇒ map PITCH alignment. `off` is then WORLD METRES, and the whole clip position is rebuilt
+    // bit2 set ⇒ map PITCH alignment. `off` is then WORLD METRES, and the whole clip position is rebuilt
     // by displacing the anchor in its own ground plane before projection — see SymbolWorldPitchAlign.hlsl.
     // The tangent rotation the else-branch applies below is intrinsic there (the ground frame's x̂ IS the road
     // tangent), so the two branches are alternatives, never composed.
@@ -93,12 +88,12 @@ SymbolWorldVaryings SymbolWorldPassVertex(SymbolWorldAttributes input)
     }
     else
     {
-        // Stage AC D-I: bit1 set ⇒ along-line (curved) — rotate `off` by the LIVE projected screen angle of the
+        // bit1 set ⇒ along-line (curved) — rotate `off` by the LIVE projected screen angle of the
         // baked world Tangent, ignoring bit0 (MapLibre line placement ignores text-rotation-alignment). Point/
-        // icon never set bit1, so this branch is never taken for them (byte-identical render, unread Tangent).
+        // icon never set bit1, so this branch is never taken for them (render unaffected, Tangent unread).
         if (input.alignFlags >= 1.5)
         {
-            // D-E (primary form, magnitude-robust over a finite-difference second point): project the world
+            // Tangent projection (magnitude-robust, unlike a finite-difference second point): project the world
             // tangent as a DIRECTION (w=0) through the SAME object→world→clip transform TransformObjectToHClip
             // composes — the Jacobian only holds if clipT and clipA share that transform. UNITY_MATRIX_MVP is
             // used NOWHERE in this codebase and may not resolve under URP; GetWorldToHClipMatrix/
@@ -110,16 +105,13 @@ SymbolWorldVaryings SymbolWorldPassVertex(SymbolWorldAttributes input)
             // way a finite-difference second point would.
             float2 sdir = clipT.xy * clip.w - clip.xy * clipT.w;
             sdir *= _ScreenParamsLogical.xy;             // ndc→px aspect correction (x,y px-per-ndc differ)
-            // D-H (RESOLVED — empirically, per WorldCurvedAbRenderSnapshotTests' 45°/90° diagonal+vertical sweep):
-            // NO extra Y-frame flip here. The A0-F2 Offset.y negation (this file's header) reconciles the OLD
-            // path's on-screen calibration flip for the STATIC corner offset — a separate concern from this
-            // Jacobian's angle, which already lands in the SAME sense as BillboardMath's Y-up screen rotation
-            // (`atan2(sdir.y, sdir.x)` directly, unnegated, matches OLD's `atan2(chord.y, chord.x)`). Flipping
-            // sdir.y here rotates every curved glyph to the mirrored angle (confirmed RED: it passed the 0°
-            // horizontal case — which can't discriminate a sign error — and failed both the 45° and 90° cases,
-            // exactly the D-H risk this file's plan flagged).
+            // NO extra Y-frame flip here. The Offset.y negation in BillboardMath.BuildWorldQuad handles the
+            // STATIC corner offset — a separate concern from this Jacobian's angle, which already lands in the
+            // SAME sense as BillboardMath's Y-up screen rotation (`atan2(sdir.y, sdir.x)` directly, unnegated).
+            // Flipping sdir.y here would rotate every curved glyph to the mirrored angle. The 0° horizontal
+            // case cannot see that sign error; WorldCurvedAbRenderSnapshotTests' 45° and 90° cases do.
 
-            // D-J: a degenerate projected tangent (edge-on to the camera under tilt) OR an anchor behind the
+            // A degenerate projected tangent (edge-on to the camera under tilt) OR an anchor behind the
             // camera (the ndc division feeding sdir is undefined there) falls back to angle 0 (upright) — rare,
             // graceful; the near-pin below still keeps the glyph drawn.
             bool degenerate = dot(sdir, sdir) < 1e-8 || clip.w <= 1e-6;
@@ -130,8 +122,8 @@ SymbolWorldVaryings SymbolWorldPassVertex(SymbolWorldAttributes input)
         clip.xy += off / _ScreenParamsLogical.xy * 2.0 * clip.w;  // LOGICAL viewport (not physical — DPR bug), constant-px size
     }
 
-    // Deliberately OUTSIDE the branch: the near-pin is what keeps labels drawn over geometry, and a
-    // map-pitched glyph needs it exactly as much as a screen one.
+    // OUTSIDE the branch: the near-pin is what keeps labels drawn over geometry, and a
+    // map-pitched glyph needs it as much as a screen one.
     clip.z   = UNITY_NEAR_CLIP_VALUE * clip.w;                 // near-pin; MUST be * clip.w (NOT the old w=1 form)
 
     output.positionCS = clip;

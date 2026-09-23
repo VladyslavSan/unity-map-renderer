@@ -11,15 +11,13 @@ using MapRenderer.Jobs.Geometry;
 namespace MapRenderer.Tests.Geometry
 {
     /// <summary>
-    /// T8 — <see cref="RingWindowClipper"/> (managed, <c>MapRenderer.Core</c>) and <see cref="RingClipJob"/>
+    /// <see cref="RingWindowClipper"/> (managed, <c>MapRenderer.Core</c>) and <see cref="RingClipJob"/>
     /// (Burst) must produce BIT-IDENTICAL vertex sequences.
     ///
     /// <para>The GeoJSON slicer cannot use the job — it must stay engine-free so the whole stack runs in the
     /// ~0.1 s <c>dotnet test</c> loop, which is the point of a source that exists to serve fixtures. That
     /// leaves a second copy of an in-repo algorithm, which this repo normally treats as a smell. This test is
-    /// what converts the copy from an UNVERIFIED duplicate into a CHECKED equivalence, and it is also the
-    /// retirement path: when the geometry IR lands, the job can delegate to the managed clipper and this
-    /// stays green.</para>
+    /// what converts the copy from an UNVERIFIED duplicate into a CHECKED equivalence.</para>
     /// </summary>
     [TestFixture]
     public class RingWindowClipperParityTests
@@ -38,7 +36,7 @@ namespace MapRenderer.Tests.Geometry
         };
 
         [Test]
-        public void T8_ManagedClipperMatchesTheBurstJob_BitForBit()
+        public void ManagedClipperMatchesTheBurstJob_BitForBit()
         {
             foreach (double2[] window in Windows)
                 AssertParityOverCorpus(window[0], window[1]);

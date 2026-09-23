@@ -8,7 +8,7 @@
 //   TileLoadMeasurementTests                — Tooth (c) (consume-tick alloc-free) is NOT duplicated here — it is already guaranteed by MapViewLiveLoopTests.MapView_SteadyStateTick_DoesNotAllocateGCMemory (asserts Is.Not.AllocatingGCMemory() over the budgeted-consume Tick in the all-built steady state,…
 //   TileLoadStressDriverTests               — Tests for the TileLoadStressDriver debug harness: the pure motion math (ZoomAt triangle wave + LookAtAt circular orbit) and the wired live-plumbing (Tick pushes the swept zoom + orbited look-at onto the real MapCamera; disabled/unwired are clean no-ops).
 //   TileManagerBackgroundRegistrationTests  — The source-less per-covered-tile background processor's TileManager wiring.
-//   TileManagerLoadPriorityTests            — T1/T2 are RED-verified against pre-stage HEAD (no concurrency cap, no priority order existed at all — admission was an unconditional immediate fetch in cover-descent order, and the paint-order kick ran over a plain Dictionary enumeration).
+//   TileManagerLoadPriorityTests            — The load concurrency cap and the priority order: which tile builds first, the cap across a full load, no cancel in flight, re-prioritization, the strategy toggle, and an allocation-free admission path.
 //   TileSymbolKickTests                     — The feed swap (TileManager's per-tile kick drives the symbol worker pass, retiring the SymbolTileBytesReady push).
 //   TilePrioritySorterTests                 — Unit-level teeth for TilePrioritySorter.
 //   FillAntialiasBandTests                  — fill-antialias is the ONE antialiasing switch that stays implementable per layer: MSAA and camera post-AA are render-target settings, so they cannot be turned off for a single fill.
@@ -92,7 +92,7 @@ namespace MapRenderer.Tests.Tiles
             var stuckGate = new UniTaskCompletionSource<TileResponse>();
             var stuckSrc  = new TestDataSource((id, ct) => stuckGate.Task);
 
-            var go   = new GameObject("T9_TeardownFlushOrder");
+            var go   = new GameObject("TeardownFlushOrder");
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom  = 5;
             view.Config.TileSelection.MaxZoom  = 5;
@@ -108,7 +108,7 @@ namespace MapRenderer.Tests.Tiles
                 long fetchBaseline = SharedDisposable<IDecodedTile>.DebugLiveCount;
 
                 var style = StyleParser.Parse(@"{
-                    ""version"": 8, ""name"": ""T9"",
+                    ""version"": 8, ""name"": ""TeardownFlushOrder"",
                     ""sources"": {
                         ""main"":  { ""type"": ""vector"", ""tiles"": [""https://example.com/main/{z}/{x}/{y}.pbf""] },
                         ""stuck"": { ""type"": ""vector"", ""tiles"": [""https://example.com/stuck/{z}/{x}/{y}.pbf""] }
@@ -1650,7 +1650,7 @@ namespace MapRenderer.Tests.Tiles
                     "does not skip it. An inline Dispose() would already have completed the gated job and " +
                     "decremented the count by now.");
 
-                // NOT the tooth — a hang guard, deliberately generous. It measures the gated spin's wall
+                // NOT the tooth — a hang guard, and a generous one. It measures the gated spin's wall
                 // time, which is MaxIterations divided by this machine's throughput, so no constant makes it
                 // decisive: a bound loose enough to be safe here would pass on a faster machine that was
                 // still blocking. It exists only so a pen that stashes AND blocks (a Complete() added before
@@ -2085,12 +2085,12 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── T1: WHICH tile builds first, by IDENTITY, under a 1-kick-per-tick budget ────────────────
+        // ── WHICH tile builds first, by IDENTITY, under a 1-kick-per-tick budget ────────────────────
 
         /// <summary>
-        /// RED-verify: on pre-stage HEAD, PumpPending's kick loop ran over <c>_toRelease</c> in whatever
-        /// order <c>Dictionary&lt;LoadedKey, LoadedTile&gt;</c> enumerated it — insertion order early,
-        /// drifting after evictions — with no notion of "center".
+        /// PumpPending kicks builds in priority order, centre first. A kick loop that ran over
+        /// <c>_toRelease</c> in whatever order <c>Dictionary&lt;LoadedKey, LoadedTile&gt;</c> enumerated it —
+        /// insertion order early, drifting after evictions — would have no notion of "center" and reds here.
         ///
         /// <para>Admitting the WHOLE cover in one Tick already inserts <c>_loaded</c> in priority order (A
         /// first), so a fixture that never disturbs that insertion order cannot tell "PumpPending sorts too"
@@ -2111,7 +2111,7 @@ namespace MapRenderer.Tests.Tiles
             (double lonB, double latB) = CenterOf(tileB);
 
             var gated = new GatedSource();
-            var go    = Track(new GameObject("T1_CenterFirst"));
+            var go    = Track(new GameObject("CenterFirst"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5;
@@ -2131,9 +2131,9 @@ namespace MapRenderer.Tests.Tiles
 
                 // Tick 1: admits the WHOLE cover (insertion order == A-priority order). Every fetch is held
                 // PENDING by the gate, so nothing can be kicked yet regardless of ThreadPool timing. (An
-                // earlier instant-bytes source let fetches race to completion in a nondeterministic order, so
+                // instant-bytes source would let fetches race to completion in a nondeterministic order, so
                 // PumpPending could kick a non-center tile whose fetch happened to land first — an
-                // intermittent failure this gated fixture removes.)
+                // intermittent failure the gate removes.)
                 view.LateUpdate();
                 Assert.GreaterOrEqual(view.LoadedTileCount(), 5,
                     "sanity: need a genuinely multi-tile cover for the cap to mean anything.");
@@ -2189,16 +2189,14 @@ namespace MapRenderer.Tests.Tiles
                 string kickDiag = $"atKick: inFlight={view.InFlightCount()} loaded={atKick.Count} " +
                                   $"priorityArgMin={ArgMin(atKick, in kickCtx)}";
 
-                // A source tile's kicked build no longer completes+
-                // consumes in one more tick — it needs the prologue-complete tick, the write-kick tick, AND
-                // the consume tick (kickTick+3, not kickTick+1; TileBuildsStartedLastTick's own doc). One
+                // A source tile's kicked build does not complete and consume in one more tick — it needs
+                // the prologue-complete tick, the write-kick tick, AND the consume tick (kickTick+3, not
+                // kickTick+1; TileBuildsStartedLastTick's own doc). One
                 // Await + one LateUpdate only completes whichever STEP is currently in flight. Pump
                 // (bounded) until B is Built instead of assuming a fixed tick count — the cap (1) still
-                // throttles NEW kicks each tick exactly as before, so this changes nothing about which tile
-                // gets picked, only how long B's OWN build takes to finish once picked. A may also get
-                // kicked during this window (it already could, pre-stage-3 — the ORIGINAL comment here
-                // already tolerated "a second kick", just not a second kick given time to COMPLETE); the
-                // assertions below still check A is not YET built at the moment B settles.
+                // throttles NEW kicks each tick, so the loop changes nothing about which tile gets picked,
+                // only how long B's OWN build takes to finish once picked. A may also get kicked during
+                // this window; the assertions below still check A is not YET built at the moment B settles.
                 for (int f = 0; f < 20 && !view.TryGetBuiltTile(tileB); f++)
                 {
                     view.AwaitInFlightMeshBuilds();
@@ -2222,20 +2220,21 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── T2: concurrency cap respected across a full (eventually-settling) load ──────────────────
+        // ── concurrency cap respected across a full (eventually-settling) load ──────────────────────
 
         /// <summary>
-        /// RED-verify: pre-stage HEAD has no concurrency cap anywhere — a cover-wide cover/zoom transition
-        /// fetches every newly-entering tile in one Tick, so the active (admitted, not-yet-Built) set jumps
-        /// straight to the full cover size. A per-tile GATE holds every fetch open (never completing) so the
-        /// active set can only GROW via admission, never shrink via completion — isolating the cap.
+        /// Admission holds the active (admitted, not-yet-Built) set at the concurrency cap. Without a
+        /// cap, a cover-wide cover/zoom transition would fetch every newly-entering tile in one Tick, and
+        /// the active set would jump straight to the full cover size. A per-tile GATE holds every fetch open
+        /// (never completing) so the active set can only GROW via admission, never shrink via completion —
+        /// isolating the cap.
         /// </summary>
         [Test]
         public void ActiveLoadCount_NeverExceedsTheConcurrencyCap_AcrossAFullLoad()
         {
             const int cap = 4;
             var gated = new GatedSource();
-            var go    = Track(new GameObject("T2_ConcurrencyCap"));
+            var go    = Track(new GameObject("ConcurrencyCap"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 6;
             view.Config.TileSelection.MaxZoom = 6; // a cover clearly larger than the cap
@@ -2286,7 +2285,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── T3: no-cancel-in-flight on a recompute that keeps the tile visible ──────────────────────
+        // ── no-cancel-in-flight on a recompute that keeps the tile visible ──────────────────────────
 
         /// <summary>
         /// An admitted, in-flight tile that stays visible across a cover recompute must NOT be released and
@@ -2309,7 +2308,7 @@ namespace MapRenderer.Tests.Tiles
             var centerTile = new TileId { Z = 5, X = 12, Y = 13 };
             (double lon, double lat) = CenterOf(centerTile);
 
-            var go   = Track(new GameObject("T3_NoCancelInFlight"));
+            var go   = Track(new GameObject("NoCancelInFlight"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5;
@@ -2345,7 +2344,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── T4: re-prioritization head — a recompute promotes the NEW center ────────────────────────
+        // ── re-prioritization head — a recompute promotes the NEW center ────────────────────────────
 
         /// <summary>
         /// With admission capped to 1 (so most of the cover stays in the not-yet-admitted desired list), a
@@ -2362,7 +2361,7 @@ namespace MapRenderer.Tests.Tiles
             (double lonA, double latA) = CenterOf(centerA);
             (double lonB, double latB) = CenterOf(centerB);
 
-            var go   = Track(new GameObject("T4_Repriority"));
+            var go   = Track(new GameObject("Repriority"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
             view.Config.TileSelection.MaxZoom = 5;
@@ -2404,7 +2403,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── T5: strategy toggle is honored end to end, and the two strategies genuinely diverge ────
+        // ── strategy toggle is honored end to end, and the two strategies genuinely diverge ────────
 
         /// <summary>
         /// Under a real tilt, GroundDistanceToLookAt and CameraDistance can disagree about which tile is
@@ -2473,7 +2472,7 @@ namespace MapRenderer.Tests.Tiles
         {
             var gated = new GatedSource();
             using var bag = new ObjectDisposalBag();
-            var go    = bag.Track(new GameObject("T5_StrategyToggle"));
+            var go    = bag.Track(new GameObject("StrategyToggle"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom  = 6;
             view.Config.TileSelection.MaxZoom  = 6;
@@ -2509,7 +2508,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── T7: the admission/sort path stays allocation-free under sustained churn ─────────────────
+        // ── the admission/sort path stays allocation-free under sustained churn ─────────────────────
 
         /// <summary>
         /// A capped, gated load keeps the desired list populated across many Ticks (nothing ever completes,
@@ -2521,7 +2520,7 @@ namespace MapRenderer.Tests.Tiles
         public void AdmissionAndPrioritySort_UnderSustainedChurn_DoesNotAllocateGCMemory()
         {
             var gated = new GatedSource();
-            var go    = Track(new GameObject("T7_ZeroAlloc"));
+            var go    = Track(new GameObject("ZeroAlloc"));
             var view  = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.Backend                = RenderBackend.Brg; // zero-alloc path
             view.Config.TileSelection.MinZoom  = 6;
@@ -2688,9 +2687,9 @@ namespace MapRenderer.Tests.Tiles
 
                 Assert.IsTrue(view.AllTilesSettled(), "sanity: drain must fully settle the tile.");
                 Assert.AreEqual(0, spy.BeginBuildCalls.Count,
-                    "F-4 DECISIVE: TryBeginBuild must NEVER fire from a DrainMeshBuilds call site — symbolPass " +
-                    "is computed ONLY at the PumpPending kick site (§Q-Drain); drain always passes the default " +
-                    "(null), keeping it symbol-silent by construction.");
+                    "DECISIVE: TryBeginBuild must NEVER fire from a DrainMeshBuilds call site — symbolPass " +
+                    "is computed ONLY at the PumpPending kick site; drain always passes the default " +
+                    "(null), keeping it symbol-silent.");
             }
             finally { view.Teardown(); }
         }
@@ -2714,7 +2713,7 @@ namespace MapRenderer.Tests.Tiles
                 view.LoadTestStyle(src, Cam(0, 0, 5.0), style: FillAndSymbolStyle(), symbolsIntentionallyUnwired: true);
 
                 view.LateUpdate();          // Tick 1: cover created (9 tiles), fetches requested
-                view.DrainMeshBuilds();     // land the fetch decodes deterministically (symbol-silent, per F-4)
+                view.DrainMeshBuilds();     // land the fetch decodes deterministically (symbol-silent, see DrainMeshBuilds_NeverDrivesSymbolFactory)
                 view.LateUpdate();          // Tick 2: fetches observed → lt.Decode set, 0 kicked
                 Assert.AreEqual(0, spy.BeginBuildCalls.Count, "sanity: nothing kicked before the tile has a prior lt.Decode.");
 
@@ -2783,8 +2782,6 @@ namespace MapRenderer.Tests.Tiles
 
         private static readonly TilePriorityContext Zero = ZeroContext();
 
-        // ── T4 ───────────────────────────────────────────────────────────────────────────────────
-
         /// <summary>Every entry has an identical (zero) priority key, so the sort result is decided
         /// ENTIRELY by the (Z, X, Y, Slot) tiebreak — the reason <see cref="TilePrioritySorter"/>'s private
         /// <c>IsAfter</c> exists. A sorter that drops the <c>Slot</c> tiebreak produces a nondeterministic
@@ -2815,8 +2812,6 @@ namespace MapRenderer.Tests.Tiles
             CollectionAssert.AreEqual(expected, list,
                 "with every priority key tied at 0, the sort must order strictly by (Z, X, Y) then Slot.");
         }
-
-        // ── T5 ───────────────────────────────────────────────────────────────────────────────────
 
         /// <summary><c>_keys</c> exists solely to avoid a per-sort allocation. Warms the scratch buffer to
         /// steady size with one discarded call (a list past the initial 64-capacity forces the growth
@@ -3320,8 +3315,6 @@ namespace MapRenderer.Tests.Tiles
         private static TileManager.TileSelectionConfig Cfg(double viewportX, double viewportY)
             => new TileManager.TileSelectionConfig { FramingViewportPx = new double2(viewportX, viewportY) };
 
-        // ── T2a ──────────────────────────────────────────────────────────────────────────────────
-
         [Test]
         public void FreshGate_IsDirty()
         {
@@ -3343,8 +3336,6 @@ namespace MapRenderer.Tests.Tiles
                 "`!_initialised` clause, so the first Tick always recomputes.");
         }
 
-        // ── T2b ──────────────────────────────────────────────────────────────────────────────────
-
         [Test]
         public void StaysDirty_UntilCommitted()
         {
@@ -3364,8 +3355,6 @@ namespace MapRenderer.Tests.Tiles
                 "a gate that treats Invalidate as 'reset the key and recompute from it' would read clean " +
                 "here, because the camera genuinely has not moved. Invalidate must force dirty regardless.");
         }
-
-        // ── T1 ───────────────────────────────────────────────────────────────────────────────────
 
         [Test]
         public void DoesNotRecompute_WhenNothingMoved()

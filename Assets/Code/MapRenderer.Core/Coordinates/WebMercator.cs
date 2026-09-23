@@ -56,7 +56,8 @@ namespace MapRenderer.Core.Geo
 
         /// <summary>
         /// Batch projects an array of geodetic points to render-space coordinates.
-        /// Element-wise equivalent to scalar <see cref="Forward(GeoCoordinate3D)"/> (T4: exact equality).
+        /// Element-wise equal to scalar <see cref="Forward(GeoCoordinate3D)"/>, bit for bit
+        /// (pinned by <c>ProjectionMathTests.WebMercator_BatchEqualsScalar_Exact</c>).
         /// Allocates zero bytes (caller owns <paramref name="dst"/> span).
         /// </summary>
         public static void Forward(ReadOnlySpan<GeoCoordinate3D> src, Span<double3> dst)
@@ -97,7 +98,7 @@ namespace MapRenderer.Core.Geo
         /// <summary>
         /// Projects (lon, lat) in degrees to Web Mercator meters as <c>double2(x, y)</c>.
         /// Delegates to <see cref="Forward(GeoCoordinate3D)"/> so the Mercator literal lives
-        /// in exactly one method (T2). Return value is bit-identical to the pre-refactor inline.
+        /// in one method. The result is the (x, z) pair of that call.
         /// </summary>
         public static double2 FromLonLat(GeoCoordinate3D geoCoordinate)
         {

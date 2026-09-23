@@ -9,7 +9,7 @@
 // Every property here is engine plumbing (SDF threshold, AA, per-frame screen size) EXCEPT the two colour
 // tints below; the plumbing names avoid every `text-*`/`symbol-*` style-spec term so a future style binding
 // can never collide.
-// `text-color`/`text-halo-color`: a two-carrier split (style-transitions epic). A CONSTANT value rides
+// `text-color`/`text-halo-color`: a two-carrier split. A CONSTANT value rides
 // `_TextColor`/`_HaloColor` below — a multiplier, identity white — so it can ease across a restyle; every
 // other kind (Zoom/Feature/Composite) bakes into the per-vertex COLOR stream (mirrors how `line-color` rides
 // vertex color in StyledLineTileBuilder), which then carries white for exactly the constant arm.
@@ -31,8 +31,9 @@ float4 _ScreenParamsLogical;
 // _MainTex_TexelSize — (1/w, 1/h, w, h) of the SDF atlas, auto-populated by Unity. Used by the analytic AA
 //   to convert the SDF's texel range into screen pixels (see the fragment). In the CBUFFER for SRP Batcher.
 float4 _MainTex_TexelSize;
-// _SdfEdge          — the SDF's fill iso level, normalized [0,1]. 0.75 matches S18's on-disk convention
-//                      (GlyphSdf/SdfDistanceFieldTests.IsoLevel = 191/255 ≈ 0.75), NOT the generic 0.5.
+// _SdfEdge          — the SDF's fill iso level, normalized [0,1]. 0.75 matches the SDF bake's on-disk
+//                      convention (GlyphSdf/SdfDistanceFieldTests.IsoLevel = 191/255 ≈ 0.75), NOT the
+//                      generic 0.5.
 // _SdfAaDevicePx    — the coverage ramp's width BEYOND the outline, in RASTER px. KEEP IT AT 1.0.
 //   RASTER, not logical: it divides a distance the fragment derives from fwidth(uv), a derivative on the
 //   render target's grid. _ScreenParamsLogical above is the OTHER unit and scales vertex corner offsets
@@ -55,14 +56,14 @@ float _SdfRangeTexels;
 // identity white; `_HaloColor` tints the halo run and `_TextColor` the text run, told apart by
 // SdfWidenPx (see SymbolTextWorld_ForwardPass.hlsl). Both defaults MUST stay white
 // (SymbolTextWorld.shader) — every other expression kind leaves them there and carries its colour in the
-// vertex instead. The `.a` of both is deliberately unread: a colour's own alpha rides the opacity stream.
+// vertex instead. The `.a` of both is unread by design: a colour's own alpha rides the opacity stream.
 float4 _TextColor;
 float4 _HaloColor;
 CBUFFER_END
 
-// Stage M: a Texture2DArray — one layer per GlyphAtlas page. Single-page maps (the invariant: any map
+// A Texture2DArray — one layer per GlyphAtlas page. Single-page maps (the invariant: any map
 // that fits in one page) upload exactly one layer, and every vertex's Page is 0, so the array sample at
-// layer 0 is pixel-identical to the pre-Stage-M plain Texture2D sample.
+// layer 0 is pixel-identical to a plain Texture2D sample.
 TEXTURE2D_ARRAY(_MainTex);
 SAMPLER(sampler_MainTex);
 

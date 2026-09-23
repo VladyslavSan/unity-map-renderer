@@ -98,7 +98,8 @@ Render N:                             [consume cmds → driver submit ~4-7ms]
 ```
 
 Whether that ~4–7 ms is **free** or **stolen from N+1** is decided by whether the main thread is the
-bottleneck (§2) — via `maxQueuedFrames`, not vsync:
+bottleneck (§ "The invariant — slack exists when the main thread is NOT the bottleneck" above) — via
+`maxQueuedFrames`, not vsync:
 - **Consumer/GPU-bound frame** (main thread not the bottleneck) — it would otherwise hit the queue limit and
   **block** before N+1; the tail-work fills that block → truly free. (Vsync-paced or uncapped-GPU-bound alike.)
 - **CPU-main-bound frame** — the main thread would **start N+1 immediately**; the tail-work now *delays* N+1
@@ -109,7 +110,7 @@ steals from N+1 instead of filling idle time.
 
 **Hook: `RenderPipelineManager.endContextRendering`.** **[MODEL]** It fires **once per `RenderPipeline.Render`
 call** (≈ once per frame) on the main thread, right after the frame's cameras are submitted, receiving the
-camera list. Understand the three-tier SRP callback family and pick deliberately:
+camera list. Understand the three-tier SRP callback family and pick with care:
 - `endCameraRendering` — **per camera**. Too granular; fires N times a frame.
 - **`endContextRendering` — once per frame, ALLOCATION-FREE.** ✅ Use this.
 - `endFrameRendering` — once per frame, **same functionality but heap-allocates every frame** (Unity's own
@@ -120,8 +121,9 @@ camera list. Understand the three-tier SRP callback family and pick deliberately
   allocation-free, URP-native seam.
 
 **Non-negotiable: the tail-work must be budgeted/adaptive.** Because the window is real only when there's
-slack (§2), the tail routine must cap its own cost and back off when the main thread has no headroom — never
-an unconditional fixed batch. Otherwise, on a CPU-main-bound frame it directly extends frame time.
+slack (§ "The invariant — slack exists when the main thread is NOT the bottleneck" above), the tail routine
+must cap its own cost and back off when the main thread has no headroom — never an unconditional fixed batch.
+Otherwise, on a CPU-main-bound frame it directly extends frame time.
 
 ## 4. Where `Mesh` allocate/apply fit — and the retention risk
 
@@ -129,7 +131,7 @@ The two main-thread-only `Mesh.MeshData` operations, and what each costs:
 
 | Op | Called on | What it *actually* costs | Where it should live |
 |----|-----------|--------------------------|----------------------|
-| `AllocateWritableMeshData(n)` | main-only *(spike-verified in this repo — `TileManager.cs:1023`)* | allocates **CPU** staging buffers; **no GPU resource** | **the frame-tail slack** (§3) — pre-allocate a pool, refill here |
+| `AllocateWritableMeshData(n)` | main-only *(`MeshDataPayload.AllocateTracked`)* | allocates **CPU** staging buffers; **no GPU resource** | **the frame-tail slack** (§ "Reaching the slack — schedule at the frame tail, don't hook the wait") — pre-allocate a pool, refill here |
 | write geometry into the MeshData | **worker** (off-main) | pure CPU (`SetVertexBufferParams` + fill) | already background |
 | `ApplyAndDisposeWritableMeshData` | main-only *(the call)* | **cheap on the main thread** — updates the CPU-side mesh, hands off the native buffer, **enqueues** a GPU upload; the **upload itself runs on the render thread**, deferred | frame-tail slack too — but the *upload load* it adds is render-thread budget (see below) |
 
@@ -137,7 +139,8 @@ The key correction: `ApplyAndDispose` is **not** a synchronous main-thread GPU t
 *made* from the main thread (API rule), but it only updates the CPU mesh + enqueues the upload; the actual
 buffer creation/transfer executes **on the render thread**, often lazily. So its main-thread cost is small —
 what it really spends is **render-thread time**, which matters because the render thread's busyness is what
-*creates* the slack (§2). Uploading a lot there spends that same budget.
+*creates* the slack (§ "The invariant — slack exists when the main thread is NOT the bottleneck" above).
+Uploading a lot there spends that same budget.
 
 **How much that upload costs is backend-dependent — do NOT design to OpenGL's worst case.** **[EMPIRICAL]**
 - **OpenGL / GLES** — the serialized floor: all GPU work funnels through the single render thread, so uploads
@@ -147,8 +150,8 @@ what it really spends is **render-thread time**, which matters because the rende
   is small-to-negligible on the render thread's critical path. (Caveat: API *capability* ≠ automatic Unity
   exploitation — depends on backend + native graphics jobs + version; verify on the shipping backend.)
 - Practical target split: desktop Vulkan/D3D12/Metal + iOS Metal → modern path (upload ≈ free); older
-  Android GLES → the serialized floor. Keep the S87 budget as the guardrail **for the floor**, not the
-  assumed cost everywhere.
+  Android GLES → the serialized floor. Keep the per-Tick upload caps (`MaxConsumesPerTick`,
+  `MaxVerticesPerTick`) as the guardrail **for the floor**, not the assumed cost everywhere.
 
 `AllocateWritableMeshData` produces only CPU staging memory (no GfxDevice resource), so relocating it to
 `endContextRendering` is stall-free on any backend — **[EMPIRICAL]**, confirm on a capture.
@@ -156,7 +159,9 @@ what it really spends is **render-thread time**, which matters because the rende
 ### 4a. What's relocatable to the slack — classify on two axes
 
 Not everything main-thread is safe to move to the post-submit slot. Test each action on **two independent
-axes** (`endContextRendering` fires *after* frame N's cameras are culled + recorded — §1/§3):
+axes** (`endContextRendering` fires *after* frame N's cameras are culled + recorded — § "The pipeline —
+three stages, pipelined across frames" and § "Reaching the slack — schedule at the frame tail, don't hook the
+wait" above):
 
 **Axis 1 — does it change what the cull sees ("the world")?** Frame N's scene is already extracted, so:
 - **Cull-neutral → relocatable, invisible to N:** decode, build, project, cover-select, process the
@@ -191,10 +196,12 @@ hold).
 ## 5. The coupling to keep honest
 
 The pool's payoff is **conditional**:
-- It converts the mesh build **kick** into a fully-background step (the only main-thread anchor in
-  `KickMeshBuild` is the `AllocateWritableMeshData` loop — `TileManager.cs:1001-1029` documents that
-  nothing else touches a `Unity.Object` off-main). That architectural win stands **independently**.
-- But it is "free" (no added frame time) **only if the main thread has slack** (§2). If `CoverSelect` is
+- It converts the mesh build into a fully-background step. The build's only main-thread anchor is the
+  `AllocateWritableMeshData` call before the write graph (`MeshDataPayload.AllocateTracked`,
+  `docs/job-scheduling-design.md` § "The tile build — three polled steps"); nothing else in the build
+  touches a `Unity.Object` off-main. That architectural win stands **independently**.
+- But it is "free" (no added frame time) **only if the main thread has slack** (§ "The invariant — slack
+  exists when the main thread is NOT the bottleneck" above). If `CoverSelect` is
   saturating the main thread every motion frame, the slack isn't there — so the pool and
   `TileLoadMeasurementTests`' select-tax are **coupled**, and the Profiler capture in checklist item 2 tells
   you which regime you're in.
@@ -203,9 +210,13 @@ The pool's payoff is **conditional**:
 
 Run these from the `TileLoadingStressTest` scene (`TileLoadStressDriver`, Berlin sweep, vSync=1):
 
-1. **[gating]** Hold a `MeshDataArray` unapplied across N frames — does Unity's leak/safety detection warn? (§4)
+1. **[gating]** Hold a `MeshDataArray` unapplied across N frames — does Unity's leak/safety detection warn?
+   (§ "Where `Mesh` allocate/apply fit — and the retention risk")
 2. Capture the frame timeline — is the frame consumer/GPU-bound (main thread not the bottleneck ⇒ slack
-   present), and where does the wait sit (`WaitForTargetFPS` vs `Gfx.WaitForPresentOnGfxThread`)? (§2)
-3. Does `AllocateWritableMeshData` at `endContextRendering` contend with the render thread? (§4)
+   present), and where does the wait sit (`WaitForTargetFPS` vs `Gfx.WaitForPresentOnGfxThread`)?
+   (§ "The invariant — slack exists when the main thread is NOT the bottleneck")
+3. Does `AllocateWritableMeshData` at `endContextRendering` contend with the render thread?
+   (§ "Where `Mesh` allocate/apply fit — and the retention risk")
 4. Which regime does a motion frame sit in — CPU-main-bound (`CoverSelect` saturating the main thread, no
-   slack) or consumer/GPU-bound (slack present)? (§5, and the Profiler capture in item 2)
+   slack) or consumer/GPU-bound (slack present)? (§ "The coupling to keep honest", and the Profiler capture
+   in item 2)

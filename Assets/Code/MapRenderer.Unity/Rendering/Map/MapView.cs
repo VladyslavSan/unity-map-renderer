@@ -33,10 +33,10 @@ namespace MapRenderer.Unity.Rendering.Map
     /// </summary>
     public enum RenderBackend
     {
-        /// <summary>Default (S53c): each tile-layer draw item is an <see cref="Backend.Entities.TileRenderer"/>
+        /// <summary>Default: each tile-layer draw item is an <see cref="Backend.Entities.TileRenderer"/>
         /// entity rendered via Entities Graphics (BatchRendererGroup under the hood), grouped per tile and
-        /// inspectable/disable-able in the Entities Hierarchy. Value 0 so scenes serialized with the old
-        /// default deserialize to Entities.</summary>
+        /// inspectable/disable-able in the Entities Hierarchy. Value 0 so a scene that serialized the
+        /// field as 0 deserializes to Entities.</summary>
         Entities = 0,
 
         /// <summary>BRG path: draw tile meshes via a hand-packed <see cref="Backend.BRG.TileRenderer"/>
@@ -51,7 +51,7 @@ namespace MapRenderer.Unity.Rendering.Map
 
     /// <summary>
     /// The live multi-tile render loop — per-layer styled fill/line rendering. A <b>plain C# class</b>
-    /// (the MonoBehaviour host is <see cref="MapViewComponent"/>): correct by construction — it is built with
+    /// (the MonoBehaviour host is <see cref="MapViewComponent"/>). It is always fully wired: it is built with
     /// its <see cref="MapViewConfig"/> and a non-null <see cref="MapCamera"/>, and owns its
     /// <see cref="RenderLayerSet"/> and <see cref="TileManager"/> from construction, so there are no
     /// "is it wired yet" null guards and no lifecycle flag: before <see cref="SetStyle(string,CancellationToken)"/>
@@ -122,7 +122,7 @@ namespace MapRenderer.Unity.Rendering.Map
         private static readonly ProfilerMarker PmSymbolBatch =
             new(ProfilerCategory.Scripts, ProfilerMarkerNames.SymbolBatch);
 
-        // ── Injected collaborators (correct by construction — never null) ────────────────────────
+        // ── Injected collaborators (set by the constructor — never null) ─────────────────────────
         private readonly MapViewConfig _config;
 
         /// <summary>The map camera, owned by this view — the single source of camera state. Non-null, set
@@ -162,7 +162,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <summary>Test seam for the style-transition clock. Production → <c>Time.unscaledTimeAsDouble</c>
         /// (UNSCALED: a theme change is a UI-class animation that must ease under <c>timeScale == 0</c>).
         /// <see cref="Text.SymbolPlacementSystem.EaseFade"/> runs on SCALED time, so the two clocks disagree
-        /// under <c>timeScale != 1</c> — pre-existing, and not this epic's to fix.</summary>
+        /// under <c>timeScale != 1</c> — a known limitation.</summary>
         internal Func<double> NowSecondsOverride { get; set; }
         // Not `(NowSecondsOverride ?? DefaultNowSeconds)()`: that reads as a method-group-to-delegate
         // conversion on every call, which this project's C# version does not cache — an allocation inside
@@ -170,7 +170,7 @@ namespace MapRenderer.Unity.Rendering.Map
         private double NowSeconds => NowSecondsOverride != null ? NowSecondsOverride() : Time.unscaledTimeAsDouble;
 
         /// <summary>How long a restyled uniform binding eases from its old value to its new one. The ONLY
-        /// source of the duration/delay: no style key is read (epic decision 0a).</summary>
+        /// source of the duration/delay: no style key is read.</summary>
         public Style.StyleTransition StyleTransition { get; set; } = Style.StyleTransition.Default;
 
         // Per-style-layer render bundles (fills + lines), built at SetStyle. Owns the materials.
@@ -243,7 +243,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// <see cref="StyleDocument"/> overload it is the caller-supplied id.</summary>
         internal string StyleId { get; private set; }
 
-        // S83b loader seams — production defaults; tests inject counting/offline fakes via InternalsVisibleTo.
+        // Loader seams — production defaults; tests inject counting/offline fakes via InternalsVisibleTo.
         internal System.Func<string, CancellationToken, UniTask<string>> DocumentLoaderOverride;
         internal System.Func<string, IDataSource>                        TileSourceFactoryOverride;
 
@@ -303,7 +303,7 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         /// <summary>
-        /// S83b: apply an already-parsed <paramref name="style"/> with a caller-supplied
+        /// Applies an already-parsed <paramref name="style"/> with a caller-supplied
         /// <paramref name="styleId"/>. A second call RESTYLES: <see cref="RenderLayerSet"/> rebuilds and the
         /// source registry diffs (unchanged sources keep their warm pipeline; removed are torn down).
         /// </summary>
@@ -457,9 +457,9 @@ namespace MapRenderer.Unity.Rendering.Map
         }
 
         /// <summary>
-        /// S83b: resolves each rendered source-id of <paramref name="style"/> into a
+        /// Resolves each rendered source-id of <paramref name="style"/> into a
         /// <see cref="Tile.TileManager.SourceSpec"/>. Inline <c>tiles[]</c> short-circuits (no TileJSON
-        /// fetch); a <c>url</c>-only source fetches its TileJSON ONCE and resolves via S83a. Failure
+        /// fetch); a <c>url</c>-only source fetches its TileJSON ONCE and resolves via <c>SourceResolver</c>. Failure
         /// isolation: an offline/404/malformed TileJSON logs a warning and skips THAT source.
         ///
         /// Runs BEFORE <see cref="Style.RenderLayerSet.Build"/>, so it cannot walk the built
@@ -524,7 +524,7 @@ namespace MapRenderer.Unity.Rendering.Map
                     {
                         // System.Exception, not just GeoJsonFormatException, so this really is the shape the
                         // comment above claims. Every current GeoJsonParser throw IS a format exception, so
-                        // the widening changes nothing today — it is here because a parser edit that threw
+                        // the widening changes no current behaviour — it is here because a parser edit that threw
                         // anything else would otherwise fault SetStyle for the WHOLE style over one bad
                         // source, which is the failure isolation this branch exists to provide. Cancellation
                         // is rethrown: swallowing it is its own defect, and the TileJSON path beside this
@@ -589,7 +589,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// LateUpdate on purpose: the input <c>Controller</c> mutates the camera props in its <c>Update</c>, and
         /// Unity runs every LateUpdate after every Update, so this pipeline is GUARANTEED to see this frame's
         /// input — no execution-order attributes needed. The whole per-frame pipeline lives HERE, in one ordered
-        /// pass off a SINGLE camera snapshot, so tiles and symbols are frame-coherent by construction:
+        /// pass off a SINGLE camera snapshot, so tiles and symbols are always frame-coherent:
         /// <list type="number">
         ///   <item>commit the camera (DPI refresh + <see cref="MapCamera.SyncToCamera"/>) — the merged input
         ///         state from every controller this frame;</item>
@@ -651,7 +651,7 @@ namespace MapRenderer.Unity.Rendering.Map
             using (PmManagerTick.Auto())
                 TileManager.Tick(cameraProperties, BuildTileSelectionConfig());
 
-            // Hand the style's sprite sheet to the layers that paint from it (fill-pattern today). Pulled per
+            // Hand the style's sprite sheet to the layers that paint from it (fill-pattern). Pulled per
             // frame rather than pushed from the fetch because the sheet is owned and fetched by the symbol
             // subsystem — the same per-frame pull SymbolPlacementSystem.Tick already does for SymbolSubsystem.IconTexture below.
             // RenderLayerSet.SetSprites early-outs on an unchanged pair, so the steady state is one reference
@@ -673,7 +673,7 @@ namespace MapRenderer.Unity.Rendering.Map
                 {
                     TileManager.CollectLoadedTileKeys(_loadedTileKeys);
                     SymbolSubsystem.ReconcileLoadedTiles(_loadedTileKeys, now);
-                    // Stall #1: start ≤MaxBuildsPerFrame queued symbol builds and coalesce the atlas upload.
+                    // Start ≤MaxBuildsPerFrame queued symbol builds and coalesce the atlas upload.
                     // AFTER reconcile so its loaded-set snapshot drops builds for tiles that just left cover.
                     SymbolSubsystem.PumpBuilds();
                 }
@@ -807,7 +807,7 @@ namespace MapRenderer.Unity.Rendering.Map
         /// altitude frames from, not a second derivation of it. That is what makes "render far == selection
         /// far" structural: an on-screen tile stays the same physical size across panel densities
         /// because one quantity, not two, decides it. The projection is the pixel↔ground service the camera
-        /// owns (Web-Mercator today).
+        /// owns (Web-Mercator).
         /// </summary>
         internal Tile.TileManager.TileSelectionConfig BuildTileSelectionConfig()
             => new Tile.TileManager.TileSelectionConfig

@@ -814,11 +814,11 @@ namespace MapRenderer.Tests.Visual
             using var f = CreateFixture();
             // The floor, not decoration: the whole stage exists to read the two competing rulers apart, and
             // below ~1.8 they are too close to. It is also what makes the clause below falsifiable by a
-            // config change — stop rule S2 says to lower the ZOOM, never the ratio, so a config that shrank
+            // config change — stop rule 2 says to lower the ZOOM, never the ratio, so a config that shrank
             // the ratio to keep the far anchor on-screen must fail HERE.
             Assert.That(f.Config.TargetDepthRatio, Is.GreaterThanOrEqualTo(1.8),
                 $"M1: the designed far/near view-depth ratio must be at least 1.8 — configured " +
-                $"{f.Config.TargetDepthRatio:F3}. STOP RULE S2: if the far anchor will not fit on-screen, " +
+                $"{f.Config.TargetDepthRatio:F3}. STOP RULE 2: if the far anchor will not fit on-screen, " +
                 "lower the zoom and report; do not shrink this.");
             Assert.That(f.AchievedDepthRatio, Is.EqualTo(f.Config.TargetDepthRatio).Within(2).Percent,
                 $"M1: the solved far anchor must sit at {f.Config.TargetDepthRatio:F3}× the near anchor's " +
@@ -833,7 +833,7 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para>Does NOT prove that the far LABEL fits (that is M8's spill check), nor anything about depth.</para>
         ///
-        /// <para><b>STOP RULE S2.</b> If this fails because the far anchor leaves the frame, LOWER THE ZOOM
+        /// <para><b>STOP RULE 2.</b> If this fails because the far anchor leaves the frame, LOWER THE ZOOM
         /// (more ground per pixel) and report both numbers — do NOT shrink the depth ratio below 1.8, which
         /// is what makes every reading on this fixture a two-depth reading.</para>
         ///
@@ -853,7 +853,7 @@ namespace MapRenderer.Tests.Visual
                 math.min(math.min(farPx.x - lo, hi - farPx.x),   math.min(farPx.y - lo, hi - farPx.y)));
             Assert.That(worst, Is.GreaterThan(0.0),
                 $"M2: both anchors must project inside [{lo:F0}, {hi:F0}]² device px — near=({nearPx.x:F1}, " +
-                $"{nearPx.y:F1}), far=({farPx.x:F1}, {farPx.y:F1}); worst margin {worst:F1} px. STOP RULE S2: " +
+                $"{nearPx.y:F1}), far=({farPx.x:F1}, {farPx.y:F1}); worst margin {worst:F1} px. STOP RULE 2: " +
                 "if the FAR anchor is the offender, lower the zoom and report — do not shrink the depth ratio.");
         }
 
@@ -895,7 +895,7 @@ namespace MapRenderer.Tests.Visual
         }
 
         /// <summary>
-        /// <b>M4 — THE RULER IDENTITY (stop rule S1).</b> Proves:
+        /// <b>M4 — THE RULER IDENTITY (stop rule 1).</b> Proves:
         /// <see cref="MapRenderer.Unity.Rendering.Map.MapCamera.MetresPerDevicePixel"/> IS the lateral
         /// px-per-metre ruler at the look-at — a segment of <c>30·mpp</c> metres laid along ĉ at the look-at
         /// projects to 30 device px. The settled model's "X px TOP-DOWN" enters the oracle at exactly this one
@@ -903,7 +903,7 @@ namespace MapRenderer.Tests.Visual
         ///
         /// <para>Does NOT prove anything at any OTHER depth — the identity holds only here.</para>
         ///
-        /// <para><b>STOP RULE S1.</b> If this reads outside 1 %, DO NOT WIDEN IT. Report both numbers and
+        /// <para><b>STOP RULE 1.</b> If this reads outside 1 %, DO NOT WIDEN IT. Report both numbers and
         /// STOP: every oracle downstream would then be calibrated against the wrong ruler.</para>
         ///
         /// <para>RED-verify: probe with <c>60·mpp</c> ⇒ reads 60 px against a 30 px expectation.</para>
@@ -918,17 +918,17 @@ namespace MapRenderer.Tests.Visual
                 f.UnityCamera, f.NearAnchorWorldUnity,
                 new double2(f.CrossAzimuthDir.x, f.CrossAzimuthDir.z), probeM);
 
-            // Printed every run, not only on failure: S1 is a STOP RULE, so the number every downstream
+            // Printed every run, not only on failure: this is STOP RULE 1, so the number every downstream
             // oracle is calibrated on should be legible in the results without re-deriving it.
             TestContext.WriteLine(
-                $"M4 ruler check (S1): {probeMultiplier:F0}·mpp along ĉ at the look-at projects to " +
+                $"M4 ruler check (stop rule 1): {probeMultiplier:F0}·mpp along ĉ at the look-at projects to " +
                 $"{spanPx:F6} px against an expectation of {probeMultiplier:F0} px — " +
                 $"{100.0 * (spanPx / probeMultiplier - 1.0):F5} % (bound ±1 %). " +
                 $"mpp={f.MetresPerDevicePixel:F4} m, |P11|={f.AbsP11:F6}, H={f.ViewportHeightPx:F0}, " +
                 $"w_near={f.NearAnchorViewDepthMetres:F1} m.");
 
             Assert.That(spanPx, Is.EqualTo(probeMultiplier).Within(1).Percent,
-                $"M4 (STOP RULE S1): {probeMultiplier:F0}·mpp of ground laid ACROSS the view axis at the " +
+                $"M4 (STOP RULE 1): {probeMultiplier:F0}·mpp of ground laid ACROSS the view axis at the " +
                 $"look-at must project to {probeMultiplier:F0} device px — measured {spanPx:F4} px " +
                 $"({100.0 * (spanPx / probeMultiplier - 1.0):F3} % off; mpp={f.MetresPerDevicePixel:F3} m). " +
                 "If this is a genuine failure, DO NOT widen the tolerance — report both numbers and STOP, " +

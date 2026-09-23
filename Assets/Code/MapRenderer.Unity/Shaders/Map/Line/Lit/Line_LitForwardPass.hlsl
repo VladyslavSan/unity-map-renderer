@@ -17,12 +17,12 @@
 //                   TEXCOORD4 slot:
 //                       uv.x = distance along the line in line-width units (dashU)
 //                       uv.y = signed cross position ∈ [-1,+1] (side; 0 = center, ±1 = edge)
-//                       uv.z = gap inner-fraction (S14; 0 = solid line)
+//                       uv.z = gap inner-fraction (0 = solid line)
 //                       vColor = per-feature data-driven color (white = identity)
 //   • Vertex      → position from Line_VertexExtrude (shared world-space ribbon extrusion); constant
 //                   +Y lighting normal + placeholder tangent; uv = (dashU, side, innerFrac).
 //   • Fragment    → albedo *= vColor; alpha replaced by the fwidth ribbon coverage:
-//                   LineCoverage(uv.y, uv.z, uv.x) * _Opacity * vColor.a * _BaseColor.a (S05/S14 — makes
+//                   LineCoverage(uv.y, uv.z, uv.x) * _Opacity * vColor.a * _BaseColor.a (makes
 //                   _Opacity functional, carries gap/dash AA). Both COLOR sources participate in alpha
 //                   exactly as they do in rgb: a constant line-color's alpha rides _BaseColor.a, a
 //                   data-driven one's rides vColor.a, and the other side is 1. SurfaceData still comes from the stock
@@ -315,7 +315,7 @@ void LinePassFragment(
     color.rgb = MixFog(color.rgb, inputData.fogCoord);
 
     // LINE DELTA: replace surface alpha with the fwidth ribbon coverage × _Opacity × vColor.a × _BaseColor.a
-    // (S05). Replacing — not multiplying — is why _BaseColor.a has to be re-applied here: the surface alpha
+    // Replacing — not multiplying — is why _BaseColor.a has to be re-applied here: the surface alpha
     // Line_LitInput computed from it is discarded.
     float coverage = LineCoverage(input.uv.y, input.uv.z, input.uv.x);
 #if defined(_HAIRLINE_SOLID_CORE)

@@ -5,13 +5,13 @@
 // Fill_VertexModify.hlsl — fill layer implementation of the MapVertexModify hook.
 //
 // Implements fill-translate: a SCREEN-PIXEL offset, converted to world metres here in the vertex shader
-// through the measured px→world below (P5). It previously treated _FillTranslate.xy as world units
-// while its own comment claimed "px→world applied CPU-side" — nothing applied it, so a fill-translate of
-// [16, -8] displaced the geometry by 16 world METRES at every zoom instead of 16 screen pixels.
+// through the measured px→world below. The CPU binds it in pixels, so a shader that read
+// _FillTranslate.xy as world units would displace a [16, -8] fill-translate by 16 world METRES at every
+// zoom instead of 16 screen pixels.
 //
 // Pattern: every layer has a vertex-modify file that defines MapVertexModify.
-//   Line (S33)              → extrudes laterally along extrudeN (done in its own pass body).
-//   Fill-extrusion (future) → will offset +Y by height attribute.
+//   Line           → extrudes laterally along extrudeN (Line_VertexExtrude.hlsl).
+//   Fill-extrusion → extrudes along the baked extrudeUp by height (FillExtrusion_VertexModify.hlsl).
 //
 // Must be #included AFTER Fill_LitInput.hlsl (which declares the CBUFFER props used by the body below).
 // Fill.shader includes Fill_LitInput.hlsl → Fill_VertexModify.hlsl → Fill_<Pass>.hlsl in that
@@ -24,10 +24,8 @@
 //                        = 1 → "viewport": the offset is fixed to the screen, independent of map bearing.
 // ============================================================================
 
-// MapPixelsToWorld is shared with Line and FillExtrusion via ../PixelsToWorld.hlsl (S23 I2a); see
-// Shaders/README.md "Shared px→world include". It previously lived here as a sentinel-pinned,
-// character-identical copy of the block also carried by Map/Line/Line_VertexExtrude.hlsl, kept honest
-// by ShaderStructureTests comparing the two byte for byte. One copy now serves every carrier.
+// MapPixelsToWorld is shared with Line and FillExtrusion via ../PixelsToWorld.hlsl; see
+// Shaders/README.md "Shared px→world include".
 #include "../PixelsToWorld.hlsl"
 
 // Screen-pixel offset → object-space displacement.
@@ -77,11 +75,11 @@ void MapVertexModify(inout float3 positionOS, float3 normalOS, float4 tangentOS,
     }
 
     // fill-translate is [0,0] on every shipped layer, so this branch is skipped for essentially every
-    // vertex the product draws. It used to be an early `return`, which made "below it" a place code could
-    // be put — and anything the band needs, put there, would be dead in exactly the shipped case. There is
-    // no "below it" now: the function ends with this block, and ShaderStructureTests forbids `return` in
-    // this file so it cannot come back. `!all(...)` is the old guard's own predicate negated rather than
-    // an `any(... >= ...)` rewrite: the two differ when a component is NaN, and this file is under a
+    // vertex the product draws. An early `return` here would make "below it" a place code could be put —
+    // and anything the band needs, put there, would be dead in exactly the shipped case. So there is no
+    // "below it": the function ends with this block, and ShaderStructureTests forbids `return` in this
+    // file. The condition is `!all(abs(t) < eps)` rather than an `any(abs(t) >= eps)` rewrite: the two
+    // differ when a component is NaN, and this file is under a
     // byte-identity invariant.
     if (!all(abs(_FillTranslate.xy) < 1e-6))
     {

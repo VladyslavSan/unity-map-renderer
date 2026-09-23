@@ -2,16 +2,15 @@
 // MaterialFactory.CreateBackgroundMaterial, which clones the FILL base for both variants).
 //
 // Mirrors stock URP Unlit.shader's pass list (Unlit / DepthOnly / DepthNormalsOnly) the way Fill.shader
-// mirrors URP Lit.shader — verbatim + minimal marked deltas. GBuffer/Meta/MotionVectors are deferred
-// (unlit rendering mode epic §3/§6 — not needed until a gate forces one); ShadowCaster is DROPPED by
-// construction (stock URP Unlit has none — an unlit material cannot cast a shadow).
+// mirrors URP Lit.shader — verbatim + minimal marked deltas. It has no GBuffer/Meta/MotionVectors
+// pass, and no ShadowCaster (stock URP Unlit has none — an unlit material cannot cast a shadow).
 //
 // Key design points:
 //   • Fragment is flat albedo × _BaseColor × vColor / alpha × _Opacity — no lighting, no SurfaceData.
 //     See Fill_UnlitForwardPass.hlsl for the exact composite and its rationale.
 //   • CBUFFER (UnityPerMaterial) is IDENTICAL across all passes — SRP Batcher requires this.
 //   • Render state: same parameterized contract as Fill.shader (Cull/ZWrite/ZTest/Blend all driven by
-//     material floats so FillTweaker's runtime contract binds unchanged) — S37's queue-2000 regression
+//     material floats so FillTweaker's runtime contract binds unchanged) — the queue-2000 import
 //     guard applies here exactly as it does to Fill.shader; see the Properties block below.
 //   • The DepthOnly/DepthNormals passes reuse Fill_DepthOnlyPass.hlsl/Fill_DepthNormalsPass.hlsl
 //     VERBATIM (no new file) — they already carry no lighting math and consume the same Attributes this
@@ -30,10 +29,10 @@ Shader "Map/FillUnlit"
         _Cutoff("Alpha Cutoff", Range(0.0, 1.0)) = 0.5
 
         // ── Blending state (mirrors Fill.shader; consumed by URP's ValidateMaterial) ──
-        // S37: these props must be DECLARED so material.HasProperty(...) is true and the queue resolves
+        // These props must be DECLARED so material.HasProperty(...) is true and the queue resolves
         // from _Surface/_Blend rather than URP defaulting the material to opaque queue 2000 on import
         // (clobbering the SubShader's Queue=Transparent). Defaults mirror Fill.shader's flat-fill
-        // contract exactly (transparent, no depth write) — see that file's constraint-1 comment.
+        // contract exactly (transparent, no depth write) — see that file's Blending state comment.
         _Surface("__surface", Float) = 1.0
         _Blend("__blend", Float) = 0.0
         [ToggleUI] _AlphaClip("__clip", Float) = 0.0

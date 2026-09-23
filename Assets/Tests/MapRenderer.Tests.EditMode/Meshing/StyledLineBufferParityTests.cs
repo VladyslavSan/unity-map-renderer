@@ -62,17 +62,18 @@ namespace MapRenderer.Tests.Meshing
         private const double FixtureExtent = 4096.0;
         private const double TestZoom      = 0.0;
 
-        // A degenerate-area ring under RingAssemblyJob's own threshold — mirrored here so T5 can state, in
-        // the test, that its fixture really is the case fill would drop.
+        // A degenerate-area ring under RingAssemblyJob's own threshold — mirrored here so
+        // StraightZeroAreaPolyline_StillRenders can state that its fixture really is the case fill would drop.
         private const double FillDegenerateThreshold = 1.0;
 
-        // ── T1: the differential oracle ────────────────────────────────────────────────────────────
+        // ── the differential oracle ────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// T1 — the ring list the line consumer iterates, read out of the shared buffer, is element-wise
-        /// identical to the one the OLD managed decoder produces for the same features, running live in the
-        /// same process. Everything downstream of this ring list is untouched code, so ring-level equality is
-        /// mesh-level equality; the line pixel suites are the end-to-end confirmation of that implication.
+        /// The ring list the line consumer iterates, read out of the shared buffer, is element-wise
+        /// identical to the one the managed decoder produces for the same features, running live in the
+        /// same process. Everything downstream of this ring list does not depend on where the list came
+        /// from, so ring-level equality is mesh-level equality; the line pixel suites are the end-to-end
+        /// confirmation of that implication.
         /// <para>Exact comparison, no tolerance: both decoders accumulate <c>long</c> deltas and emit
         /// <c>(double)</c> of integer magnitudes far inside <c>double</c>'s exact range, so the vertices are
         /// bit-identical. A tolerance here would be a weakened tooth.</para>
@@ -178,10 +179,10 @@ namespace MapRenderer.Tests.Meshing
             }
         }
 
-        // ── T2: the coexistence gate (a gate that cannot mis-classify is inert) ────────────────────
+        // ── the coexistence gate (a gate that cannot mis-classify is inert) ────────────────────────
 
         /// <summary>
-        /// T2 — with polygon rings and line rings genuinely coexisting in one buffer, the line layer ribbons
+        /// With polygon rings and line rings genuinely coexisting in one buffer, the line layer ribbons
         /// <b>only</b> the LineString. Ring kind is not recoverable from the coordinates, so this is the tooth
         /// that would catch a consumer classifying by area instead of by the declared kind.
         /// </summary>
@@ -249,10 +250,10 @@ namespace MapRenderer.Tests.Meshing
                 "(c) a selection of polygons only must produce no line geometry at all");
         }
 
-        // ── T3: line's OWN length threshold — `< 2`, never fill's `< 3` ────────────────────────────
+        // ── line's OWN length threshold — `< 2`, never fill's `< 3` ────────────────────────────────
 
         /// <summary>
-        /// T3 — a two-point polyline is the boundary value of line's own filter and must still render. The
+        /// A two-point polyline is the boundary value of line's own filter and must still render. The
         /// seam tooth observes that the shared <i>buffer</i> stays unfiltered; this observes <b>the line
         /// consumer's own threshold</b>, which is the direction that is actually observable downstream:
         /// <c>RibbonJob.Execute</c> already early-returns on <c>PointCount &lt; 2</c>, so a short ring
@@ -287,10 +288,10 @@ namespace MapRenderer.Tests.Meshing
                 "a 1-point ring has no segment and must produce nothing");
         }
 
-        // ── T4: ownership on the empty paths ───────────────────────────────────────────────────────
+        // ── ownership on the empty paths ───────────────────────────────────────────────────────────
 
         /// <summary>
-        /// T4 — the paths where the layer produces nothing must produce nothing <i>and not throw</i>, and the
+        /// The paths where the layer produces nothing must produce nothing <i>and not throw</i>, and the
         /// zero must come from the consumer's kind gate rather than from an empty buffer.
         /// </summary>
         [Test]
@@ -347,10 +348,10 @@ namespace MapRenderer.Tests.Meshing
             Assert.AreEqual(0, nullVerts, "a null command stream produces no geometry");
         }
 
-        // ── T5: the fused-RingAssemblyJob fence, behaviourally ────────────────────────────────────
+        // ── the fused-RingAssemblyJob fence, behaviourally ────────────────────────────────────────
 
         /// <summary>
-        /// T5 — a perfectly straight polyline has <b>exactly zero</b> signed area, i.e. strictly inside
+        /// A perfectly straight polyline has <b>exactly zero</b> signed area, i.e. strictly inside
         /// <c>RingAssemblyJob</c>'s degenerate band. It must still render. This is the falsifier an area
         /// filter cannot survive: it is the single most likely form of the "just reuse RingAssemblyJob's
         /// filter" shortcut.

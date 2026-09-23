@@ -1,22 +1,22 @@
-// Fill.shader — Map/Fill (S34 structural parity with URP Lit.shader)
+// Fill.shader — Map/Fill (structural parity with URP Lit.shader)
 //
 // Lit fill shader for unity-map-renderer.
 // Mirrors URP Lit.shader's pass list (ForwardLit / ShadowCaster / GBuffer / DepthOnly /
 // DepthNormals); each pass delegates to our mirror-copied building blocks which carry
 // the full URP material surface + map paint additions (the standard _BaseColor tint, _Opacity).
 //
-// Key design points (S34):
+// Key design points:
 //   • Fragment uses InitializeStandardLitSurfaceData — NEVER hand-assembled SurfaceData.
 //   • Full URP Lit property set (base/normal/metallic/occlusion/emission/detail maps, etc.)
 //     plus the _Opacity map paint property (the layer color is the standard _BaseColor).
 //   • CBUFFER (UnityPerMaterial) is IDENTICAL across all passes — SRP Batcher requires this.
 //   • Render state: the forward pass drives Cull via [_Cull] (default Off; winding is projection-correct
-//     so [_Cull]=Back culls back-faces on globe + Mercator alike). ZWrite is driven by [_ZWrite]
-//     (default 1.0 = opaque depth write, identical to stock URP Lit) so painter's-algorithm
-//     flat layers (S07) can set _ZWrite=0 + renderQueue=base+index for coplanar compositing.
-//     This restores stock URP Lit's `ZWrite [_ZWrite]` on the forward pass; the prior hardcoded
-//     `ZWrite On` was the S34 deviation. Passes 2-5 (ShadowCaster/GBuffer/DepthOnly/DepthNormals)
-//     keep their own `ZWrite On` — they must write depth regardless of the forward-pass setting.
+//     so [_Cull]=Back culls back-faces on globe + Mercator alike). ZWrite is driven by [_ZWrite], as in
+//     stock URP Lit. Flat fills render in the TRANSPARENT band: FillTweaker.ApplyPainterContract sets
+//     ZWrite off, straight alpha blend and _SURFACE_TYPE_TRANSPARENT, and FillRenderLayer orders the
+//     coplanar layers by render queue (LayerDrawOrder.QueueFor). Passes 2-5 (ShadowCaster/GBuffer/
+//     DepthOnly/DepthNormals) keep their own `ZWrite On` — they must write depth regardless of the
+//     forward-pass setting.
 //
 // Clean-room: this is URP integration, not MapLibre. URP docs/source are fair reference.
 // Authored for URP 17.5 / Unity 6000.x.
@@ -65,15 +65,15 @@ Shader "Map/Fill"
         [HideInInspector] _ClearCoatSmoothness("_ClearCoatSmoothness", Float) = 0.0
 
         // ── Blending state (mirrors URP Lit.shader; consumed by URP's ValidateMaterial) ──
-        // S37: the line is intrinsically transparent (ShaderLab hardcodes Blend/ZWrite Off/
-        // Queue=Transparent). These props must be DECLARED here so material.HasProperty(...)
-        // is true and URP's ValidateMaterial (run on every import via MapLitShaderGUI :
-        // BaseShaderGUI) resolves the queue from _Surface/_QueueControl. Without them
-        // ValidateMaterial defaults the material to opaque and forces queue 2000, clobbering
-        // the SubShader's Queue=Transparent on import (the S37 regression). Defaults =
+        // A fill renders in the transparent band (FillTweaker.ApplyPainterContract; see
+        // docs/meshing-design.md § "Layer opacity & compositing"). These props must be DECLARED here so
+        // material.HasProperty(...) is true and URP's ValidateMaterial (run on every import via
+        // MapLitShaderGUI : BaseShaderGUI) resolves the queue from _Surface/_QueueControl. Without them
+        // ValidateMaterial defaults the material to opaque and forces queue 2000 on import. Defaults =
         // transparent (_Surface=1, _Blend=0 alpha, _SrcBlend=SrcAlpha, _DstBlend=OneMinusSrcAlpha,
-        // _ZWrite off) so a default-constructed line material is import-stable at Queue>=2501.
-        // These do NOT fight the fixed ShaderLab render state — they only feed queue resolution.
+        // _ZWrite off), matching the painter contract, so a default-constructed fill material is
+        // import-stable in the transparent band. The forward pass reads them through its parameterized
+        // render state.
         _Surface("__surface", Float) = 1.0
         _Blend("__blend", Float) = 0.0
         [ToggleUI] _AlphaClip("__clip", Float) = 0.0
@@ -82,9 +82,9 @@ Shader "Map/Fill"
         _SrcBlendAlpha("__srcA", Float) = 1.0
         _DstBlendAlpha("__dstA", Float) = 10.0
         _ZWrite("__zw", Float) = 0.0
-        // S58: forward render state as parameters (driven by the typed tweaker layer / ShaderGUI).
-        // Defaults reproduce the previously-hardcoded line state: ZTest LEqual(4), Cull Off(0), BlendOp Add(0).
-        // (_SrcBlend=5 SrcAlpha / _DstBlend=10 OneMinusSrcAlpha / _ZWrite=0 already match the old hardcode.)
+        // Forward render state as parameters (driven by the typed tweaker layer / ShaderGUI).
+        // Defaults: ZTest LEqual(4), Cull Off(0), BlendOp Add(0), with _SrcBlend=5 SrcAlpha /
+        // _DstBlend=10 OneMinusSrcAlpha / _ZWrite=0 above.
         _ZTest("__ztest", Float) = 4.0
         _Cull("__cull", Float) = 0.0
         _BlendOp("__blendop", Float) = 0.0
@@ -106,13 +106,13 @@ Shader "Map/Fill"
         [HideInInspector][NoScaleOffset]unity_LightmapsInd("unity_LightmapsInd", 2DArray) = "" {}
         [HideInInspector][NoScaleOffset]unity_ShadowMasks("unity_ShadowMasks", 2DArray) = "" {}
 
-        // ── Map paint properties (S34/S13 additions) ─────────────────────────
+        // ── Map paint properties ─────────────────────────────────────────────
         // These are the MapLibre-style styling knobs; they modulate the URP surface.
         // The layer color is the standard _BaseColor above; _Opacity modulates alpha.
         _Opacity ("Opacity", Range(0, 1)) = 1.0
 
-        // S13 fill paint properties (MapLibre Style Spec fill layer):
-        // _FillOutlineColor: color of the optional fill outline (future outline pass).
+        // Fill paint properties (MapLibre Style Spec fill layer):
+        // _FillOutlineColor: color of the optional fill outline (declared; no pass reads it).
         // _FillAntialias: 1=AA on (default), 0=off.
         // _FillTranslate: xy = pixel offset (world/viewport per _FillTranslateAnchor). zw unused.
         // _FillTranslateAnchor: 0=map world-space, 1=viewport screen-space.
@@ -143,9 +143,9 @@ Shader "Map/Fill"
         }
         LOD 300
 
-        // Forward-pass render state — fully parameterized (S58). Defaults reproduce the prior
-        // behaviour: Blend driven by _SrcBlend/_DstBlend (1,0 = opaque), BlendOp Add, ZWrite [_ZWrite]
-        // (1 opaque; painter's-algorithm flat layers set 0), ZTest LEqual, Cull Off. Driven from C#
+        // Forward-pass render state — fully parameterized: Blend by _SrcBlend/_DstBlend (1,0 = opaque),
+        // BlendOp, ZWrite [_ZWrite] (1 opaque; painter's-algorithm flat layers set 0), ZTest and Cull
+        // (defaults in the Properties block above). Driven from C#
         // via the typed tweaker layer and surfaced in the modular ShaderGUI. Only the forward pass is
         // parameterized — the ShadowCaster/GBuffer/DepthOnly/DepthNormals passes keep their forced state.
         Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
@@ -270,8 +270,8 @@ Shader "Map/Fill"
 
         // ─────────────────────────────────────────────────────────────────────
         // Pass 3: GBuffer — deferred G-Buffer fill (opaque only).
-        // Fills are deferred-eligible; this pass populates the GBuffer for
-        // deferred lighting. Deferred renderer activation is out of scope (S34).
+        // It populates the GBuffer for deferred lighting, and only for opaque materials. Flat fills
+        // render in the transparent band, so it is inert for them even under the deferred renderer.
         // ─────────────────────────────────────────────────────────────────────
         Pass
         {

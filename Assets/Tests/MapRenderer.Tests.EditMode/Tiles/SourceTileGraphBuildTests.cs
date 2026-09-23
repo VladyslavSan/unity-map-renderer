@@ -115,7 +115,7 @@ namespace MapRenderer.Tests.Tiles
                              ""paint"": { ""background-color"": ""#00ff00"" } } ]
         }";
 
-        // ── T1: the byte-fetching kick (KickMeshBuild) ────────────────────────────────────────────────
+        // ── the byte-fetching kick (KickMeshBuild) ────────────────────────────────────────────────────
 
         /// <summary>The headline tooth: under an injected <see cref="InlineWorkScheduler"/>,
         /// <c>KickMeshBuild</c> runs its body on the CALLING thread with zero dispatch — the WebGL-correct
@@ -173,21 +173,20 @@ namespace MapRenderer.Tests.Tiles
             finally { view.Teardown(); }
         }
 
-        // ── T2: the source-less kick (KickSourcelessBackground) ───────────────────────────────────────
+        // ── the source-less kick (KickSourcelessBackground) ───────────────────────────────────────────
 
-        // The background kick
-        // now schedules the FillMeshGraph directly and reaches no IWorkScheduler.Schedule<T> call on EITHER
-        // projection — the graph serves both arms. A tooth that only drove Mercator would leave the shipped
-        // globe scene's client untested, which is the hole option C was chosen to avoid.
+        // The background kick schedules the FillMeshGraph directly and reaches no IWorkScheduler.Schedule<T>
+        // call on EITHER projection — the graph serves both arms. A tooth that only drove Mercator would
+        // leave the shipped globe scene's client untested.
         private static readonly IProjection[] BackgroundProjectionCases = { null, new SphericalProjection() };
 
-        /// <summary>The sourceless-background sibling of T1 — retires
-        /// <c>InjectedScheduler_RunsTheSourcelessBackgroundKick_OnTheCallingThread</c> (which asserted
-        /// <c>spy.ScheduleCount &gt;= 1</c>), because leaving the seam is exactly what this stage does at
-        /// this site. Asserts BOTH ends — the suite's own rule: <c>ScheduleCount == 0</c> alone cannot tell
-        /// "absent" from "never kicked", so the settle + registered-mesh check must accompany it.
+        /// <summary>The sourceless-background sibling of
+        /// <c>InjectedScheduler_RunsTheMeshBuildKick_OnTheCallingThread</c>. The background kick does not
+        /// go through the work-scheduler seam, so <c>spy.ScheduleCount</c> stays 0. Asserts BOTH ends — the
+        /// suite's own rule: <c>ScheduleCount == 0</c> alone cannot tell "absent" from "never kicked", so
+        /// the settle + registered-mesh check must accompany it.
         ///
-        /// <para><b>RED injection:</b> restore the seam call in <c>KickSourcelessBackground</c> (schedule the
+        /// <para><b>RED injection:</b> add a seam call in <c>KickSourcelessBackground</c> (schedule the
         /// graph inside <c>WorkScheduler.Schedule</c>) — <c>ScheduleCount</c> becomes 1.</para></summary>
         [Test]
         public void SourcelessBackgroundKick_ReachesNoWorkScheduler_AndStillRegistersItsMesh(
@@ -228,7 +227,7 @@ namespace MapRenderer.Tests.Tiles
             finally { view.Teardown(); }
         }
 
-        // ── T5: the MeshBuildGateForTest / WorkScheduler mutual-exclusion guard ───────────────────────
+        // ── the MeshBuildGateForTest / WorkScheduler mutual-exclusion guard ───────────────────────────
 
         /// <summary>Arming <see cref="TileManager.MeshBuildGateForTest"/> while
         /// <see cref="TileManager.WorkScheduler"/> is an <see cref="InlineWorkScheduler"/> (or the symmetric
@@ -265,8 +264,8 @@ namespace MapRenderer.Tests.Tiles
                     () => tm.WorkScheduler = new InlineWorkScheduler(),
                     "selecting Inline while the gate is armed must throw at the setter (the symmetric order).");
 
-                // Review finding: the guard must read IWorkScheduler.RunsInline, not `is
-                // InlineWorkScheduler` — a decorator (RecordingWorkScheduler, T1/T2's own spy) wrapping an
+                // The guard must read IWorkScheduler.RunsInline, not `is InlineWorkScheduler` — a
+                // decorator (RecordingWorkScheduler, the kick tests' own spy) wrapping an
                 // Inline scheduler is just as deadlock-prone, and a concrete-type check would silently miss
                 // it. The gate is still armed from the clause above.
                 Assert.Throws<InvalidOperationException>(
@@ -278,13 +277,12 @@ namespace MapRenderer.Tests.Tiles
             finally { view.Teardown(); }
         }
 
-        // ── T6: a POPULATED symbol pass under Inline — T1/T2/T5 only ever drive symbolPass == null ────
+        // ── a POPULATED symbol pass under Inline — the tests above only drive symbolPass == null ──────
 
-        /// <summary>The missing integration tooth: T1, T2 and T5 above all drive a style/view with no
+        /// <summary>The kick and gate tests above all drive a style/view with no
         /// <c>TileManager.SymbolWorkerFactory</c> set, so <c>symbolPass</c> inside <c>KickMeshBuild</c>'s
         /// body is always <c>null</c> and <c>symbolPass?.RunWorkerAndHandoff(decode)</c> never actually
-        /// executes anything — the POPULATED
-        /// path was untested end to end under Inline. This wires a spy factory so <c>TryBeginBuild</c>
+        /// executes anything. This wires a spy factory so <c>TryBeginBuild</c>
         /// returns a real (non-null) pass and asserts its <c>RunWorkerAndHandoff</c> actually ran, on the
         /// CALLING thread, inside the SAME Inline-dispatched kick as the mesh pass.
         ///
@@ -951,8 +949,8 @@ namespace MapRenderer.Tests.Tiles
             return view;
         }
 
-        /// <summary>T1 — a style round-trip re-shows without a rebuild. RED against the unmodified tree
-        /// (DERIVED, not run — SetSources purged unconditionally): the pan-back would be a MISS.</summary>
+        /// <summary>A style round-trip re-shows without a rebuild. RED (DERIVED, not run): a
+        /// <c>SetSources</c> that purged unconditionally would make the pan-back a MISS.</summary>
         [Test]
         public void StyleRoundTrip_AfterPanOut_ReShowsWithoutRebuild()
         {
@@ -1361,10 +1359,9 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
-        /// <summary>T4. A restyle whose SOURCES are unchanged (paint-only, background included) must keep
+        /// <summary>A restyle whose SOURCES are unchanged (paint-only, background included) must keep
         /// every loaded record — both the fill layer's AND the background's own per-tile quad — by Mesh
-        /// IDENTITY. Anti-vacuity: the drawn set is non-empty both before and after (A's T1 tooth 1's own
-        /// guard).</summary>
+        /// IDENTITY. Anti-vacuity: the drawn set is non-empty both before and after.</summary>
         [Test]
         public void UnchangedSources_KeepEveryRecord()
         {
@@ -1396,10 +1393,11 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        /// <summary>T5. Removing the BACKGROUND layer (sources otherwise untouched) departs the synthetic
+        /// <summary>Removing the BACKGROUND layer (sources otherwise untouched) departs the synthetic
         /// source-less pipeline — its record must be torn down, while the surviving fill layer's own record
-        /// keeps its Mesh identity. This is the pairing point with T4: an implementation that keeps every
-        /// record unconditionally (ignoring the departed-pipeline case) passes T4 but fails here.</summary>
+        /// keeps its Mesh identity. This pairs with <c>UnchangedSources_KeepEveryRecord</c>: an
+        /// implementation that keeps every record unconditionally (ignoring the departed-pipeline case)
+        /// passes that test but fails here.</summary>
         [Test]
         public void BackgroundRemovedRestyle_TearsDownOnlyTheBackgroundRecord()
         {
@@ -1445,7 +1443,7 @@ namespace MapRenderer.Tests.Tiles
             }
         }
 
-        // ── T3 — the BRG re-stamp is mandatory ─────────────────────────────────────────────────────
+        // ── the BRG re-stamp is mandatory ──────────────────────────────────────────────────────────
 
         private static StyleDocument ThreeFillLayersAbc() => StyleParser.Parse(@"{
             ""version"": 8,
@@ -1467,7 +1465,7 @@ namespace MapRenderer.Tests.Tiles
             ]
         }");
 
-        /// <summary>T3 — MANDATORY: under
+        /// <summary>MANDATORY: under
         /// <c>RenderBackend.Brg</c>, a reorder restyle must move the emitted draw order too, not just the
         /// Material.renderQueue values — BRG caches its own copy (<c>DrawItem.LayerRenderQueue</c>) and only
         /// <c>SetLayerMaterials</c>'s explicit re-stamp updates it. Slots never move on a reorder (a=0, b=1,
@@ -3013,9 +3011,9 @@ namespace MapRenderer.Tests.Tiles
         }
 
         /// <summary>
-        /// T3 — the background quad is the SAME geometry after the corners stopped being a hand-authored
-        /// MVT command stream. A <b>differential against the retired encoding</b>: materialize
-        /// <see cref="FullExtentRingCommandStream"/> (the frozen record of what production used to hold)
+        /// The background quad built from the processor's corners is the SAME geometry as the full-extent
+        /// ring encoded as an MVT command stream. A <b>differential against that encoding</b>: materialize
+        /// <see cref="FullExtentRingCommandStream"/> (a frozen record of the full-extent ring)
         /// through the MVT producer, materialize the live processor's corners through the path producer, and
         /// compare the two <c>TileGeometryBuffers</c> element-wise.
         ///
@@ -3105,10 +3103,9 @@ namespace MapRenderer.Tests.Tiles
                 foreach (var v in verts)
                     Assert.AreEqual(0f, v.y, 1e-3f, "Mercator stored positions must be coplanar y≈0 (origin-relative).");
 
-                // T4 colour clause: every background vertex is exactly opaque white. This used to come
-                // from evaluating a constant {"fill-color":"#ffffff"} paint through the fill builder; the change
-                // passes the literal that expression produced. Nothing else watched that value, so a wrong
-                // literal (or a stray alpha) would have rendered a tinted/translucent background silently.
+                // Colour clause: every background vertex is exactly opaque white — the literal a constant
+                // {"fill-color":"#ffffff"} paint evaluates to. Nothing else watches that value, so a wrong
+                // literal (or a stray alpha) would render a tinted/translucent background silently.
                 var colors = new List<Color>();
                 mesh.GetColors(colors);
                 Assert.AreEqual(verts.Count, colors.Count,

@@ -277,8 +277,8 @@ namespace MapRenderer.Tests.Visual
                 new Vector4((float)pattern.Rect.x, (float)pattern.Rect.y,
                             (float)pattern.Rect.z, (float)pattern.Rect.w));
 
-            // The whole reason late resolve is cheap: the mesh already carries tile-normalized UVs in
-            // stream 1, so nothing about the geometry depends on the sprite. If this ever fails, the
+            // The whole reason late resolve is cheap: the mesh already carries world-unit pattern coordinates
+            // in stream 1, so nothing about the geometry depends on the sprite. If this ever fails, the
             // "pure material-uniform change" claim in docs/fill-parity-design.md is void and the
             // resolve path needs a tile rebuild.
             Assert.AreSame(before, filter.sharedMesh,

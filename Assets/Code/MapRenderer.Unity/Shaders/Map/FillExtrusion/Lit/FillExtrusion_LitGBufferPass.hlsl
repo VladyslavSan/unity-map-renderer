@@ -6,7 +6,7 @@
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 // Modified from upstream:
 //   • FillExtrusion_LitInput.hlsl (our mirror) is included by FillExtrusion.shader before this file.
-//   • Attributes carries the D1 extrusion inputs (extrudeUpAndT, bakedBaseHeight); MapVertexModify(...) is
+//   • Attributes carries the extrusion inputs (extrudeUpAndT, bakedBaseHeight); MapVertexModify(...) is
 //     called with all six.
 //   • Modulates albedo/alpha by map paint properties after InitializeStandardLitSurfaceData.
 
@@ -37,10 +37,10 @@ struct Attributes
     float2 texcoord     : TEXCOORD0;
     float2 staticLightmapUV   : TEXCOORD1;
     float2 dynamicLightmapUV  : TEXCOORD2;
-    // [MAP DELTA S23 I2b] D1 extrusion inputs — see StyledFillExtrusionTileBuilder's ExtrudeAndBake doc.
+    // [MAP DELTA] Extrusion inputs — see StyledFillExtrusionTileBuilder's ExtrudeAndBake doc.
     float4 extrudeUpAndT     : TEXCOORD3;
     float2 bakedBaseHeight   : TEXCOORD4;
-    // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
+    // [MAP DELTA] Per-vertex baked color from data-driven expression (mesh COLOR stream).
     float4 color        : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
@@ -78,7 +78,7 @@ struct Varyings
     float4 probeOcclusion           : TEXCOORD9;
 #endif
 
-    // [MAP DELTA S12] Per-vertex baked color (data-driven dimension).
+    // [MAP DELTA] Per-vertex baked color (data-driven dimension).
     // TEXCOORD11 is free in this pass; TEXCOORD10 is unused but skip it to avoid potential collisions.
     half4 vColor                    : TEXCOORD11;
 
@@ -210,7 +210,7 @@ Varyings LitGBufferPassVertex(Attributes input)
 
     output.positionCS = vertexInput.positionCS;
 
-    // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
+    // [MAP DELTA] Pass per-vertex baked color to the fragment stage.
     output.vColor = input.color;
 
     return output;
@@ -236,7 +236,7 @@ GBufferFragOutput LitGBufferPassFragment(Varyings input)
     InitializeStandardLitSurfaceData(input.uv, surfaceData);
 
     // [MAP DELTA] Modulate albedo/alpha by map paint properties (init-then-modulate pattern).
-    // [MAP DELTA S12] Composite data-driven × constant — see FillExtrusion_LitForwardPass's comment.
+    // [MAP DELTA] Composite data-driven × constant — see FillExtrusion_LitForwardPass's comment.
     surfaceData.albedo *= input.vColor.rgb;
     surfaceData.alpha  *= input.vColor.a   * _Opacity;
 

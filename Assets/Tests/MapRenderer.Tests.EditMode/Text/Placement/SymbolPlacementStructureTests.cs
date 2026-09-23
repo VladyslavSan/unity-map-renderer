@@ -84,12 +84,12 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.IsEmpty(offenders,
                 "AddTileLayer (the static per-(tile,layer) mesh path) must be called ONLY by the backend " +
                 "implementations and the static pipeline's own TileManager caller -- the per-frame label " +
-                "placement path (T5), and every other file in the assembly, must reach it never, not even " +
+                "placement path, and every other file in the assembly, must reach it never, not even " +
                 "through an indirection. Offending files:\n" + string.Join("\n", offenders));
         }
 
-        // ── E2: Graphics.RenderMesh is retired — symbols draw via persistent per-slot MeshRenderers now
-        //    (SymbolSlotPresenter), never an immediate-mode per-frame submission (design option (c)). ──
+        // ── No Graphics.RenderMesh — symbols draw via persistent per-slot MeshRenderers
+        //    (WorldSymbolRenderer), never an immediate-mode per-frame submission. ──
         [Test]
         public void SourceTree_NeverReferencesGraphicsRenderMesh()
         {
@@ -97,7 +97,7 @@ namespace MapRenderer.Tests.Text.Placement
             DirectoryAssert.Exists(dir);
 
             // Match the CALL form "Graphics.RenderMesh(" (no space before the paren) so prose discussing the
-            // retired mechanism (doc comments, shader README) is not itself flagged -- only an actual call is.
+            // mechanism (doc comments, shader README) is not itself flagged -- only an actual call is.
             var offenders = new List<string>();
             foreach (string file in Directory.GetFiles(dir, "*.cs", SearchOption.AllDirectories))
             {

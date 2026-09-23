@@ -6,7 +6,7 @@
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 // Modified from upstream:
 //   • FillExtrusion_LitInput.hlsl (our mirror) is included by FillExtrusion.shader before this file.
-//   • Attributes carries the D1 extrusion inputs (extrudeUpAndT, bakedBaseHeight) alongside the usual
+//   • Attributes carries the extrusion inputs (extrudeUpAndT, bakedBaseHeight) alongside the usual
 //     positionOS/normalOS/tangentOS — MapVertexModify(...) is called with all six.
 //   • Modulates albedo/alpha by map paint properties after InitializeStandardLitSurfaceData.
 //   Keep verbatim-plus-delta so git diff against upstream (and against Fill_LitForwardPass.hlsl) stays
@@ -40,10 +40,10 @@ struct Attributes
     float2 texcoord     : TEXCOORD0;
     float2 staticLightmapUV   : TEXCOORD1;
     float2 dynamicLightmapUV  : TEXCOORD2;
-    // [MAP DELTA S23 I2b] D1 extrusion inputs — see StyledFillExtrusionTileBuilder's ExtrudeAndBake doc.
+    // [MAP DELTA] Extrusion inputs — see StyledFillExtrusionTileBuilder's ExtrudeAndBake doc.
     float4 extrudeUpAndT     : TEXCOORD3; // xyz = baked extrude-up, w = t (0=floor, 1=roof)
     float2 bakedBaseHeight   : TEXCOORD4; // x = baked base offset, y = baked height offset
-    // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
+    // [MAP DELTA] Per-vertex baked color from data-driven expression (mesh COLOR stream).
     float4 color        : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
@@ -84,7 +84,7 @@ struct Varyings
     float4 probeOcclusion : TEXCOORD10;
 #endif
 
-    // [MAP DELTA S12] Per-vertex baked color (data-driven dimension).
+    // [MAP DELTA] Per-vertex baked color (data-driven dimension).
     // TEXCOORD11 is free in this pass; avoids collisions with TEXCOORD0-10 above.
     half4 vColor                    : TEXCOORD11;
 
@@ -199,7 +199,7 @@ Varyings LitPassVertex(Attributes input)
     UNITY_TRANSFER_INSTANCE_ID(input, output);
     UNITY_INITIALIZE_VERTEX_OUTPUT_STEREO(output);
 
-    // [MAP DELTA] Apply per-layer vertex modification before position transform — the D1 height extrusion,
+    // [MAP DELTA] Apply per-layer vertex modification before position transform — the height extrusion,
     // then fill-extrusion-translate. See FillExtrusion_VertexModify.hlsl.
     MapVertexModify(input.positionOS.xyz, input.normalOS, input.tangentOS,
         input.extrudeUpAndT.xyz, input.extrudeUpAndT.w, input.bakedBaseHeight);
@@ -254,7 +254,7 @@ Varyings LitPassVertex(Attributes input)
 
     output.positionCS = vertexInput.positionCS;
 
-    // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
+    // [MAP DELTA] Pass per-vertex baked color to the fragment stage.
     output.vColor = input.color;
 
     return output;
@@ -288,10 +288,10 @@ void LitPassFragment(
     // [MAP DELTA] Modulate albedo/alpha by map paint properties (init-then-modulate pattern).
     // The constant/zoom layer color rides _BaseColor (applied in InitializeStandardLitSurfaceData);
     // _Opacity modulates alpha (effective in transparent queue).
-    // [MAP DELTA S12] Composite data-driven × constant:
-    //   input.vColor.rgb = per-feature baked color (data-driven dimension, S12)
-    //   _BaseColor.rgb   = zoom-level or constant color (S11 uniform dimension, applied above)
-    //   Multiply combines both: when vColor is white (default), reduces to S11 behavior exactly.
+    // [MAP DELTA] Composite data-driven × constant:
+    //   input.vColor.rgb = per-feature baked color (data-driven dimension)
+    //   _BaseColor.rgb   = zoom-level or constant color (uniform dimension, applied above)
+    //   Multiply combines both: a white vColor (the default) leaves the uniform color unchanged.
     surfaceData.albedo *= input.vColor.rgb;
     surfaceData.alpha  *= input.vColor.a   * _Opacity;
 

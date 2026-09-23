@@ -766,7 +766,7 @@ namespace MapRenderer.Tests.Structure
             "LineAnchorPlacement", "EmitAtAnchor",
         };
 
-        // ── T4: the ownership contract ──────────────────────────────────────────────────────────────
+        // ── the ownership contract ──────────────────────────────────────────────────────────────────
 
         [Test]
         public void SymbolExtractMintsNoBufferAndDisposesNone_ItBorrows()
@@ -814,7 +814,7 @@ namespace MapRenderer.Tests.Structure
                 "sourced buffer in the same body is visible.)");
         }
 
-        // ── T7: the fused-job fence, plus the claim that no production code decodes MVT geometry any more ──
+        // ── the fused-job fence, plus the claim that no production code decodes MVT geometry ──────────
 
         [Test]
         public void SymbolExtractorTouchesNoFillAssemblyStage_AndNoProductionCodeDecodesMvtGeometry()
@@ -867,17 +867,19 @@ namespace MapRenderer.Tests.Structure
                 string.Join(", ", offenders));
         }
 
-        // ── T-fence: THE NAMED FENCE, as a structural clause on the moved extractor ─────────────────
+        // ── THE NAMED FENCE, as a structural clause on the extractor ────────────────────────────────
 
         /// <summary>
-        /// T-fence — the three tile-space consumers inside <c>Extract</c> are handed TILE-SPACE identifiers.
+        /// The three tile-space consumers inside <c>Extract</c> are handed TILE-SPACE identifiers.
         /// <c>Extract</c> holds three coordinate representations at once (<c>path</c>/<c>densePath</c>
         /// tile-local, <c>ups</c>/<c>lonLat</c> geodetic, <c>pathRender</c>/<c>anchor</c> projected), and the
         /// epsilons downstream are calibrated to tile-integer magnitude, so "just pass the projected one" is
         /// one wrong line away.
         /// <para><b>Stated limitation:</b> this is a call-form grep, not a C# parser — it pins the exact
-        /// argument text of three call sites and nothing more. The fence is primarily carried by T1, which
-        /// compares tile-local coordinates element-wise.</para>
+        /// argument text of three call sites and nothing more. The differential oracle
+        /// <c>SymbolPaths_FromTheSharedBuffer_MatchTheManagedDecodeOracle</c> does not reach these call sites:
+        /// it transcribes the path read and never runs <c>Extract</c>'s consumers. So this grep is the fence's
+        /// only direct instrument; the symbol suites that run <c>Extract</c> end to end cover it indirectly.</para>
         /// </summary>
         [Test]
         public void SymbolExtractHandsTileSpacePathsToTheTileSpaceConsumers()
@@ -1942,7 +1944,7 @@ namespace MapRenderer.Tests.Structure
         /// retaining, re-publishing or simply forgetting what it observed. The body half is pinned
         /// separately below — the funnel must actually observe the outcome, so an EMPTY body fails (arm 2
         /// REQUIRED) — and the runtime release obligation hung here belongs to the leak teeth
-        /// (T-D1…T-D6), not a claim this text oracle makes.</para></summary>
+        /// (<c>EagerDecodeOwnershipTests</c>), not a claim this text oracle makes.</para></summary>
         [Test]
         public void TheFetchDiscardFunnel_CannotHandBackADecodeHandle()
         {
@@ -3230,10 +3232,10 @@ namespace MapRenderer.Tests.Structure
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The per-layer build-object stage's own T2 — <c>TileBuildGraph</c> retains no kind knowledge: every
-    /// layer it touches is an <c>ILayerMeshBuild</c>, and this fence pins that the type cannot silently
-    /// re-grow a per-kind dispatch the way it once held one (a <c>LayerRequestKind</c>-discriminated struct,
-    /// three factories, two dispatch sites). Copies <see cref="WallChainCallerFenceTests"/>'s own mould
+    /// <c>TileBuildGraph</c> retains no kind knowledge: every layer it touches is an
+    /// <c>ILayerMeshBuild</c>, and this fence pins that the type cannot silently re-grow a per-kind
+    /// dispatch (a <c>LayerRequestKind</c>-discriminated struct, per-kind factories, per-kind dispatch
+    /// sites). Copies <see cref="WallChainCallerFenceTests"/>'s own mould
     /// exactly: same two scan roots, <c>AllDirectories</c>, comments stripped first, <c>&gt;= 50</c>
     /// non-vacuity floor.
     ///

@@ -4,21 +4,22 @@
 // ============================================================================
 // FillExtrusion_VertexModify.hlsl — fill-extrusion layer implementation of the MapVertexModify hook.
 //
-// S23 I2b — D1: height extrusion happens ENTIRELY here, in the vertex shader, along a per-vertex baked
-// `extrudeUp` direction (see StyledFillExtrusionTileBuilder's class doc for the full sec-φ derivation,
-// OQ1/C1-A). The mesh itself carries a HEIGHT-AGNOSTIC footprint (elevation 0); `_ExtrusionBase`/
-// `_ExtrusionHeight` (constant/zoom, S11) plus the per-vertex `bakedBaseHeight` (data-driven, S12) select
-// how far along `extrudeUp` this vertex sits. See StyledFillExtrusionMeshTests' T1 (position
-// height-agnostic) and T5 (uniform vs bake) for the invariant this hook must preserve: changing
-// `_ExtrusionHeight` must NEVER require a re-mesh.
+// Height extrusion happens ENTIRELY here, in the vertex shader, along a per-vertex baked
+// `extrudeUp` direction (see StyledFillExtrusionTileBuilder's class doc for the full sec-φ derivation).
+// The mesh itself carries a HEIGHT-AGNOSTIC footprint (elevation 0); `_ExtrusionBase`/
+// `_ExtrusionHeight` (constant/zoom) plus the per-vertex `bakedBaseHeight` (data-driven) select
+// how far along `extrudeUp` this vertex sits. StyledFillExtrusionMeshTests pins the invariant this hook
+// must preserve — Wall_FloorAndRoof_CoincideInFootprintPosition (position height-agnostic) and
+// ConstantHeight_BakeStreamStaysZero / DataDrivenHeight_BakesEvaluatedValuePerVertex (uniform vs bake):
+// changing `_ExtrusionHeight` must NEVER require a re-mesh.
 //
-// fill-extrusion-translate (I2b): the SAME anchor-aware px→world pattern as Fill_VertexModify, applied
+// fill-extrusion-translate: the SAME anchor-aware px→world pattern as Fill_VertexModify, applied
 // AFTER the height extrusion (so the translate's "map" anchor tangent frame reads the ALREADY-extruded
 // vertex — correct for a roof vertex whose position has moved along extrudeUp).
 // ============================================================================
 
-// MapPixelsToWorld is shared with Fill and Line via ../PixelsToWorld.hlsl (S23 I2a/I2b) — FillExtrusion is
-// the THIRD carrier; see Shaders/README.md "Shared px→world include".
+// MapPixelsToWorld is shared with Fill and Line via ../PixelsToWorld.hlsl; see Shaders/README.md
+// "Shared px→world include".
 #include "../PixelsToWorld.hlsl"
 
 // Must be #included AFTER FillExtrusion_LitInput.hlsl (which declares the CBUFFER props used below).
@@ -29,11 +30,11 @@
 //               it, exactly like normalOS/tangentOS below), SEPARATE from the lighting normal.
 // t:            0 = floor/base, 1 = roof/height.
 // bakedBaseHeight: x = per-vertex baked fill-extrusion-base, y = per-vertex baked fill-extrusion-height
-//               (S12; both 0 on the constant/zoom-only path — see ExtrudeAndBake's doc in the C# builder).
+//               (both 0 on the constant/zoom-only path — see ExtrudeAndBake's doc in the C# builder).
 void MapVertexModify(
     inout float3 positionOS, float3 normalOS, float4 tangentOS, float3 extrudeUp, float t, float2 bakedBaseHeight)
 {
-    // Height extrusion (D1, C1-A, OQ1): ADDITIVE composition of the uniform (constant/zoom) and the baked
+    // Height extrusion: ADDITIVE composition of the uniform (constant/zoom) and the baked
     // (data-driven) contributions — so the uniform-only and bake-only paths both reduce to the plain
     // uniform behaviour when the other side is 0, with no branch (see ExtrudeAndBake's doc).
     float elevation = lerp(_ExtrusionBase + bakedBaseHeight.x, _ExtrusionHeight + bakedBaseHeight.y, t);

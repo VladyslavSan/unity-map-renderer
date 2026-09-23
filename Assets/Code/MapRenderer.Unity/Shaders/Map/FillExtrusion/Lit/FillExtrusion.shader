@@ -1,12 +1,12 @@
-// FillExtrusion.shader — Map/FillExtrusion (S23 I2b, structural parity with URP Lit.shader / Map/Fill)
+// FillExtrusion.shader — Map/FillExtrusion (structural parity with URP Lit.shader / Map/Fill)
 //
 // Lit fill-extrusion shader for unity-map-renderer: roof cap + side walls, height extrusion entirely in
 // the vertex shader (see FillExtrusion_VertexModify.hlsl).
 // Mirrors URP Lit.shader's pass list (ForwardLit / ShadowCaster / GBuffer / DepthOnly /
-// DepthNormals) — same shape as Map/Fill, with the D1 extrusion vertex attributes added and no
+// DepthNormals) — same shape as Map/Fill, with the extrusion vertex attributes added and no
 // fill-pattern (the spec has none for this layer).
 //
-// Key design points (mirrors S34's Fill.shader design, "Key design points"):
+// Key design points (mirrors Fill.shader's "Key design points"):
 //   • Fragment uses InitializeStandardLitSurfaceData — NEVER hand-assembled SurfaceData.
 //   • Full URP Lit property set (base/normal/metallic/occlusion/emission/detail maps, etc.)
 //     plus the _Opacity map paint property (the layer color is the standard _BaseColor).
@@ -14,9 +14,9 @@
 //   • Render state: the property DEFAULTS below mirror URP/Map/Fill (_ZWrite=0, alpha blend), but the
 //     RUNTIME contract for fill-extrusion is ELEVATED-3D — opaque, depth-writing (ZWrite On, ZTest LEqual,
 //     One/Zero blend) — asserted by FillExtrusionTweaker.ApplyElevatedContract and baked into the
-//     Map/FillExtrusion .mat (I3). Buildings must occupy the depth buffer to occlude one another and their
-//     own walls; see docs/depth-and-render-regimes-design.md § "What S23 implements — the degenerate
-//     case". [_Cull] drives winding as Fill's does.
+//     Map/FillExtrusion .mat. Buildings must occupy the depth buffer to occlude one another and their
+//     own walls; see docs/depth-and-render-regimes-design.md § "Fill-extrusion — the degenerate case".
+//     [_Cull] drives winding as Fill's does.
 //
 // Clean-room: this is URP integration, not MapLibre. URP docs/source are fair reference.
 // Authored for URP 17.5 / Unity 6000.x.
@@ -65,7 +65,7 @@ Shader "Map/FillExtrusion"
         [HideInInspector] _ClearCoatSmoothness("_ClearCoatSmoothness", Float) = 0.0
 
         // ── Blending state (mirrors Map/Fill; consumed by URP's ValidateMaterial) ──
-        // I2b keeps the FILL transparent-band defaults — opaque/depth render state is I3 (fence).
+        // Defaults are the FILL transparent-band values; FillExtrusionTweaker sets the opaque/depth state.
         _Surface("__surface", Float) = 1.0
         _Blend("__blend", Float) = 0.0
         [ToggleUI] _AlphaClip("__clip", Float) = 0.0
@@ -95,14 +95,15 @@ Shader "Map/FillExtrusion"
         [HideInInspector][NoScaleOffset]unity_LightmapsInd("unity_LightmapsInd", 2DArray) = "" {}
         [HideInInspector][NoScaleOffset]unity_ShadowMasks("unity_ShadowMasks", 2DArray) = "" {}
 
-        // ── Map paint properties (S23 I2b) ─────────────────────────
+        // ── Map paint properties ───────────────────────────────────
         // These are the MapLibre-style styling knobs; they modulate the URP surface.
         // The layer color is the standard _BaseColor above; _Opacity modulates alpha.
         _Opacity ("Opacity", Range(0, 1)) = 1.0
 
-        // fill-extrusion-height/-base: constant/zoom uniforms (S11); data-driven bakes per-vertex instead
-        // (S23 I2b builder) — the VS composes them additively (see FillExtrusion_VertexModify.hlsl).
-        // NOT named _Height/_Base — _Base collides with nothing today, but _ExtrusionBase reserves the
+        // fill-extrusion-height/-base: constant/zoom uniforms; data-driven bakes per-vertex instead
+        // (StyledFillExtrusionTileBuilder) — the VS composes them additively (see
+        // FillExtrusion_VertexModify.hlsl).
+        // NOT named _Height/_Base — _Base collides with nothing, but _ExtrusionBase reserves the
         // name against a future generic "base" property the way _FillOutlineColor etc. do.
         _ExtrusionHeight ("Extrusion Height (m)", Float) = 0.0
         _ExtrusionBase ("Extrusion Base (m)", Float) = 0.0
@@ -124,10 +125,10 @@ Shader "Map/FillExtrusion"
         }
         LOD 300
 
-        // Forward-pass render state — fully parameterized (mirrors Map/Fill's S58 shape). I2b defaults
+        // Forward-pass render state — fully parameterized (mirrors Map/Fill's shape). The defaults
         // reproduce the FILL transparent-band behaviour: Blend driven by _SrcBlend/_DstBlend, BlendOp Add,
-        // ZWrite [_ZWrite] (0 here — painter's-algorithm transparent), ZTest LEqual, Cull Off. Opaque/depth
-        // render state (a per-layer tweaker) is I3.
+        // ZWrite [_ZWrite] (0 here — painter's-algorithm transparent), ZTest LEqual, Cull Off. The
+        // opaque/depth render state comes from a per-layer tweaker (FillExtrusionTweaker).
         Blend [_SrcBlend] [_DstBlend], [_SrcBlendAlpha] [_DstBlendAlpha]
         BlendOp [_BlendOp]
         AlphaToMask [_AlphaToMask]
@@ -251,7 +252,7 @@ Shader "Map/FillExtrusion"
         // ─────────────────────────────────────────────────────────────────────
         // Pass 3: GBuffer — deferred G-Buffer fill (opaque only).
         // Fills are deferred-eligible; this pass populates the GBuffer for
-        // deferred lighting. Deferred renderer activation is out of scope (S34/S23).
+        // deferred lighting. It is inert unless the URP renderer runs in deferred mode.
         // ─────────────────────────────────────────────────────────────────────
         Pass
         {

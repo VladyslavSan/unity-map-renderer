@@ -65,7 +65,8 @@ namespace MapRenderer.Core.Geo
 
         /// <summary>
         /// Batch projects an array of geodetic points to render-space ECEF coordinates.
-        /// Element-wise equivalent to scalar <see cref="Forward(GeoCoordinate3D)"/> (T4: exact equality).
+        /// Element-wise equal to scalar <see cref="Forward(GeoCoordinate3D)"/>, bit for bit
+        /// (pinned by <c>ProjectionMathTests.Ecef_BatchEqualsScalar_Exact</c>).
         /// Allocates zero bytes (caller owns <paramref name="dst"/> span).
         /// </summary>
         public static void Forward(ReadOnlySpan<GeoCoordinate3D> src, Span<double3> dst)

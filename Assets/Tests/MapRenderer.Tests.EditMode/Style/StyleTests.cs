@@ -1736,7 +1736,7 @@ namespace MapRenderer.Tests.Style
             Assert.IsTrue(fp.IsInertFallback, "a layer with null Paint must be IsInertFallback.");
         }
 
-        // ── StyleParser dispatch (T4 Core half) ──────────────────────────────────
+        // ── StyleParser dispatch (Core half) ─────────────────────────────────────
 
         [Test]
         public void StyleParser_ParseLayer_FillExtrusion_YieldsTypedSubclass()
@@ -2433,10 +2433,9 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(AlignmentMode.Auto, bad.Layout.TextRotationAlignment, "an unrecognized alignment degrades to auto");
         }
 
-        // T6 — icon/text parse independence. AlignmentMode has only two usable
-        // non-auto values for FOUR keys, so one layer can never give all four keys distinguishable values
-        // (a prior version of this test wrongly claimed it could, setting two of the four to the same
-        // 'map'). Instead: FOUR layers, each setting exactly ONE of the four {text,icon}-{rotation,pitch}
+        // Icon/text parse independence. AlignmentMode has only two usable
+        // non-auto values for FOUR keys, so one layer can never give all four keys distinguishable values.
+        // Instead: FOUR layers, each setting exactly ONE of the four {text,icon}-{rotation,pitch}
         // keys to 'map' and leaving the other three absent (auto). A copy-paste that reads the wrong
         // PropertyNames constant, or assigns a pitch property from its sibling rotation key, then makes the
         // SET key read Auto or an absent key read Map — caught unambiguously in exactly one of the four
@@ -3000,7 +2999,7 @@ namespace MapRenderer.Tests.Style
                 "Line_VertexExtrude.hlsl must have _DashCount guard for solid identity (dash logic lives in shared helper).");
         }
 
-        // ── T6: the CPU mirror's pointer to its HLSL twin must name a file that exists ───────────
+        // ── the CPU mirror's pointer to its HLSL twin must name a file that exists ───────────────
 
         /// <summary>Resolves a repo-relative DIRECTORY the same way <see cref="FindRepoFile"/> resolves a
         /// file. Returns null when no ancestor contains it.</summary>
@@ -3026,16 +3025,15 @@ namespace MapRenderer.Tests.Style
         }
 
         /// <summary>
-        /// <b>T6.</b> <see cref="Line.LineDash"/> is the declared single source of truth for the dash
+        /// <see cref="Line.LineDash"/> is the declared single source of truth for the dash
         /// function and points at its HLSL mirror by name. Those pointers must name the file that actually
-        /// carries the mirror — <c>Line_VertexExtrude.hlsl</c> — and not the
-        /// <c>MapLineForwardPass.hlsl</c> that has not existed for several stages.
+        /// carries the mirror — <c>Line_VertexExtrude.hlsl</c> — and not a file that does not exist, such
+        /// as <c>MapLineForwardPass.hlsl</c>.
         ///
         /// <para>The second half is what stops this from rotting: every <c>*.hlsl</c> token in the file is
-        /// resolved on disk. <c>MapLineForwardPass.hlsl</c> was a CORRECT pointer once; without a
-        /// resolve-on-disk clause, a name-only assertion is one rename away from being green and wrong
-        /// again. Distinct from the greppable tooth above, which reads the SHADER files rather than this
-        /// one.</para>
+        /// resolved on disk. Without a resolve-on-disk clause, a name-only assertion is one rename away
+        /// from being green and wrong. Distinct from the greppable tooth above, which reads the SHADER files
+        /// rather than this one.</para>
         /// </summary>
         [Test]
         public void ShaderPointers_InLineDashSource_ResolveOnDisk()

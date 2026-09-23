@@ -68,16 +68,16 @@ namespace MapRenderer.Jobs.Symbols
         public NativeArray<byte>   AnchorWasPlaced;
         public float   Bearing;
         public double2 Viewport;
-        // W1: this frame's world ruler, metres per LOGICAL screen pixel — already recombined by
+        // This frame's world ruler, metres per LOGICAL screen pixel — already recombined by
         // SymbolPlacementSystem.Tick (MetresPerDevicePixel × DevicePixelRatio), so nothing downstream carries
         // a device-px value plus a ratio to be re-multiplied. Patched into each curved record below, the same
         // way the point arm patches ScreenPx/Depth/Projected/SurfaceUp.
         public float   MetresPerLogicalPixel;
-        // W3: this frame's view transform (scene origin, rebase, view-projection, logical viewport) — the
+        // This frame's view transform (scene origin, rebase, view-projection, logical viewport) — the
         // four values SymbolScreenProjection needs to project an arbitrary render-space point, which is what
         // the map-pitched collision box is built from. Per-frame, like Bearing/Viewport; passed to
         // StageCurved only. The POINT arm never sees it (StagePoint/StagePointPair take no such parameter),
-        // and a default-constructed value selects the pre-W3 screen box — see SymbolViewTransform.IsUsable.
+        // and a default-constructed value selects the screen-space box — see SymbolViewTransform.IsUsable.
         public SymbolViewTransform View;
 
         // Incumbency: last frame's collision survivors, keyed by fade id. Read from Burst — the reason
@@ -168,7 +168,7 @@ namespace MapRenderer.Jobs.Symbols
                     int anchorCount = CurvedAnchorCount[d];
                     int fadeStart   = CurvedAnchorFadeStart[d];
                     CurvedStageInput s = Curveds[d];
-                    s.MetresPerLogicalPixel = MetresPerLogicalPixel; // W1: per-frame patch (see the field's doc)
+                    s.MetresPerLogicalPixel = MetresPerLogicalPixel; // per-frame patch (see the field's doc)
 
                     ReadOnlySpan<float2>  screen = Screen.AsSpan().Slice(off, wc);
                     ReadOnlySpan<float>   depth  = Depth.AsSpan().Slice(off, wc);

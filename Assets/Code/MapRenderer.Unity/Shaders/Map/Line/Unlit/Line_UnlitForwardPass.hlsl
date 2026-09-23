@@ -8,12 +8,12 @@
 //   • Line_UnlitInput.hlsl (our mirror) is included by LineUnlit.shader before this file, and
 //     Line_VertexExtrude.hlsl (which DEFINES LineAttributes and LineCoverage — see that file) is included
 //     between the two. This file therefore does NOT declare its own Attributes struct — it consumes the
-//     SAME LineAttributes every line pass (Lit and Unlit) shares. That is the load-bearing invariant this
-//     epic documents (plan §1): a vertex-layout fork is impossible by construction.
+//     SAME LineAttributes every line pass (Lit and Unlit) shares. That is the load-bearing invariant:
+//     with one shared struct, the Lit and Unlit vertex layouts cannot fork.
 //   • Vertex calls the SAME Line_VertexExtrude(...) the Lit twin's LinePassVertex calls — identical
 //     world-space ribbon extrusion, identical silhouette, identical AA/dash coverage inputs. Only the
 //     FRAGMENT drops lighting.
-//   • [MAP DELTA S3] Line AA is PRESERVED, not stubbed: alpha is the SAME LineCoverage(...) formula the Lit
+//   • [MAP DELTA] Line AA is PRESERVED, not stubbed: alpha is the SAME LineCoverage(...) formula the Lit
 //     twin's LinePassFragment uses — LineCoverage lives in the reused Line_VertexExtrude.hlsl and is
 //     unchanged, so the straddle AA / gap-hole / line-blur / dash coverage all carry over verbatim. The
 //     _HAIRLINE_SOLID_CORE energy-compensation multiply (× hairlineScale) is reproduced exactly too.

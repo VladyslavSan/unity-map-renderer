@@ -91,7 +91,7 @@ namespace MapRenderer.Tests.Style
             return symbols;
         }
 
-        // ── T1: constant arm, bind ────────────────────────────────────────────────────────────
+        // ── constant arm, bind ────────────────────────────────────────────────────────────────
 
         /// <summary>The bound `_TextColor` must be the authored sRGB triple — NO manual gamma conversion
         /// before <c>ZoomStyleApplier.BindColor</c> (the same defect shape one field over). RED-verify:
@@ -115,7 +115,7 @@ namespace MapRenderer.Tests.Style
             finally { renderLayer.Dispose(); }
         }
 
-        // ── T2: constant arm, alpha ────────────────────────────────────────────────────────────
+        // ── constant arm, alpha ────────────────────────────────────────────────────────────────
 
         /// <summary>(a) the uniform's alpha is pinned to 1 regardless of the authored alpha — the uniform
         /// carries RGB only. RED-verify: pass <c>(float)c.A</c> instead of <c>1f</c> at the bind site.</summary>
@@ -149,7 +149,7 @@ namespace MapRenderer.Tests.Style
                 "the extracted SymbolPaint's alpha must be the authored 0.5, whichever carrier holds RGB.");
         }
 
-        // ── T3: constant arm, bake — the vertex stays white ───────────────────────────────────
+        // ── constant arm, bake — the vertex stays white ───────────────────────────────────────
 
         /// <summary>A CONSTANT text-color's extracted vertex RGB must be white — the colour lives in the
         /// uniform instead. RED-verify: delete the <c>RidesUniform</c> guard in
@@ -167,7 +167,7 @@ namespace MapRenderer.Tests.Style
             Assert.That(rgba.z, Is.EqualTo(1f).Within(1e-4f), what);
         }
 
-        // ── T4: data-driven arm untouched ──────────────────────────────────────────────────────
+        // ── data-driven arm untouched ──────────────────────────────────────────────────────────
 
         /// <summary>(a) a data-driven text-color must still bake its PER-FEATURE colour into the vertex,
         /// not white. RED-verify: invert the guard to <c>!RidesUniform</c>.</summary>
@@ -209,7 +209,7 @@ namespace MapRenderer.Tests.Style
             finally { renderLayer?.Dispose(); }
         }
 
-        // ── T5: fence — a data-driven halo must not swallow the text-color bind ───────────────
+        // ── fence — a data-driven halo must not swallow the text-color bind ───────────────────
 
         /// <summary>A data-driven <c>text-halo-color</c> is skipped by its own <c>!DependsOnFeature</c>
         /// guard in <c>BindTextPaint</c>; the <c>text-color</c> arm is a separate, independent guard, so a
@@ -239,7 +239,7 @@ namespace MapRenderer.Tests.Style
             finally { renderLayer.Dispose(); }
         }
 
-        // ── T7: the predicate itself, over real parsed expressions ────────────────────────────
+        // ── the predicate itself, over real parsed expressions ────────────────────────────────
 
         private static StyleProperty<CoreColor> ColorProperty(string json)
             => new StyleProperty<CoreColor>(JsonParser.Parse(json), new CoreColor(0, 0, 0, 1),
@@ -273,11 +273,12 @@ namespace MapRenderer.Tests.Style
             Assert.IsFalse(SymbolTextColorCarrier.RidesUniform(composite), "Composite must not ride the uniform.");
         }
 
-        // ── T9: the extraction half of skip 3's "no symbol BAKE output" claim ─────────────────
+        // ── the extraction half of the in-place restyle's "no symbol BAKE output" claim ───────
 
-        /// <summary>Skip 3's observer (<c>MapView.cs</c>): a Constant <c>text-color</c> change between two
-        /// otherwise-identical symbol layers must extract IDENTICAL <see cref="SymbolPaint"/>s (white vertex
-        /// RGB both sides), which is what makes <c>SymbolSubsystem</c> keeping the previous document's
+        /// <summary>The in-place restyle in <c>MapView.cs</c> skips <c>SymbolSubsystem.SetStyle</c>, so a
+        /// Constant <c>text-color</c> change between two otherwise-identical symbol layers must extract
+        /// IDENTICAL <see cref="SymbolPaint"/>s (white vertex RGB both sides), which is what makes
+        /// <c>SymbolSubsystem</c> keeping the previous document's
         /// symbol layers checkable rather than asserted. RED-verify: delete the <c>RidesUniform</c> guard in
         /// <c>SymbolFeatureExtractor.EvaluatePaint</c> — the two extractions then carry different vertex
         /// colours and the <c>TextColor.x</c> assertion fires.</summary>
@@ -397,7 +398,7 @@ namespace MapRenderer.Tests.Style
     ]
 }";
 
-        /// <summary>T2. A reorder with NO paint change: every slot/Mesh/Material identity stays, but every
+        /// <summary>A reorder with NO paint change: every slot/Mesh/Material identity stays, but every
         /// declared-order-derived <c>Material.renderQueue</c> moves to the NEW order, including a symbol
         /// layer's icon band.</summary>
         [Test]
@@ -491,7 +492,8 @@ namespace MapRenderer.Tests.Style
             }
         }
 
-        /// <summary>Not the mid-call T7 (that needs an observation hook <c>TryRestyleInPlace</c>
+        /// <summary>Not a mid-call check like <c>EveryCommitPhase_KeepsAtLeastTheSmallerLiveMaterialCount</c>
+        /// (that needs an observation hook <c>TryRestyleInPlace</c>
         /// exposes none of — no <c>CommitProbe</c>-equivalent exists inside a single synchronous call).
         /// This is the two-pass shape's OTHER half instead: a REFUSED restyle must leave every original
         /// Material and instance completely untouched — never disposed, never replaced.</summary>
@@ -724,7 +726,7 @@ namespace MapRenderer.Tests.Style
                 "would accept and every tile would keep the previous style's baked colour forever.");
         }
 
-        // ── Symbol layers survive and ease across a restyle (T1, T2a–e) ──────────────────────
+        // ── Symbol layers survive and ease across a restyle ──────────────────────────────────
 
         private const string SymbolTemplate = @"{{
     ""version"": 8, ""name"": ""T"",
@@ -740,7 +742,7 @@ namespace MapRenderer.Tests.Style
             => StyleParser.Parse(string.Format(SymbolTemplate, paintJson));
 
         /// <summary>
-        /// <b>T1.</b> The real shipped liberty → liberty-night pair must survive the gate once text-color
+        /// The real shipped liberty → liberty-night pair must survive the gate once text-color
         /// and text-halo-color are transitionable. RED-verify
         /// (two injections, either alone leaves the other's RED unproven): remove text-halo-color from
         /// TransitionablePaintKeys (18 refuse); separately remove text-color (20 refuse).
@@ -755,9 +757,9 @@ namespace MapRenderer.Tests.Style
                 "text-halo-color, must survive the gate — this is the stage's deliverable.");
         }
 
-        /// <summary><b>T2a.</b> A synthetic pair differing only in a Constant text-color survives — T2b's
-        /// non-vacuity control (same fixture shape, opposite verdict). RED-verify: remove text-color from
-        /// TransitionablePaintKeys.</summary>
+        /// <summary>A synthetic pair differing only in a Constant text-color survives — the
+        /// non-vacuity control for <see cref="SymbolLayer_ZoomKindTextColorChange_IsRefused"/> (same fixture
+        /// shape, opposite verdict). RED-verify: remove text-color from TransitionablePaintKeys.</summary>
         [Test]
         public void SymbolLayer_ConstantTextColorChange_Survives()
         {
@@ -767,7 +769,7 @@ namespace MapRenderer.Tests.Style
                 "a Constant text-color change must survive — the applier re-binds the uniform on Restyle.");
         }
 
-        /// <summary><b>T2b.</b> A Zoom-kind text-color change — different stop outputs on each side — must
+        /// <summary>A Zoom-kind text-color change — different stop outputs on each side — must
         /// be REFUSED: the in-place path never re-bakes the vertex COLOR stream a non-Constant text-color
         /// lives in. RED-verify: change the gate's text-color arm from RidesUniform(kind) to
         /// !DependsOnFeature(kind).</summary>
@@ -783,9 +785,8 @@ namespace MapRenderer.Tests.Style
                 "stream — MapView's SymbolSubsystem.SetStyle skip and _symbolStyleLayers assume it never has to.");
         }
 
-        /// <summary><b>T2c.</b> A Zoom-kind text-halo-color change — different stops on each side — must
-        /// be REFUSED, on exactly the same grounds as T2b's text-color. This arm asserted the OPPOSITE while
-        /// the whole halo trio bound to per-layer uniforms; once the halo became GEOMETRY, a non-Constant
+        /// <summary>A Zoom-kind text-halo-color change — different stops on each side — must
+        /// be REFUSED, on the same grounds as a Zoom-kind text-color. The halo is GEOMETRY: a non-Constant
         /// text-halo-color bakes into the vertex COLOR stream of a second glyph run, which the in-place path
         /// never re-bakes. RED-verify: widen the gate's symbol-colour arm from RidesUniform(kind) to
         /// !DependsOnFeature(kind).</summary>
@@ -798,11 +799,11 @@ namespace MapRenderer.Tests.Style
                 @"""text-halo-color"": [""interpolate"",[""linear""],[""zoom""],5,""#000000"",15,""#4099C0""]");
             Assert.IsFalse(WholeDocumentGate.AllLayersSurvive(oldStyle, newStyle),
                 "freeing text-halo-color above Constant requires the in-place path to re-bake the halo run's " +
-                "vertex COLOR stream — the same carrier argument that refuses a Zoom-kind text-color (T2b).");
+                "vertex COLOR stream — the same carrier argument that refuses a Zoom-kind text-color.");
         }
 
-        /// <summary><b>T2c2.</b> The Constant control for T2c — same fixture shape, opposite verdict, so
-        /// T2c's refusal is not vacuous. RED-verify: remove text-halo-color from
+        /// <summary>The Constant control for <see cref="SymbolLayer_ZoomKindHaloColorChange_IsRefused"/> —
+        /// same fixture shape, opposite verdict, so that refusal is not vacuous. RED-verify: remove text-halo-color from
         /// TransitionablePaintKeys.</summary>
         [Test]
         public void SymbolLayer_ConstantHaloColorChange_Survives()
@@ -813,7 +814,7 @@ namespace MapRenderer.Tests.Style
                 "a Constant text-halo-color change must survive — it rides _HaloColor, which Restyle re-binds.");
         }
 
-        /// <summary><b>T2d.</b> A data-driven text-halo-color change must be REFUSED — the gate guard and
+        /// <summary>A data-driven text-halo-color change must be REFUSED — the gate guard and
         /// BindTextPaint's !DependsOnFeature guard are exact complements. RED-verify: drop the
         /// !DependsOnFeature half of the default arm.</summary>
         [Test]
@@ -826,7 +827,7 @@ namespace MapRenderer.Tests.Style
                 "every symbol layer would keep the previous style's halo forever.");
         }
 
-        /// <summary><b>T2e.</b> A text-halo-width change — a key NOT freed — must still
+        /// <summary>A text-halo-width change — a key NOT freed — must still
         /// refuse, guarding against a future "make the gate pass" by adding keys.</summary>
         [Test]
         public void SymbolLayer_HaloWidthChange_IsRefused()

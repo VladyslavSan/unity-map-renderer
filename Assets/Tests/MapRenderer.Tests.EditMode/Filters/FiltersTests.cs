@@ -770,9 +770,9 @@ namespace MapRenderer.Tests.Filters
             }
         }
 
-        /// <summary>The FeatureSelector-level half of T3b: when the seam itself refuses to bind (simulated
-        /// here via the spy, standing in for a real rebind refusal), the seam is still probed but the
-        /// selection falls back to the managed path and stays correct.</summary>
+        /// <summary>The FeatureSelector-level half of the rebind-refusal case: when the seam itself refuses
+        /// to bind (simulated here via the spy, standing in for a real rebind refusal), the seam is still
+        /// probed but the selection falls back to the managed path and stays correct.</summary>
         [Test]
         public void FeatureSelector_FallsBackToManaged_WhenTheSeamRefusesToBind()
         {
@@ -792,7 +792,7 @@ namespace MapRenderer.Tests.Filters
                 Assert.AreSame(expected[i], into[i].Feature);
         }
 
-        // ── Test-assembly spy decorator (T2/T3b) ────────────────────────────────────────────────
+        // ── Test-assembly spy decorator (T2, and T3's rebind refusal) ───────────────────────────
 
         /// <summary>Test-assembly capability decorator around a real <see cref="MvtLayer"/> — forwards every
         /// <see cref="ITileLayer"/>/<see cref="IIndexedFeatureSource"/>/<see cref="INativeFilterSource"/>
@@ -803,7 +803,7 @@ namespace MapRenderer.Tests.Filters
         /// type).
         ///
         /// <para><paramref name="forceRefuse"/> makes <see cref="TryBindNativeFilterCalls"/> still count the
-        /// probe but always answer null — standing in for a real rebind refusal (T3b), without depending on
+        /// probe but always answer null — standing in for a real rebind refusal, without depending on
         /// the fixture actually containing one.</para></summary>
         private sealed class NativeFilterSourceSpy : ITileLayer, IIndexedFeatureSource, INativeFilterSource
         {

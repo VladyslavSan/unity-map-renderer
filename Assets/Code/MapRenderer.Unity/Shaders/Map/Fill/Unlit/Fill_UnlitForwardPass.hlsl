@@ -9,16 +9,16 @@
 //   • Vertex is IDENTICAL to Fill_LitForwardPass's vertex for the geometry that matters: it calls the
 //     SAME MapVertexModify(...) hook over the SAME Attributes (POSITION/NORMAL/TANGENT/TEXCOORD0/COLOR),
 //     so fill-translate and the mesh silhouette are pixel-identical between the Lit and Unlit twins — only
-//     the FRAGMENT drops lighting. This is the load-bearing invariant the epic plan documents (§1): the
-//     vertex hooks consume NORMAL/TANGENT as GEOMETRY, not lighting, so there is no vertex-layout fork.
+//     the FRAGMENT drops lighting. This is the load-bearing invariant: the vertex hooks consume
+//     NORMAL/TANGENT as GEOMETRY, not lighting, so there is no vertex-layout fork.
 //   • Fragment is flat: albedo = _BaseColor × _BaseMap × vColor; alpha = _BaseColor.a × _BaseMap.a ×
 //     vColor.a × _Opacity (_BaseMap.a stays 1 for every layer — fill-color never sets a custom
-//     _BaseMap — but _BaseColor.a now carries a Constant/Zoom fill-color's authored alpha, read the
+//     _BaseMap — but _BaseColor.a carries a Constant/Zoom fill-color's authored alpha, read the
 //     same way the Lit twin reads it, so this is the Lit twin's alpha with the lighting-only
-//     surface-data plumbing removed, not the epic plan's shorthand which drops _BaseMap.a/_BaseColor.a
-//     outright; see the unlit S1 dev report for why). No InitializeStandardLitSurfaceData, no
-//     InputData, no UniversalFragmentPBR/SAMPLE_GI — UniversalFragmentUnlit (URP's own no-lighting exit
-//     point) composes the final color instead.
+//     surface-data plumbing removed; an alpha that dropped _BaseMap.a/_BaseColor.a would lose that
+//     authored alpha). No InitializeStandardLitSurfaceData, no InputData, no
+//     UniversalFragmentPBR/SAMPLE_GI — UniversalFragmentUnlit (URP's own no-lighting exit point)
+//     composes the final color instead.
 //   • Keeps the fill-pattern branch (SampleFillPattern + clip) verbatim from Fill_LitForwardPass.hlsl.
 
 #ifndef MAP_FORWARD_UNLIT_PASS_INCLUDED
@@ -42,7 +42,7 @@ struct Attributes
     // [MAP DELTA] boundary band (dirEast, dirNorth, side). The slot is the MESH's attribute index, so it
     // is TEXCOORD3 here too even though this pass declares no TEXCOORD1/2 of its own.
     float3 band         : TEXCOORD3;
-    // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
+    // [MAP DELTA] Per-vertex baked color from data-driven expression (mesh COLOR stream).
     float4 color        : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
@@ -50,7 +50,7 @@ struct Attributes
 struct Varyings
 {
     float2 uv          : TEXCOORD0;
-    // [MAP DELTA S12] Per-vertex baked color (data-driven dimension), passed through untouched.
+    // [MAP DELTA] Per-vertex baked color (data-driven dimension), passed through untouched.
     half4  vColor      : TEXCOORD1;
     float  fogCoord    : TEXCOORD2;
     // [MAP DELTA] Outward boundary band coordinate; next free slot in this pass.
@@ -92,7 +92,7 @@ Varyings UnlitPassVertex(Attributes input)
     output.uv = TRANSFORM_TEX(input.texcoord, _BaseMap);
     output.fogCoord = ComputeFogFactor(vertexInput.positionCS.z);
 
-    // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
+    // [MAP DELTA] Pass per-vertex baked color to the fragment stage.
     output.vColor = input.color;
 
     return output;
@@ -109,10 +109,10 @@ void UnlitPassFragment(
     half4 texColor = SAMPLE_TEXTURE2D(_BaseMap, sampler_BaseMap, input.uv);
 
     // [MAP DELTA] Flat albedo/alpha — no lighting, no InitializeStandardLitSurfaceData. Composite order
-    // mirrors Fill_LitForwardPass's InitializeStandardLitSurfaceData + its [MAP DELTA S12] modulation:
+    // mirrors Fill_LitForwardPass's InitializeStandardLitSurfaceData + its [MAP DELTA] modulation:
     //   texColor  = the URP surface factor (identity {1,1,1,1} for every real fill — no custom _BaseMap).
     //   _BaseColor = a Constant/Zoom fill-color, converted and uploaded once per material.
-    //   vColor    = the data-driven bake (Source/Expression fill-color, S12) — white when _BaseColor
+    //   vColor    = the data-driven bake (Source/Expression fill-color) — white when _BaseColor
     //     carries the color instead, so exactly one of the two is non-white per layer.
     //   _Opacity  = the paint property.
     half3 albedo = texColor.rgb * _BaseColor.rgb * input.vColor.rgb;

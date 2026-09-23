@@ -206,7 +206,7 @@ namespace MapRenderer.Tests.Visual
             view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
-            // Backend defaults to Entities (S53c) — do NOT set it to Brg.
+            // Backend defaults to Entities — do NOT set it to Brg.
 
             try
             {
@@ -1669,7 +1669,7 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // S53b increment 2 — Entities backend wired through MapView/TileManager.
+    // Entities backend wired through MapView/TileManager.
     //
     // Proves the live path (not just the EntitiesTileRenderer unit): selecting RenderBackend.Entities
     // constructs the backend, ConsumeMeshBuild creates one entity per tile-layer, and the per-frame
@@ -1677,7 +1677,7 @@ namespace MapRenderer.Tests.Visual
     // entity's LocalToWorld translation), mirroring BrgBackendSnapshotTests' floating-origin tooth.
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // MapViewEntitiesBackendTests — S53b increment 2
+    // MapViewEntitiesBackendTests — the Entities backend through MapView/TileManager
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -1717,7 +1717,7 @@ namespace MapRenderer.Tests.Visual
             view.Config.TileSelection.MinZoom = 0; view.Config.TileSelection.MaxZoom = 0; view.WithTestCamera();
             view.Config.MaxConsumesPerTick = 64;
             view.Config.MaxMeshBuildsPerTick = 64;
-            view.Config.Backend = RenderBackend.Brg; // S53c: default is Entities; pin BRG to prove exclusivity.
+            view.Config.Backend = RenderBackend.Brg; // The default is Entities; pin BRG to prove exclusivity.
             try
             {
                 view.LoadTestStyle(src, MakeCam(0, 0, 0.0), style: MinimalStyle());

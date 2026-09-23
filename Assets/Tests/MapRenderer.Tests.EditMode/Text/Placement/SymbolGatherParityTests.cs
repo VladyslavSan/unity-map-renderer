@@ -37,7 +37,7 @@ using MapRenderer.Unity.View;
 using MapRenderer.Unity.View.Camera;
 using UnityEngine.TestTools.Constraints;
 using MapRenderer.Core.Style.Symbol;
-using Is = UnityEngine.TestTools.Constraints.Is; // Is.Not.AllocatingGCMemory() — T6
+using Is = UnityEngine.TestTools.Constraints.Is; // Is.Not.AllocatingGCMemory()
 using System;
 using Object = UnityEngine.Object;
 
@@ -332,7 +332,7 @@ namespace MapRenderer.Tests.Text.Placement
         }
 
         // ── WITHIN-FRAME DETERMINISM given a fixed kept-set: the survivor set is independent of candidate input
-        //    order (T1 permutation-invariance still holds — it is only the GLOBAL history-independence incumbency trades). ──
+        //    order (permutation-invariance still holds — it is only the GLOBAL history-independence incumbency trades). ──
         [Test]
         public void Collision_Hysteresis_IsPermutationInvariant_GivenFixedKeptSet()
         {
@@ -1121,7 +1121,7 @@ namespace MapRenderer.Tests.Text.Placement
                 $"{because} — sampled ({actual.x:F3},{actual.y:F3},{actual.z:F3}) vs expected ({expected.x:F3},{expected.y:F3},{expected.z:F3}).");
         }
 
-        // ── T1 / T5's primary tooth: the collision verdict a Tick's emit reads is the one HARVESTED at the top
+        // ── The primary deferred-collision tooth: the collision verdict a Tick's emit reads is the one HARVESTED at the top
         //    of THAT Tick — i.e. the collision SCHEDULED at the end of the PREVIOUS Tick, over the PREVIOUS
         //    Tick's candidates. A brand-new candidate set therefore takes one extra Tick to be reflected: an
         //    incumbent holds its slot for one more Tick after a newcomer that would beat it appears. ──
@@ -1160,7 +1160,7 @@ namespace MapRenderer.Tests.Text.Placement
             AssertColorMatches(h.System, PaintOf(blue), "tick 4 must show B, A has snapped to 0");
         }
 
-        // ── T5 — the first Tick after construction schedules but shows nothing;
+        // ── The first Tick after construction schedules but shows nothing;
         //    the second shows the survivor of that scheduled collision. ──
         [Test]
         public void FirstTick_SchedulesOnly_SecondTickShowsTheSurvivors()
@@ -1176,7 +1176,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, h.System.LastQuadCount, "the second Tick harvests the first Tick's scheduled collision.");
         }
 
-        // ── T3 — DoDispose must Complete() a still-pending collision before disposing the buffers it holds
+        // ── DoDispose must Complete() a still-pending collision before disposing the buffers it holds
         //    (_stageCandidates/_stageBoxes/_nSurvivors/_survivorCountOut/the grid lists), or the job safety system
         //    throws (a use-after-free). Tick once (schedules a collision, leaving it pending — HarvestCollision
         //    only runs at the START of the NEXT Tick, which never comes here) then Dispose. ──
@@ -1204,7 +1204,7 @@ namespace MapRenderer.Tests.Text.Placement
             return SymbolRenderLayer.Create((Symbol.StyleLayer)StyleParser.Parse(styleJson).Layers[0], settings, initialZoom, drawIndex: 0);
         }
 
-        // ── T4 — the display-time zoom gate (`!cand.Suppressed` in the emit `show` expression) is a SAME-frame
+        // ── The display-time zoom gate (`!cand.Suppressed` in the emit `show` expression) is a SAME-frame
         //    override on top of the deferred verdict: a candidate that WON a previous collision must stop
         //    showing the instant its layer leaves the live zoom range, not linger a Tick until the next
         //    harvest catches up. ──
@@ -1904,28 +1904,24 @@ namespace MapRenderer.Tests.Text.Placement
     /// <see cref="SymbolPlacementSystem.GatherIntoMirror"/> memoizes its heavy compaction on
     /// <see cref="SymbolGatherPlan.WinnerSetVersion"/> — a same-source, same-version frame runs only
     /// the three per-frame masks (Departing/CoverageFading/Dropped), not the full
-    /// pool rebuild. These are the CONTENT teeth: byte-identity across held frames (T1), invalidation on a real
-    /// version change with the winner SET (T2a) or CONTENT (T3/T4/T4b) changing, and the memo-hit path's own
-    /// zero-GC guarantee (T6). <see cref="SymbolPlacementSystem.MirrorRebuildCount"/> is the discriminating signal
-    /// throughout — without it every test here would pass trivially against an unmemoized implementation.
+    /// pool rebuild. These are the CONTENT teeth: byte-identity across held frames, invalidation on a real
+    /// version change with the winner SET changing, per-frame mask tracking on a held mirror, and the memo-hit
+    /// path's own zero-GC guarantee. <see cref="SymbolPlacementSystem.MirrorRebuildCount"/> is the discriminating
+    /// signal throughout — without it every test here would pass trivially against an unmemoized implementation.
     ///
-    /// <para>T2b (a REAL front swap through the production <see cref="MapRenderer.Unity.Text.SymbolSubsystem"/>,
-    /// the stage's only end-to-end guard) and T5 (a restyle through the subsystem) live in
-    /// <c>SymbolReconcileAsyncTests</c> — that fixture already owns the async pump harness (UseImmediateGlyphs
-    /// / DriveTileBytesReady / PumpToQuiescence) both need, so building a second copy of it here would duplicate
-    /// non-trivial async machinery for no benefit; this is a placement deviation from the plan's table (which
-    /// listed T5 under this file) noted for the reviewer, not a change to T5's teeth.</para>
+    /// <para>A REAL front swap through the production <see cref="MapRenderer.Unity.Text.SymbolSubsystem"/>
+    /// (<c>Memo_RealFrontSwap_Invalidates</c>) and a restyle through the subsystem
+    /// (<c>Memo_RestyleBetweenTicks_Invalidates</c>) live in <c>SymbolReconcileAsyncTests</c> — that fixture
+    /// already owns the async pump harness (UseImmediateGlyphs / DriveTileBytesReady / PumpToQuiescence) both
+    /// need, so a second copy of it here would duplicate non-trivial async machinery for no benefit.</para>
     ///
     /// Fixture style follows <c>SymbolGatherParityTests</c> / <c>SymbolGatherPlanDropMaskTests</c>: a real
     /// <see cref="SymbolTileStore"/> seeded via <see cref="SymbolTileBlockBaker"/>, a real
     /// <see cref="SymbolPlacementSystem"/> behind a throwaway camera/material (<see cref="LpsHarness"/> — a plain
     /// camera, no real look-at, since <see cref="SymbolPlacementSystem.GatherIntoMirror"/>/<c>CopyMirrorInto</c>
     /// never touch the camera; <see cref="TickHarness"/> adds a real look-at only for the tests below that drive
-    /// a full <c>Tick</c>). T3 compares content across a <see cref="TickHarness"/> (zoom 12 @
-    /// 10°,10°, needed for its demo-batch <c>Tick</c> call) and a plain <see cref="LpsHarness"/> oracle (zoom 5 @
-    /// 0°,0°) — valid, not an oversight, because the gather/mirror comparison is camera-independent; the two
-    /// harnesses' differing cameras never enter it. The content-diff oracle is the shared
-    /// <see cref="SymbolBatchDiff.FirstDifference"/>. Per NIT7, the REFERENCE gather alternates between TWO
+    /// a full <c>Tick</c>). The gather/mirror comparison is camera-independent. The content-diff oracle is the
+    /// shared <see cref="SymbolBatchDiff.FirstDifference"/>. The REFERENCE gather alternates between TWO
     /// persistent <see cref="SymbolGatherPlan"/> objects fed to ONE reference <see cref="SymbolPlacementSystem"/>
     /// — a different instance identity than the previous call always mismatches <c>_mirrorSource</c>, so the
     /// reference NEVER memo-hits (a trustworthy ground truth) with zero per-tick native allocation (a
@@ -2070,7 +2066,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ═══ T1: N successive same-version gathers must stay a memo HIT and byte-match a fresh gather ═══
+        // ═══ N successive same-version gathers must stay a memo HIT and byte-match a fresh gather ═══
 
         [Test]
         public void Memo_NTicksNoTileEvent_MirrorByteIdenticalToFreshGather()
@@ -2081,7 +2077,7 @@ namespace MapRenderer.Tests.Text.Placement
             SeedTile(store, tile, PointSymbol(new double3(100, 0, 200), "a", 1, key, 0.1f));
 
             using var harness = new LpsHarness();
-            using var refHarness = new LpsHarness(); // NIT7: ONE reference system, TWO alternating plan objects below
+            using var refHarness = new LpsHarness(); // ONE reference system, TWO alternating plan objects below
             var plan = new SymbolGatherPlan();
             var refPlanA = new SymbolGatherPlan();
             var refPlanB = new SymbolGatherPlan();
@@ -2108,7 +2104,7 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); refPlanA.Dispose(); refPlanB.Dispose(); store.Clear(); }
         }
 
-        // ═══ T2a: rebuilding the SAME plan object with DIFFERENT content at a FIXED WinnerCount and a bumped
+        // ═══ Rebuilding the SAME plan object with DIFFERENT content at a FIXED WinnerCount and a bumped
         //          version must invalidate the memo — the coupled constraint: vary the winner SET (a
         //          different tile), never the record count, or the release-build count backstop rescues a broken
         //          version key and this row's RED-verify goes vacuously green. ═══
@@ -2158,16 +2154,16 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); refPlanA.Dispose(); refPlanB.Dispose(); storeA.Clear(); storeB.Clear(); }
         }
 
-        // ═══ T4: masks (Departing/CoverageFading) are per-frame inputs, legitimately varying at a FIXED version
-        //         (1.2's exemption) — must be tracked on a HELD (memo-hit) mirror, not frozen from the first
-        //         rebuild. Fixed WinnerCount throughout (else AssertMemoPlanMatchesMirror fires for the wrong
-        //         reason — 3.4's coupled constraint). Split into two single-mask tests (Codex SHOULD-FIX 2, see
-        //         below) so a cross-wire between the two masks can't hide behind a "both flipped together" test. ═══
+        // ═══ Masks (Departing/CoverageFading) are per-frame inputs, legitimately varying at a FIXED version
+        //     — must be tracked on a HELD (memo-hit) mirror, not frozen from the first rebuild. Fixed
+        //     WinnerCount throughout (else AssertMemoPlanMatchesMirror fires for the wrong reason). Two
+        //     single-mask tests, so a cross-wire between the two masks can't hide behind a "both flipped
+        //     together" test. ═══
 
-        // Split into two independent single-mask flips (Codex SHOULD-FIX 2): the original single test flipped
-        // Departing and CoverageFading TOGETHER, so an implementation that copied either source mask into BOTH
-        // destinations (e.g. WritePerFrameMasks accidentally writing plan.Departing into both
-        // _mirrorSymbolDeparting AND _mirrorSymbolCoverageFading) would still pass — both masks would read true either way.
+        // Two independent single-mask flips: a single test that flipped Departing and CoverageFading
+        // TOGETHER would let an implementation that copied either source mask into BOTH destinations
+        // (e.g. WritePerFrameMasks writing plan.Departing into both _mirrorSymbolDeparting AND
+        // _mirrorSymbolCoverageFading) pass — both masks would read true either way.
         // Each test below flips exactly ONE mask and asserts the OTHER stayed at its unflipped value, so a
         // mask-to-mask cross-wire fails on the "unchanged" assertion even though the "changed" one still passes.
 
@@ -2245,7 +2241,7 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); refPlan.Dispose(); store.Clear(); }
         }
 
-        // ═══ T4b: Dropped is invisible through CopyMirrorInto (it hard-skips in GatherSymbolPoints, not the
+        // ═══ Dropped is invisible through CopyMirrorInto (it hard-skips in GatherSymbolPoints, not the
         //          mirror-comparison surface) — assert it BEHAVIOURALLY, on a memo-HIT frame, via a real Tick +
         //          WorldMeshReadback comparison against a reference that never collected the dropped tile at all
         //          (mirrors SymbolGatherPlanDropMaskTests' pattern), with the masked side's Drop flip held at the
@@ -2349,9 +2345,9 @@ namespace MapRenderer.Tests.Text.Placement
             finally { storeMasked.Clear(); storeRef.Clear(); }
         }
 
-        // ═══ T6: the memo-HIT path (three mask memcpys + a subtraction) allocates ZERO managed garbage — pairs
-        //         with SymbolGatherParityTests.GatherIntoMirror_Warm_AllocatesNoGCMemory (the HEAVY-path guard,
-        //         repaired by forcing a version bump before its measured call). ═══
+        // ═══ The memo-HIT path (three mask memcpys + a subtraction) allocates ZERO managed garbage — pairs
+        //     with SymbolGatherParityTests.GatherIntoMirror_Warm_AllocatesNoGCMemory (the HEAVY-path guard,
+        //     which forces a version bump before its measured call). ═══
 
         [Test]
         public void GatherIntoMirror_MemoHit_AllocatesNoGCMemory()
@@ -2771,13 +2767,13 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); harness.Dispose(); store.Clear(); }
         }
 
-        // Tooth #2 (gather path): once warm, a second HEAVY GatherIntoMirror allocates ZERO managed garbage — the
-        // mirror native lists + plan are reused (the whole point of moving the SoA to a build-time bake). Mirrors
+        // Gather path: once warm, a second HEAVY GatherIntoMirror allocates ZERO managed garbage — the
+        // mirror native lists + plan are reused (the point of the build-time SoA bake). Mirrors
         // the SymbolSubsystemPumpTests.CurrentBatch_Warm_… idiom, one level down on the gather itself.
-        // Post-memo, a same-version GatherIntoMirror is a memo HIT, not the heavy path this test's message
+        // A same-version GatherIntoMirror is a memo HIT, not the heavy path this test's message
         // claims — bump WinnerSetVersion immediately before the measured call to force a real rebuild (the honest
         // "force a rebuild" knob: the field is internal, so the test can assign it). The memo-HIT alloc guard is
-        // SymbolGatherMemoTests.GatherIntoMirror_MemoHit_AllocatesNoGCMemory (T6), kept separate.
+        // SymbolGatherMemoTests.GatherIntoMirror_MemoHit_AllocatesNoGCMemory, kept separate.
         [Test]
         public void GatherIntoMirror_Warm_AllocatesNoGCMemory()
         {
@@ -2917,7 +2913,7 @@ namespace MapRenderer.Tests.Text.Placement
             finally { plan.Dispose(); harness.Dispose(); blockA.Dispose(); blockB.Dispose(); }
         }
 
-        // ── P12: bake/gather parity holds on a pair-bearing fixture — the baker resolves PairRole
+        // ── Bake/gather parity holds on a pair-bearing fixture — the baker resolves PairRole
         //    over the TILE list (SymbolTileBlockBaker.Fill); this test pins that the gather's block/detail
         //    SELECTION carries that resolved role through untouched. ──
         [Test]
@@ -3126,7 +3122,7 @@ namespace MapRenderer.Tests.Text.Placement
         // present in the plan, regardless of decision). dropTileKey == -1 (no tile ever packs to -1) ⇒ all Keep.
         // `version` is threaded through to SymbolGatherPlan.Build — every test below rebuilds the SAME plan
         // object across frames, so each call passes a freshly incremented per-test counter (audited by READING
-        // this call site, not by which tests happen to go RED — SHOULD-FIX 3).
+        // this call site, not by which tests happen to go RED).
         private static void BuildMaskedPlan(SymbolTileStore store, SymbolGatherPlan plan, long dropTileKey, int version)
         {
             var blockId = new List<int>();

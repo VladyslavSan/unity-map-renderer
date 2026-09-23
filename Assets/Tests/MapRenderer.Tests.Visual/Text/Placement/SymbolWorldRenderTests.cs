@@ -177,10 +177,10 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // Tile-corner placement: TileKey names a NEIGHBOR of the containing tile (mirrors
-        // WorldPointEmitRenderTests' NEW-F1 nonzero-AnchorLocal pattern) so the per-glyph Level-1 RTC bake is
-        // genuinely large (comparable to a whole tile span), not the small in-tile offset the main sweep
-        // above already carries incidentally.
+        // Tile-corner placement: TileKey names a NEIGHBOR of the containing tile, so the per-glyph Level-1 RTC
+        // bake is genuinely large (comparable to a whole tile span), not the small in-tile offset the main sweep
+        // above already carries incidentally. It mirrors the nonzero-AnchorLocal pattern of
+        // WorldPointEmitRenderTests.RealTick_NonzeroAnchorLocal_IsPixelEquivalentToZeroAnchorLocalBaseline.
         [Test]
         public void NewWorldPath_RendersUprightCurvedGlyph_MatchesGolden_NonzeroAnchorLocal()
         {
@@ -457,7 +457,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── NEW-F1: nonzero AnchorLocal through the real builder + shader ──────────────────────────────
+        // ── nonzero AnchorLocal through the real builder + shader ──────────────────────────────────────
 
         [Test]
         public void RealTick_NonzeroAnchorLocal_IsPixelEquivalentToZeroAnchorLocalBaseline()
@@ -695,7 +695,7 @@ namespace MapRenderer.Tests.Text.Placement
 
                 // The FROZEN world anchor — the glyph's own world point, a diagonal world Tangent (non-
                 // axis-aligned), and a NONZERO AnchorLocal (baked against a NEIGHBOR tile's origin, not the
-                // anchor's own containing tile — mirrors WorldPointEmitRenderTests' NEW-F1 pattern).
+                // anchor's own containing tile — mirrors WorldPointEmitRenderTests' nonzero-AnchorLocal pattern).
                 double3 anchorRender = frame0.SceneOriginRender + new double3(0.0, 0.0, altitude0 * 0.02);
                 var projection = new WebMercatorProjection();
                 TileId containingTile = TestTileKeys.Containing(new GeoCoordinate { Latitude = lookAt0.Latitude, Longitude = lookAt0.Longitude }, zoom: 14);
@@ -974,7 +974,8 @@ namespace MapRenderer.Tests.Visual
         /// binds <c>_HaloColor</c>) over a quad whose vertex COLOR is <paramref name="streamSrgb"/> taken
         /// through <c>SymbolPlacementSystem.LinearHaloColor</c> — the caller spells out that payload so the
         /// carrier under test is explicit, never derived from the production predicate. Optionally followed
-        /// by a <see cref="SymbolRenderLayer.Restyle"/> to <paramref name="restyleToHex"/> — T7.
+        /// by a <see cref="SymbolRenderLayer.Restyle"/> to <paramref name="restyleToHex"/>
+        /// (<see cref="RestyledHaloColor_RenderedPixel_MatchesTheNewAuthored"/>).
         /// Returns the centre sample in linear RGB.
         /// </summary>
         private static double3 RenderHalo(string haloColorJson, in float4 streamSrgb,
@@ -994,7 +995,7 @@ namespace MapRenderer.Tests.Visual
             mat.SetFloat(Shader.PropertyToID("_SdfEdge"), 3f);
             mat.SetVector(Shader.PropertyToID("_ScreenParamsLogical"), new Vector4(SnapSize, SnapSize, 0f, 0f));
 
-            // T7: the restyle seam. AFTER the SDF overrides (Restyle/ApplyZoom touch only _TextColor and
+            // The restyle seam. AFTER the SDF overrides (Restyle/ApplyZoom touch only _TextColor and
             // _HaloColor, so the overrides above survive unaffected) and BEFORE the render, so the sample
             // reflects the eased/settled colour, not the initial bind.
             if (restyleToHex != null)
@@ -1138,7 +1139,7 @@ namespace MapRenderer.Tests.Visual
         private const string RestyledHaloHex = "#4099C0";
 
         /// <summary>
-        /// <b>T7.</b> A RESTYLED <c>text-halo-color</c> must reach the fragment as the NEW
+        /// A RESTYLED <c>text-halo-color</c> must reach the fragment as the NEW
         /// authored colour, converted sRGB->linear exactly once — <see cref="HaloColor_RenderedPixel_MatchesAuthored"/>
         /// only guards the initial <c>Create</c> write; this is the missing assertion over a restyle
         /// re-bind. RED-verify: <c>Restyle</c> omits the halo re-bind — the pixel stays <c>#808080</c> and

@@ -2,9 +2,9 @@
 // (UnityEngine.TestTools.Constraints). NOT included in Tools/core-tests.
 //
 // Covered:
-//   T4-alloc: Forward(span,out) allocates 0 bytes when caller owns the buffers.
-//   T5-NativeArray: GeoCoordinate3D is usable as NativeArray<T> element type (blittable).
-//   T4-NativeArray: NativeArray<GeoCoordinate3D>.AsReadOnlySpan() bridges correctly to Forward.
+//   Forward(span,out) allocates 0 bytes when caller owns the buffers.
+//   GeoCoordinate3D is usable as NativeArray<T> element type (blittable).
+//   NativeArray<GeoCoordinate3D>.AsReadOnlySpan() bridges correctly to Forward.
 
 using NUnit.Framework;
 using Unity.Collections;
@@ -18,11 +18,10 @@ namespace MapRenderer.Tests.Projection
     [TestFixture]
     public class ProjectionMathUnityTests
     {
-        // ── T5 — GeoCoordinate3D usable as NativeArray element type ──────────────────────────────
+        // ── GeoCoordinate3D usable as NativeArray element type ───────────────────────────────────
 
         /// <summary>
-        /// T5: GeoCoordinate3D is blittable and works as NativeArray&lt;GeoCoordinate3D&gt; element.
-        /// Verifies T5's "usable as NativeArray element type" requirement.
+        /// GeoCoordinate3D is blittable and works as NativeArray&lt;GeoCoordinate3D&gt; element.
         /// </summary>
         [Test]
         public void GeoCoordinate3D_UsableAsNativeArrayElement()
@@ -47,7 +46,7 @@ namespace MapRenderer.Tests.Projection
         }
 
         /// <summary>
-        /// T5: GeoCoordinate usable as NativeArray element type (surface struct).
+        /// GeoCoordinate usable as NativeArray element type (surface struct).
         /// </summary>
         [Test]
         public void GeoCoordinate_UsableAsNativeArrayElement()
@@ -67,10 +66,10 @@ namespace MapRenderer.Tests.Projection
             }
         }
 
-        // ── T4-alloc — batch Forward allocates 0 bytes (NUnit GC recorder) ──────────────────────
+        // ── batch Forward allocates 0 bytes (NUnit GC recorder) ─────────────────────────────────
 
         /// <summary>
-        /// T4 (alloc): WebMercator.Forward(ReadOnlySpan, Span) with caller-owned NativeArrays
+        /// WebMercator.Forward(ReadOnlySpan, Span) with caller-owned NativeArrays
         /// allocates ZERO bytes on the GC heap. Uses NUnit GC-alloc recorder (NOT raw System.GC
         /// counters — per the allocation-measurement lesson).
         /// </summary>
@@ -101,7 +100,7 @@ namespace MapRenderer.Tests.Projection
         }
 
         /// <summary>
-        /// T4 (alloc): Ecef.Forward(ReadOnlySpan, Span) with caller-owned NativeArrays
+        /// Ecef.Forward(ReadOnlySpan, Span) with caller-owned NativeArrays
         /// allocates ZERO bytes on the GC heap.
         /// </summary>
         [Test]
@@ -129,10 +128,10 @@ namespace MapRenderer.Tests.Projection
             }
         }
 
-        // ── T4-NativeArray: AsReadOnlySpan bridge correctness ────────────────────────────────────
+        // ── AsReadOnlySpan bridge correctness ───────────────────────────────────────────────────
 
         /// <summary>
-        /// T4 (bridge): NativeArray&lt;GeoCoordinate3D&gt;.AsReadOnlySpan() + Forward(span,dst)
+        /// NativeArray&lt;GeoCoordinate3D&gt;.AsReadOnlySpan() + Forward(span,dst)
         /// produces the same values as scalar Forward for each element.
         /// </summary>
         [Test]

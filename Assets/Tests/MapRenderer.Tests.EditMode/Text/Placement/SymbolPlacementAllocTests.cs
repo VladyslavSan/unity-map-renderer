@@ -214,7 +214,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── C8 at the Tick level: text-optional lets the ICON survive its text's collision loss ──────────────
+        // ── At the Tick level: text-optional lets the ICON survive its text's collision loss ─────────────────
         //    The two runs differ ONLY by the property, so anything else that could explain a missing text mesh
         //    (the blocker, the translate, the tile split) is held constant.
         [Test]
@@ -282,7 +282,7 @@ namespace MapRenderer.Tests.Text.Placement
                 else
                 {
                     Assert.AreEqual(1, system.LastQuadCount,
-                        "without text-optional only the blocker places — the pair drops all-or-nothing (P3)");
+                        "without text-optional only the blocker places — the pair drops all-or-nothing");
                     Assert.IsFalse(iconShows, "un-optional: the icon drops WITH its text");
                     Assert.IsFalse(textShows, "un-optional: the text drops too");
                 }
@@ -636,7 +636,7 @@ namespace MapRenderer.Tests.Text.Placement
 
             for (int i = 0; i < 3; i++) system.Tick(in frame, builtPlan, atlasTexture);
             Assert.AreEqual(1, system.LastQuadCount, "the curved label's single glyph must place (precondition).");
-            Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Text), "the world TEXT slot must be built+presented (curved routes there since Stage AC).");
+            Assert.IsTrue(system.IsWorldSlotVisible(tileKey, 0, SymbolKind.Text), "the world TEXT slot must be built+presented (curved text routes there).");
 
             Assert.That(() =>
                 {
@@ -647,10 +647,11 @@ namespace MapRenderer.Tests.Text.Placement
                 "curved arm of WorldSymbolRenderer.Emit reuses the slot's NativeLists exactly like point.");
         }
 
-        // ── P11: a centred icon+text pair's steady-state Tick allocates ZERO. The pair collapses two
+        // ── A centred icon+text pair's steady-state Tick allocates ZERO. The pair collapses two
         //    records into ONE SymbolCandidate/emit-range pair, which is fewer sort/grid/fade operations than
-        //    before, not more — SymbolPairing is a stateless O(1) helper and AppendPointHalf reuses the existing
-        //    emit NativeArray, so nothing here should allocate any differently than the lone-icon tooth above. ──
+        //    two lone symbols, not more — SymbolPairing is a stateless O(1) helper and AppendPointHalf reuses
+        //    the existing emit NativeArray, so nothing here should allocate any differently than the lone-icon
+        //    tooth above. ──
         [Test]
         public void Tick_SteadyState_CentredPair_AllocatesNoGCMemory()
         {
@@ -730,10 +731,10 @@ namespace MapRenderer.Tests.Text.Placement
                 "must allocate ZERO managed garbage.");
         }
 
-        // ── C8: the same steady-state zero-alloc claim for a pair that is ACTUALLY placing without
-        //    one half — the state that exercises every new branch (the collision write-back, the dropped-halves
-        //    map write in HarvestCollision, the stage job's probe, the emit skip). The map is a persistent
-        //    NativeHashMap cleared and refilled in place, so none of that may reach the managed heap. ──
+        // ── The same steady-state zero-alloc claim for a pair that is ACTUALLY placing without
+        //    one half — the state that exercises every optional-pair branch (the collision write-back, the
+        //    dropped-halves map write in HarvestCollision, the stage job's probe, the emit skip). The map is a
+        //    persistent NativeHashMap cleared and refilled in place, so none of that may reach the managed heap. ──
         [Test]
         public void Tick_SteadyState_OptionalPairPlacingWithoutItsText_AllocatesNoGCMemory()
         {
@@ -943,7 +944,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
         }
 
-        // ── T2: same parity, but with a NON-identity Rebase (a real globe rebase) — proves the Burst job
+        // ── Same parity, but with a NON-identity Rebase (a real globe rebase) — proves the Burst job
         //    carries the rotation identically to the inline (managed) seam, not just the identity fast-path. ──
         [Test]
         public void SymbolProjectionJob_MatchesInlineProjection_PerPoint_NonIdentityRebase()

@@ -6,7 +6,7 @@
 // Licensed under the Unity Companion License — see THIRD-PARTY-NOTICES.txt
 // Modified from upstream:
 //   • FillExtrusion_LitInput.hlsl (our mirror) is included by FillExtrusion.shader before this file.
-//   • Attributes carries the D1 extrusion inputs; MapVertexModify(...) is called with all six, before
+//   • Attributes carries the extrusion inputs; MapVertexModify(...) is called with all six, before
 //     world-space transforms in GetShadowPositionHClip. The vertex modification MUST also apply in this
 //     pass so shadows match the extruded roof/wall silhouette.
 
@@ -32,7 +32,7 @@ struct Attributes
     float3 normalOS     : NORMAL;
     float4 tangentOS    : TANGENT;    // [MAP DELTA] for MapVertexModify's tangent-plane frame
     float2 texcoord     : TEXCOORD0;
-    // [MAP DELTA S23 I2b] D1 extrusion inputs — see StyledFillExtrusionTileBuilder's ExtrudeAndBake doc.
+    // [MAP DELTA] Extrusion inputs — see StyledFillExtrusionTileBuilder's ExtrudeAndBake doc.
     float4 extrudeUpAndT     : TEXCOORD3;
     float2 bakedBaseHeight   : TEXCOORD4;
     UNITY_VERTEX_INPUT_INSTANCE_ID

@@ -54,7 +54,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
             public double Extent;
 
             /// <summary>Set once, at schedule time, from the layer's own projection — never re-derived per
-            /// vertex (mirrors the retired synchronous <c>WriteMeshData</c>'s own single call site).</summary>
+            /// vertex.</summary>
             public bool Globe;
 
             /// <summary>The layer's own <c>Mesh.MeshData</c> — already sized by
@@ -92,7 +92,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
                 float3 bMin = new float3(float.MaxValue);
                 float3 bMax = new float3(float.MinValue);
 
-                // ── Roof: [0, vr) — same sec-φ bake the retired managed flat/globe roof writers used. ──
+                // ── Roof: [0, vr) — the same sec-φ bake as the walls (MetresToWorldFactor). ──
                 for (int i = 0; i < vr; i++)
                 {
                     float3 v  = (float3)worldPositions[i];
@@ -107,7 +107,7 @@ namespace MapRenderer.Unity.Rendering.Meshing
 
                     if (Globe)
                     {
-                        // Globe factor = 1.0 (OQ1) — extrudeUp is the plain surface up, un-scaled.
+                        // Globe factor = 1.0 — extrudeUp is the plain surface up, un-scaled.
                         s1[i] = new ExtrudeAndBake
                         {
                             ExtrudeUpAndT   = new Vector4(up.x, up.y, up.z, 1f), // t=1 roof

@@ -75,7 +75,7 @@ namespace MapRenderer.Core.Text
                 UvTopLeft = uvTopLeft,
                 UvBottomRight = uvBottomRight,
                 LineIndex = 0,
-                Page = 0, // Stage M: the sprite sheet stays single-page — icons never multi-page.
+                Page = 0, // The sprite sheet is single-page, so every icon is on page 0.
             };
         }
 

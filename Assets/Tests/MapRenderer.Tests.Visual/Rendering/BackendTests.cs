@@ -100,7 +100,7 @@ namespace MapRenderer.Tests.Visual
             => SnapshotCoverage.Analyse(snap.Pixels, Bg32).FilledFraction;
 
         /// <summary>
-        /// S53a GATE: an Entities-Graphics entity drawing Map/Fill renders non-empty pixels in the
+        /// An Entities-Graphics entity drawing Map/Fill renders non-empty pixels in the
         /// headless SnapshotRenderer, driven by a manual system-group tick before camera.Render().
         /// </summary>
         [Test]
@@ -175,7 +175,7 @@ namespace MapRenderer.Tests.Visual
                 float controlCov = FilledFraction(snapControl);
                 float egCov      = FilledFraction(snapEg);
                 TestContext.WriteLine(
-                    $"[S53a spike] control(GO) filled={controlCov:F4}  EG(entity) filled={egCov:F4}");
+                    $"[EG spike] control(GO) filled={controlCov:F4}  EG(entity) filled={egCov:F4}");
 
                 // No-GPU guard: if even the GO control is blank, there's no GPU context in this batch
                 // session — the EG gate can't be evaluated (matches the suite's snapshot convention).
@@ -185,11 +185,11 @@ namespace MapRenderer.Tests.Visual
 
                 // THE GATE.
                 Assert.That(egCov, Is.GreaterThanOrEqualTo(CoverageFloor),
-                    $"S53a GATE: an Entities-Graphics entity drawing Map/Fill must produce non-empty " +
+                    $"GATE: an Entities-Graphics entity drawing Map/Fill must produce non-empty " +
                     $"pixels in the headless SnapshotRenderer. control(GO)={controlCov:F4}, " +
                     $"EG(entity)={egCov:F4}. If the control renders but EG is blank, " +
                     $"EntitiesGraphicsSystem did not submit under camera.Render() in EditMode — " +
-                    $"see S53a honest-stop (PlayMode harness vs hand-rolled BRG-over-entities).");
+                    $"the alternatives are a PlayMode harness or a hand-rolled BRG-over-entities.");
             }
             finally
             {
@@ -265,7 +265,7 @@ namespace MapRenderer.Tests.Visual
         }
     }
 
-    // S53b increment 1 — EntitiesTileRenderer engine tests.
+    // EntitiesTileRenderer engine tests.
     //
     // Proves the ECS backend engine independently of the live MapView/TileManager wiring:
     //   • Lifecycle: AddTileLayer creates entities; RemoveItem destroys the right one (GPU-independent).
@@ -274,10 +274,10 @@ namespace MapRenderer.Tests.Visual
     //     byte-for-byte the same formula the BRG backend uses (GPU-independent).
     //   • Dispose: idempotent, restores DefaultGameObjectInjectionWorld, destroys the world.
     //   • Render smoke: an engine-created entity actually rasterizes (the rendering mechanism itself is
-    //     already de-risked by EntitiesGraphicsSpikeTests / S53a; here we confirm the engine drives it).
+    //     already de-risked by EntitiesGraphicsSpikeTests; here we confirm the engine drives it).
 
     // ───────────────────────────────────────────────────────────────────────────────────
-    // EntitiesTileRendererTests — S53b increment 1
+    // EntitiesTileRendererTests — the ECS backend engine, independent of MapView
     // ───────────────────────────────────────────────────────────────────────────────────
 
     [TestFixture]
@@ -348,8 +348,8 @@ namespace MapRenderer.Tests.Visual
                 int h2 = r.AddTileLayer(mesh, o, 0, tid);
 
                 Assert.AreEqual(1, r.RenderMeshArraysCreated,
-                    "AddTileLayer must NOT create a per-entity RenderMeshArray (the stall-#3 fix) — still just " +
-                    "the prototype's ONE. The old per-entity path would leave this at 3 (the falsifier).");
+                    "AddTileLayer must NOT create a per-entity RenderMeshArray — still just " +
+                    "the prototype's ONE. A per-entity path would leave this at 3 (the falsifier).");
                 Assert.AreEqual(3, r.RegisteredMeshCount, "one EG mesh registration per AddTileLayer.");
                 Assert.AreEqual(3, r.DrawItemCount());
 
@@ -388,7 +388,7 @@ namespace MapRenderer.Tests.Visual
 
                 Assert.AreEqual(1, r.DestroyEntityBatchesLastRemove,
                     "the record's entities must be destroyed in ONE DestroyEntity(NativeArray) structural " +
-                    "change — a shallow loop-over-RemoveItem leaves this 0 (the stall-#2 falsifier).");
+                    "change — a shallow loop-over-RemoveItem leaves this 0 (the falsifier).");
                 Assert.AreEqual(4, r.EntitiesDestroyedLastRemove,
                     "3 layer entities + 1 emptied tile root = 4 entities in the batch.");
                 Assert.AreEqual(0, r.DrawItemCount(), "all layers removed.");
@@ -641,7 +641,7 @@ namespace MapRenderer.Tests.Visual
         // Measures whether EntitiesTileRenderer.Rebuild allocates managed memory in steady state.
         // Unlike the hand-tuned BrgTileRenderer.Rebuild (asserted zero-alloc), this drives the EG
         // system groups, so it is expected to allocate. Logs the figure rather than hard-asserting so
-        // the truth is recorded; the S53b churn-no-alloc tooth is evaluated from this.
+        // the truth is recorded.
 
         [Test]
         public void Rebuild_SteadyState_AllocationProfile()
@@ -685,7 +685,7 @@ namespace MapRenderer.Tests.Visual
                     // here, so report the trip itself, not the unhelpful message tail.
                     verdict = $"ALLOCATES over {N} Rebuilds (GC.Alloc recorder tripped)";
                 }
-                TestContext.WriteLine($"[S53b alloc] EntitiesTileRenderer.Rebuild steady-state (NUnit GC.Alloc recorder): {verdict}");
+                TestContext.WriteLine($"[EG alloc] EntitiesTileRenderer.Rebuild steady-state (NUnit GC.Alloc recorder): {verdict}");
             }
         }
 
@@ -740,7 +740,7 @@ namespace MapRenderer.Tests.Visual
                 var bg32 = new Color32(26, 28, 38, 255);
                 float controlCov = SnapshotCoverage.Analyse(snapControl.Pixels, bg32).FilledFraction;
                 float egCov      = SnapshotCoverage.Analyse(snapEg.Pixels,      bg32).FilledFraction;
-                TestContext.WriteLine($"[S53b engine] control(GO) filled={controlCov:F4}  EG(entity) filled={egCov:F4}");
+                TestContext.WriteLine($"[EG engine] control(GO) filled={controlCov:F4}  EG(entity) filled={egCov:F4}");
 
                 Assert.That(controlCov, Is.GreaterThanOrEqualTo(0.01f),
                     $"GameObject control did not render (filled={controlCov:F4}) — no GPU context.");

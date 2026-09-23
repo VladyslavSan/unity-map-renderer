@@ -15,7 +15,8 @@
 //   • Fragment: ribbon coverage clip; albedo *= vColor.rgb, alpha *= vColor.a * _Opacity. The
 //     InitializeInputData / GI / BRDF / PackGBuffers tail is the stock GBuffer path.
 //
-// CAPABILITY-ONLY (S67): inert for transparent lines (Queue ≥ 2501). S69 activates it for deferred.
+// CAPABILITY-ONLY: inert while lines render transparent (Queue ≥ 2501). An opaque line material under
+// the deferred renderer would activate it.
 // Include order (set by Line.shader): Line_LitInput.hlsl → Line_VertexExtrude.hlsl → this file.
 
 #ifndef MAP_LINE_LIT_GBUFFER_PASS_INCLUDED

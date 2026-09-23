@@ -30,7 +30,7 @@ namespace MapRenderer.Tests.GeoJsons
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// T12 — a structural guard on where the GeoJSON stack is allowed to live.
+    /// A structural guard on where the GeoJSON stack is allowed to live.
     ///
     /// <para>The fence pins a live invariant, not the retired carrier fork it was written for:
     /// <c>TileGeometryBuffers</c>, in <c>MapRenderer.Jobs/Tiles</c>, is a sanctioned decoder location.</para>
@@ -58,7 +58,7 @@ namespace MapRenderer.Tests.GeoJsons
         };
 
         [Test]
-        public void T12_TheGeoJsonStageNamesNeitherGeometryCarrier()
+        public void TheGeoJsonStageNamesNeitherGeometryCarrier()
         {
             List<string> files = StageSourceFiles();
 
@@ -119,8 +119,8 @@ namespace MapRenderer.Tests.GeoJsons
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// The projection boundary of the GeoJSON source (T5, T5b, T4b): geodetic → unit square → tile-local, and
-    /// what survives quantization.
+    /// The projection boundary of the GeoJSON source: geodetic → unit square → tile-local, what survives
+    /// quantization, the y-flip, and the pole clamp.
     /// </summary>
     [TestFixture]
     public class WebMercatorTilingTests
@@ -131,10 +131,10 @@ namespace MapRenderer.Tests.GeoJsons
                     new GeoCoordinate { Latitude = latitude, Longitude = longitude }),
                 tile, extent);
 
-        // ── T5: round trip through the independently-authored inverse ──────────────────────────────
+        // ── round trip through the independently-authored inverse ──────────────────────────────────
 
         /// <summary>
-        /// T5. Quantized tile-local coordinates round-trip through <see cref="TileId.ToLonLat"/> — authored
+        /// Quantized tile-local coordinates round-trip through <see cref="TileId.ToLonLat"/> — authored
         /// years earlier, for a different purpose, which is what makes it an INDEPENDENT oracle rather than a
         /// restatement of the forward formula. The residual is printed in Mercator metres alongside the
         /// analytic bound <c>WorldExtent / (extent · 2^z)</c> (= half a tile unit).
@@ -143,7 +143,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// slack constant can satisfy both.</para>
         /// </summary>
         [Test]
-        public void T5_QuantizedTileLocal_RoundTripsWithinHalfATileUnit()
+        public void QuantizedTileLocal_RoundTripsWithinHalfATileUnit()
         {
             (double lon, double lat, int z, double extent)[] rows =
             {
@@ -187,10 +187,10 @@ namespace MapRenderer.Tests.GeoJsons
             }
         }
 
-        /// <summary>T5, hand-checked structural rows: the null island and the antimeridian land on exact
+        /// <summary>The round trip's hand-checked structural rows: the null island and the antimeridian land on exact
         /// integers, in the exact tiles the slippy-map layout puts them in.</summary>
         [Test]
-        public void T5_StructuralAnchors_AreExact()
+        public void StructuralAnchors_AreExact()
         {
             // (0, 0) is the meeting point of all four z1 tiles: extent-corner of (0,0), origin of (1,1).
             double2 originOfSouthEast = TileLocal(0.0, 0.0, GeoJsonTestFixtures.Tile(1, 1, 1), 4096.0);
@@ -206,16 +206,16 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.That(TileLocal(-180.0, 0.0, world, 4096.0).x, Is.EqualTo(0.0).Within(1e-9));
         }
 
-        // ── T5b: the y-flip anchor, which goes through neither identity ────────────────────────────
+        // ── the y-flip anchor, which goes through neither identity ─────────────────────────────────
 
         /// <summary>
-        /// T5b. A round trip passes trivially if the forward and inverse formulas share a sign error,
+        /// A round trip passes trivially if the forward and inverse formulas share a sign error,
         /// so this asserts SEMANTICS instead: northern latitudes are in the northern tile row, eastern
         /// longitudes in the eastern column. The values are non-zero and non-symmetric — a sign flip at a
         /// symmetric value is invisible.
         /// </summary>
         [Test]
-        public void T5b_NorthIsRowZero_EastIsColumnOne()
+        public void NorthIsRowZero_EastIsColumnOne()
         {
             Assert.That(GeoJsonTestFixtures.TileOf(13.4, 51.5, 1).Y, Is.EqualTo(0),
                 "Berlin (lat +51.5) must be in the NORTHERN z1 tile row");
@@ -228,9 +228,9 @@ namespace MapRenderer.Tests.GeoJsons
                 "lon -74 must be in the WESTERN z1 tile column");
         }
 
-        /// <summary>T5b, in tile-local terms: within one tile, py must DECREASE as latitude increases.</summary>
+        /// <summary>The y-flip in tile-local terms: within one tile, py must DECREASE as latitude increases.</summary>
         [Test]
-        public void T5b_TileLocalY_DecreasesNorthward()
+        public void TileLocalY_DecreasesNorthward()
         {
             TileId world = GeoJsonTestFixtures.Tile(0, 0, 0);
             double south = TileLocal(0.0, 10.0, world, 4096.0).y;
@@ -239,16 +239,16 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.That(north, Is.LessThan(south), "py must grow SOUTHWARD (origin top-left, Y down)");
         }
 
-        // ── T4b: the pole clamp is a recorded limitation, not silent drift ──────────────────────────
+        // ── the pole clamp is a recorded limitation, not silent drift ───────────────────────────────
 
         /// <summary>
-        /// T4b. <c>|lat| &gt; MaxLatitude</c> has no Mercator image, so it is CLAMPED. The second row is the
+        /// <c>|lat| &gt; MaxLatitude</c> has no Mercator image, so it is CLAMPED. The second row is the
         /// non-vacuity clause: at lat 89 alone, "clamped" and "computed" are indistinguishable — a latitude
         /// strictly inside the limit must land strictly south of the clamped one, proving the clamp is not
         /// simply pinning everything.
         /// </summary>
         [Test]
-        public void T4b_LatitudeBeyondMercatorLimit_ClampsRatherThanDiverging()
+        public void LatitudeBeyondMercatorLimit_ClampsRatherThanDiverging()
         {
             TileId world = GeoJsonTestFixtures.Tile(0, 0, 0);
 
@@ -288,8 +288,8 @@ namespace MapRenderer.Tests.GeoJsons
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// RFC 7946 parsing: the rejections this source makes loudly (T4a, T4c, T11), the attribute mapping
-    /// (T6), and the ring closure convention (T7b).
+    /// RFC 7946 parsing: the rejections this source makes loudly (antimeridian, out-of-range coordinates,
+    /// GeometryCollection), the attribute mapping, and the ring closure convention.
     /// </summary>
     [TestFixture]
     public class GeoJsonParserTests
@@ -297,15 +297,15 @@ namespace MapRenderer.Tests.GeoJsons
         private static string Point(double lon, double lat)
             => GeoJsonTestFixtures.Feature("Point", GeoJsonTestFixtures.Position(lon, lat));
 
-        // ── T4a: the antimeridian is rejected, and only the antimeridian ────────────────────────────
+        // ── the antimeridian is rejected, and only the antimeridian ─────────────────────────────────
 
         /// <summary>
-        /// T4a. RFC 7946 §3.1.9 tells authors to split geometry crossing the antimeridian; interpreting such
+        /// RFC 7946 §3.1.9 tells authors to split geometry crossing the antimeridian; interpreting such
         /// a segment literally draws it the long way around the world. v1 fails loudly instead. The
         /// exception must name the FEATURE INDEX — "something threw" is not the assertion.
         /// </summary>
         [Test]
-        public void T4a_AntimeridianCrossingSegment_ThrowsNamingTheFeatureIndex()
+        public void AntimeridianCrossingSegment_ThrowsNamingTheFeatureIndex()
         {
             string json = GeoJsonTestFixtures.Collection(
                 Point(0.0, 0.0),
@@ -316,10 +316,10 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.That(ex.Message, Does.Contain("antimeridian"));
         }
 
-        /// <summary>T4a's companion: a 179° step is the largest legal one and must parse cleanly, proving
-        /// the check is not firing on every long segment.</summary>
+        /// <summary>The antimeridian test's companion: a 179° step is the largest legal one and must parse
+        /// cleanly, proving the check is not firing on every long segment.</summary>
         [Test]
-        public void T4a_LargestLegalLongitudeStep_Parses()
+        public void LargestLegalLongitudeStep_Parses()
         {
             string json = GeoJsonTestFixtures.Feature(
                 "LineString", GeoJsonTestFixtures.Positions(-90.0, 10.0, 89.0, 10.0)); // |Δlon| = 179
@@ -329,10 +329,10 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.That(dataset.Features[0].Paths[0].Count, Is.EqualTo(2));
         }
 
-        // ── T4c: out-of-range coordinates are malformed, not clamped ────────────────────────────────
+        // ── out-of-range coordinates are malformed, not clamped ─────────────────────────────────────
 
         [Test]
-        public void T4c_OutOfRangeCoordinates_Throw()
+        public void OutOfRangeCoordinates_Throw()
         {
             Assert.Throws<GeoJsonFormatException>(() => GeoJsonParser.Parse(Point(0.0, 91.0)),
                 "latitude 91 is outside RFC 7946 §3.1.1's range");
@@ -340,11 +340,11 @@ namespace MapRenderer.Tests.GeoJsons
                 "longitude 181 is outside RFC 7946 §3.1.1's range");
         }
 
-        /// <summary>T4c's non-vacuity clause: 89.9 is a valid latitude beyond the Mercator limit. It must
-        /// PARSE (the limit is handled by the projection's clamp, not by rejection) — which proves the range
-        /// check is a range check and not the clamp misfiring.</summary>
+        /// <summary>The range check's non-vacuity clause: 89.9 is a valid latitude beyond the Mercator limit.
+        /// It must PARSE (the limit is handled by the projection's clamp, not by rejection) — which proves the
+        /// range check is a range check and not the clamp misfiring.</summary>
         [Test]
-        public void T4c_ValidLatitudeBeyondTheMercatorLimit_Parses()
+        public void ValidLatitudeBeyondTheMercatorLimit_Parses()
         {
             GeoJsonDataset dataset = GeoJsonParser.Parse(Point(0.0, 89.9));
             Assert.That(dataset.Features[0].Paths[0][0].Latitude, Is.EqualTo(89.9));
@@ -371,15 +371,15 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.That(p.Latitude, Is.EqualTo(52.5));
         }
 
-        // ── T6: properties and id ───────────────────────────────────────────────────────────────────
+        // ── properties and id ───────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// T6. <c>JsonKind</c>'s six kinds map one-to-one onto <see cref="Value"/>'s factories, so the
+        /// <c>JsonKind</c>'s six kinds map one-to-one onto <see cref="Value"/>'s factories, so the
         /// mapping is a total, lossless structural recursion. Asserting the LEAF (and the array length) is
         /// the non-vacuity clause: a stringify implementation also yields a non-empty properties map.
         /// </summary>
         [Test]
-        public void T6_NestedProperties_RecurseStructurallyToTheLeaf()
+        public void NestedProperties_RecurseStructurallyToTheLeaf()
         {
             string json = GeoJsonTestFixtures.Feature(
                 "Point", GeoJsonTestFixtures.Position(0.0, 0.0),
@@ -398,7 +398,7 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         [Test]
-        public void T6_NullProperties_BecomeAnEmptyNonNullMap()
+        public void NullProperties_BecomeAnEmptyNonNullMap()
         {
             GeoJsonFeature feature = GeoJsonParser.Parse(Point(0.0, 0.0)).Features[0];
 
@@ -407,7 +407,7 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         [Test]
-        public void T6_IdSurvivesAsStringOrNumber_AndIsAbsentWhenUnset()
+        public void IdSurvivesAsStringOrNumber_AndIsAbsentWhenUnset()
         {
             GeoJsonFeature stringId = GeoJsonParser.Parse(GeoJsonTestFixtures.Feature(
                 "Point", GeoJsonTestFixtures.Position(0.0, 0.0), idMember: "\"id\":\"node/42\",")).Features[0];
@@ -430,16 +430,16 @@ namespace MapRenderer.Tests.GeoJsons
                 "Point", GeoJsonTestFixtures.Position(0.0, 0.0), idMember: "\"id\":[1,2],")));
         }
 
-        // ── T7b: rings are implicitly closed, like MVT's ─────────────────────────────────────────────
+        // ── rings are implicitly closed, like MVT's ──────────────────────────────────────────────────
 
         /// <summary>
-        /// T7b. RFC 7946 §3.1.6 rings repeat their first position last; every downstream stage assumes the
+        /// RFC 7946 §3.1.6 rings repeat their first position last; every downstream stage assumes the
         /// MVT convention instead (implicitly closed). Asserting the COUNT RELATION — exactly one fewer than
         /// the input — is the tooth: <c>first != last</c> alone would also pass on a ring that had lost some
         /// other vertex.
         /// </summary>
         [Test]
-        public void T7b_ClosingDuplicateIsStripped()
+        public void ClosingDuplicateIsStripped()
         {
             string ring = GeoJsonTestFixtures.RectangleRing(-20.0, -20.0, 20.0, 20.0);
             GeoJsonFeature feature = GeoJsonParser.Parse(
@@ -465,15 +465,15 @@ namespace MapRenderer.Tests.GeoJsons
                 GeoJsonTestFixtures.Feature("Polygon", $"[{unclosed}]")), "a LinearRing must be closed");
         }
 
-        // ── T11: GeometryCollection is fenced, and only it ───────────────────────────────────────────
+        // ── GeometryCollection is fenced, and only it ────────────────────────────────────────────────
 
         /// <summary>
-        /// T11. <c>TileGeometryType</c> is a per-FEATURE property and <c>IFeature.GeometryType</c> is
+        /// <c>TileGeometryType</c> is a per-FEATURE property and <c>IFeature.GeometryType</c> is
         /// singular, so a mixed-kind feature would make a per-ring type tag load-bearing again. Rejected,
         /// with the kind named.
         /// </summary>
         [Test]
-        public void T11_GeometryCollection_ThrowsNamingTheKind()
+        public void GeometryCollection_ThrowsNamingTheKind()
         {
             string geometryCollection =
                 "{\"type\":\"Feature\",\"properties\":null,\"geometry\":{\"type\":\"GeometryCollection\"," +
@@ -485,10 +485,11 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.That(ex.Message, Does.Contain("GeometryCollection"));
         }
 
-        /// <summary>T11's non-vacuity clause: the same collection minus the GeometryCollection parses, so the
-        /// rejection is targeted at the kind rather than at the shape of the document.</summary>
+        /// <summary>The GeometryCollection rejection's non-vacuity clause: the same collection minus the
+        /// GeometryCollection parses, so the rejection is targeted at the kind rather than at the shape of
+        /// the document.</summary>
         [Test]
-        public void T11_TheSiblingFeatureAloneParses()
+        public void CollectionWithoutTheGeometryCollection_Parses()
         {
             GeoJsonDataset dataset = GeoJsonParser.Parse(GeoJsonTestFixtures.Collection(Point(1.0, 1.0)));
 
@@ -558,9 +559,9 @@ namespace MapRenderer.Tests.GeoJsons
     // ───────────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Client-side slicing end to end — parse → project → cut one tile: the straddle partition (T1), the
-    /// containing polygon (T2), line pieces, ring role and winding (T7a/T7b/T7c), the simplification
-    /// deferral (T9), and the buffer window (T10).
+    /// Client-side slicing end to end — parse → project → cut one tile: the straddle partition, the
+    /// containing polygon, line pieces, ring role and winding, the simplification deferral, and the
+    /// buffer window.
     /// </summary>
     [TestFixture]
     public class GeoJsonTileSlicerTests
@@ -570,10 +571,10 @@ namespace MapRenderer.Tests.GeoJsons
                    WebMercatorTiling.UnitSquareFromLonLat(
                        new GeoCoordinate { Latitude = 0.0, Longitude = longitude }), tile, extent).x;
 
-        // ── T1: a polygon straddling a seam is PARTITIONED, not truncated ───────────────────────────
+        // ── a polygon straddling a seam is PARTITIONED, not truncated ───────────────────────────────
 
         /// <summary>
-        /// T1. A lon/lat rectangle spanning the z1 seam at longitude 0, sliced into both neighbouring tiles
+        /// A lon/lat rectangle spanning the z1 seam at longitude 0, sliced into both neighbouring tiles
         /// with the buffer OFF (so the two windows partition the plane rather than overlap it). The pieces'
         /// areas must sum to the input's, both must keep the input's shoelace sign, and both must be
         /// implicitly closed.
@@ -583,7 +584,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// produces none of those and a strictly smaller total area.</para>
         /// </summary>
         [Test]
-        public void T1_PolygonStraddlingATileSeam_PartitionsAcrossBothTiles()
+        public void PolygonStraddlingATileSeam_PartitionsAcrossBothTiles()
         {
             const double extent = GeoJsonSliceOptions.DefaultExtent;
             string json = GeoJsonTestFixtures.Feature(
@@ -615,7 +616,7 @@ namespace MapRenderer.Tests.GeoJsons
             // move by at most one; the sum of the two pieces is bounded accordingly.
             double bound = 2.0 * ((inputEastX - inputWestX) + InputHeight(west, extent)) + 4.0;
             TestContext.WriteLine(
-                $"T1 input area = {inputArea:F3}, sliced = {sliced:F3}, |Δ| = {math.abs(sliced - inputArea):F3}, " +
+                $"seam input area ={inputArea:F3}, sliced = {sliced:F3}, |Δ| = {math.abs(sliced - inputArea):F3}, " +
                 $"bound = {bound:F3}");
             Assert.That(math.abs(sliced - inputArea), Is.LessThanOrEqualTo(bound));
 
@@ -646,15 +647,15 @@ namespace MapRenderer.Tests.GeoJsons
             return n;
         }
 
-        // ── T2: a polygon containing the tile becomes the window itself ─────────────────────────────
+        // ── a polygon containing the tile becomes the window itself ─────────────────────────────────
 
         /// <summary>
-        /// T2. Sutherland–Hodgman reduces a subject enclosing the whole window to the window rectangle with
+        /// Sutherland–Hodgman reduces a subject enclosing the whole window to the window rectangle with
         /// no special case. Non-vacuity: NONE of the input's vertices is inside the window, so a
         /// "keep the vertices that are inside" clipper emits nothing here and this reds.
         /// </summary>
         [Test]
-        public void T2_PolygonContainingTheTile_BecomesTheWindowRectangle()
+        public void PolygonContainingTheTile_BecomesTheWindowRectangle()
         {
             string json = GeoJsonTestFixtures.Feature(
                 "Polygon", $"[{GeoJsonTestFixtures.RectangleRing(-80.0, -80.0, 80.0, 80.0)}]");
@@ -714,10 +715,10 @@ namespace MapRenderer.Tests.GeoJsons
             }
         }
 
-        // ── T7a / T7b: winding comes from ROLE, and rings stay implicitly closed ────────────────────
+        // ── winding comes from ROLE, and rings stay implicitly closed ───────────────────────────────
 
         /// <summary>
-        /// T7a. RFC 7946 §3.1.6 gives ring role POSITIONALLY and tells parsers not to reject non-conforming
+        /// RFC 7946 §3.1.6 gives ring role POSITIONALLY and tells parsers not to reject non-conforming
         /// winding, so authored winding carries no information — role must be re-encoded as winding. A
         /// polygon authored AGAINST the right-hand rule must therefore slice identically to its conforming
         /// twin, with exterior positive / hole negative in tile space (the MVT convention the downstream
@@ -727,7 +728,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// rather than the input happening to be right already.</para>
         /// </summary>
         [Test]
-        public void T7a_RingWindingIsNormalisedFromRole_NotFromAuthoring()
+        public void RingWindingIsNormalisedFromRole_NotFromAuthoring()
         {
             string conforming = Polygon(rfcWound: true);
             string reversed   = Polygon(rfcWound: false);
@@ -751,11 +752,11 @@ namespace MapRenderer.Tests.GeoJsons
                 "the hole must carry the OPPOSITE sign, which is what makes it a hole downstream");
         }
 
-        /// <summary>T7b, at the slicer's output: a 5-position RFC ring emits exactly 4 tile-space vertices,
+        /// <summary>Implicit closure at the slicer's output: a 5-position RFC ring emits exactly 4 tile-space vertices,
         /// first ≠ last. The count relation is the tooth — inequality alone would also hold if a vertex had
         /// been lost elsewhere.</summary>
         [Test]
-        public void T7b_SlicedRingsAreImplicitlyClosed()
+        public void SlicedRingsAreImplicitlyClosed()
         {
             IReadOnlyList<double2> ring = SingleRing(GeoJsonTestFixtures.Slice(
                 GeoJsonTestFixtures.Feature("Polygon", $"[{GeoJsonTestFixtures.RectangleRing(-20.0, -20.0, 20.0, 20.0)}]"),
@@ -772,10 +773,10 @@ namespace MapRenderer.Tests.GeoJsons
             return GeoJsonTestFixtures.Feature("Polygon", $"[{exterior},{hole}]");
         }
 
-        // ── T7c: a polygon's holes leave with its exterior ──────────────────────────────────────────
+        // ── a polygon's holes leave with its exterior ───────────────────────────────────────────────
 
         /// <summary>
-        /// T7c. If a polygon's exterior clips away, its holes must go too: a surviving orphan would become
+        /// If a polygon's exterior clips away, its holes must go too: a surviving orphan would become
         /// the feature's FIRST ring downstream, establish the exterior sign itself, and render as an
         /// inverted patch. The fixture is MALFORMED — polygon 2's hole does not lie inside its
         /// exterior — because that is the only way the case can arise, and the failure is silent-wrong.
@@ -785,7 +786,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// squarely inside the tile, so dropping only the exterior leaves a visible sign-inverted ring.</para>
         /// </summary>
         [Test]
-        public void T7c_ExteriorClippedAway_TakesItsHolesWithIt()
+        public void ExteriorClippedAway_TakesItsHolesWithIt()
         {
             string insidePolygon  = GeoJsonTestFixtures.RectangleRing(10.0, -30.0, 30.0, -10.0);
             string outsideOuter   = GeoJsonTestFixtures.RectangleRing(-170.0, 10.0, -150.0, 30.0);
@@ -806,15 +807,15 @@ namespace MapRenderer.Tests.GeoJsons
                 "no surviving ring may carry the hole's (negative) sign");
         }
 
-        // ── T9: the simplification deferral is observable ───────────────────────────────────────────
+        // ── the simplification deferral is observable ───────────────────────────────────────────────
 
         /// <summary>
-        /// T9. Simplification is deferred, and a silently-ignored parameter is indistinguishable from an
+        /// Simplification is deferred, and a silently-ignored parameter is indistinguishable from an
         /// implemented one — so a non-zero tolerance THROWS. The default's numeric value is asserted
         /// explicitly, so a later silent change of default reds here.
         /// </summary>
         [Test]
-        public void T9_NonZeroSimplifyTolerance_ThrowsNotSupported()
+        public void NonZeroSimplifyTolerance_ThrowsNotSupported()
         {
             Assert.That(GeoJsonSliceOptions.Default.SimplifyTolerance, Is.EqualTo(0.0),
                 "v1 slices at the authored resolution; a fixture wants the EXACT authored position");
@@ -839,19 +840,19 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// T9b. The deferral is stated by the <b>validator</b>, so every source that retains options — a source that
+        /// The deferral is stated by the <b>validator</b>, so every source that retains options — a source that
         /// keeps them for its whole life, not just a caller of <c>Slice</c> — rejects a non-zero tolerance
         /// at the moment it accepts them. Calling <c>Validate</c> directly is the point: <c>Slice</c>'s own
-        /// guard runs first (T9 pins that), so a check reachable only through <c>Slice</c> would leave the
-        /// construction boundary admitting a tolerance it cannot honour, and this test is what tells the two
-        /// front lines apart.
+        /// guard runs first (<see cref="NonZeroSimplifyTolerance_ThrowsNotSupported"/> pins that), so a check
+        /// reachable only through <c>Slice</c> would leave the construction boundary admitting a tolerance it
+        /// cannot honour, and this test is what tells the two front lines apart.
         ///
         /// <para>NaN is an arm because <c>!= 0</c> catches it while the sign- or range-shaped rewrites of
         /// this predicate (<c>&lt; 0</c>, <c>&gt; 0</c>) do not; the valid arm is what stops "reject
         /// everything" from satisfying the rest.</para>
         /// </summary>
         [Test]
-        public void T9b_ANonZeroSimplifyTolerance_IsRejectedByTheValidator()
+        public void ANonZeroSimplifyTolerance_IsRejectedByTheValidator()
         {
             Assert.DoesNotThrow(() => GeoJsonSliceOptions.Default.Validate(),
                 "precondition: the default option set must validate, or every arm below is satisfied by a " +
@@ -870,10 +871,10 @@ namespace MapRenderer.Tests.GeoJsons
                     "reject it");
         }
 
-        // ── T10: the slicer's window IS the fill pipeline's window ──────────────────────────────────
+        // ── the slicer's window IS the fill pipeline's window ───────────────────────────────────────
 
         /// <summary>
-        /// T10. At the default buffer the slicer's window and <c>TileBufferClip</c>'s are EQUAL, not merely
+        /// At the default buffer the slicer's window and <c>TileBufferClip</c>'s are EQUAL, not merely
         /// nested — which makes the pipeline's clip a provable no-op on GeoJSON tiles. Several extents are
         /// the non-vacuity clause: a single one would also pass on a formula that ignored the rescale.
         ///
@@ -889,7 +890,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// tooth-enforced — and it is what a future change to <c>ReferenceExtent</c> would spend.</para>
         /// </summary>
         [Test]
-        public void T10_DefaultBufferWindow_EqualsTheFillPipelineWindow()
+        public void DefaultBufferWindow_EqualsTheFillPipelineWindow()
         {
             Assert.That(GeoJsonSliceOptions.Default.BufferAtReferenceExtent, Is.EqualTo(64.0));
             Assert.That(GeoJsonSliceOptions.Default.Extent, Is.EqualTo(4096.0));
@@ -906,7 +907,7 @@ namespace MapRenderer.Tests.GeoJsons
 
                 Assert.That(clipped, Is.True);
                 TestContext.WriteLine(
-                    $"T10 extent={extent}: slicer [{sliceMin.x}, {sliceMax.x}] vs " +
+                    $"window extent={extent}: slicer [{sliceMin.x}, {sliceMax.x}] vs " +
                     $"pipeline [{pipelineMin.x}, {pipelineMax.x}]");
 
                 Assert.That(sliceMin.x, Is.EqualTo(pipelineMin.x));
@@ -917,14 +918,14 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// T10b. The window carries <c>TileBufferClip</c>'s input GUARDS, not merely its arithmetic. A
+        /// The window carries <c>TileBufferClip</c>'s input GUARDS, not merely its arithmetic. A
         /// NEGATIVE margin would erode INTO the tile (min &gt; 0, max &lt; extent), silently dropping
         /// geometry the tile owns; a NaN one would make an all-NaN window against which every vertex tests
         /// outside. Both must degrade to "cut exactly at the tile boundary" — and, since the two types claim
         /// to be the same window, must still agree with the pipeline's on the same input.
         /// </summary>
         [Test]
-        public void T10b_NegativeAndNaNBuffers_DegradeToTheTileBoundaryLikeTheFillPipeline()
+        public void NegativeAndNaNBuffers_DegradeToTheTileBoundaryLikeTheFillPipeline()
         {
             const double extent = GeoJsonSliceOptions.DefaultExtent;
 
@@ -950,14 +951,15 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// T10c. The consequence, live: a NaN margin must not clip the map away to nothing. Every comparison
+        /// The consequence, live: a NaN margin must not clip the map away to nothing. Every comparison
         /// against NaN is false, so an unguarded window makes <see cref="RingWindowClipper"/>'s inclusive
         /// test reject EVERY vertex — the whole source renders blank with no error anywhere. This is the
-        /// failure <c>TileBufferClip</c> calls "the worst failure this type can produce"; T10b pins the
-        /// window, this pins what the window does.
+        /// failure <c>TileBufferClip</c> calls "the worst failure this type can produce";
+        /// <see cref="NegativeAndNaNBuffers_DegradeToTheTileBoundaryLikeTheFillPipeline"/> pins the window,
+        /// this pins what the window does.
         /// </summary>
         [Test]
-        public void T10c_ANaNBufferDoesNotClipTheMapAway()
+        public void ANaNBufferDoesNotClipTheMapAway()
         {
             string json = GeoJsonTestFixtures.Feature(
                 "Polygon", "[" + GeoJsonTestFixtures.RectangleRing(-40.0, -40.0, 40.0, 40.0) + "]");
@@ -972,14 +974,15 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.That(GeoJsonTestFixtures.Area(sliced.Features[0].Paths[0]), Is.GreaterThan(0.0));
         }
 
-        // ── T13b: the two tiles either side of a seam agree where the seam is ───────────────────────
+        // ── the two tiles either side of a seam agree where the seam is ─────────────────────────────
 
         /// <summary>
-        /// T13b. <c>WindowClipperTests.T13</c> proves the boundary assignment in the clipper's own idealised
-        /// frame; this proves it survives the frames the slicer actually builds. The two tiles either side of
-        /// a seam derive their local coordinates independently — <c>(u·2^z − x)·extent</c> with a different
-        /// <c>x</c> — so their arithmetic does NOT round alike, and the only thing that can make them agree
-        /// about where their common edge is, is that each writes its own boundary LITERAL there.
+        /// <c>WindowClipperTests.OneLineClippedFromTwoAdjacentTiles_PutsTheSeamVertexExactlyOnTheSeam</c>
+        /// proves the boundary assignment in the clipper's own idealised frame; this proves it survives the
+        /// frames the slicer actually builds. The two tiles either side of a seam derive their local
+        /// coordinates independently — <c>(u·2^z − x)·extent</c> with a different <c>x</c> — so their
+        /// arithmetic does NOT round alike, and the only thing that can make them agree about where their
+        /// common edge is, is that each writes its own boundary LITERAL there.
         ///
         /// <para><b>The eastern tile is where this bites</b>, and the tooth says so rather than asserting
         /// both sides and hoping. Its frame puts the crossing near ZERO, where the interpolation's absolute
@@ -993,7 +996,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// clipper, and it is what a consumer working at unquantized precision gets to rely on.</para>
         /// </summary>
         [Test]
-        public void T13b_AdjacentTilesPutTheirSharedSeamVertexOnTheirOwnBoundary()
+        public void AdjacentTilesPutTheirSharedSeamVertexOnTheirOwnBoundary()
         {
             const double extent = GeoJsonSliceOptions.DefaultExtent;
             const int    zoom   = 4;
@@ -1221,7 +1224,7 @@ namespace MapRenderer.Tests.GeoJsons
 
     /// <summary>
     /// The two window clippers, in tile-local coordinates: rings (Sutherland–Hodgman) and open polylines
-    /// (Liang–Barsky, T3 / T3b). Lines are NOT the polygon case with the closure removed, and these teeth
+    /// (Liang–Barsky). Lines are NOT the polygon case with the closure removed, and these teeth
     /// are what make substituting one for the other visible.
     /// </summary>
     [TestFixture]
@@ -1303,16 +1306,16 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.That(math.sign(afterReversed), Is.Not.EqualTo(math.sign(after)));
         }
 
-        // ── Polylines: T3 and T3b ───────────────────────────────────────────────────────────────────
+        // ── Polylines ───────────────────────────────────────────────────────────────────────────────
 
         /// <summary>
-        /// T3. A polyline that traverses the window, leaves, and traverses it again must emit TWO open
+        /// A polyline that traverses the window, leaves, and traverses it again must emit TWO open
         /// paths. The count is asserted exactly (not <c>&gt;= 1</c>), and neither path may be closed —
         /// substituting the ring clipper here yields one closed ring, joining the two traverses across a gap
         /// the input never had.
         /// </summary>
         [Test]
-        public void T3_LineCrossingTheWindowTwice_EmitsTwoOpenPaths()
+        public void LineCrossingTheWindowTwice_EmitsTwoOpenPaths()
         {
             List<double2> line = Path(-500.0, 1000.0, 4500.0, 1000.0, 4500.0, 3000.0, -500.0, 3000.0);
             List<List<double2>> pieces = PolylineWindowClipper.Clip(line, Min, Max);
@@ -1333,12 +1336,12 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// T3b. Leaving and re-entering through the SAME edge also yields two paths. Distinct from T3, whose
-        /// runs enter through different edges: this catches an implementation that only breaks a run when
-        /// the crossing changes axis.
+        /// Leaving and re-entering through the SAME edge also yields two paths. Distinct from
+        /// <see cref="LineCrossingTheWindowTwice_EmitsTwoOpenPaths"/>, whose runs enter through different
+        /// edges: this catches an implementation that only breaks a run when the crossing changes axis.
         /// </summary>
         [Test]
-        public void T3b_LineLeavingAndReenteringThroughTheSameEdge_EmitsTwoPaths()
+        public void LineLeavingAndReenteringThroughTheSameEdge_EmitsTwoPaths()
         {
             List<double2> line = Path(2000.0, 1000.0, 4500.0, 1000.0, 4500.0, 3000.0, 2000.0, 3000.0);
             List<List<double2>> pieces = PolylineWindowClipper.Clip(line, Min, Max);
@@ -1375,14 +1378,14 @@ namespace MapRenderer.Tests.GeoJsons
             Assert.That(pieces[0], Is.EqualTo(Path(0.0, 1000.0, 1000.0, 1000.0, 2000.0, 2000.0, 4096.0, 2000.0)));
         }
 
-        // ── T13/T14: the boundary ASSIGNMENT — the contract nothing above observes ───────────────────
+        // ── the boundary ASSIGNMENT — the contract nothing above observes ───────────────────────────
         //
         // Every tooth above survives an implementation that writes the interpolated `a + t·d` instead of
         // assigning the boundary literal, because their crossings all fall on coordinates where the two
         // happen to agree. These two do not: their fixtures are chosen so `a + t·d` demonstrably misses.
 
         /// <summary>
-        /// T13. One world-space line, clipped from the frames of two horizontally adjacent tiles, must place
+        /// One world-space line, clipped from the frames of two horizontally adjacent tiles, must place
         /// the shared seam vertex EXACTLY on the seam in each frame — <c>x = Extent</c> for the western tile,
         /// <c>x = 0</c> for its eastern neighbour. That is what makes the two tiles agree about where their
         /// common edge is, and it is the property seam-matched stroke and symbol geometry will rest on.
@@ -1400,7 +1403,7 @@ namespace MapRenderer.Tests.GeoJsons
         /// amount, so it is the two boundary-literal assertions above it that carry the discrimination.</para>
         /// </summary>
         [Test]
-        public void T13_OneLineClippedFromTwoAdjacentTiles_PutsTheSeamVertexExactlyOnTheSeam()
+        public void OneLineClippedFromTwoAdjacentTiles_PutsTheSeamVertexExactlyOnTheSeam()
         {
             const double extent = 4096.0;                                  // == Max.x: buffer off, so the
             const double startX = 100.0,  startY = 1000.0;                 // tile edge IS the clip boundary
@@ -1437,14 +1440,14 @@ namespace MapRenderer.Tests.GeoJsons
         }
 
         /// <summary>
-        /// T14. A segment meeting the window exactly at a CORNER is put there by two half-planes at the same
+        /// A segment meeting the window exactly at a CORNER is put there by two half-planes at the same
         /// parameter, so BOTH of its coordinates must be assigned. Recording only the first plane tried
         /// leaves the other interpolated: on these fixtures that lands the vertex off the corner — outside
         /// the window on entry, inside it on exit — which is the disagreement the assignment
         /// exists to remove.
         /// </summary>
         [Test]
-        public void T14_SegmentCrossingExactlyAtAWindowCorner_LandsOnBothBoundariesExactly()
+        public void SegmentCrossingExactlyAtAWindowCorner_LandsOnBothBoundariesExactly()
         {
             AssertCornerCrossing(
                 Path(-4000.0, -2000.0, 432.0, 216.0), Min, first: true,  corner: Min);

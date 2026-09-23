@@ -11,11 +11,11 @@
 //     the SAME MapVertexModify(...) hook over the SAME height-extrusion inputs (extrudeUpAndT/
 //     bakedBaseHeight, TEXCOORD3/4) as the Lit twin, so the extruded silhouette (roof + walls) is
 //     pixel-identical between the two — only the FRAGMENT drops lighting. This is the load-bearing
-//     invariant the epic plan documents (§1): the vertex hooks consume NORMAL/TANGENT as GEOMETRY (the
+//     invariant: the vertex hooks consume NORMAL/TANGENT as GEOMETRY (the
 //     translate tangent frame), not lighting, so there is no vertex-layout fork. Unlit ≠ 2D: the height
 //     extrusion (and therefore the 3D silhouette + self-occlusion) is entirely a property of this SHARED
 //     vertex hook, untouched by dropping lighting.
-//   • [MAP DELTA S2] No TEXCOORD0/_BaseMap sampling in this pass: StyledFillExtrusionTileBuilder bakes no
+//   • [MAP DELTA] No TEXCOORD0/_BaseMap sampling in this pass: StyledFillExtrusionTileBuilder bakes no
 //     UV stream at all (see FillExtrusion_UnlitInput.hlsl's header) — the Lit twin's own texColor factor
 //     is always the same fixed-UV texel for every vertex, so this twin skips the degenerate sample rather
 //     than carry it. Fragment is flat: albedo = _BaseColor × vColor; alpha = _BaseColor.a × vColor.a ×
@@ -43,17 +43,17 @@ struct Attributes
     float4 positionOS       : POSITION;
     float3 normalOS         : NORMAL;
     float4 tangentOS        : TANGENT;
-    // [MAP DELTA S23 I2b] D1 extrusion inputs — see StyledFillExtrusionTileBuilder's ExtrudeAndBake doc.
+    // [MAP DELTA] Extrusion inputs — see StyledFillExtrusionTileBuilder's ExtrudeAndBake doc.
     float4 extrudeUpAndT    : TEXCOORD3; // xyz = baked extrude-up, w = t (0=floor, 1=roof)
     float2 bakedBaseHeight  : TEXCOORD4; // x = baked base offset, y = baked height offset
-    // [MAP DELTA S12] Per-vertex baked color from data-driven expression (mesh COLOR stream).
+    // [MAP DELTA] Per-vertex baked color from data-driven expression (mesh COLOR stream).
     float4 color             : COLOR;
     UNITY_VERTEX_INPUT_INSTANCE_ID
 };
 
 struct Varyings
 {
-    // [MAP DELTA S12] Per-vertex baked color (data-driven dimension), passed through untouched.
+    // [MAP DELTA] Per-vertex baked color (data-driven dimension), passed through untouched.
     half4  vColor      : TEXCOORD1;
     float  fogCoord    : TEXCOORD2;
     // [MAP DELTA — unlit fill-extrusion face shading] World-space face normal (roof→up, wall→outward),
@@ -98,7 +98,7 @@ Varyings UnlitPassVertex(Attributes input)
     output.positionCS = vertexInput.positionCS;
     output.fogCoord = ComputeFogFactor(vertexInput.positionCS.z);
 
-    // [MAP DELTA S12] Pass per-vertex baked color to the fragment stage.
+    // [MAP DELTA] Pass per-vertex baked color to the fragment stage.
     output.vColor = input.color;
 
     // [MAP DELTA — unlit fill-extrusion face shading] Transform the MESH face normal to world space for the
@@ -129,7 +129,7 @@ void UnlitPassFragment(
     // opposite wall sits at the 0.5 floor (never pure black), the roof between — so faces at different
     // orientations differ and the 3D form reads. DIRECTION ONLY (no light colour/intensity) keeps it
     // predictable and exposure-independent; rotating the scene sun re-shades the buildings. Fills and lines
-    // are flat 2D and deliberately DON'T do this (no face normal to react to). The main light is guaranteed
+    // are flat 2D and DON'T do this (no face normal to react to). The main light is guaranteed
     // to exist under Unlit — see Bootstrapper.EnsureDirectionalLight.
     Light mainLight = GetMainLight();
     half ndl = saturate(dot(normalize(input.normalWS), mainLight.direction));

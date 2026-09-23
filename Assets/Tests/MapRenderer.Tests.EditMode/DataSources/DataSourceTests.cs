@@ -4,7 +4,8 @@
 // collision found across the four EditMode files merged here.
 //
 // Contents:
-//   TileFeatureSourceGetTileTests   — the raised ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile> interface, EditMode async-Task unit teeth.
+//   TileFeatureSourceGetTileTests   — the raised ITileFeatureSource.GetTile -> SharedDisposable<IDecodedTile>
+//                                     interface, EditMode async-Task unit teeth.
 //   UnityWebRequestDataSourceTests  — UnityWebRequestDataSource against a loopback HttpListener, including the 404 -> Absent mapping.
 //   DataSourceRenderPathTests       — FileDataSource through the render pipeline.
 //   DataSourceTests                 — FileDataSource/UnityWebRequestDataSource/MvtTileFeatureSource, migrated onto UniTask/UniTaskCompletionSource.
