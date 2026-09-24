@@ -151,11 +151,11 @@ namespace MapRenderer.Tests.Visual
                 $"W3-T1 precondition: the depth span must be at least 2× — measured {depthRatio:F4}.");
             double heightSpread = math.abs(nearHeights[nearHeights.Count - 1] - nearHeights[0]);
             Assert.That(heightSpread, Is.GreaterThanOrEqualTo(4.0),
-                $"W3-T1 precondition (ANTI-P3c): within RecedingNear alone the reconstructed quad's screen " +
+                $"W3-T1 precondition: within RecedingNear alone the reconstructed quad's screen " +
                 $"height must vary by ≥ 4 px between its first and last glyph — measured {heightSpread:F3} px " +
                 $"({nearHeights[0]:F3} → {nearHeights[nearHeights.Count - 1]:F3}). Without it a box scaled by " +
-                "ONE constant per label could clear the 0.5 px bound, and that model is exactly what P3c was " +
-                "reverted for.");
+                "ONE constant per label could clear the 0.5 px bound, and that model is wrong under " +
+                "perspective.");
         }
 
         /// <summary>

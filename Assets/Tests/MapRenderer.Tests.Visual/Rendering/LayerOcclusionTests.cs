@@ -568,7 +568,7 @@ namespace MapRenderer.Tests.Visual
                 double[] above = SampleAround(snap.Pixels, ix, iy);
                 Assert.Greater(above[0], above[1] + 0.15,
                     $"a layer declared ABOVE a symbol layer must occlude its labels — sampled (R,G,B)=({above[0]:F3},{above[1]:F3},{above[2]:F3}) " +
-                    "should read occluder-red (R dominant), not label-green. Under the retired Overlay-4000 pin this fails by construction.");
+                    "should read occluder-red (R dominant), not label-green. A symbol queue pinned to Overlay (4000) draws over every layer and fails this.");
 
                 // 3. Control: occluder BELOW the symbol layer's queue (+0 < +1) — the symbol must win instead.
                 occluderMat.renderQueue = LayerDrawOrder.TransparentQueue + 0;
@@ -732,7 +732,7 @@ namespace MapRenderer.Tests.Visual
                 double[] second = SampleAround(snap.Pixels, ix, iy);
                 Assert.Greater(second[0] + second[1] + second[2], 0.5,
                     $"a SECOND render with no Tick between must STILL show ink at ({ix},{iy}) — sampled sum={second[0] + second[1] + second[2]:F3}. " +
-                    "Under the retired immediate-mode Graphics.RenderMesh path this would be the Editor blink (0 ink, nothing re-submitted).");
+                    "0 ink means the symbols draw in immediate mode (Graphics.RenderMesh), which a repaint without a Tick does not re-submit: the Editor blink.");
 
                 // HIDE half (risk #1's mirror-image guard): Tick with an EMPTY set → the presenter must hide,
                 // not keep drawing last frame's symbol frozen on screen.

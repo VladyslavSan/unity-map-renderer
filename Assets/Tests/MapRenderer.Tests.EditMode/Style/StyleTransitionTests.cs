@@ -1031,8 +1031,8 @@ namespace MapRenderer.Tests.Style
                 Assert.AreEqual(0f, Opacity(view), 1e-6f, "drive precondition: the layer starts gated out.");
                 Assert.IsFalse(backend.AllItemsDrawnAtSlot(0),
                     "a layer settled outside its zoom range must submit no draw item. Submitting it and " +
-                    "discarding the fragment is the retired mechanism — it still paid for the vertex " +
-                    "stage and the draw call on every frame.");
+                    "discarding the fragment is wrong — it pays for the vertex stage and the draw call " +
+                    "on every frame.");
 
                 // Cross the bound with the DEFAULT (non-instant) transition and stop halfway through it.
                 double d = StyleTransition.Default.DurationSeconds;

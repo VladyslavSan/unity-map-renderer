@@ -156,7 +156,7 @@ namespace MapRenderer.Tests.Materials
                 $"MapLine.mat must resolve to the Transparent render queue (>=2501) after a fresh "      +
                 $"batch import, got {mat.renderQueue}. The queue comes from the material's "   +
                 "serialized custom render queue (3000) + the Line SubShader Queue=Transparent tag — "    +
-                "the raw-ShaderGUI no longer recomputes it. A value of 2000 means the custom queue was " +
+                "the raw ShaderGUI does not recompute it. A value of 2000 means the custom queue was " +
                 "lost.");
         }
 #endif
@@ -606,7 +606,7 @@ namespace MapRenderer.Tests.Materials
         {
             Assert.AreEqual(typeof(ShaderGUI), typeof(MapRenderer.Unity.Editor.BaseShaderGUI).BaseType,
                 "Our BaseShaderGUI must subclass the RAW UnityEditor.ShaderGUI directly — it is our own " +
-                "type, distinct from URP's UnityEditor.BaseShaderGUI (no longer referenced).");
+                "type, distinct from URP's UnityEditor.BaseShaderGUI, which this repo does not reference.");
         }
 
         [Test]

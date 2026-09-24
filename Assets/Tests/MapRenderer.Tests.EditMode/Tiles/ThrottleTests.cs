@@ -2482,16 +2482,16 @@ namespace MapRenderer.Tests.Tiles
             string subsystemSrc   = File.ReadAllText(SourcePath("MapRenderer.Unity", "Text", "SymbolSubsystem.cs"));
 
             Assert.AreEqual(0, CountOccurrences(tileManagerSrc, "SymbolTileBytesReady"),
-                "TileManager must contain ZERO SymbolTileBytesReady occurrences — the push feed is retired.");
+                "TileManager must contain ZERO SymbolTileBytesReady occurrences — symbol tiles are pulled through the worker pass, not pushed.");
             Assert.IsTrue(tileManagerSrc.Contains("ISymbolTileWorkerFactory SymbolWorkerFactory"),
                 "TileManager must hold the factory field SymbolWorkerFactory.");
             Assert.IsTrue(tileManagerSrc.Contains("ISymbolTileWorkerPass symbolPass"),
                 "KickMeshBuild's signature must carry an ISymbolTileWorkerPass parameter.");
 
             Assert.AreEqual(0, CountOccurrences(subsystemSrc, "OnTileBytesReady"),
-                "SymbolSubsystem must contain ZERO OnTileBytesReady occurrences — the push entry is retired.");
+                "SymbolSubsystem must contain ZERO OnTileBytesReady occurrences — the subsystem has no push entry.");
             Assert.AreEqual(0, CountOccurrences(subsystemSrc, "_buildQueue"),
-                "SymbolSubsystem must contain ZERO _buildQueue occurrences — the build-start queue is retired.");
+                "SymbolSubsystem must contain ZERO _buildQueue occurrences — the subsystem has no build-start queue.");
             Assert.IsTrue(typeof(ISymbolTileWorkerFactory).IsAssignableFrom(typeof(SymbolSubsystem)),
                 "SymbolSubsystem must implement ISymbolTileWorkerFactory.");
         }

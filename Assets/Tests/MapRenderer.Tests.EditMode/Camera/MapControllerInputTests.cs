@@ -129,7 +129,7 @@ namespace MapRenderer.Tests.Cameras
         public void MapController_NoFusedApplyTilt()
         {
             Assert.IsFalse(MapControllerSource.Contains("ApplyTilt"),
-                "Controller.cs must NOT contain 'ApplyTilt' — the fused helper is retired. " +
+                "Controller.cs must NOT contain 'ApplyTilt' — tilt and heading are separate intents, not one fused helper. " +
                 "Use GestureIntent.TiltBy + GestureIntent.HeadingBy via ViewInput.Apply instead.");
         }
 

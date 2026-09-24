@@ -1312,7 +1312,7 @@ namespace MapRenderer.Tests.Visual
                 $"{boundPercent:F2} %).{table}" +
                 "   A receding label reading well ABOVE the expected advance, growing with depth, is a " +
                 "SCREEN-uniform walk (or a world walk scaled by one per-label constant, which is the same " +
-                "thing) — the model already reverted twice. A uniform 0.5× at DPR 2 with DPR 1 " +
+                "thing), which is wrong under perspective. A uniform 0.5× at DPR 2 with DPR 1 " +
                 "green is the dropped DevicePixelRatio factor.");
         }
     }

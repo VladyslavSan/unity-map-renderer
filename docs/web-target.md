@@ -101,9 +101,9 @@ against three defects (a non-advancing buffer, unhandled `ENOBUFS`, and a retry 
 | managed stripping | **High** — same as every other target | it works again as of 6.6; it hung the player at 100% on 6000.5 | none; keeping Minimal cost 3.1 MB |
 | threads support | **on** | grants the job system worker pthreads, which Burst can now actually use | requires a cross-origin-isolated host |
 
-Burst and threads are set in `BuildScript.RunWeb`, stripping in `ApplyReleaseSettings`, with the reasoning
-inline rather than left to whoever last opened the Editor. **Web no longer carries any settings exception**
-— that is new as of 6.6, and both exceptions it used to carry were fixed by the same upgrade.
+Burst and threads are set in `BuildScript.RunWeb`, stripping in `ApplyReleaseSettings`, rather than left
+to whoever last opened the Editor. This table holds the reasoning; `RunWeb` points here.
+**Web no longer carries any settings exception** — that is new as of 6.6, and both exceptions it used to carry were fixed by the same upgrade.
 `UMR_WEB_BURST=off Tools/build.sh web` builds the Burst-off variant if the 6000.5 trap ever returns.
 
 ### Known-bad configurations, all measured on this project

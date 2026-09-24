@@ -21,6 +21,7 @@ using MapRenderer.Unity.Rendering.Backend.BRG;
 using System.Linq;
 using System.Text.RegularExpressions;
 using System.Text;
+using System.Xml.Linq;
 using Unity.Collections.LowLevel.Unsafe;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -196,6 +197,25 @@ namespace MapRenderer.Tests.Structure
             Assert.That(failures, Is.Empty,
                 "Struct → Fill∪Line DOTS reverse parity failed (orphan struct fields):\n" +
                 string.Join("\n", failures));
+        }
+
+        /// <summary>
+        /// <c>Assets/link.xml</c> keeps every <see cref="MapInstanceData"/> field under managed stripping.
+        /// No C# code reads those fields, so without the entry the linker can drop one and shift the SoA layout.
+        /// </summary>
+        [Test]
+        public void LinkXml_PreservesEveryInstanceDataField()
+        {
+            Type type = typeof(MapInstanceData);
+            var linker = XDocument.Load(Path.Combine(Application.dataPath, "link.xml"));
+            bool preserved = linker.Descendants("type")
+                .Any(t => (string)t.Parent.Attribute("fullname") == type.Assembly.GetName().Name
+                       && (string)t.Attribute("fullname") == type.FullName
+                       && ((string)t.Attribute("preserve") == "fields" || (string)t.Attribute("preserve") == "all"));
+
+            Assert.That(preserved, Is.True,
+                $"Assets/link.xml must hold <type fullname=\"{type.FullName}\" preserve=\"fields\"/> " +
+                $"under <assembly fullname=\"{type.Assembly.GetName().Name}\">.");
         }
     }
 

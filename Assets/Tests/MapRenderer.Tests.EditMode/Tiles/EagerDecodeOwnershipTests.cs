@@ -155,12 +155,12 @@ namespace MapRenderer.Tests.Tiles
             int held = fake.Probe.DecodeCount - fake.Probe.DisposedCount;
             Assert.AreEqual(loaded, held,
                 $"ANTI-VACUITY: EVERY decoded tile must still be ALIVE and held by its RECORD when the funnel " +
-                $"runs ({held} of {fake.Probe.DecodeCount} are). A kick no longer steals the record's " +
+                $"runs ({held} of {fake.Probe.DecodeCount} are). A kick does not take the record's " +
                 "reference — KickMeshBuild takes its OWN separate one (decode.Acquire()) and RenderTeardownRecord " +
                 "alone ends the record's ownership, kicked or not — so even the single tile the observe tick may " +
                 "kick at a cap of one per tick is still held here, and nothing has reached a final release yet " +
-                "(DisposedCount is 0). The retired scoped-lease model transferred the record's reference to the " +
-                "kick's pool lambda and nulled the field, which is why this once had to tolerate loaded - 1.");
+                "(DisposedCount is 0). A reading of loaded - 1 means a kick transferred the record's " +
+                "reference to its pool lambda and nulled the field.");
             return held;
         }
 

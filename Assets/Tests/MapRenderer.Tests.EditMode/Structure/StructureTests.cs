@@ -677,8 +677,8 @@ namespace MapRenderer.Tests.Structure
             // Geometry belongs to the layer, so "this method mints nothing and frees nothing" is the two
             // zero-counts above plus this clause: the one remaining way to mint privately is absent.
             Assert.AreEqual(0, CountOccurrences(body, "new MvtGeometryMaterializer("),
-                "Extract must construct NO producer of its own. This is the only remaining shape of the " +
-                "retired per-(layer, feature) mint: with the store gone, a private materializer is " +
+                "Extract must construct NO producer of its own. A private materializer is a " +
+                "per-(layer, feature) mint: it is " +
                 "how a consumer would silently stop sharing the layer's buffer — and it is OUTPUT-NEUTRAL, " +
                 "so no behavioural test in the suite would notice.");
             Assert.AreEqual(1, CountOccurrences(NormaliseWhitespace(body),
@@ -735,8 +735,8 @@ namespace MapRenderer.Tests.Structure
                 $"Found {testAssemblyHits}; a low number means the matcher, not production, is what changed.");
 
             Assert.IsEmpty(offenders,
-                $"ZERO production files may call '{decodeCallForm}' — the last one is retired " +
-                "(SymbolFeatureExtractor). The TYPE stays: it is the spec transcription, the parity oracle " +
+                $"ZERO production files may call '{decodeCallForm}' — production decodes through " +
+                "MvtDecodeJob. The TYPE stays: it is the spec transcription, the parity oracle " +
                 $"MvtDecodeJob is measured against, and Tools/core-tests' ground truth. Offenders: " +
                 string.Join(", ", offenders));
         }
@@ -934,10 +934,10 @@ namespace MapRenderer.Tests.Structure
                      { ".Materialize(", "TileGeometryBuffers.Allocate(", "TileGeometryBuffers.AdoptDerivedLists(" })
             {
                 Assert.AreEqual(0, CountOccurrences(body, mintToken),
-                    $"This INVERTED from 1 to 0. StyledLineTileBuilder must mint NOTHING — " +
+                    $"StyledLineTileBuilder must mint NOTHING — " +
                     $"'{mintToken}' found. The source-layer's buffer is materialized once per worker pass by " +
                     "TileGeometryStore and lent to every style layer naming that source-layer. A mint here is " +
-                    "the 61-decodes-per-pass regression that was retired, re-introduced one layer down.");
+                    "a materialization per style layer (61 decodes per pass on the fixture) instead of one per source-layer.");
             }
             Assert.AreEqual(0, CountOccurrences(body, "geometry.Dispose()"),
                 "…and must free NOTHING. Disposing a BORROWED buffer frees geometry sibling layers are still " +
@@ -1088,13 +1088,13 @@ namespace MapRenderer.Tests.Structure
 
             Assert.AreEqual(0, CountOccurrences(source, DecodeCallForm),
                 $"SymbolSubsystem.cs must contain ZERO direct '{DecodeCallForm}' call sites — the " +
-                "symbol decode now lives in TileLayerProcessorRunner.RunSymbolWorkerPass.");
+                "symbol decode lives in TileLayerProcessorRunner.RunSymbolWorkerPass.");
             Assert.AreEqual(0, CountOccurrences(source, extractLayersCallForm),
                 $"SymbolSubsystem.cs must contain ZERO direct '{extractLayersCallForm}' call sites — " +
-                "per-layer extraction now happens inside TileSymbolLayerProcessor.ProcessOnWorker.");
+                "per-layer extraction happens inside TileSymbolLayerProcessor.ProcessOnWorker.");
             Assert.AreEqual(0, CountOccurrences(source, shapeAsyncCallForm),
                 $"SymbolSubsystem.cs must contain ZERO direct '{shapeAsyncCallForm}' call sites — the " +
-                "identifier no longer exists (renamed to Shape by the glyph-fetch hoist).");
+                "shaping entry point is Shape.");
             Assert.AreEqual(0, CountOccurrences(source, shapeCallForm),
                 $"SymbolSubsystem.cs must contain ZERO direct '{shapeCallForm}' call sites — " +
                 "per-layer shaping still happens inside TileSymbolLayerProcessor.CompleteOnMain, never " +
@@ -1450,8 +1450,8 @@ namespace MapRenderer.Tests.Structure
             }
 
             Assert.IsEmpty(offenders,
-                $"no file under {codeRoot} or {testsRoot} may reference the retired geometry-type enum name " +
-                $"— it was renamed to Core.Tiles.TileGeometryType; found the old name in: " +
+                $"no file under {codeRoot} or {testsRoot} may reference '{oldTypeName}' " +
+                $"— the enum is Core.Tiles.TileGeometryType; found '{oldTypeName}' in: " +
                 $"{string.Join(", ", offenders)}");
 
             string newTypePath = Path.Combine(codeRoot, "MapRenderer.Core", "Tiles", "TileGeometryType.cs");
@@ -1703,7 +1703,7 @@ namespace MapRenderer.Tests.Structure
 
             // ── The dispatch, narrowed to its own argument list ──────────────────────────────────────
             Assert.AreEqual(0, CountOccurrences(pumpBody, "UniTask.RunOnThreadPool"),
-                "PumpBuilds must no longer dispatch the parked drain's worker phase through raw " +
+                "PumpBuilds must not dispatch the parked drain's worker phase through raw " +
                 "UniTask.RunOnThreadPool — it is dead on WebGL (docs/web-target.md).");
             // The dispatch must reach the INJECTED policy: a body-minted `new InlineWorkScheduler()` still reads
             // like a dispatch and passes the substring check below, so both construction forms are banned.
@@ -1818,8 +1818,8 @@ namespace MapRenderer.Tests.Structure
 
             Assert.AreEqual(1, CountOccurrences(body, "decode.Acquire()"),
                 "KickMeshBuild must call 'decode.Acquire()' exactly once — its OWN reference, taken in the " +
-                "main-thread prologue before the scheduler call exists. The transfer is retired: the record no " +
-                "longer hands this reference over, so the kick must take a separate one of its own.");
+                "main-thread prologue before the scheduler call exists. The record does not hand its " +
+                "reference over, so the kick must take a separate one of its own.");
             Assert.AreEqual(2, CountOccurrences(body, "decode.Release()"),
                 "KickMeshBuild must contain EXACTLY TWO 'decode.Release()' — one guard `catch` around the " +
                 "worker-pass body (a fault there releases instead of transferring) and one guard `catch` " +
@@ -1856,10 +1856,10 @@ namespace MapRenderer.Tests.Structure
                 Assert.GreaterOrEqual(call, 0,
                     $"the caller anchored at '{callerAnchor}' must kick through lt.Decode");
                 Assert.AreEqual(0, CountOccurrences(callerBody, "lt.Decode = null"),
-                    $"'{callerAnchor}' must NOT null lt.Decode anywhere around its KickMeshBuild call — the change " +
-                    "retired the transfer: the record keeps its own reference for its whole in-cover " +
-                    "lifetime, and RenderTeardownRecord (funnel 1) is the only release. A null-out here is " +
-                    "the retired transfer shape leaking back in.");
+                    $"'{callerAnchor}' must NOT null lt.Decode anywhere around its KickMeshBuild call — the " +
+                    "record keeps its own reference for its whole in-cover lifetime, and " +
+                    "RenderTeardownRecord (funnel 1) is the only release. A null-out here transfers the " +
+                    "record's reference to the kick.");
             }
         }
 
@@ -1888,7 +1888,7 @@ namespace MapRenderer.Tests.Structure
             // so only KickMeshBuild dispatches through the seam.
             Assert.AreEqual(1, CountOccurrences(stripped, "WorkScheduler.Schedule("),
                 "TileManager.cs must contain exactly one 'WorkScheduler.Schedule(' call site — KickMeshBuild. " +
-                "KickSourcelessBackground no longer uses the seam at all.");
+                "KickSourcelessBackground does not use the seam.");
 
             string meshBuildBody = StripComments(
                 ExtractMethodBody(source, KickMeshBuildSignatureAnchor, path));
@@ -2364,8 +2364,8 @@ namespace MapRenderer.Tests.Structure
             }
 
             Assert.IsEmpty(violations,
-                "production source under MapRenderer.Jobs/ or MapRenderer.Unity/Rendering/ still references a " +
-                "a retired symbol mesher — the graph is the only mesher now:\n" +
+                "production source under MapRenderer.Jobs/ or MapRenderer.Unity/Rendering/ references " +
+                "a symbol mesher other than the graph — the graph is the only mesher:\n" +
                 string.Join("\n", violations));
         }
 
@@ -2399,8 +2399,8 @@ namespace MapRenderer.Tests.Structure
             }
 
             Assert.IsEmpty(violations,
-                "a builder source file still declares WriteMeshData — the synchronous convenience method " +
-                "was retired with zero production callers and moved to MapRenderer.Tests.SyncMeshWrite; it " +
+                "a builder source file declares WriteMeshData — the synchronous convenience method " +
+                "has zero production callers and lives in MapRenderer.Tests.SyncMeshWrite; it " +
                 "must not grow back here under any modifier or arity:\n" + string.Join("\n", violations));
         }
 

@@ -299,10 +299,9 @@ namespace MapRenderer.Tests.Text
             Assert.AreEqual(0, _parkedSubsystem.PendingSpriteCount(), "…and the pending queue must have drained");
 
             Assert.AreEqual(1, parkedProbe.DecodeCount,
-                "THE NUMBER THIS STAGE BOUGHT: a parked build decodes EXACTLY ONCE. It used to be 2 — the " +
-                "drain re-parsed the retained bytes because the kick's scope had already freed the tile — and " +
-                "that second decode is what the reference count deletes. A 2 here means the park is no longer " +
-                "holding its reference across the sprite-settle window; do not 'restore' this to 2.");
+                "a parked build decodes EXACTLY ONCE. A 2 here means the park does not hold its reference " +
+                "across the sprite-settle window: the kick's scope frees the tile, so the drain re-parses " +
+                "the retained bytes. The reference count prevents that second decode; do not accept 2.");
 
             // The drain read the kick's own tile: only a worker pass reads a layer (DriveKick's mesh read never
             // calls GetLayer), so a layer read against decode 0 is the parked drain's extract.
@@ -348,7 +347,7 @@ namespace MapRenderer.Tests.Text
             // Vacuity guard 3: both arms decode once, so the decode count cannot tell them apart. The tile's
             // lifetime can: the parked arm reads DisposedCount 0 after its kick, the oracle arm reads 1.
             Assert.AreEqual(1, oracleProbe.DecodeCount,
-                "sanity: the oracle arm decoded once (both arms do now — this is no longer the differential)");
+                "sanity: the oracle arm decoded once (both arms decode once — this is not the differential)");
             Assert.AreEqual(0, _oracleSubsystem.PendingSpriteCount(),
                 "sanity: the queue is empty. NOT the never-parked guard — that is the park-decision " +
                 "assertion above; this reads 0 for an arm that parked and then drained, which is exactly " +

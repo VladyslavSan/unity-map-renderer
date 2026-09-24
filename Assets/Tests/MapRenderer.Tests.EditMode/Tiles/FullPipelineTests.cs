@@ -2030,7 +2030,7 @@ namespace MapRenderer.Tests.Tiles
                 "below compare two default(NativeArray)s and assert nothing");
             Assert.IsTrue(log[0].buffer.Equals(log[1].buffer),
                 "every symbol processor must borrow the SAME source-layer buffer — a per-get materialization " +
-                "is the retired per-layer mint, wearing the layer's name");
+                "mints a copy per layer, which re-materializes the source layer once per symbol layer");
             Assert.IsTrue(log[0].buffer.Equals(log[2].buffer),
                 "every symbol processor must borrow the SAME source-layer buffer");
 

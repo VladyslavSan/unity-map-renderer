@@ -16,6 +16,7 @@ using System.Collections.Generic;
 using System.Threading;
 using NUnit.Framework;
 using UnityEngine;
+using MapRenderer.Core.Data;
 using MapRenderer.Core.Geo;
 using MapRenderer.Core.Lifetime;
 using MapRenderer.Core.Style;
@@ -1917,8 +1918,8 @@ namespace MapRenderer.Tests.Tiles
                     "rest of the cover completes during the wait and the witness becomes vacuous, which is " +
                     "exactly why the Measure case dropped it. It also depends on THIS fixture's style " +
                     "declaring no `background` layer — KickSourcelessBackground runs on the main thread " +
-                    "ungated by MeshBuildGateForTest and, since LayerMeshBuildCounters counts unconditionally " +
-                    "(unlike the retired per-factory counting), a background tile's build would advance " +
+                    "ungated by MeshBuildGateForTest and, since LayerMeshBuildCounters counts every build " +
+                    "unconditionally, a background tile's build would advance " +
                     "this counter regardless of the gate; FillStyle() never declares one, so that path never " +
                     "runs here.");
 
@@ -2046,15 +2047,19 @@ namespace MapRenderer.Tests.Tiles
 
         /// <summary>
         /// Case 3 (Write): a tile released once its WRITE step is COMPLETE but UNCONSUMED
-        /// (<c>MaxConsumesPerTick = 0</c>), which <c>RenderTeardownRecord</c> also pens. The write handle is
-        /// complete at release, so <see cref="MapViewTestExtensions.ReleasedMidFlightCount"/> does not count
-        /// it; this case asserts only the pen/drain shape. Its non-vacuity pair is on
-        /// <see cref="TileBuildGraph.DebugLiveCount"/>, not the process-wide build counter.
+        /// (<c>MaxConsumesPerTick = 0</c>), which <c>RenderTeardownRecord</c> also pens. The handle is complete
+        /// at release, so <see cref="MapViewTestExtensions.ReleasedMidFlightCount"/> does not count it.
+        /// The post-pan cover is served absent. With consume blocked, a served tile parks at
+        /// Write and holds a live graph in its record, which reads as a pen leak.
         /// </summary>
         [Test]
         public void ReleasedCompleteButUnconsumed_Write_StashesInThePen_ThenDrains()
         {
-            var src  = TestDataSource.FromBytes(SampleTileFixture.Bytes());
+            byte[] bytes  = SampleTileFixture.Bytes();
+            bool   panned = false;
+            var src = TestDataSource.FromFetch(_ => UniTask.FromResult(Volatile.Read(ref panned)
+                ? TileResponse.Absent(TileEncoding.Mvt)
+                : new TileResponse(bytes, TileEncoding.Mvt)));
             var go = Track(new GameObject("SourceTileGraphBuild_D_Write"));
             var view = go.AddComponent<MapView>().WithTestMaterials();
             view.Config.TileSelection.MinZoom = 5;
@@ -2085,6 +2090,7 @@ namespace MapRenderer.Tests.Tiles
                 Assert.Greater(MeshDataPayload.DebugLiveAllocCount, payloadBaseline,
                     "non-vacuous precondition: the completed write must hold a real allocated payload.");
 
+                Volatile.Write(ref panned, true);
                 view.Camera.Apply(new CameraPropertiesUpdate { Longitude = 170 });
                 view.LateUpdate();
 
@@ -2094,12 +2100,16 @@ namespace MapRenderer.Tests.Tiles
                     "the evicted graph must still be LIVE right after eviction — this case's pen defers " +
                     "disposal to the drain, exactly like the genuinely-in-flight cases.");
 
-                for (int f = 0; f < 100_000 && TileBuildGraph.DebugLiveCount > graphBaseline; f++)
+                // A fixed pump with no early exit, so the new cover settles before the count is read.
+                for (int f = 0; f < 200; f++)
+                {
+                    view.AwaitInFlightMeshBuilds();
                     view.LateUpdate();
+                }
 
                 Assert.AreEqual(graphBaseline, TileBuildGraph.DebugLiveCount,
                     "the pen must drain the complete-but-unconsumed graph — PendingDisposalQueue.DrainCompleted disposes it " +
-                    "(a Burst job cannot fault, so IsStepComplete is the only gate; no wait was needed here).");
+                    "(a Burst job cannot fault, so IsStepComplete is the only gate; the pen itself needs no wait).");
                 Assert.AreEqual(requestsBaseline, LayerMeshBuildCounters.DebugLiveBuilds,
                     "the graph's own builds' columns must be freed with it.");
                 Assert.AreEqual(payloadBaseline, MeshDataPayload.DebugLiveAllocCount,
@@ -2118,7 +2128,6 @@ namespace MapRenderer.Tests.Tiles
         /// The Write case's hold, but parked by <see cref="TileManager.SetSources"/> with an EMPTY source
         /// list: zero cover, so no other job can flush the batch queue. The drain works when the parked
         /// graph's <see cref="TileBuildGraph.IsStepComplete"/> is already true at parking time.
-        /// Limitation: a rare pan-eviction leak, where graphs never enter the pen, is not reproduced here.
         /// </summary>
         [Test]
         public void ParkedGraph_AlreadyComplete_DrainsWithoutAnyOtherJobScheduled()
@@ -2792,7 +2801,8 @@ namespace MapRenderer.Tests.Tiles
         {
             double extent = BackgroundQuad.Extent;
             Assert.AreEqual(FullExtentRingCommandStream.Extent, extent,
-                "precondition: the retired stream was authored at the extent the processor still uses");
+                "precondition: the frozen command stream must use the processor's extent, or the element-wise " +
+                "comparison below compares rings at two different scales");
 
             // The legacy arm: the exact bytes production used to hand-author.
             var legacyFeature = new DictionaryFeature(properties: null, geometryType: TileGeometryType.Polygon, hasId: false, geometry: FullExtentRingCommandStream.Commands);

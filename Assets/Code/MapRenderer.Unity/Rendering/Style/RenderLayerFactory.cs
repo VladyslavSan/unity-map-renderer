@@ -1,4 +1,3 @@
-using UnityEngine;
 using MapRenderer.Core.Style;
 using Fill = MapRenderer.Core.Style.Fill;
 using Line = MapRenderer.Core.Style.Line;
@@ -23,7 +22,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// the reasons into a style-load compatibility summary.</summary>
         public static IRenderLayer Create(
             StyleLayer layer, Materials.MapMaterialSet settings, double initialZoom, int drawIndex,
-            out LayerSkipReason reason, Transform parent = null)
+            out LayerSkipReason reason)
         {
             // `visibility: none` takes no slot for THIS style load. A restyle can still flip it on in place:
             // SurvivingLayerGate ignores layout.visibility, so it never rebuilds a layer for that alone.
@@ -46,8 +45,8 @@ namespace MapRenderer.Unity.Rendering.Style
                 Fill.StyleLayer f                          => WithMaterialReason(FillRenderLayer.TryCreate(f, settings, initialZoom, drawIndex)),
                 Line.StyleLayer l                           => WithMaterialReason(LineRenderLayer.TryCreate(l, settings, initialZoom, drawIndex)),
                 // Source != null mirrors SymbolSubsystem.SetStyle's skip, which keeps the 1:1 slot↔subsystem
-                // ordinal mapping. Only it takes `parent`, which SymbolRenderLayer does not use at present.
-                Symbol.StyleLayer s when s.Source != null   => (SymbolRenderLayer.Create(s, settings, initialZoom, drawIndex, parent), LayerSkipReason.None),
+                // ordinal mapping.
+                Symbol.StyleLayer s when s.Source != null   => (SymbolRenderLayer.Create(s, settings, initialZoom, drawIndex), LayerSkipReason.None),
                 // A source-less symbol layer has nothing to place — by design, not a compatibility gap.
                 Symbol.StyleLayer                           => ((IRenderLayer)null, LayerSkipReason.GenuinelyUnpainted),
                 Background.StyleLayer b                     => (BackgroundRenderLayer.Create(b, settings, initialZoom, drawIndex), LayerSkipReason.None),

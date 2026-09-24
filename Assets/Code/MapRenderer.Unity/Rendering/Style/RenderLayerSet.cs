@@ -27,11 +27,6 @@ namespace MapRenderer.Unity.Rendering.Style
         /// docs/conventions-short.md, "New data-plane code is born native", for the discriminator.</summary>
         private readonly List<SkippedLayer> _skippedLayers = new List<SkippedLayer>();
 
-        /// <summary>The Hierarchy root that <see cref="Build"/> passes to layer creation as <c>parent</c>, created
-        /// on the first Build; <see cref="HideFlags.DontSave"/> keeps it out of scenes and builds.
-        /// <c>SymbolRenderLayer</c> takes <c>parent</c> but does not use it, so nothing is parented here.</summary>
-        private GameObject _root;
-
         /// <summary>Last pair pushed through <see cref="SetSprites"/> — the per-frame no-op memo. Reset by
         /// <see cref="ClearLayers"/>, since a rebuilt layer starts unresolved and must be re-told.</summary>
         private SpriteAtlasView _spriteAtlas;
@@ -41,10 +36,6 @@ namespace MapRenderer.Unity.Rendering.Style
         /// (a <see cref="TombstoneRenderLayer"/>). <c>index == slot == material index</c>, but not
         /// <c>== draw order</c> after a partial-survival reorder (see <see cref="TryRestyleInPlace"/>).</summary>
         public int Count => _layers.Count;
-
-        /// <summary>The shared Hierarchy parent for the layers' scene GameObjects (null before the first
-        /// <see cref="Build"/> / after <see cref="Dispose"/>). Tests read the live grouping through it.</summary>
-        internal Transform Root => _root != null ? _root.transform : null;
 
         /// <summary>The render layer at SLOT <paramref name="index"/>.</summary>
         public IRenderLayer this[int index] => _layers[index];
@@ -91,14 +82,11 @@ namespace MapRenderer.Unity.Rendering.Style
             ClearLayers();
             if (style == null) return;
 
-            if (_root == null)
-                _root = new GameObject("Map Render Layers") { hideFlags = HideFlags.DontSave };
-
             int drawIndex = 0;
             foreach (var sl in style.Layers)
             {
                 IRenderLayer layer = RenderLayerFactory.Create(
-                    sl, settings, initialZoom, drawIndex, out LayerSkipReason skipReason, _root.transform);
+                    sl, settings, initialZoom, drawIndex, out LayerSkipReason skipReason);
                 if (layer == null)
                 {
                     // Unsupported kind, unconfigured material, or genuinely unpainted by design — no slot;
@@ -318,12 +306,7 @@ namespace MapRenderer.Unity.Rendering.Style
         }
 
         /// <inheritdoc cref="ClearLayers"/>
-        protected override void DoDispose()
-        {
-            ClearLayers();
-            _root.DestroySafely(); // null-guarded (never built ⇒ no-op); its children were destroyed by ClearLayers
-            _root = null;
-        }
+        protected override void DoDispose() => ClearLayers();
 
         /// <summary>Destroys a per-layer <see cref="Material"/> instance (play → Destroy, edit → DestroyImmediate).
         /// Shared by the <see cref="IRenderLayer"/> implementations, which own their materials.</summary>

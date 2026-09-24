@@ -29,12 +29,12 @@ namespace MapRenderer.Unity.Rendering.Materials
                  "Cloned per style layer (MaterialFactory.CreateFillExtrusionMaterial). Optional — unassigned " +
                  "means fill-extrusion layers will not render (a warning is logged); NOT enforced by " +
                  "Validate() (mirrors SymbolIconWorld — enforcing it would red every pre-existing scene/test " +
-                 "asset that predates this field).")]
+                 "asset that leaves this field empty).")]
         [SerializeField] public Material FillExtrusionMaterial;
 
         [Tooltip("Map/Symbol/TextWorld: base material for the world-anchored point-text draw " +
                  "path. Cloned per style layer (SymbolRenderLayer.WorldTextMaterial). REQUIRED — enforced by " +
-                 "Validate(), because A1 retired the screen-space point-text path: an unassigned base means " +
+                 "Validate(), because this is the only point-text draw path: an unassigned base means " +
                  "points never render.")]
         [SerializeField] public Material SymbolTextWorld;
 

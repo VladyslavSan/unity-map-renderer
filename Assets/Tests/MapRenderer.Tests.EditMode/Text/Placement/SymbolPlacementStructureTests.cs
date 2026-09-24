@@ -105,7 +105,7 @@ namespace MapRenderer.Tests.Text.Placement
             }
 
             Assert.IsEmpty(offenders,
-                "Graphics.RenderMesh was retired with the render-layer model " +
+                "Graphics.RenderMesh has no place in the render-layer model " +
                 "-- symbol labels draw via persistent per-slot MeshRenderers (SymbolSlotPresenter), redrawn by " +
                 "Unity on its own, never re-issued from an immediate-mode call. Offending files:\n" +
                 string.Join("\n", offenders));

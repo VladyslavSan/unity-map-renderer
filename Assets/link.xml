@@ -1,0 +1,7 @@
+<linker>
+  <!-- Only the GPU and InstancePropPlan's reflection read these fields, so no C# code path marks them.
+       A stripped field shifts every later SoA offset away from the shader's DOTS layout. -->
+  <assembly fullname="MapRenderer.Unity">
+    <type fullname="MapRenderer.Unity.Rendering.Backend.BRG.MapInstanceData" preserve="fields"/>
+  </assembly>
+</linker>

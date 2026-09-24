@@ -1150,8 +1150,8 @@ namespace MapRenderer.Tests.Visual
                     Assert.That(centre.SeparationPx, Is.InRange(68.0, 73.0),
                         $"T-S1 framing: the padded band renders {centre.SeparationPx:F2} px thick, expected " +
                         "in [68, 73] (120·cos 55° + 1 = 69.83 to first order, 70.73 measured). A reading " +
-                        "near 121 would mean the band is holding a constant DEVICE width under tilt — the " +
-                        "compensation that was reverted. If the fixture will not frame, RE-DERIVE from the " +
+                        "near 121 means the band holds a constant DEVICE width under tilt, which is wrong: " +
+                        "a styled width fixes a WORLD width. If the fixture will not frame, RE-DERIVE from the " +
                         "pose; never widen the window to reach it.");
 
                     // Only ±10 columns (see TiltedSweepHalfWidth). The sweep is a uniformity PRECONDITION, not
@@ -1194,7 +1194,7 @@ namespace MapRenderer.Tests.Visual
 
                     // A COARSE SANITY BOUND only (see the summary): a pass is no evidence the w-ratio is intact.
                     Assert.That(ratio, Is.EqualTo(1.0).Within(0.005),
-                        $"GROSS ASYMMETRY (the width path can no longer cause this — see the summary): on " +
+                        $"GROSS ASYMMETRY (the width path cannot cause this — see the summary): on " +
                         $"the CENTRE COLUMN the ribbon's far (north) silhouette sits " +
                         $"{zFar:F1} m from the centreline and its near (south) silhouette " +
                         $"{math.abs(zNear):F1} m, a ratio of {zFar / math.abs(zNear):F6}; the asserted value " +
@@ -1512,8 +1512,8 @@ namespace MapRenderer.Tests.Visual
                         $"{depthSpread:F3}× depth range. It must be constant to ~1 %, because a styled px " +
                         $"width fixes a WORLD width once and the perspective divide alone renders it. A " +
                         $"spread approaching the depth spread ({depthSpread:F3}×) means the width is being " +
-                        "held constant in DEVICE pixels at every depth — a per-vertex px→world conversion, " +
-                        "which is the defect four reverted stages were built on. Measured widths: " +
+                        "held constant in DEVICE pixels at every depth — a per-vertex px→world conversion " +
+                        "causes this. Measured widths: " +
                         $"{minWidth:F2}…{maxWidth:F2} px. {report}");
                 });
         }

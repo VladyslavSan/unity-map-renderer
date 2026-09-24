@@ -1712,7 +1712,7 @@ namespace MapRenderer.Tests.Text.Placement
             Assert.AreEqual(1, staged);
             Assert.AreEqual(SymbolKind.Text, p.Emit[0].AtlasKind, "curved text must still sample the GLYPH atlas");
             Assert.AreEqual(0f, p.Emit[0].ExtraRotationRadians, 1e-9f,
-                "curved text carries no icon-rotate — the renderer must see the same 0f it used to hardcode");
+                "curved text carries no icon-rotate — the renderer must see 0f");
             Assert.AreEqual(glyphs.Length, p.BoxCount - boxCountBefore, "one box per glyph, unchanged");
         }
 

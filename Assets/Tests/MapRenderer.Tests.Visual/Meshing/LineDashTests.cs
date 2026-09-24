@@ -543,8 +543,8 @@ namespace MapRenderer.Tests.Visual
                         $"T7 precondition: the ribbon must render {expectedThickness:F3} device px thick " +
                         $"({StyledLineWidthPx} px styled × cos {TiltDeg}°, the ground plane's foreshortening " +
                         $"along the across-axis); measured {thickness:F2} px. A reading near " +
-                        $"{StyledLineWidthPx} would mean the band is holding a constant DEVICE width under " +
-                        "tilt — the compensation this repo reverted.");
+                        $"{StyledLineWidthPx} means the band holds a constant DEVICE width under tilt, which " +
+                        "is wrong: a styled width fixes a WORLD width at the look-at.");
 
                     // The probes sit 2 px inside the band that RENDERED, so this tooth encodes no width premise.
                     // Rows are integers because the probe is a scanline.
@@ -622,13 +622,12 @@ namespace MapRenderer.Tests.Visual
                         $"THE ROTATION: a dash boundary sits at arc length {maxSkew:F0} m " +
                         $"({maxSkewPx:F3} px along the road) apart on the two ±{probeOffset} px probes — a " +
                         $"skew of {skewPerSeparation:F5} px per px of separation, i.e. it " +
-                        "is not perpendicular to the road. HISTORICALLY that was the sign term: the two " +
-                        "ribbon vertices of a station share one centreline point and carry opposite " +
-                        "extrudeN, and the earlier MapPixelsToWorld probed ONE-SIDED, so with the " +
-                        "per-vertex divisor they got rulers (1+e)/(1−e) = 1.910 % apart and dashU differed " +
-                        "across the ribbon. That mechanism was removed at source, and a frame-constant " +
-                        "divisor additionally has no direction and no sign — so a reading here is NOT " +
-                        "explained by the historical cause. Investigate what it is rather than assuming.");
+                        "is not perpendicular to the road. dashU must be equal across the ribbon at each " +
+                        "station: the two ribbon vertices of a station share one centreline point and " +
+                        "differ only in the sign of extrudeN. A divisor that depends on that sign (a " +
+                        "one-sided pixels-to-world probe gives rulers (1+e)/(1−e) = 1.910 % apart) " +
+                        "produces this skew. The frame-constant divisor has no direction and no sign, so " +
+                        "find what else makes dashU differ across the ribbon.");
 
                     // Term 2: the same WORLD period T1 measures on a perpendicular road. A per-vertex divisor puts
                     // the east–west edges elsewhere, so this clause discriminates too.
@@ -640,10 +639,9 @@ namespace MapRenderer.Tests.Visual
                         Assert.That(lowerArc[i], Is.EqualTo(want).Within(4.0).Percent,
                             $"T7 edge #{i + 1} sits at arc length {lowerArc[i]:F0} m; the world-anchored " +
                             $"period puts it at {want:F0} m (dashU = {DashOnUnits + DashPeriodUnits * i}). " +
-                            "This is the DIRECTION term: the per-vertex ruler was measured along `across` " +
-                            "while dashes run `along`, so an east–west road got a different period from the " +
-                            "north–south road T1 measures at the same depth. After the fix both roads share " +
-                            "one period.");
+                            "This is the DIRECTION term: an east–west road must share one period with the " +
+                            "north–south road T1 measures at the same depth. A per-vertex ruler measured " +
+                            "along `across` while dashes run `along` gives the two roads different periods.");
                     }
             }
         }
@@ -689,9 +687,9 @@ namespace MapRenderer.Tests.Visual
                     $"T8: the dense mesh produced only {denseY.Length} dash edges — too few to pair.");
                 Assert.That(sparseY.Length, Is.EqualTo(denseY.Length),
                     $"T8: the two meshes produced different edge counts ({denseY.Length} vs " +
-                    $"{sparseY.Length}) and cannot be paired. Note this clause discriminated NOTHING " +
-                    "under the earlier ruler — both meshes yielded 2 — it exists so the positional comparison below is " +
-                    "never taken over mismatched pairs.");
+                    $"{sparseY.Length}) and cannot be paired. This clause is a precondition, not the " +
+                    "discriminator: it stops the positional comparison below from running over " +
+                    "mismatched pairs.");
 
                 double maxDelta = 0.0;
                 int    worst    = 0;
@@ -704,11 +702,10 @@ namespace MapRenderer.Tests.Visual
 
                 Assert.That(maxDelta, Is.LessThanOrEqualTo(1.0),
                     $"the same road rendered with a different vertex count moved dash edge #{worst + 1} by " +
-                    $"{maxDelta:F3} screen px. Under the earlier ruler the tree measured ≈12.4 px on the first edge and " +
-                    "≈12.7 px on the second: dashU was a per-vertex varying over a hyperbola, so the " +
-                    "rendered chord — and therefore the dash period — depended on the road's tessellation. " +
-                    "After the fix dashU " +
-                    "is linear in arc length and the chord reproduces it to float noise at any density.");
+                    $"{maxDelta:F3} screen px. dashU must be linear in arc length, so the rendered chord " +
+                    "reproduces it to float noise at any density. A per-vertex dashU over a hyperbola " +
+                    "makes the chord, and so the dash period, depend on the road's tessellation " +
+                    "(≈12.4 px and ≈12.7 px displacement on the first two edges, measured on this fixture).");
             }
         }
 

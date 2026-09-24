@@ -35,7 +35,7 @@ namespace MapRenderer.Unity.Rendering.Map
         [Header("Performance Budgets")]
         [Tooltip("Per-frame MESH-upload count budget — max tile-layer meshes uploaded + registered per " +
                  "Tick (responsiveness knob: bounds AddLayer/entity-add + GPU upload per frame). This budget makes " +
-                 "consume MESH-by-mesh, so a single rich tile no longer lands in one frame. Pair with " +
+                 "consume MESH-by-mesh, so a single rich tile can span several frames. Pair with " +
                  "MaxVerticesPerTick (whichever binds first stops the frame). Raise for faster fill, lower " +
                  "for smoother FPS while loading. NOTE: 0 BLOCKS consume entirely (not 'uncapped').")]
         public int MaxConsumesPerTick = 4;

@@ -1400,21 +1400,6 @@ namespace MapRenderer.Tests.Rendering
         }
 
         [Test]
-        public void Build_LayerGameObjects_ParentedUnderVisibleRoot()
-        {
-            using var set = Build(InterleavedStyleJson);
-
-            // The shared "Map Render Layers" root exists and is a visible-but-not-serialised runtime
-            // artifact (DontSave carries no HideInHierarchy bit, unlike the old HideAndDontSave).
-            Assert.IsNotNull(set.Root, "RenderLayerSet exposes a shared root after Build.");
-            Assert.AreEqual(HideFlags.DontSave, set.Root.gameObject.hideFlags,
-                "the root is not serialised into a scene/build, but IS visible/inspectable in the Hierarchy.");
-
-            // Background owns no scene GameObject (the backend owns its per-tile quads), and symbol presenters
-            // parent lazily, so this pins only the shared root's own visibility contract.
-        }
-
-        [Test]
         public void Factory_IsTheSoleDispatchPoint_UnpaintedTypesYieldNoRenderLayer()
         {
             // RenderLayerFactory maps a StyleLayer subtype → IRenderLayer: raster maps to null (no slot), and

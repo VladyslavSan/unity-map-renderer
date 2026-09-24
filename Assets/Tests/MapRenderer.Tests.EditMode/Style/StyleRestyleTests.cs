@@ -883,8 +883,8 @@ namespace MapRenderer.Tests.Style
             Assert.AreEqual(SymbolKind.Text, symbols[1].Kind, "the rider text is emitted second");
             Assert.AreEqual("L", symbols[1].Text);
             Assert.AreEqual(1, symbols[1].FeatureIndex, "the text symbol continues the SAME ordinal sequence");
-            Assert.IsFalse(symbols[1].AllowOverlap, "the forcing is retired — the rider carries its AUTHORED flag (default false)");
-            Assert.IsFalse(symbols[1].IgnorePlacement, "the forcing is retired — the rider carries its AUTHORED flag (default false)");
+            Assert.IsFalse(symbols[1].AllowOverlap, "nothing forces the flag — the rider carries its AUTHORED flag (default false)");
+            Assert.IsFalse(symbols[1].IgnorePlacement, "nothing forces the flag — the rider carries its AUTHORED flag (default false)");
             // The pair is stamped Owner/Rider sharing one PairId (the owner's own FeatureIndex).
             Assert.AreEqual(MapRenderer.Core.Text.SymbolPairRole.Owner, symbols[0].PairRole);
             Assert.AreEqual(MapRenderer.Core.Text.SymbolPairRole.Rider, symbols[1].PairRole);

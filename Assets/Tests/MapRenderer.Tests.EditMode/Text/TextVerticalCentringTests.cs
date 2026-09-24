@@ -685,7 +685,7 @@ namespace MapRenderer.Tests.Text
 
             GlyphAtlasEntry third = atlas.Append(Glyph(67, w: 10, h: 10), 0); // would start at y=32 on page 0
             Assert.AreEqual(0, atlas.OverflowCount,
-                "No longer a drop — the glyph lands on a fresh page instead");
+                "A full page does not drop the glyph — the glyph lands on a fresh page instead");
             Assert.AreEqual(2, atlas.PageCount, "the third glyph forced a second page open");
             Assert.AreEqual(1, third.Page, "the third glyph packed onto page 1");
             Assert.AreEqual(new int2(0, 0), third.AtlasOrigin, "page 1 is a fresh packer — starts at its own origin");
@@ -2367,7 +2367,7 @@ namespace MapRenderer.Tests.Text
                 .ToArray();
 
             Assert.AreEqual(1, layoutMethods.Length,
-                "expected exactly the one no-alloc Layout overload (the allocating overload was retired with the managed layout-result carrier)");
+                "expected exactly the one no-alloc Layout overload (an allocating overload puts a managed layout result on the hot path)");
 
             foreach (MethodInfo method in layoutMethods)
             {

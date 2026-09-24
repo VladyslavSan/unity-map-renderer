@@ -1186,7 +1186,7 @@ namespace MapRenderer.Tests.Visual
                 // Loose by design — a recorded limit, not a gate.
                 Assert.That(1f - worst, Is.LessThan(0.60f),
                     $"Junction crotch under-coverage is {(1f - worst):P1} at ({worstColumn}, {worstRow}), " +
-                    "far beyond what two overlapping straddles produce. That is no longer the accepted " +
+                    "far beyond what two overlapping straddles produce. That exceeds the accepted " +
                     "same-layer blend limit — something is punching a hole in the junction.");
             }
             finally

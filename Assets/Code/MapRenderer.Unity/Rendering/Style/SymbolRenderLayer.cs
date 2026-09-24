@@ -61,7 +61,7 @@ namespace MapRenderer.Unity.Rendering.Style
         private readonly ZoomStyleApplier _applier;
 
         private SymbolRenderLayer(SymbolStyle.StyleLayer layer,
-            Material worldTextMaterial, Material worldIconMaterial, int drawIndex, Transform parent,
+            Material worldTextMaterial, Material worldIconMaterial, int drawIndex,
             ZoomStyleApplier applier)
         {
             StyleLayer        = layer;
@@ -79,8 +79,7 @@ namespace MapRenderer.Unity.Rendering.Style
         /// <param name="initialZoom">Unused: construction binds only CONSTANT paint. Kept so every layer
         /// kind shares one creation shape.</param>
         public static SymbolRenderLayer Create(
-            SymbolStyle.StyleLayer layer, MapMaterialSet settings, double initialZoom, int drawIndex,
-            Transform parent = null)
+            SymbolStyle.StyleLayer layer, MapMaterialSet settings, double initialZoom, int drawIndex)
         {
             Material baseWorldTextMat = settings != null ? settings.SymbolTextWorld : null;
             Material worldTextMat = null;
@@ -108,7 +107,7 @@ namespace MapRenderer.Unity.Rendering.Style
                 worldIconMat.renderQueue = LayerDrawOrder.QueueFor(drawIndex, LayerSubSlot.Base);
             }
 
-            return new SymbolRenderLayer(layer, worldTextMat, worldIconMat, drawIndex, parent, applier);
+            return new SymbolRenderLayer(layer, worldTextMat, worldIconMat, drawIndex, applier);
         }
 
         /// <summary>
